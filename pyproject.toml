@@ -22,6 +22,8 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
     "typer>=0.12",
+    "pooch>=1.8",
+    "tqdm>=4",
 ]
 
 [project.urls]
@@ -57,6 +59,8 @@ liulab-genome = { path = ".", editable = true }
 [tool.pixi.dependencies]
 samtools = "*"
 bedtools = "*"
+ucsc-fatotwobit = "*"
+ucsc-twobitinfo = "*"
 
 # Python version features
 [tool.pixi.feature.py312.dependencies]

@@ -28,6 +28,16 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 - `genome.external` — native tool discovery (`samtools`, `bedtools`) via `shutil.which`
   + `subprocess`, with a `doctor()` function and `ToolNotFoundError` carrying an
   actionable message.
+- `genome.io` package (the I/O boundary):
+  - `genome.io.download` — `Downloader`, a pooch-backed cache for large files, and
+    `UCSCGenomeDownloader`, which fetches and decompresses a reference-genome FASTA
+    (`<assembly>.fa.gz`) from the UCSC golden path given an assembly name (e.g. `hg38`).
+  - `genome.io.fasta` — `prepare_fasta`, which indexes a FASTA (`samtools faidx`),
+    converts it to 2bit (`faToTwoBit`), and writes `chrom.sizes` (`twoBitInfo`),
+    returning a `GenomeFiles` record; plus the individual `faidx`, `fasta_to_2bit`, and
+    `twobit_to_chrom_sizes` steps.
+- Runtime dependencies: `pooch` and `tqdm` (PyPI); `ucsc-fatotwobit` and
+  `ucsc-twobitinfo` (bioconda) native tools.
 - CLI commands `genome revcomp <seq> [--json]` and `genome doctor [--json]`; the existing
   `genome version` stub remains.
 - `docs/sequences.md` — hand-authored narrative documentation for the sequence classes.
