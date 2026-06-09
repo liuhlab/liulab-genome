@@ -1,0 +1,127 @@
+[project]
+name = "liulab-genome"
+description = "Handling genomic files — metadata, processing, feature extraction."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+authors = [{ name = "Liu Lab" }]
+keywords = ["bioinformatics", "genomics", "samtools", "bedtools"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Typing :: Typed",
+]
+dynamic = ["version"]
+dependencies = [
+    "typer>=0.12",
+]
+
+[project.urls]
+Homepage = "https://github.com/lhqing/liulab-genome"
+Issues = "https://github.com/lhqing/liulab-genome/issues"
+Changelog = "https://github.com/lhqing/liulab-genome/blob/main/CHANGELOG.md"
+
+[project.scripts]
+genome = "genome.cli:app"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0+dev"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/genome/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/genome"]
+
+# -------- pixi --------
+
+[tool.pixi.workspace]
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64"]
+
+# Editable install of this package into every env
+[tool.pixi.pypi-dependencies]
+liulab-genome = { path = ".", editable = true }
+
+# Native runtime deps (shelled out to; never reimplemented)
+[tool.pixi.dependencies]
+samtools = "*"
+bedtools = "*"
+
+# Python version features
+[tool.pixi.feature.py312.dependencies]
+python = "3.12.*"
+[tool.pixi.feature.py313.dependencies]
+python = "3.13.*"
+[tool.pixi.feature.py314.dependencies]
+python = "3.14.*"
+
+# Test feature
+[tool.pixi.feature.test.dependencies]
+pytest = "*"
+pytest-cov = "*"
+hypothesis = "*"
+
+# Dev tooling feature
+[tool.pixi.feature.dev.dependencies]
+ruff = "*"
+pyright = "*"
+pre-commit = "*"
+python-build = "*"
+hatch-vcs = "*"
+
+# Docs feature
+[tool.pixi.feature.docs.dependencies]
+mkdocs-material = "*"
+mkdocstrings-python = "*"
+
+[tool.pixi.environments]
+default    = { features = ["py314", "dev", "test", "docs"], solve-group = "default" }
+test-py312 = { features = ["py312", "test"], solve-group = "py312" }
+test-py313 = { features = ["py313", "test"], solve-group = "py313" }
+test-py314 = { features = ["py314", "test"], solve-group = "py314" }
+docs       = { features = ["py314", "docs"], solve-group = "default" }
+
+[tool.pixi.tasks]
+lint      = "ruff check ."
+fmt       = "ruff format ."
+fmt-check = "ruff format --check ."
+typecheck = "pyright"
+test      = "pytest"
+test-cov  = "pytest --cov=genome --cov-report=term-missing"
+check     = { depends-on = ["lint", "fmt-check", "typecheck", "test"] }
+build     = "python -m build"
+docs      = "mkdocs serve"
+
+# -------- tool config (minimal in Phase 1; tightened in Phase 2) --------
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["src", "tests"]
+venvPath = ".pixi/envs"
+venv = "default"
+pythonVersion = "3.14"
+typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]
