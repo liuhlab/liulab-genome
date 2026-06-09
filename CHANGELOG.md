@@ -15,3 +15,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   and standard tasks (`lint`, `fmt`, `typecheck`, `test`, `check`, `build`, `docs`).
 - Package skeleton: `src/genome/{__init__.py, py.typed, cli.py}` with a stub Typer app.
 - MIT license, README, AGENTS.md pointer.
+- Quality gates: ruff rule set (E, W, F, I, UP, B, C4, SIM, PT, PTH, N, D, RUF) with
+  numpy docstring convention; pyright in basic mode targeting py3.12 minimum; pytest
+  with `--strict-config`, `xfail_strict`, and warnings-as-errors; branch coverage config.
+- `.pre-commit-config.yaml`: ruff hooks (pinned) + pyright as a local pixi-backed hook.
