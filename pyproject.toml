@@ -84,6 +84,7 @@ hatch-vcs = "*"
 [tool.pixi.feature.docs.dependencies]
 mkdocs-material = "*"
 mkdocstrings-python = "*"
+ruff = "*"   # used by mkdocstrings to format rendered signatures
 
 [tool.pixi.environments]
 default    = { features = ["py314", "dev", "test", "docs"], solve-group = "default" }

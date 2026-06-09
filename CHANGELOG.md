@@ -41,3 +41,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
     OIDC trusted publishing (no API tokens; uses `pypa/gh-action-pypi-publish`).
   - `claude.yml` — responds to `@claude` mentions in issues / PR comments / PR reviews,
     with a pixi setup step so the agent can run `pixi run check` in CI.
+- MkDocs Material documentation site (`mkdocs.yml`, `docs/{index,usage,reference}.md`)
+  with the `mkdocstrings-python` plugin pulling NumPy-style docstrings into the
+  secondary API reference page. Live preview via `pixi run docs`.
+- `.readthedocs.yaml` — Read the Docs config that bootstraps pixi via
+  `build.commands` and runs `mkdocs build --strict --site-dir $READTHEDOCS_OUTPUT/html`
+  in the project's `docs` env, so RTD builds match local output exactly.
+- `ruff` added to the `docs` feature so mkdocstrings can format rendered signatures.
