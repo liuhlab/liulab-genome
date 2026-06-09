@@ -57,29 +57,11 @@ class _Seq(str):
     _ALPHABET: ClassVar[frozenset[str]] = frozenset()
 
     def __new__(cls, value: str) -> Self:
-        """Return a typed instance wrapping ``value`` (case preserved).
+        """Wrap ``value`` (stored verbatim, case preserved) as the calling subclass.
 
-        The subclass alphabet (:attr:`_ALPHABET`) documents the *expected*
-        characters but is **not enforced**: alphabet checking is intentionally
-        skipped because scanning every character is prohibitively expensive on
-        large sequences (whole chromosomes). Callers that need to reject
-        non-alphabet input must validate at the I/O boundary.
-
-        Parameters
-        ----------
-        value
-            The sequence string. May be empty. Stored verbatim.
-
-        Returns
-        -------
-        Self
-            An instance of the calling subclass, storing ``value`` verbatim
-            (case preserved).
-
-        Raises
-        ------
-        TypeError
-            If called on :class:`_Seq` directly rather than a concrete subclass.
+        The alphabet is documentation only and is not validated here — see the
+        class and module docstrings for why. Raises :class:`TypeError` if called
+        on :class:`_Seq` directly rather than a concrete subclass.
         """
         if cls is _Seq:
             raise TypeError("_Seq is abstract; instantiate DNA, RNA, or Protein instead.")
@@ -127,13 +109,7 @@ class DNA(_Seq):
     _ALPHABET: ClassVar[frozenset[str]] = frozenset("ACGT")
 
     def complement(self) -> DNA:
-        """Return the Watson-Crick complement, case preserved.
-
-        Returns
-        -------
-        DNA
-            A new :class:`DNA` of the same length with ``A↔T`` and ``C↔G``
-            swapped. Lowercase letters complement to lowercase.
+        """Return the Watson-Crick complement (``A↔T``, ``C↔G``), case preserved.
 
         Examples
         --------
@@ -145,12 +121,7 @@ class DNA(_Seq):
         return DNA._unchecked(self.translate(_DNA_COMPLEMENT))
 
     def reverse_complement(self) -> DNA:
-        """Return the reverse complement, case preserved.
-
-        Returns
-        -------
-        DNA
-            A new :class:`DNA` of the same length: complement then reverse.
+        """Return the reverse complement (complement, then reverse), case preserved.
 
         Examples
         --------
@@ -164,12 +135,7 @@ class DNA(_Seq):
         return DNA._unchecked(self.translate(_DNA_COMPLEMENT)[::-1])
 
     def transcribe(self) -> RNA:
-        """Transcribe DNA to RNA by replacing ``T``/``t`` with ``U``/``u``.
-
-        Returns
-        -------
-        RNA
-            A new :class:`RNA` of equal length; other bases (and case) unchanged.
+        """Transcribe to RNA by replacing ``T``/``t`` with ``U``/``u``.
 
         Examples
         --------
@@ -182,12 +148,7 @@ class DNA(_Seq):
 
     @property
     def gc_content(self) -> float:
-        """Fraction of bases that are ``G`` or ``C`` (case-insensitive).
-
-        Returns
-        -------
-        float
-            Value in ``[0.0, 1.0]``. Defined as ``0.0`` for the empty sequence.
+        """Fraction of bases that are ``G`` or ``C`` (case-insensitive); ``0.0`` if empty.
 
         Examples
         --------
@@ -253,9 +214,7 @@ class RNA(_Seq):
 
     @property
     def gc_content(self) -> float:
-        """Fraction of bases that are ``G`` or ``C`` (case-insensitive).
-
-        ``0.0`` for the empty sequence.
+        """Fraction of bases that are ``G`` or ``C`` (case-insensitive); ``0.0`` if empty.
 
         Examples
         --------

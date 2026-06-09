@@ -11,6 +11,11 @@ The headline entry point is :func:`prepare_fasta`, which runs all three steps:
 2. ``faToTwoBit``      →  ``<fasta>.2bit``       (compact 2bit encoding)
 3. ``twoBitInfo``      →  ``<fasta>.chrom.sizes`` (``name<TAB>length`` per seq)
 
+Every step is **cached**: it runs through :func:`_run_to`, which skips the
+native tool when its output already exists and is newer than its input (the same
+freshness rule ``make`` uses). Re-running a preparation is therefore cheap; pass
+``overwrite=True`` to force regeneration.
+
 Examples
 --------
 >>> from genome.io.fasta import prepare_fasta
@@ -21,12 +26,10 @@ Examples
 
 from __future__ import annotations
 
-import subprocess
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from genome.external import _resolve
+from genome.io.utils import _run_to
 
 # FASTA suffixes we know how to strip when deriving sibling output names.
 _FASTA_SUFFIXES: tuple[str, ...] = (
@@ -70,40 +73,13 @@ def _strip_fasta_suffix(path: Path) -> Path:
     return path.with_suffix("")
 
 
-def _run(name: str, args: Sequence[str]) -> None:
-    """Resolve and run a native tool, raising an actionable error on failure.
-
-    Parameters
-    ----------
-    name
-        Tool to run (e.g. ``"samtools"``); resolved on ``PATH`` via pixi.
-    args
-        Arguments passed after the executable.
-
-    Raises
-    ------
-    genome.external.ToolNotFoundError
-        If ``name`` is not on ``PATH``.
-    RuntimeError
-        If the tool exits non-zero; the message includes its stderr.
-    """
-    executable = _resolve(name)
-    try:
-        subprocess.run([executable, *args], check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as err:
-        detail = (err.stderr or err.stdout or "").strip()
-        raise RuntimeError(
-            f"{name} failed (exit {err.returncode}) for args {list(args)!r}: {detail}"
-        ) from err
-
-
 def _require_file(path: Path) -> None:
     """Raise :class:`FileNotFoundError` if ``path`` is not an existing file."""
     if not path.is_file():
         raise FileNotFoundError(f"input FASTA not found: {path}")
 
 
-def faidx(fasta_path: str | Path) -> Path:
+def faidx(fasta_path: str | Path, *, overwrite: bool = False) -> Path:
     """Build a ``samtools faidx`` index for ``fasta_path``.
 
     Parameters
@@ -111,6 +87,9 @@ def faidx(fasta_path: str | Path) -> Path:
     fasta_path : str or pathlib.Path
         FASTA to index. May be bgzipped (``.fa.gz``); plain gzip is not
         supported by ``samtools faidx`` — use bgzip for compressed input.
+    overwrite : bool, default False
+        By default a fresh existing ``<fasta>.fai`` (newer than the FASTA) is
+        reused without re-running ``samtools``. Set ``True`` to rebuild it.
 
     Returns
     -------
@@ -126,11 +105,16 @@ def faidx(fasta_path: str | Path) -> Path:
     """
     fasta = Path(fasta_path)
     _require_file(fasta)
-    _run("samtools", ["faidx", str(fasta)])
-    return fasta.with_name(fasta.name + ".fai")
+    fai = fasta.with_name(fasta.name + ".fai")
+    return _run_to("samtools", ["faidx", str(fasta)], fai, [fasta], overwrite=overwrite)
 
 
-def fasta_to_2bit(fasta_path: str | Path, twobit_path: str | Path | None = None) -> Path:
+def fasta_to_2bit(
+    fasta_path: str | Path,
+    twobit_path: str | Path | None = None,
+    *,
+    overwrite: bool = False,
+) -> Path:
     """Convert a FASTA to UCSC 2bit format via ``faToTwoBit``.
 
     Parameters
@@ -140,6 +124,9 @@ def fasta_to_2bit(fasta_path: str | Path, twobit_path: str | Path | None = None)
     twobit_path : str or pathlib.Path, optional
         Destination ``.2bit`` path. Defaults to the FASTA path with its
         FASTA suffix replaced by ``.2bit`` (e.g. ``hg38.fa`` → ``hg38.2bit``).
+    overwrite : bool, default False
+        By default a fresh existing ``.2bit`` (newer than the FASTA) is reused
+        without re-running ``faToTwoBit``. Set ``True`` to rebuild it.
 
     Returns
     -------
@@ -160,11 +147,15 @@ def fasta_to_2bit(fasta_path: str | Path, twobit_path: str | Path | None = None)
         if twobit_path is not None
         else _strip_fasta_suffix(fasta).with_suffix(".2bit")
     )
-    _run("faToTwoBit", [str(fasta), str(twobit)])
-    return twobit
+    return _run_to("faToTwoBit", [str(fasta), str(twobit)], twobit, [fasta], overwrite=overwrite)
 
 
-def twobit_to_chrom_sizes(twobit_path: str | Path, sizes_path: str | Path | None = None) -> Path:
+def twobit_to_chrom_sizes(
+    twobit_path: str | Path,
+    sizes_path: str | Path | None = None,
+    *,
+    overwrite: bool = False,
+) -> Path:
     """Write a ``chrom.sizes`` file from a 2bit file via ``twoBitInfo``.
 
     Parameters
@@ -174,6 +165,9 @@ def twobit_to_chrom_sizes(twobit_path: str | Path, sizes_path: str | Path | None
     sizes_path : str or pathlib.Path, optional
         Destination path. Defaults to the 2bit path with its suffix replaced
         by ``.chrom.sizes`` (e.g. ``hg38.2bit`` → ``hg38.chrom.sizes``).
+    overwrite : bool, default False
+        By default a fresh existing ``chrom.sizes`` (newer than the 2bit) is
+        reused without re-running ``twoBitInfo``. Set ``True`` to rebuild it.
 
     Returns
     -------
@@ -196,8 +190,7 @@ def twobit_to_chrom_sizes(twobit_path: str | Path, sizes_path: str | Path | None
         if sizes_path is not None
         else twobit.with_name(twobit.stem + ".chrom.sizes")
     )
-    _run("twoBitInfo", [str(twobit), str(sizes)])
-    return sizes
+    return _run_to("twoBitInfo", [str(twobit), str(sizes)], sizes, [twobit], overwrite=overwrite)
 
 
 def prepare_fasta(
@@ -205,11 +198,14 @@ def prepare_fasta(
     *,
     twobit_path: str | Path | None = None,
     sizes_path: str | Path | None = None,
+    overwrite: bool = False,
 ) -> GenomeFiles:
     """Index a FASTA, convert it to 2bit, and write its ``chrom.sizes``.
 
     Convenience wrapper that runs :func:`faidx`, :func:`fasta_to_2bit`, and
-    :func:`twobit_to_chrom_sizes` in sequence and collects their outputs.
+    :func:`twobit_to_chrom_sizes` in sequence and collects their outputs. Each
+    step is cached: an output already present and newer than its input is reused
+    rather than regenerated, so re-running is cheap (see ``overwrite``).
 
     Parameters
     ----------
@@ -220,6 +216,8 @@ def prepare_fasta(
     sizes_path : str or pathlib.Path, optional
         Override for the ``chrom.sizes`` destination; see
         :func:`twobit_to_chrom_sizes`.
+    overwrite : bool, default False
+        Force every step to rerun even when its output looks fresh.
 
     Returns
     -------
@@ -240,7 +238,7 @@ def prepare_fasta(
     (PosixPath('genome.fa.fai'), PosixPath('genome.2bit'), PosixPath('genome.chrom.sizes'))
     """
     fasta = Path(fasta_path)
-    fai = faidx(fasta)
-    twobit = fasta_to_2bit(fasta, twobit_path)
-    chrom_sizes = twobit_to_chrom_sizes(twobit, sizes_path)
+    fai = faidx(fasta, overwrite=overwrite)
+    twobit = fasta_to_2bit(fasta, twobit_path, overwrite=overwrite)
+    chrom_sizes = twobit_to_chrom_sizes(twobit, sizes_path, overwrite=overwrite)
     return GenomeFiles(fasta=fasta, fai=fai, twobit=twobit, chrom_sizes=chrom_sizes)

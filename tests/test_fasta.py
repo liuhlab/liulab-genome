@@ -2,12 +2,16 @@
 
 The end-to-end tests need the native binaries (samtools, faToTwoBit,
 twoBitInfo); they run inside the pixi env and skip cleanly outside it. The
-input-validation tests need no binaries and always run.
+input-validation and caching-wiring tests need no binaries and always run
+(``genome.io.utils._run`` is stubbed via the ``run_calls`` fixture). The cache
+freshness logic itself is unit-tested in test_utils; here we only assert that
+the public functions wire the right output paths and inputs into it.
 """
 
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -51,6 +55,61 @@ def test_fasta_to_2bit_missing_input_raises(tmp_path: Path) -> None:
 def test_chrom_sizes_missing_input_raises(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="not found"):
         twobit_to_chrom_sizes(tmp_path / "nope.2bit")
+
+
+# --- caching wiring (no binaries: _run is stubbed via run_calls) ---
+
+
+def test_faidx_runs_when_index_missing(fasta: Path, run_calls: list[tuple[str, list[str]]]) -> None:
+    faidx(fasta)
+    assert len(run_calls) == 1
+
+
+def test_faidx_reuses_fresh_index(
+    fasta: Path,
+    run_calls: list[tuple[str, list[str]]],
+    touch_newer_than: Callable[..., None],
+) -> None:
+    fai = fasta.with_name("mini.fa.fai")
+    fai.write_text("cached\n")
+    touch_newer_than(fai, fasta)
+
+    result = faidx(fasta)
+
+    assert result == fai
+    assert run_calls == []  # tool skipped — served from the fresh cache
+
+
+def test_faidx_overwrite_forces_rerun(
+    fasta: Path,
+    run_calls: list[tuple[str, list[str]]],
+    touch_newer_than: Callable[..., None],
+) -> None:
+    fai = fasta.with_name("mini.fa.fai")
+    fai.write_text("cached\n")
+    touch_newer_than(fai, fasta)
+
+    faidx(fasta, overwrite=True)
+
+    assert len(run_calls) == 1
+
+
+def test_prepare_fasta_reuses_all_fresh_outputs(
+    fasta: Path,
+    run_calls: list[tuple[str, list[str]]],
+    touch_newer_than: Callable[..., None],
+) -> None:
+    fai = fasta.with_name("mini.fa.fai")
+    twobit = fasta.with_name("mini.2bit")
+    sizes = fasta.with_name("mini.chrom.sizes")
+    for path in (fai, twobit, sizes):
+        path.write_text("cached\n")
+        touch_newer_than(path, fasta)
+
+    files = prepare_fasta(fasta)
+
+    assert run_calls == []  # all three steps served from cache
+    assert (files.fai, files.twobit, files.chrom_sizes) == (fai, twobit, sizes)
 
 
 @_needs_tools

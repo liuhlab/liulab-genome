@@ -15,8 +15,11 @@ Examples
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 
 REQUIRED_TOOLS: tuple[str, ...] = ("samtools", "bedtools")
 
@@ -26,15 +29,35 @@ class ToolNotFoundError(RuntimeError):
 
 
 def _resolve(name: str) -> str:
-    """Return the absolute path to ``name`` or raise :class:`ToolNotFoundError`."""
+    """Return the absolute path to ``name`` or raise :class:`ToolNotFoundError`.
+
+    Resolution order:
+
+    1. ``shutil.which(name)`` — the normal ``PATH`` lookup.
+    2. The ``bin/`` directory of the running interpreter
+       (``Path(sys.executable).parent``). In a conda/pixi environment the native
+       tools are installed alongside ``python``, so this still finds them when the
+       script is run with the environment's interpreter by absolute path without
+       the environment being activated (so ``PATH`` lacks its ``bin/``).
+
+    Raises
+    ------
+    ToolNotFoundError
+        If ``name`` is found by neither lookup.
+    """
     path = shutil.which(name)
-    if path is None:
-        raise ToolNotFoundError(
-            f"{name!r} not found on PATH. Activate the project environment with "
-            f"`pixi shell`, or add the tool with `pixi add {name}` "
-            f"(channels: conda-forge, bioconda)."
-        )
-    return path
+    if path is not None:
+        return path
+
+    sibling = Path(sys.executable).parent / name
+    if sibling.is_file() and os.access(sibling, os.X_OK):
+        return str(sibling)
+
+    raise ToolNotFoundError(
+        f"{name!r} not found on PATH. Activate the project environment with "
+        f"`pixi shell` (or run via `pixi run`), or add the tool with "
+        f"`pixi add {name}` (channels: conda-forge, bioconda)."
+    )
 
 
 def tool_version(name: str) -> str:

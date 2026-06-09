@@ -47,3 +47,6 @@ site/
 
 # Claude Code local settings (project-wide settings.json may be committed)
 .claude/settings.local.json
+
+# playground contains manual test code
+playground/

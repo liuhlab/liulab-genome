@@ -107,6 +107,23 @@ test-py314 = ["py314", "test"]
   exception types, not bare `Exception`.
 - Optimize for the reviewer, not the character count.
 
+### Visibility — default to private
+
+- **Prefer underscore-prefixed names** (`_func`, `_Class`, `_method`) for anything not part of the
+  public API. If an object isn't deliberately exposed to users, it should be hidden. Only the names
+  re-exported from `__init__.py` (and the thin CLI surface) are public.
+- **Promotion is a one-line refactor.** When a hidden object genuinely needs to be public, drop the
+  leading `_` — don't pre-emptively make things public "just in case."
+
+### Docstrings — concise, no redundancy
+
+- **NumPy style for public objects**, but keep them tight. Good code speaks for itself; the docstring
+  explains intent, contracts, and the non-obvious — not line-by-line mechanics.
+- **Don't repeat the parent in the child.** A subclass/override docstring should describe only what
+  differs from what it inherits or overrides; don't restate shared Parameters/Returns prose.
+- **Simplify docstrings for simple hidden objects.** A short one-line summary is enough for a small
+  `_helper`; reserve full Parameters / Returns / Raises / Examples for the public API.
+
 ---
 
 ## 5. Domain invariants — READ BEFORE TOUCHING GENOMIC LOGIC
