@@ -53,6 +53,7 @@ nav:
   - Home: index.md
   - Usage: usage.md
   - Sequences: sequences.md
+  - Genome files: genome-files.md
   - API reference: reference.md
 
 markdown_extensions:

@@ -15,6 +15,14 @@
 
 ::: genome.external
 
+## `genome.io.download`
+
+::: genome.io.download
+
+## `genome.io.fasta`
+
+::: genome.io.fasta
+
 ## `genome.cli`
 
 ::: genome.cli
