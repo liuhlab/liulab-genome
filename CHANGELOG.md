@@ -48,3 +48,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   `build.commands` and runs `mkdocs build --strict --site-dir $READTHEDOCS_OUTPUT/html`
   in the project's `docs` env, so RTD builds match local output exactly.
 - `ruff` added to the `docs` feature so mkdocstrings can format rendered signatures.
+- `skills/genome/SKILL.md` — agent-usability skill teaching coding assistants
+  when to reach for `liulab-genome`, the CLI surface (`revcomp`, `doctor`),
+  the typed sequence API, what does *not* stay typed (gotcha), and the
+  project's domain invariants.
