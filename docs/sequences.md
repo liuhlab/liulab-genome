@@ -8,18 +8,22 @@
 | `RNA` | `A C G U` | `complement`, `reverse_complement`, `back_transcribe`, `gc_content` |
 | `Protein` | 20 standard amino acids (`ACDEFGHIKLMNPQRSTVWY`) | _(none yet)_ |
 
-These classes subclass `str`, so a `DNA` **is** a string anywhere a string is expected — but
-construction validates the alphabet, slicing keeps the type, and the biological methods return
-the right typed result with case preserved.
+These classes subclass `str`, so a `DNA` **is** a string anywhere a string is expected. Slicing
+keeps the type and the biological methods return the right typed result with case preserved.
+
+The alphabet listed above is the *expected* one, but construction does **not** enforce it:
+scanning every character is prohibitively expensive on large sequences (whole chromosomes), so
+the alphabet is documentation, not a runtime check. If you need to reject non-alphabet input,
+validate it at the I/O boundary (the CLI does this for `revcomp`).
 
 > **IUPAC ambiguity codes (`N`, `R`, `Y`, …) are intentionally out of scope.** Add them only
 > when the project explicitly needs them.
 
-## Construction and validation
+## Construction
 
-Validation runs in `__new__` (because `str` is immutable), is **case-insensitive**, and
-**preserves case** in the stored value. Lower case is meaningful — it is the conventional
-soft-masking marker — so `aTcG` is stored verbatim, not normalised.
+Construction **preserves the value verbatim**, including case. Lower case is meaningful — it is
+the conventional soft-masking marker — so `aTcG` is stored as-is, not normalised. Because the
+alphabet is not enforced, any string is accepted and stored unchanged.
 
 ```python
 from genome import DNA, RNA, Protein
@@ -27,20 +31,7 @@ from genome import DNA, RNA, Protein
 DNA("ATCG")        # → DNA('ATCG')
 DNA("aTcG")        # → DNA('aTcG')   (case preserved)
 DNA("")            # → DNA('')       (empty is valid)
-```
-
-An invalid character raises `ValueError` naming the offenders:
-
-```python
->>> DNA("ATCX")
-Traceback (most recent call last):
-    ...
-ValueError: DNA contains characters outside alphabet {ACGT}: ['X']
-
->>> RNA("ATCG")    # T isn't part of RNA
-Traceback (most recent call last):
-    ...
-ValueError: RNA contains characters outside alphabet {ACGU}: ['T']
+DNA("ATCX")        # → DNA('ATCX')   (alphabet NOT enforced — stored verbatim)
 ```
 
 The private base class `_Seq` is abstract and can't be instantiated:
