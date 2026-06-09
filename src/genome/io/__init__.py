@@ -6,7 +6,12 @@ that process them (:mod:`genome.io.fasta`). Keep real, side-effect-free logic
 in ``core``/``features``; this layer only moves bytes.
 """
 
-from genome.io.download import Downloader, UCSCGenomeDownloader
+from genome.io.download import (
+    Downloader,
+    UCSCGenomeDownloader,
+    assembly_data_dir,
+    liulab_data_dir,
+)
 from genome.io.fasta import (
     GenomeFiles,
     faidx,
@@ -19,8 +24,10 @@ __all__ = [
     "Downloader",
     "GenomeFiles",
     "UCSCGenomeDownloader",
+    "assembly_data_dir",
     "faidx",
     "fasta_to_2bit",
+    "liulab_data_dir",
     "prepare_fasta",
     "twobit_to_chrom_sizes",
 ]

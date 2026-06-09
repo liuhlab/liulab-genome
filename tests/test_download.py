@@ -12,7 +12,42 @@ from pathlib import Path
 import pooch
 import pytest
 
-from genome.io.download import Downloader, UCSCGenomeDownloader
+from genome.io import download as download_mod
+from genome.io.download import (
+    Downloader,
+    UCSCGenomeDownloader,
+    assembly_data_dir,
+    liulab_data_dir,
+)
+from genome.io.fasta import GenomeFiles
+
+
+def test_liulab_data_dir_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "lab"))
+    assert liulab_data_dir() == tmp_path / "lab"
+
+
+def test_liulab_data_dir_defaults_to_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LIULAB_DATA", raising=False)
+    assert liulab_data_dir() == Path.home() / "liulab_data"
+
+
+def test_liulab_data_dir_empty_env_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LIULAB_DATA", "")
+    assert liulab_data_dir() == Path.home() / "liulab_data"
+
+
+def test_assembly_data_dir_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+    assert assembly_data_dir("hg38") == tmp_path / "genome" / "hg38"
+
+
+def test_ucsc_default_cache_dir_is_assembly_data_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+    dl = UCSCGenomeDownloader("mm39")
+    assert dl.cache_dir == tmp_path / "genome" / "mm39"
 
 
 def test_default_cache_dir_is_under_pooch_os_cache() -> None:
@@ -93,3 +128,86 @@ def test_fetch_fasta_without_decompress_has_no_processor(
     dl.fetch_fasta(decompress=False)
 
     assert captured["processor"] is None
+
+
+def test_fetch_genome_runs_full_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # fetch_genome chains fetch_fasta (network) and prepare_fasta (native tools);
+    # stub both so the test stays offline and binary-free, then assert the wiring.
+    def fake_retrieve(**kwargs: object) -> str:
+        assert kwargs["url"] == dl.fasta_url
+        return str(tmp_path / "hg38.fa")
+
+    prepared: dict[str, object] = {}
+
+    def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        prepared["fasta"] = fasta_path
+        prepared["overwrite"] = overwrite
+        fasta = Path(fasta_path)
+        return GenomeFiles(
+            fasta=fasta,
+            fai=fasta.with_name(fasta.name + ".fai"),
+            twobit=fasta.with_name("hg38.2bit"),
+            chrom_sizes=fasta.with_name("hg38.chrom.sizes"),
+        )
+
+    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
+    monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
+
+    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
+    files = dl.fetch_genome()
+
+    # fetch_fasta's decompressed output is handed to prepare_fasta...
+    assert prepared["fasta"] == tmp_path / "hg38.fa"
+    assert prepared["overwrite"] is False  # default: caches reused
+    # ...and every derived path is surfaced on the returned record.
+    assert files.fasta == tmp_path / "hg38.fa"
+    assert files.fai == tmp_path / "hg38.fa.fai"
+    assert files.twobit == tmp_path / "hg38.2bit"
+    assert files.chrom_sizes == tmp_path / "hg38.chrom.sizes"
+
+
+def test_fetch_genome_forwards_overwrite(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    prepared: dict[str, object] = {}
+
+    def fake_retrieve(**kwargs: object) -> str:
+        assert kwargs["url"] == dl.fasta_url
+        return str(tmp_path / "hg38.fa")
+
+    def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        prepared["overwrite"] = overwrite
+        fasta = Path(fasta_path)
+        return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
+
+    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
+    monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
+
+    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
+    dl.fetch_genome(overwrite=True)
+
+    assert prepared["overwrite"] is True
+
+
+def test_fetch_genome_forwards_known_hash_and_decompresses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_retrieve(**kwargs: object) -> str:
+        captured.update(kwargs)
+        return str(tmp_path / "hg38.fa")
+
+    def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        assert overwrite is False  # default: no forced regeneration
+        fasta = Path(fasta_path)
+        return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
+
+    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
+    monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
+
+    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
+    dl.fetch_genome(known_hash="md5:abc")
+
+    assert captured["url"] == dl.fasta_url
+    assert captured["known_hash"] == "md5:abc"
+    # the pipeline always decompresses, so a Decompress processor is selected.
+    assert isinstance(captured["processor"], pooch.Decompress)

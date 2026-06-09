@@ -32,10 +32,21 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   - `genome.io.download` — `Downloader`, a pooch-backed cache for large files, and
     `UCSCGenomeDownloader`, which fetches and decompresses a reference-genome FASTA
     (`<assembly>.fa.gz`) from the UCSC golden path given an assembly name (e.g. `hg38`).
+    `UCSCGenomeDownloader` stores each assembly under `<LIULAB_DATA>/genome/<assembly>/`
+    (configurable via the `LIULAB_DATA` env var, default `~/liulab_data`) so all
+    reference files for a build are co-located; exposes `liulab_data_dir` and
+    `assembly_data_dir` helpers. `UCSCGenomeDownloader.fetch_genome` runs the full
+    pipeline end to end — download `<assembly>.fa.gz`, decompress, `samtools faidx`,
+    `faToTwoBit`, and `twoBitInfo` — returning a `GenomeFiles` record (the 2bit is
+    self-indexed, so its internal index is surfaced as `chrom.sizes`).
   - `genome.io.fasta` — `prepare_fasta`, which indexes a FASTA (`samtools faidx`),
     converts it to 2bit (`faToTwoBit`), and writes `chrom.sizes` (`twoBitInfo`),
     returning a `GenomeFiles` record; plus the individual `faidx`, `fasta_to_2bit`, and
-    `twobit_to_chrom_sizes` steps.
+    `twobit_to_chrom_sizes` steps. Each step is cached at the command-running step: the
+    native tool is skipped when its output already exists and is newer than its input
+    (a `make`-style freshness check), making re-runs cheap and idempotent. An
+    `overwrite=True` flag (on every step, `prepare_fasta`, and `fetch_genome`) forces
+    regeneration; the download/decompression cache is handled independently by pooch.
 - Runtime dependencies: `pooch` and `tqdm` (PyPI); `ucsc-fatotwobit` and
   `ucsc-twobitinfo` (bioconda) native tools.
 - CLI commands `genome revcomp <seq> [--json]` and `genome doctor [--json]`; the existing
