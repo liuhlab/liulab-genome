@@ -33,11 +33,17 @@ def revcomp(
 
     Exits with code 2 on invalid input.
     """
-    try:
-        result = DNA(sequence).reverse_complement()
-    except ValueError as err:
-        typer.echo(f"error: {err}", err=True)
-        raise typer.Exit(code=2) from err
+    # The DNA constructor no longer validates (too costly on large sequences),
+    # so reject non-A/C/G/T characters here, at the I/O boundary.
+    invalid = sorted({c for c in sequence if c.upper() not in "ACGT"})
+    if invalid:
+        typer.echo(
+            f"error: sequence contains characters outside alphabet {{ACGT}}: {invalid!r}",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    result = DNA(sequence).reverse_complement()
 
     if json:
         typer.echo(_json.dumps({"input": sequence, "reverse_complement": str(result)}))

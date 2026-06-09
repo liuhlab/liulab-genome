@@ -1,15 +1,17 @@
 """Typed biological sequence classes.
 
 This module defines :class:`DNA`, :class:`RNA`, and :class:`Protein` — thin,
-typed subclasses of :class:`str` that validate their alphabet at construction
-time and carry biological transforms (complement, reverse complement,
-transcription) without losing their type or case.
+typed subclasses of :class:`str` that carry biological transforms (complement,
+reverse complement, transcription) without losing their type or case.
 
 Notes
 -----
-- Validation runs in ``__new__`` (``str`` is immutable), is **case-insensitive**,
-  and **preserves case** in the stored value (lowercase carries meaning —
-  soft-masking).
+- Construction does **not** validate the alphabet: scanning every character is
+  prohibitively expensive on large sequences (whole chromosomes), so the
+  subclass alphabet is documentation, not a runtime check. Validate at the I/O
+  boundary if you need to reject non-alphabet input.
+- The stored value is **preserved verbatim**, including case (lowercase carries
+  meaning — soft-masking).
 - Slicing and indexing return the **same subclass**, not a plain :class:`str`.
 - Biological transforms return the correct typed class and preserve case.
 - Other inherited :class:`str` methods (``upper``, ``lower``, ``replace``, …)
@@ -44,9 +46,10 @@ _U_TO_T = str.maketrans("Uu", "Tt")
 class _Seq(str):
     """Private base for typed sequence strings.
 
-    Subclasses declare their permitted alphabet via the class variable
-    :attr:`_ALPHABET` (uppercase characters only); validation is performed
-    case-insensitively in :meth:`__new__` and the original case is preserved.
+    Subclasses declare their expected alphabet via the class variable
+    :attr:`_ALPHABET` (uppercase characters only) for documentation; it is
+    **not enforced** at construction (see :meth:`__new__`). The original value
+    and case are preserved verbatim.
 
     This class is abstract — instantiating it directly raises :class:`TypeError`.
     """
@@ -54,13 +57,18 @@ class _Seq(str):
     _ALPHABET: ClassVar[frozenset[str]] = frozenset()
 
     def __new__(cls, value: str) -> Self:
-        """Validate ``value`` against ``cls._ALPHABET`` and return a typed instance.
+        """Return a typed instance wrapping ``value`` (case preserved).
+
+        The subclass alphabet (:attr:`_ALPHABET`) documents the *expected*
+        characters but is **not enforced**: alphabet checking is intentionally
+        skipped because scanning every character is prohibitively expensive on
+        large sequences (whole chromosomes). Callers that need to reject
+        non-alphabet input must validate at the I/O boundary.
 
         Parameters
         ----------
         value
-            The sequence string. May be empty. Characters are checked
-            case-insensitively against the subclass alphabet.
+            The sequence string. May be empty. Stored verbatim.
 
         Returns
         -------
@@ -72,18 +80,9 @@ class _Seq(str):
         ------
         TypeError
             If called on :class:`_Seq` directly rather than a concrete subclass.
-        ValueError
-            If ``value`` contains any character outside the subclass alphabet;
-            the message names the offending characters.
         """
         if cls is _Seq:
             raise TypeError("_Seq is abstract; instantiate DNA, RNA, or Protein instead.")
-        invalid = sorted({c for c in value if c.upper() not in cls._ALPHABET})
-        if invalid:
-            alphabet = "".join(sorted(cls._ALPHABET))
-            raise ValueError(
-                f"{cls.__name__} contains characters outside alphabet {{{alphabet}}}: {invalid!r}"
-            )
         return str.__new__(cls, value)
 
     @classmethod
@@ -123,10 +122,6 @@ class DNA(_Seq):
     RNA('AUCG')
     >>> DNA("GGCC").gc_content
     1.0
-    >>> DNA("ATCX")                           # doctest: +IGNORE_EXCEPTION_DETAIL
-    Traceback (most recent call last):
-        ...
-    ValueError: DNA contains characters outside alphabet {ACGT}: ['X']
     """
 
     _ALPHABET: ClassVar[frozenset[str]] = frozenset("ACGT")

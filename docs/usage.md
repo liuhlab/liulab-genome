@@ -52,8 +52,9 @@ exit codes (`2` for invalid input, `1` for missing native tools).
 ```python
 from genome import DNA, RNA, Protein
 
-# Construction validates the alphabet (case-insensitive) and preserves case.
-seq = DNA("aTcGN")  # raises ValueError naming "N" — ambiguity codes are out of scope
+# Construction preserves the value verbatim (including case). The alphabet is
+# NOT enforced — scanning every char is too costly on large sequences.
+seq = DNA("aTcGN")  # accepted and stored as-is; no validation
 seq = DNA("aTcG")   # OK
 
 # Biological transforms return the right typed result.

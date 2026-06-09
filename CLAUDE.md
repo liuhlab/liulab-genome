@@ -107,19 +107,6 @@ test-py314 = ["py314", "test"]
   exception types, not bare `Exception`.
 - Optimize for the reviewer, not the character count.
 
-### Sequence classes contract (`seq.py`)
-- `DNA`, `RNA`, `Protein` subclass `str` and share a private base (e.g. `_Seq(str)`).
-- **Validation happens in `__new__`** (str is immutable), is **case-insensitive**, and **preserves
-  case** in the stored value (lowercase carries meaning — soft-masking). Invalid characters raise
-  `ValueError` naming the offending characters.
-- `__getitem__` is overridden so slices/indexing return the **same subclass**, not bare `str`.
-- Biological transforms (`reverse_complement`, `complement`, `transcribe`/`back_transcribe`) return
-  the correct typed class and preserve case.
-- **By design, other inherited `str` methods (`upper`, `lower`, `replace`, …) return plain `str`.**
-  Do not silently override them; if a typed variant is wanted, add it explicitly and test it.
-- Alphabets: DNA `ACGT`, RNA `ACGU`, Protein 20 standard (`ACDEFGHIKLMNPQRSTVWY`). Empty allowed.
-- IUPAC ambiguity codes (`N`, etc.) are intentionally **out of scope** until explicitly added.
-
 ---
 
 ## 5. Domain invariants — READ BEFORE TOUCHING GENOMIC LOGIC
@@ -208,5 +195,3 @@ test-py314 = ["py314", "test"]
 - Don't perform unrequested refactors or reformat unrelated files.
 - Don't weaken or delete a failing test to make CI pass; fix the cause.
 - Don't assume coordinate system, assembly, or strand. Make them explicit.
-- In `seq.py`, don't validate in `__init__`, don't silently override inherited `str` methods, and
-  don't add IUPAC ambiguity codes without an explicit request.

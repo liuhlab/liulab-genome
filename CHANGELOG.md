@@ -20,18 +20,20 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   with `--strict-config`, `xfail_strict`, and warnings-as-errors; branch coverage config.
 - `.pre-commit-config.yaml`: ruff hooks (pinned) + pyright as a local pixi-backed hook.
 - Typed biological sequence classes `genome.DNA`, `genome.RNA`, `genome.Protein` —
-  `str` subclasses validated in `__new__` (case-insensitive, case preserved), with typed
+  `str` subclasses that preserve the value verbatim (case preserved), with typed
   slicing, biological transforms (`complement`, `reverse_complement`, `transcribe`,
-  `back_transcribe`), and a `gc_content` property. IUPAC ambiguity codes are out of scope.
+  `back_transcribe`), and a `gc_content` property. The alphabet is documentation only,
+  not enforced at construction (too costly on large sequences); validate at the I/O
+  boundary instead. IUPAC ambiguity codes are out of scope.
 - `genome.external` — native tool discovery (`samtools`, `bedtools`) via `shutil.which`
   + `subprocess`, with a `doctor()` function and `ToolNotFoundError` carrying an
   actionable message.
 - CLI commands `genome revcomp <seq> [--json]` and `genome doctor [--json]`; the existing
   `genome version` stub remains.
 - `docs/sequences.md` — hand-authored narrative documentation for the sequence classes.
-- Tests: 52 cases covering construction, validation, typed slicing, transforms, GC
-  content, plus hypothesis property tests (involution, round-trip, slice closure,
-  alphabet rejection) and CLI/Typer integration. Tests requiring native binaries skip
+- Tests: cases covering construction (alphabet not enforced), typed slicing, transforms,
+  GC content, plus hypothesis property tests (involution, round-trip, slice closure,
+  verbatim construction) and CLI/Typer integration. Tests requiring native binaries skip
   cleanly when they are absent.
 - GitHub Actions:
   - `ci.yml` — lint/typecheck in the `default` env (Python-version-independent),

@@ -5,8 +5,8 @@ and feature extraction. Import name: `genome`.
 
 The package wraps mature native tools (`samtools`, `bedtools`) with a thin, typed
 Python API and CLI. Sequence operations get first-class types
-(`DNA` / `RNA` / `Protein`) that validate their alphabet at construction and
-keep the right type across slicing and biological transforms.
+(`DNA` / `RNA` / `Protein`) that keep the right type across slicing and
+biological transforms.
 
 ## Where to go next
 

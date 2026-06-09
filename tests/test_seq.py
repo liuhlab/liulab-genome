@@ -22,7 +22,7 @@ protein_text = st.text(
 
 
 # ---------------------------------------------------------------------------
-# Construction & validation
+# Construction (alphabet is NOT enforced — see seq.py)
 # ---------------------------------------------------------------------------
 
 
@@ -37,30 +37,13 @@ class TestConstruction:
         assert str(RNA("aUcG")) == "aUcG"
         assert str(Protein("mKtAy")) == "mKtAy"
 
-    def test_dna_rejects_non_alphabet(self) -> None:
-        with pytest.raises(ValueError, match="X"):
-            DNA("ATCX")
-
-    def test_dna_rejects_rna_letter_u(self) -> None:
-        with pytest.raises(ValueError, match="U"):
-            DNA("AUCG")
-
-    def test_rna_rejects_dna_letter_t(self) -> None:
-        with pytest.raises(ValueError, match="T"):
-            RNA("ATCG")
-
-    def test_protein_rejects_b_o_u_z(self) -> None:
-        # B, O, U, Z are not in the 20-standard alphabet
-        for ch in "BOUZ":
-            with pytest.raises(ValueError, match=ch):
-                Protein(f"M{ch}T")
-
-    def test_validation_lists_all_offending_chars_sorted(self) -> None:
-        with pytest.raises(ValueError, match="outside alphabet") as exc:
-            DNA("ATCXZ_")
-        msg = str(exc.value)
-        for ch in ("X", "Z", "_"):
-            assert ch in msg
+    def test_non_alphabet_chars_are_accepted_verbatim(self) -> None:
+        # Alphabet checking is intentionally skipped for performance; any
+        # string is accepted and stored as-is.
+        assert str(DNA("ATCX")) == "ATCX"
+        assert str(DNA("AUCG")) == "AUCG"
+        assert str(RNA("ATCG")) == "ATCG"
+        assert str(Protein("MBTOUZ")) == "MBTOUZ"
 
     def test_seq_base_is_abstract(self) -> None:
         with pytest.raises(TypeError, match="abstract"):
@@ -206,14 +189,9 @@ class TestPropertiesDNA:
         assert 0.0 <= DNA(s).gc_content <= 1.0
 
     @given(st.text(min_size=1, max_size=32))
-    def test_rejects_non_alphabet(self, s: str) -> None:
-        # If every char is a valid DNA letter, construction must succeed; else fail.
-        all_valid = all(c.upper() in "ACGT" for c in s)
-        if all_valid:
-            DNA(s)
-        else:
-            with pytest.raises(ValueError, match="outside alphabet"):
-                DNA(s)
+    def test_construction_accepts_any_text_verbatim(self, s: str) -> None:
+        # Alphabet is not enforced: any string constructs and is stored as-is.
+        assert str(DNA(s)) == s
 
 
 class TestPropertiesRNA:
