@@ -33,3 +33,11 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   content, plus hypothesis property tests (involution, round-trip, slice closure,
   alphabet rejection) and CLI/Typer integration. Tests requiring native binaries skip
   cleanly when they are absent.
+- GitHub Actions:
+  - `ci.yml` — lint/typecheck in the `default` env (Python-version-independent),
+    pytest matrix over `test-py312/313/314`, and a wheel/sdist build job, all
+    bootstrapped via `prefix-dev/setup-pixi@v0.8.14` with `locked: true`.
+  - `release.yml` — on `v*` tag, build with `pixi run build` and publish to PyPI via
+    OIDC trusted publishing (no API tokens; uses `pypa/gh-action-pypi-publish`).
+  - `claude.yml` — responds to `@claude` mentions in issues / PR comments / PR reviews,
+    with a pixi setup step so the agent can run `pixi run check` in CI.
