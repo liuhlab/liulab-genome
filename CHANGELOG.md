@@ -52,3 +52,9 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   when to reach for `liulab-genome`, the CLI surface (`revcomp`, `doctor`),
   the typed sequence API, what does *not* stay typed (gotcha), and the
   project's domain invariants.
+- `.github/ISSUE_TEMPLATE/feature_request.yml` — structured form prompting for
+  the public signature, behavior, edge cases, applicable CLAUDE.md domain
+  invariants, worked examples, out-of-scope notes, and a required
+  definition-of-done checklist (types + NumPy docstring + tests + Markdown
+  doc + skill update + CHANGELOG + green CI). Designed so issues are tight
+  enough to hand directly to `@claude`.
