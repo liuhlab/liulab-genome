@@ -44,9 +44,11 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 - MkDocs Material documentation site (`mkdocs.yml`, `docs/{index,usage,reference}.md`)
   with the `mkdocstrings-python` plugin pulling NumPy-style docstrings into the
   secondary API reference page. Live preview via `pixi run docs`.
-- `.readthedocs.yaml` — Read the Docs config that bootstraps pixi via
-  `build.commands` and runs `mkdocs build --strict --site-dir $READTHEDOCS_OUTPUT/html`
-  in the project's `docs` env, so RTD builds match local output exactly.
+- `.github/workflows/docs.yml` — builds the MkDocs site and deploys it to
+  GitHub Pages on every push to `main` (and on manual dispatch). Uses the
+  official `actions/upload-pages-artifact` + `actions/deploy-pages` flow with
+  a single `pages` concurrency group. `ci.yml` gains a `docs` job that runs
+  `mkdocs build --strict` on PRs so doc breakage is caught before merge.
 - `ruff` added to the `docs` feature so mkdocstrings can format rendered signatures.
 - `skills/genome/SKILL.md` — agent-usability skill teaching coding assistants
   when to reach for `liulab-genome`, the CLI surface (`revcomp`, `doctor`),

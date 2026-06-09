@@ -159,7 +159,7 @@ body:
           required: true
         - label: Skill (`skills/genome/SKILL.md`) updated if the public API or CLI surface changed
           required: true
-        - label: `CHANGELOG.md` Unreleased section updated
+        - label: "`CHANGELOG.md` Unreleased section updated"
           required: true
-        - label: `pixi run check` is green
+        - label: "`pixi run check` is green"
           required: true
