@@ -52,6 +52,7 @@ plugins:
 nav:
   - Home: index.md
   - Usage: usage.md
+  - Genome: genome.md
   - Sequences: sequences.md
   - Genome files: genome-files.md
   - API reference: reference.md

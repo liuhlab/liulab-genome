@@ -11,7 +11,7 @@
 
 - **Package name:** `liulab-genome` (import name = `genome`)
 - **One-line purpose:** handling genomic files — metadata management, file processing, feature extraction.
-- **Supported Python:** 3.12, 3.13, 3.14
+- **Supported Python:** 3.12, 3.13
 - **Distribution:** published to PyPI via trusted publishing on a CalVer git tag.
 - **Reference genome assumptions:** `<e.g. GRCh38 by default; assembly must be explicit in metadata>`
 
@@ -127,12 +127,10 @@ Defined via pixi features + environments, used for CI:
 ```toml
 [tool.pixi.feature.py312.dependencies] python = "3.12.*"
 [tool.pixi.feature.py313.dependencies] python = "3.13.*"
-[tool.pixi.feature.py314.dependencies] python = "3.14.*"
 [tool.pixi.environments]
-default   = { features = ["py314", "dev"], solve-group = "default" }
+default   = { features = ["py313", "dev"], solve-group = "default" }
 test-py312 = ["py312", "test"]
 test-py313 = ["py313", "test"]
-test-py314 = ["py314", "test"]
 ```
 
 ---

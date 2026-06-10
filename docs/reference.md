@@ -7,6 +7,14 @@
     pages are the source of truth and the docstrings (and this page) should
     be updated to match.
 
+## `genome.genome`
+
+::: genome.genome
+
+## `genome.region`
+
+::: genome.region
+
 ## `genome.seq`
 
 ::: genome.seq
@@ -22,6 +30,10 @@
 ## `genome.io.fasta`
 
 ::: genome.io.fasta
+
+## `genome.io.twobit`
+
+::: genome.io.twobit
 
 ## `genome.cli`
 

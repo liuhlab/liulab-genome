@@ -1,6 +1,6 @@
 [project]
 name = "liulab-genome"
-description = "Handling genomic files — metadata, processing, feature extraction."
+description = "Handling reference genome related tasks."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -15,7 +15,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Typing :: Typed",
 ]
@@ -25,6 +24,9 @@ dependencies = [
     "pooch>=1.8",
     "requests>=2.31",
     "tqdm>=4",
+    "numpy>=2",
+    "pandas>=2.1,<3",
+    "py2bit>=0.3",
 ]
 
 [project.urls]
@@ -62,14 +64,15 @@ samtools = "*"
 bedtools = "*"
 ucsc-fatotwobit = "*"
 ucsc-twobitinfo = "*"
+numpy = ">=2.4.6,<3"
+pandas = ">=2.1,<3"
+py2bit = ">=1.0.1,<2"
 
 # Python version features
 [tool.pixi.feature.py312.dependencies]
 python = "3.12.*"
 [tool.pixi.feature.py313.dependencies]
 python = "3.13.*"
-[tool.pixi.feature.py314.dependencies]
-python = "3.14.*"
 
 # Test feature
 [tool.pixi.feature.test.dependencies]
@@ -92,11 +95,10 @@ mkdocstrings-python = "*"
 ruff = "*"   # used by mkdocstrings to format rendered signatures
 
 [tool.pixi.environments]
-default    = { features = ["py314", "dev", "test", "docs"], solve-group = "default" }
+default    = { features = ["py313", "dev", "test", "docs"], solve-group = "default" }
 test-py312 = { features = ["py312", "test"], solve-group = "py312" }
 test-py313 = { features = ["py313", "test"], solve-group = "py313" }
-test-py314 = { features = ["py314", "test"], solve-group = "py314" }
-docs       = { features = ["py314", "docs"], solve-group = "default" }
+docs       = { features = ["py313", "docs"], solve-group = "default" }
 
 [tool.pixi.tasks]
 lint      = "ruff check ."

@@ -11,6 +11,12 @@ into the index/companion files most tools expect:
 Both live at the **I/O boundary**: they touch the network and the filesystem and invoke
 native binaries (managed by pixi). They never reimplement what those binaries do.
 
+!!! tip
+    Most users don't call these directly — the [`Genome`](genome.md) class wraps the whole
+    download-and-prepare flow and then lets you query sequence. Reach for the modules here
+    when you need a specific file on disk, a custom cache location, or one preparation step
+    on its own.
+
 ## Downloading
 
 `Downloader` is a thin wrapper over `pooch.retrieve`. It downloads a URL once and caches

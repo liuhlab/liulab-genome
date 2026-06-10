@@ -11,7 +11,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 ### Added
 
 - Initial pixi scaffold: `pyproject.toml` with `[tool.pixi.*]` manifest, conda-forge +
-  bioconda channels, `samtools`/`bedtools` runtime deps, py312/py313/py314 environments,
+  bioconda channels, `samtools`/`bedtools` runtime deps, py312/py313 environments,
   and standard tasks (`lint`, `fmt`, `typecheck`, `test`, `check`, `build`, `docs`).
 - Package skeleton: `src/genome/{__init__.py, py.typed, cli.py}` with a stub Typer app.
 - MIT license, README, AGENTS.md pointer.
@@ -41,8 +41,8 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
     self-indexed, so its internal index is surfaced as `chrom.sizes`).
     `UCSCGenomeDownloader.validate_assembly` (exposed via `assembly_url`) checks the
     assembly is a real golden-path directory with an HTTP `HEAD` before downloading;
-    `fetch_fasta`/`fetch_genome` run it by default (`validate=True`) so a mistyped
-    assembly fails fast with an actionable `ValueError` instead of an opaque FASTA 404.
+    `fetch_fasta`/`fetch_genome` always run it so a mistyped assembly fails fast with an
+    actionable `ValueError` instead of an opaque FASTA 404.
   - `genome.io.fasta` — `prepare_fasta`, which indexes a FASTA (`samtools faidx`),
     converts it to 2bit (`faToTwoBit`), and writes `chrom.sizes` (`twoBitInfo`),
     returning a `GenomeFiles` record; plus the individual `faidx`, `fasta_to_2bit`, and
@@ -51,8 +51,31 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
     (a `make`-style freshness check), making re-runs cheap and idempotent. An
     `overwrite=True` flag (on every step, `prepare_fasta`, and `fetch_genome`) forces
     regeneration; the download/decompression cache is handled independently by pooch.
-- Runtime dependencies: `pooch`, `requests`, and `tqdm` (PyPI); `ucsc-fatotwobit` and
-  `ucsc-twobitinfo` (bioconda) native tools.
+    `read_chrom_sizes` reads a `chrom.sizes` file into a pandas `Series` (integer lengths
+    indexed by chromosome name, in reference order).
+  - `genome.io.twobit` — `TwoBit`, a thin wrapper over `py2bit` that holds an **open**
+    2bit file handle so repeated queries reuse it. `sequence(chrom, start, end)` reads in
+    **0-based, half-open** coordinates and is bounds-checked: an `end` past the chromosome
+    length raises a `ValueError` instead of being silently clamped (py2bit's default); a
+    `nocheck_sequence` variant skips the bound check for already-validated callers.
+    Soft-masking is preserved by default (`masked=True`). Usable as a context manager;
+    `close()` is idempotent and querying a closed file raises.
+- `genome.region` — the shared genomic-coordinate layer: `Region`, a frozen
+  0-based/half-open `[start, end)` interval with explicit strand (`+`/`-`/`.`, never
+  defaulted), validated at construction, with `len()`/`length`, a `chrom:start-end`
+  `str`, and `Region.from_string`; plus `parse_region`, which parses a locus string
+  (thousands separators tolerated) and returns `(chrom, None, None)` for a bare
+  chromosome name.
+- `genome.Genome` — the package's main entry point. `Genome("sacCer3")` downloads and
+  prepares the assembly's reference files (cached) on construction, then serves sequence
+  queries: `genome.fetch_sequence("chrIV:0-10")` (or `genome["chrIV:0-10"]`) returns a
+  `DNA` in 0-based half-open coordinates, reading through one held `TwoBit` handle. A
+  bare chromosome name yields the whole sequence; a `Region` with strand `-` is
+  reverse-complemented. Out-of-range coordinates raise a `ValueError`. Exposes
+  `chrom_sizes` (pandas `Series` copy) and `chromosomes`; usable as a context manager to
+  release the 2bit handle.
+- Runtime dependencies: `pooch`, `requests`, `tqdm`, `numpy`, and `pandas` (PyPI);
+  `py2bit`, `ucsc-fatotwobit`, and `ucsc-twobitinfo` (bioconda) native tools.
 - CLI commands `genome revcomp <seq> [--json]` and `genome doctor [--json]`; the existing
   `genome version` stub remains.
 - `docs/sequences.md` — hand-authored narrative documentation for the sequence classes.
@@ -62,7 +85,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   cleanly when they are absent.
 - GitHub Actions:
   - `ci.yml` — lint/typecheck in the `default` env (Python-version-independent),
-    pytest matrix over `test-py312/313/314`, and a wheel/sdist build job, all
+    pytest matrix over `test-py312/313`, and a wheel/sdist build job, all
     bootstrapped via `prefix-dev/setup-pixi@v0.8.14` with `locked: true`.
   - `release.yml` — on `v*` tag, build with `pixi run build` and publish to PyPI via
     OIDC trusted publishing (no API tokens; uses `pypa/gh-action-pypi-publish`).

@@ -164,14 +164,6 @@ def test_fetch_fasta_validates_by_default(
     assert len(head_recorder.calls) == 1
 
 
-def test_fetch_fasta_validate_false_skips_check(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head_recorder: _HeadRecorder
-) -> None:
-    monkeypatch.setattr(pooch, "retrieve", lambda **kwargs: str(tmp_path / "hg38.fa"))
-    UCSCGenomeDownloader("hg38", cache_dir=tmp_path).fetch_fasta(validate=False)
-    assert head_recorder.calls == []
-
-
 def test_fetch_fasta_aborts_before_download_on_bad_assembly(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head_recorder: _HeadRecorder
 ) -> None:
