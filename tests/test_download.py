@@ -7,10 +7,12 @@ right URL and selects a decompression processor.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pooch
 import pytest
+import requests
 
 from genome.io import download as download_mod
 from genome.io.download import (
@@ -20,6 +22,42 @@ from genome.io.download import (
     liulab_data_dir,
 )
 from genome.io.fasta import GenomeFiles
+
+
+@dataclass
+class _FakeResponse:
+    """Minimal stand-in for :class:`requests.Response` for ``head`` stubs."""
+
+    status_code: int = 200
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.exceptions.HTTPError(f"{self.status_code} error")
+
+
+@dataclass
+class _HeadRecorder:
+    """Records ``requests.head`` calls and returns a configurable response."""
+
+    status_code: int = 200
+    calls: list[dict[str, object]] = field(default_factory=list)
+
+    def __call__(self, url: str, **kwargs: object) -> _FakeResponse:
+        self.calls.append({"url": url, **kwargs})
+        return _FakeResponse(self.status_code)
+
+
+@pytest.fixture(autouse=True)
+def head_recorder(monkeypatch: pytest.MonkeyPatch) -> _HeadRecorder:
+    """Patch ``requests.head`` so assembly validation stays offline (200 by default).
+
+    Autouse: every test in this module runs without real network I/O. Tests that
+    care about validation request this fixture to inspect calls or set the
+    returned status code.
+    """
+    recorder = _HeadRecorder()
+    monkeypatch.setattr(download_mod.requests, "head", recorder)
+    return recorder
 
 
 def test_liulab_data_dir_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -90,6 +128,61 @@ def test_ucsc_fasta_url() -> None:
         == "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz"
     )
     assert UCSCGenomeDownloader("mm39").fasta_url.endswith("mm39/bigZips/mm39.fa.gz")
+
+
+def test_ucsc_assembly_url() -> None:
+    assert (
+        UCSCGenomeDownloader("hg38").assembly_url
+        == "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/"
+    )
+
+
+def test_validate_assembly_ok_hits_directory_url(head_recorder: _HeadRecorder) -> None:
+    dl = UCSCGenomeDownloader("hg38")
+    dl.validate_assembly()  # 200 by default → no raise
+    assert head_recorder.calls[0]["url"] == dl.assembly_url
+
+
+def test_validate_assembly_404_raises_value_error(head_recorder: _HeadRecorder) -> None:
+    head_recorder.status_code = 404
+    dl = UCSCGenomeDownloader("nope99")
+    with pytest.raises(ValueError, match="Unknown UCSC assembly 'nope99'"):
+        dl.validate_assembly()
+
+
+def test_validate_assembly_other_status_raises_http_error(head_recorder: _HeadRecorder) -> None:
+    head_recorder.status_code = 500
+    with pytest.raises(requests.exceptions.HTTPError):
+        UCSCGenomeDownloader("hg38").validate_assembly()
+
+
+def test_fetch_fasta_validates_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head_recorder: _HeadRecorder
+) -> None:
+    monkeypatch.setattr(pooch, "retrieve", lambda **_kwargs: str(tmp_path / "hg38.fa"))
+    UCSCGenomeDownloader("hg38", cache_dir=tmp_path).fetch_fasta()
+    assert len(head_recorder.calls) == 1
+
+
+def test_fetch_fasta_validate_false_skips_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head_recorder: _HeadRecorder
+) -> None:
+    monkeypatch.setattr(pooch, "retrieve", lambda **kwargs: str(tmp_path / "hg38.fa"))
+    UCSCGenomeDownloader("hg38", cache_dir=tmp_path).fetch_fasta(validate=False)
+    assert head_recorder.calls == []
+
+
+def test_fetch_fasta_aborts_before_download_on_bad_assembly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head_recorder: _HeadRecorder
+) -> None:
+    head_recorder.status_code = 404
+
+    def fail_retrieve(**kwargs: object) -> str:
+        raise AssertionError("download must not start when validation fails")
+
+    monkeypatch.setattr(pooch, "retrieve", fail_retrieve)
+    with pytest.raises(ValueError, match="Unknown UCSC assembly"):
+        UCSCGenomeDownloader("bad", cache_dir=tmp_path).fetch_fasta()
 
 
 def test_fetch_fasta_decompresses_by_default(

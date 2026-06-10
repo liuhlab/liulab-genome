@@ -23,6 +23,7 @@ dynamic = ["version"]
 dependencies = [
     "typer>=0.12",
     "pooch>=1.8",
+    "requests>=2.31",
     "tqdm>=4",
 ]
 

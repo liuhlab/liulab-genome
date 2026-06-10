@@ -39,6 +39,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
     pipeline end to end — download `<assembly>.fa.gz`, decompress, `samtools faidx`,
     `faToTwoBit`, and `twoBitInfo` — returning a `GenomeFiles` record (the 2bit is
     self-indexed, so its internal index is surfaced as `chrom.sizes`).
+    `UCSCGenomeDownloader.validate_assembly` (exposed via `assembly_url`) checks the
+    assembly is a real golden-path directory with an HTTP `HEAD` before downloading;
+    `fetch_fasta`/`fetch_genome` run it by default (`validate=True`) so a mistyped
+    assembly fails fast with an actionable `ValueError` instead of an opaque FASTA 404.
   - `genome.io.fasta` — `prepare_fasta`, which indexes a FASTA (`samtools faidx`),
     converts it to 2bit (`faToTwoBit`), and writes `chrom.sizes` (`twoBitInfo`),
     returning a `GenomeFiles` record; plus the individual `faidx`, `fasta_to_2bit`, and
@@ -47,7 +51,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
     (a `make`-style freshness check), making re-runs cheap and idempotent. An
     `overwrite=True` flag (on every step, `prepare_fasta`, and `fetch_genome`) forces
     regeneration; the download/decompression cache is handled independently by pooch.
-- Runtime dependencies: `pooch` and `tqdm` (PyPI); `ucsc-fatotwobit` and
+- Runtime dependencies: `pooch`, `requests`, and `tqdm` (PyPI); `ucsc-fatotwobit` and
   `ucsc-twobitinfo` (bioconda) native tools.
 - CLI commands `genome revcomp <seq> [--json]` and `genome doctor [--json]`; the existing
   `genome version` stub remains.

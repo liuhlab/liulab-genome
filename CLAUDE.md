@@ -17,6 +17,69 @@
 
 ---
 
+## 1A. Working mode — draft by default, finalize before git (READ FIRST)
+
+This governs *when* the heavy gates run — it does **not** relax any of them. It controls
+timing only: the toolchain gates (§2) and the testing obligation (§6) are batched to
+**finalize** instead of running after every small edit, and the prose-documentation
+obligation (§7) is deferred further still to its own explicit step. Every invariant in
+§5 still holds at all times; correctness is never deferred, only verification ceremony.
+
+There are three modes. **Default to draft.**
+
+### Draft mode (the default for every feature/edit request)
+- Make the focused code change. Keep **full type annotations** — that's part of writing
+  the code, not deferred work.
+- Do **not** author docstrings beyond a one-liner, the `docs/*.md` page, or the
+  `CHANGELOG.md` entry yet. Do **not** write the full test suite. Do **not** run
+  `pixi run check`. Do **not** `git add`/`commit`/`push`.
+- Cheap sanity only, scoped to touched files: `ruff check <files>`, `pyright`, and the
+  single most relevant test file. **Never** the full py312/313/314 matrix.
+- For anything you defer, append a line to the **finalize ledger** (below) — including a
+  one-line *spec* for each test you're postponing, so the test can be written from intent
+  later rather than reverse-engineered from the code.
+- Report status as **"drafted — pending finalize"**. Do not say "done".
+
+### Finalize mode
+**Triggers (any of):** I say "finalize" / "wrap up" / "ready to commit"; **or** I ask for
+any action that moves changes into git (`git add`, `git commit`, `git push`, opening a PR).
+A git request implies finalize — run finalize first, then perform the git action.
+
+**Steps:**
+1. Drain the finalize ledger. For every change since the last finalize, write/repair:
+   NumPy docstrings, the `CHANGELOG.md` Unreleased entry, and tests — written from the
+   captured spec (§6 test-first), then made to pass. **Do not touch the `docs/*.md` prose
+   pages or `SKILL.md` here** — that is the separate documentation step below.
+2. Run `pixi run check` and fix until green.
+3. Summarize what changed. Then perform the requested git action (commit with a
+   Conventional Commit message; push only when asked).
+
+Finalizing — and committing — with the Markdown docs still stale is allowed and expected;
+the prose pages are settled last, on demand. (Stale *committed* docs are normally treated
+as broken per §7; this working mode is the explicit exception that defers them.)
+
+### Documentation mode
+**Trigger:** only when I explicitly say "update doc(s)" / "write the docs" / "do the
+docs". Nothing else triggers it — not finalize, not a git/PR request. Prose documentation
+is the last thing, done once the design has settled and I ask for it.
+
+**Steps:** drain the documentation ledger — for every public signature that changed since
+the docs were last written, update the relevant `docs/*.md` narrative page (with runnable
+examples) and `skills/<import_name>/SKILL.md`, per §7. Then `pixi run check` if docs
+affect doctests.
+
+### Ledgers
+While drafting, maintain a running checklist (use the todo tool) of deferred obligations,
+split by which step drains it:
+- **Finalize ledger:** files needing docstrings, features needing tests **plus their
+  one-line spec**, `CHANGELOG.md` entries. **Finalize is not complete while this is
+  non-empty.**
+- **Documentation ledger:** any public signature whose `docs/*.md` page or `SKILL.md`
+  needs updating. This persists across finalizes and is drained only in documentation
+  mode; a non-empty documentation ledger does **not** block finalize or commit.
+
+---
+
 ## 2. Toolchain — single source of truth
 
 This project has **both Python and native (non-Python) dependencies** (e.g. `samtools`, `bedtools`),
@@ -49,7 +112,9 @@ All operations go through pixi tasks defined in `[tool.pixi.tasks]`:
 | Docs (live) | `pixi run docs` | `mkdocs serve` |
 | Tool doctor | `pixi run -- <import_name> doctor` | verifies samtools/bedtools |
 
-**Before claiming a task is done, `pixi run check` must pass.** Those are the exact gates CI runs.
+**At finalize (see §1A), before committing or claiming a task is done, `pixi run check` must
+pass.** Those are the exact gates CI runs. (During draft mode, run only the cheap scoped
+checks from §1A, not the full suite.)
 
 ### Native dependencies (bioconda)
 - `samtools` and `bedtools` are runtime conda dependencies and must resolve from bioconda.
@@ -146,7 +211,11 @@ test-py314 = ["py314", "test"]
 ## 6. Testing — non-negotiable
 
 - **Every new feature ships with tests in the same PR.** A feature without tests is not done.
-- Write the test from the spec **first**, confirm intent, then implement until green.
+  Per §1A, the tests may be *written at finalize* rather than per draft edit — but no change
+  reaches git without them.
+- Write the test from the spec **first**, confirm intent, then implement until green. When a
+  test is deferred during draft mode, record its spec as a one-line entry in the finalize
+  ledger so it is still written *from intent*, not reverse-engineered from the finished code.
 - Use **pytest**. Use **hypothesis** for parsers, coordinate conversions, sequence transforms, and
   feature extractors — assert invariants over generated inputs (e.g. `reverse_complement` is an
   involution; length is preserved; round-trips are identity).
@@ -163,9 +232,13 @@ test-py314 = ["py314", "test"]
   edit directly. Each feature gets a narrative page with runnable examples.
 - `mkdocstrings` may auto-render an API reference from docstrings, but the **primary, editable doc is
   the Markdown prose page** — don't rely solely on autogen.
-- A change to any public signature **requires** updating both its docstring and the relevant Markdown
-  page in the same change. Stale docs are treated as broken code.
-- Keep `skills/<import_name>/SKILL.md` and the usage reference current when the CLI or API changes.
+- The **docstring** for a changed public signature is repaired at **finalize** (§1A); it travels with
+  the code. The **Markdown prose page** is updated separately, only in **documentation mode** (§1A) when
+  I explicitly ask — log the affected signature in the documentation ledger so it is not missed.
+- Markdown docs are deliberately allowed to lag the code through finalize and commit (the §1A exception);
+  outside that deferred window, stale *committed* docs are treated as broken code.
+- Keep `skills/<import_name>/SKILL.md` and the usage reference current — also in documentation mode —
+  when the CLI or API changes.
 
 ---
 

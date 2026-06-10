@@ -1,12 +1,6 @@
 # liulab-genome
 
-A small library for handling genomic files — metadata management, file processing,
-and feature extraction. Import name: `genome`.
-
-The package wraps mature native tools (`samtools`, `bedtools`) with a thin, typed
-Python API and CLI. Sequence operations get first-class types
-(`DNA` / `RNA` / `Protein`) that keep the right type across slicing and
-biological transforms.
+A library for handling reference genomes, including genome assembly, annotation, and aligner index and other artifacts.
 
 ## Where to go next
 
@@ -14,7 +8,7 @@ biological transforms.
 - [**Sequences**](sequences.md) — the typed `DNA` / `RNA` / `Protein` classes,
   with worked examples.
 - [**API reference**](reference.md) — auto-generated from docstrings (secondary
-  to the hand-authored pages above).
+ to the hand-authored pages above).
 
 ## At a glance
 
