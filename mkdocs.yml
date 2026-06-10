@@ -55,6 +55,7 @@ nav:
   - Genome: genome.md
   - Sequences: sequences.md
   - Genome files: genome-files.md
+  - Annotations & indexes: aligner.md
   - API reference: reference.md
 
 markdown_extensions:

@@ -112,6 +112,24 @@ sacCer3.files                    # GenomeFiles: paths to fasta/.fai/.2bit/chrom.
 in reference order). It is returned as a copy, so mutating it never corrupts the
 genome's own view.
 
+## Gene annotations (GTF)
+
+Beyond sequence, a `Genome` can carry one or more gene annotations. Register a
+GTF under a name and it is placed alongside the assembly's files with a gffutils
+database built from it:
+
+```python
+sacCer3.register_gtf("sacCer3.ensGene.gtf", name="ensembl")
+sacCer3.annotations              # ['ensembl'] — registered names
+sacCer3.get_gtf_path("ensembl")  # Path to the placed .gtf
+sacCer3.default_gtf              # 'ensembl' when it is the only one
+```
+
+Annotations are the basis for building aligner indexes (a STAR index is built
+against a specific GTF). Registration, the default-annotation rules, and
+`Genome.build_star_index(gtf=...)` are covered in
+[Annotations & aligner indexes](aligner.md).
+
 ## Releasing the file handle
 
 `Genome` holds the `.2bit` file open so repeated queries are fast. Use it as a

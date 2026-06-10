@@ -8,14 +8,16 @@ description: |
   and query its sequence in 0-based half-open coordinates), a `Region` coordinate
   primitive, typed sequence classes (`DNA`, `RNA`, `Protein`) with biological
   transforms (complement, reverse_complement, transcribe, back_transcribe,
-  gc_content), and a `genome` CLI (`revcomp`, `doctor`, `version`).
+  gc_content), GTF gene-annotation registration and STAR aligner-index building,
+  and a `genome` CLI (`revcomp`, `doctor`, `version`).
   TRIGGER when: user wants the sequence of a locus / region (e.g. "chrIV:0-10"),
   loads a reference genome or assembly (hg38, mm39, sacCer3, ...), reads a `.2bit`,
   or needs chromosome sizes; user mentions reverse complement, transcription, GC
-  content, or a DNA/RNA/protein string; user imports `genome` or runs
-  `genome <subcommand>`; user asks about samtools/bedtools versions or "is the
-  tooling installed"; user is working in a project whose pyproject lists
-  `liulab-genome`.
+  content, or a DNA/RNA/protein string; user wants to register a GTF gene
+  annotation or build a STAR genome index for RNA-seq alignment; user imports
+  `genome` or runs `genome <subcommand>`; user asks about samtools/bedtools
+  versions or "is the tooling installed"; user is working in a project whose
+  pyproject lists `liulab-genome`.
   SKIP for: general string manipulation unrelated to biology; IUPAC ambiguity
   codes (intentionally out of scope); raw samtools/bedtools tasks where the user
   has explicitly chosen to shell out themselves.
@@ -35,6 +37,8 @@ This skill teaches you how to use the `liulab-genome` package (import name
 | Load a reference assembly by name (download + prepare) | ✅ `Genome("sacCer3")` | ❌ manual `wget` + `samtools faidx` |
 | Read sequence from a `.2bit` file | ✅ `TwoBit(path).sequence(...)` | ❌ parsing 2bit bytes by hand |
 | Get chromosome sizes / names | ✅ `Genome(...).chrom_sizes` / `.chromosomes` | |
+| Register a gene annotation (GTF) on a genome | ✅ `Genome(...).register_gtf(path, name="ensembl")` | ❌ ad-hoc copy + gffutils by hand |
+| Build a STAR index for RNA-seq alignment | ✅ `Genome(...).build_star_index(gtf="ensembl")` | ❌ hand-rolled `STAR --runMode genomeGenerate` |
 | Reverse-complement a DNA/RNA string | ✅ `DNA(s).reverse_complement()` or `genome revcomp` | ❌ hand-written `str.translate` |
 | Transcribe DNA → RNA | ✅ `DNA(s).transcribe()` | |
 | Validate a sequence's alphabet | ✅ `DNA(s)` raises `ValueError` listing offending characters | |
@@ -106,6 +110,44 @@ with TwoBit("sacCer3.2bit") as tb:    # holds the handle open; reuse for many qu
     tb.chroms()                       # {'chrI': 230218, ...}
     tb.sequence("chrIV", 0, 10)       # 'ACACCACACC' (0-based, half-open, bounds-checked)
 ```
+
+## Gene annotations and aligner indexes
+
+A `Genome` can carry one or more **GTF gene annotations**, and build an **aligner
+index** (currently STAR) against a chosen annotation. Full narrative:
+[`docs/aligner.md`](../../docs/aligner.md).
+
+```python
+from genome import Genome
+
+g = Genome("sacCer3")
+g.register_gtf("sacCer3.ensGene.gtf", name="ensembl")   # place GTF + build gffutils db
+g.annotations                       # ['ensembl']
+g.get_gtf_path("ensembl")           # Path to the placed .gtf
+g.build_star_index(gtf="ensembl", threads=8)            # -> index/star_ensembl/
+```
+
+Key behaviors to rely on (and to tell the user about):
+
+- **The GTF must be unzipped.** `register_gtf` rejects a `.gz` path with an
+  actionable error — `gunzip` it first. Re-registering an existing name raises
+  `FileExistsError` unless `force=True`.
+- **Gene/transcript inference is off by default** (standard GTFs already declare
+  those features; inferring is the gffutils slow path). Pass
+  `disable_infer_genes=False` only for a bare exon-level GTF.
+- **`build_star_index(gtf=...)` requires the annotation name** — it is never
+  implicit. STAR resolves the path via `get_gtf_path` and passes `--sjdbGTFfile`,
+  so the index is splice-junction-aware.
+- **Each annotation gets its own index dir** `index/star_<gtf>/`, so different
+  GTFs build independent, non-colliding indexes. A finished index is **cached
+  and reused**; pass `overwrite=True` to force a rebuild.
+- Named options: `sjdb_overhang` (default 100; set to `read_length - 1`),
+  `threads`, `overwrite`. Any other `genomeGenerate` flag passes through as a
+  keyword (e.g. `genomeSAindexNbases=11`); the suffix-array size auto-reduces for
+  small genomes.
+- **STAR is an optional dependency** — not in the default env. If it's missing
+  the build fails fast with install instructions and `ToolNotFoundError`. Install
+  with `pixi add star` (bioconda). Do **not** `pip install` it.
 
 ## CLI
 
