@@ -10,6 +10,28 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- `genome.aligner` — building aligner genome indexes, with STAR as the first aligner:
+  - `Aligner`, an abstract base owning the cross-aligner plumbing — it checks the tool is
+    installed at construction (printing install instructions and raising `ToolNotFoundError`
+    if not), lays the index out under `<LIULAB_DATA>/genome/<assembly>/index/<aligner>/`,
+    guards completion with a `.success` flag file, writes a JSON parameter sidecar
+    (including the resolved parameters and the aligner version) next to the index, and
+    exposes `index_path` (the built file/prefix/dir) which raises until a build succeeds.
+  - `STAR` — runs `STAR --runMode genomeGenerate`. It is bound to one registered GTF
+    annotation (`STAR(genome, gtf=<key>)`); the index is splice-junction-aware and always
+    built against that annotation, whose path is resolved via `Genome.get_gtf_path` and
+    passed as `--sjdbGTFfile`. Each annotation gets its own genomeDir
+    `index/star_<gtf_key>/`, so different GTFs build independent indexes. Its `index()`
+    names only the commonly tuned options (`sjdb_overhang`, `threads`, `overwrite`) and
+    forwards any other `genomeGenerate` flag through `**kwargs`; the suffix-array index
+    size is auto-reduced for small genomes. Successful indexes are cached and reused unless
+    `overwrite=True`.
+  - `Genome.build_star_index(gtf, **kwargs)` (via `AlignerMixin`) — a thin entry point that
+    builds the STAR index for a constructed `Genome` against the registered annotation
+    named `gtf`.
+  - STAR is an **optional** dependency: a `star` pixi feature (bioconda) and an `aligners`
+    environment, deliberately kept out of `default`; it is only required when a
+    `build_*_index` call is made, and the aligner checks for it then.
 - Initial pixi scaffold: `pyproject.toml` with `[tool.pixi.*]` manifest, conda-forge +
   bioconda channels, `samtools`/`bedtools` runtime deps, py312/py313 environments,
   and standard tasks (`lint`, `fmt`, `typecheck`, `test`, `check`, `build`, `docs`).

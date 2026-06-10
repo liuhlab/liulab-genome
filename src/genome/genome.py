@@ -30,14 +30,17 @@ from typing import Self
 
 import pandas as pd
 
+from genome.aligner.mixin import AlignerMixin
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
+from genome.io.gtf import GtfAnnotation, list_annotations, register_gtf
 from genome.io.twobit import TwoBit
+from genome.metadata import lookup_assembly
 from genome.region import Region, parse_region
 from genome.seq import DNA
 
 
-class Genome:
+class Genome(AlignerMixin):
     """A reference genome and the operations over it.
 
     Constructing a ``Genome`` ensures the assembly's reference files exist
@@ -90,12 +93,115 @@ class Genome:
         *,
         cache_dir: str | Path | None = None,
         progressbar: bool = True,
+        assembly_name: str | None = None,
+        species: str | None = None,
+        ucsc_name: str | None = None,
+        ncbi_name: str | None = None,
+        ncbi_assembly_id: str | None = None,
+        ncbi_taxid: int | None = None,
+        default_gtf: str | None = None,
     ) -> None:
         self.assembly = assembly
+        self._set_metadata(
+            assembly_name=assembly_name,
+            species=species,
+            ucsc_name=ucsc_name,
+            ncbi_name=ncbi_name,
+            ncbi_assembly_id=ncbi_assembly_id,
+            ncbi_taxid=ncbi_taxid,
+        )
         self._downloader = UCSCGenomeDownloader(assembly, cache_dir)
+        self._assembly_dir: Path = self._downloader.cache_dir
         self.files: GenomeFiles = self._downloader.fetch_genome(progressbar=progressbar)
         self._chrom_sizes: pd.Series = read_chrom_sizes(self.files.chrom_sizes)
         self._twobit = TwoBit(self.files.twobit)
+        self._set_default_gtf(default_gtf)
+
+    def _set_metadata(
+        self,
+        *,
+        assembly_name: str | None,
+        species: str | None,
+        ucsc_name: str | None,
+        ncbi_name: str | None,
+        ncbi_assembly_id: str | None,
+        ncbi_taxid: int | None,
+    ) -> None:
+        """Set metadata attributes, filling unset ones from the curated table when known."""
+        table = lookup_assembly(self.assembly)
+        self.assembly_name: str | None = assembly_name or (table.assembly_name if table else None)
+        self.species: str | None = species or (table.species if table else None)
+        self.ucsc_name: str | None = ucsc_name or (table.ucsc_name if table else None)
+        self.ncbi_name: str | None = ncbi_name or (table.ncbi_name if table else None)
+        self.ncbi_assembly_id: str | None = ncbi_assembly_id or (
+            table.ncbi_assembly_id if table else None
+        )
+        self.ncbi_taxid: int | None = (
+            ncbi_taxid if ncbi_taxid is not None else (table.ncbi_taxid if table else None)
+        )
+
+    def _set_default_gtf(self, default_gtf: str | None) -> None:
+        """Discover registered annotations and pick the default GTF."""
+        self._annotations: dict[str, GtfAnnotation] = list_annotations(self._assembly_dir)
+        if default_gtf is not None:
+            if default_gtf not in self._annotations:
+                known = ", ".join(self._annotations) or "(none registered)"
+                raise ValueError(
+                    f"default_gtf {default_gtf!r} is not registered for {self.assembly!r}; "
+                    f"registered annotations: {known}."
+                )
+            self.default_gtf: str | None = default_gtf
+        elif len(self._annotations) == 1:
+            self.default_gtf = next(iter(self._annotations))
+        else:
+            self.default_gtf = None
+
+    @property
+    def annotations(self) -> list[str]:
+        """Names of the GTF annotations registered for this assembly."""
+        return list(self._annotations)
+
+    def register_gtf(
+        self,
+        gtf: str | Path,
+        name: str,
+        *,
+        force: bool = False,
+        disable_infer_genes: bool = True,
+        disable_infer_transcripts: bool = True,
+    ) -> GtfAnnotation:
+        """Register an unzipped GTF under ``name`` and build its gffutils database.
+
+        The GTF is copied to ``<assembly dir>/gtf/<name>/`` and a gffutils
+        database is built beside it. If no default GTF is set and this becomes
+        the only annotation, it is adopted as :attr:`default_gtf`.
+        """
+        annotation = register_gtf(
+            self._assembly_dir,
+            gtf,
+            name,
+            force=force,
+            disable_infer_genes=disable_infer_genes,
+            disable_infer_transcripts=disable_infer_transcripts,
+        )
+        self._annotations[name] = annotation
+        if self.default_gtf is None and len(self._annotations) == 1:
+            self.default_gtf = name
+        return annotation
+
+    def get_gtf_path(self, name: str) -> Path:
+        """Return the GTF file path of the annotation registered as ``name``."""
+        if name not in self._annotations:
+            known = ", ".join(self._annotations) or "(none registered)"
+            raise KeyError(f"no annotation {name!r} for {self.assembly!r}; registered: {known}.")
+        return self._annotations[name].gtf
+
+    @property
+    def default_gtf_path(self) -> Path | None:
+        """GTF file path of the default annotation, or ``None`` when no default is set."""
+        if self.default_gtf is None:
+            return None
+        return self.get_gtf_path(self.default_gtf)
 
     def __repr__(self) -> str:
         """Return e.g. ``Genome('sacCer3', 17 sequences)``."""
