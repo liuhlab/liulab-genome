@@ -2272,6 +2272,7 @@ packages:
   name: liulab-genome
   requires_dist:
   - pooch>=1.8
+  - requests>=2.31
   - tqdm>=4
   - typer>=0.12
   requires_python: '>=3.12'

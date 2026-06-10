@@ -21,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pooch
+import requests
 
 from genome.io.fasta import GenomeFiles, prepare_fasta
 
@@ -211,9 +212,51 @@ class UCSCGenomeDownloader(Downloader):
         self.assembly = assembly
 
     @property
+    def assembly_url(self) -> str:
+        """URL of the UCSC golden-path directory for this assembly."""
+        return f"{self.BASE_URL}/{self.assembly}/"
+
+    @property
     def fasta_url(self) -> str:
         """URL of the gzipped whole-genome FASTA for this assembly."""
         return f"{self.BASE_URL}/{self.assembly}/bigZips/{self.assembly}.fa.gz"
+
+    def validate_assembly(self, *, timeout: float = 30.0) -> None:
+        """Check that ``assembly`` is a real golden-path directory at UCSC.
+
+        Sends an HTTP ``HEAD`` to :attr:`assembly_url` so a typo in the assembly
+        name fails fast with a clear message, rather than surfacing later as an
+        opaque 404 on the FASTA file itself.
+
+        Parameters
+        ----------
+        timeout : float, default 30.0
+            Seconds to wait for the server before giving up.
+
+        Raises
+        ------
+        ValueError
+            If no directory exists for ``assembly`` (HTTP 404) — the assembly
+            name is almost certainly wrong.
+        requests.exceptions.RequestException
+            If the request fails for any other reason (network error, timeout,
+            or an unexpected non-success status).
+
+        Examples
+        --------
+        >>> UCSCGenomeDownloader("hg38").validate_assembly()    # doctest: +SKIP
+        >>> UCSCGenomeDownloader("nope99").validate_assembly()  # doctest: +SKIP
+        Traceback (most recent call last):
+        ValueError: Unknown UCSC assembly 'nope99': no directory at ...
+        """
+        response = requests.head(self.assembly_url, timeout=timeout, allow_redirects=True)
+        if response.status_code == 404:
+            raise ValueError(
+                f"Unknown UCSC assembly {self.assembly!r}: no directory at "
+                f"{self.assembly_url}. Check the name against {self.BASE_URL}/ "
+                f"(e.g. 'hg38', 'mm39', 'sacCer3')."
+            )
+        response.raise_for_status()
 
     def fetch_fasta(
         self,
@@ -221,6 +264,7 @@ class UCSCGenomeDownloader(Downloader):
         known_hash: str | None = None,
         decompress: bool = True,
         progressbar: bool = True,
+        validate: bool = True,
     ) -> Path:
         """Download (and optionally decompress) the genome FASTA.
 
@@ -234,13 +278,24 @@ class UCSCGenomeDownloader(Downloader):
             that path. If ``False``, keep and return the ``.fa.gz``.
         progressbar : bool, default True
             Show a download progress bar (requires ``tqdm``).
+        validate : bool, default True
+            If ``True``, first confirm the assembly exists at UCSC via
+            :meth:`validate_assembly` so a bad name fails with a clear message
+            before any download is attempted.
 
         Returns
         -------
         pathlib.Path
             Path to the decompressed ``<assembly>.fa`` (or the ``.fa.gz`` when
             ``decompress=False``).
+
+        Raises
+        ------
+        ValueError
+            If ``validate`` is ``True`` and the assembly is unknown to UCSC.
         """
+        if validate:
+            self.validate_assembly()
         processor: _Processor | None = (
             pooch.Decompress(method="gzip", name=f"{self.assembly}.fa") if decompress else None
         )
@@ -257,6 +312,7 @@ class UCSCGenomeDownloader(Downloader):
         known_hash: str | None = None,
         progressbar: bool = True,
         overwrite: bool = False,
+        validate: bool = True,
     ) -> GenomeFiles:
         r"""Download and fully prepare the reference genome in one call.
 
@@ -278,6 +334,9 @@ class UCSCGenomeDownloader(Downloader):
             Force the preparation steps (faidx, 2bit, chrom.sizes) to rerun even
             when their outputs look fresh. The pooch download/decompression cache is
             unaffected.
+        validate : bool, default True
+            If ``True``, confirm the assembly exists at UCSC via
+            :meth:`validate_assembly` before downloading.
 
         Returns
         -------
@@ -289,7 +348,8 @@ class UCSCGenomeDownloader(Downloader):
         requests.exceptions.HTTPError
             If the download fails (e.g. a wrong assembly name 404s).
         ValueError
-            If ``known_hash`` is given and the download does not match.
+            If ``validate`` is ``True`` and the assembly is unknown to UCSC, or
+            if ``known_hash`` is given and the download does not match.
         genome.external.ToolNotFoundError
             If ``samtools``, ``faToTwoBit``, or ``twoBitInfo`` are not on ``PATH``.
         RuntimeError
@@ -306,6 +366,7 @@ class UCSCGenomeDownloader(Downloader):
             known_hash=known_hash,
             decompress=True,
             progressbar=progressbar,
+            validate=validate,
         )
         return prepare_fasta(fasta, overwrite=overwrite)
 
