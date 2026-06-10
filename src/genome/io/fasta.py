@@ -29,6 +29,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
+
 from genome.io.utils import _run_to
 
 # FASTA suffixes we know how to strip when deriving sibling output names.
@@ -191,6 +193,45 @@ def twobit_to_chrom_sizes(
         else twobit.with_name(twobit.stem + ".chrom.sizes")
     )
     return _run_to("twoBitInfo", [str(twobit), str(sizes)], sizes, [twobit], overwrite=overwrite)
+
+
+def read_chrom_sizes(sizes_path: str | Path) -> pd.Series:
+    r"""Read a ``chrom.sizes`` file into a pandas Series of lengths.
+
+    Parameters
+    ----------
+    sizes_path : str or pathlib.Path
+        Two-column ``<name>\t<length>`` file as written by
+        :func:`twobit_to_chrom_sizes`.
+
+    Returns
+    -------
+    pandas.Series
+        Integer lengths indexed by chromosome name (index name ``"chrom"``,
+        series name ``"length"``), preserving file order.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``sizes_path`` does not exist.
+
+    Examples
+    --------
+    >>> sizes = read_chrom_sizes("hg38.chrom.sizes")  # doctest: +SKIP
+    >>> sizes["chr1"]                                 # doctest: +SKIP
+    248956422
+    """
+    path = Path(sizes_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"chrom.sizes file not found: {path}")
+    frame = pd.read_csv(
+        path, sep="\t", header=None, names=["chrom", "length"], dtype={"length": int}
+    )
+    return pd.Series(
+        frame["length"].to_numpy(),
+        index=pd.Index(frame["chrom"].to_numpy(), name="chrom"),
+        name="length",
+    )
 
 
 def prepare_fasta(

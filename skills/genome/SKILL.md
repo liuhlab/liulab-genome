@@ -1,16 +1,21 @@
 ---
 name: genome
 description: |
-  Use when handling genomic data — DNA/RNA/protein sequences, reading or writing
+  Use when handling genomic data — reference genomes and assemblies, fetching the
+  sequence of a region, DNA/RNA/protein sequences, reading or writing
   BAM/VCF/BED/GTF, or invoking samtools/bedtools. The `liulab-genome` package
-  (import name `genome`) provides typed sequence classes (`DNA`, `RNA`, `Protein`)
-  with biological transforms (complement, reverse_complement, transcribe,
-  back_transcribe, gc_content) and a `genome` CLI (`revcomp`, `doctor`, `version`).
-  TRIGGER when: user mentions reverse complement, transcription, GC content,
-  validating a DNA/RNA/protein string, computing alphabet membership; user imports
-  `genome` or runs `genome <subcommand>`; user asks about samtools/bedtools
-  versions or "is the tooling installed"; user is working in a project whose
-  pyproject lists `liulab-genome`.
+  (import name `genome`) provides the `Genome` class (download an assembly by name
+  and query its sequence in 0-based half-open coordinates), a `Region` coordinate
+  primitive, typed sequence classes (`DNA`, `RNA`, `Protein`) with biological
+  transforms (complement, reverse_complement, transcribe, back_transcribe,
+  gc_content), and a `genome` CLI (`revcomp`, `doctor`, `version`).
+  TRIGGER when: user wants the sequence of a locus / region (e.g. "chrIV:0-10"),
+  loads a reference genome or assembly (hg38, mm39, sacCer3, ...), reads a `.2bit`,
+  or needs chromosome sizes; user mentions reverse complement, transcription, GC
+  content, or a DNA/RNA/protein string; user imports `genome` or runs
+  `genome <subcommand>`; user asks about samtools/bedtools versions or "is the
+  tooling installed"; user is working in a project whose pyproject lists
+  `liulab-genome`.
   SKIP for: general string manipulation unrelated to biology; IUPAC ambiguity
   codes (intentionally out of scope); raw samtools/bedtools tasks where the user
   has explicitly chosen to shell out themselves.
@@ -26,6 +31,10 @@ This skill teaches you how to use the `liulab-genome` package (import name
 
 | Task | Use this package | Don't use this package |
 |------|------------------|------------------------|
+| Fetch the sequence of a region from a reference | ✅ `Genome("hg38").fetch_sequence("chr1:0-100")` | ❌ hand-rolled FASTA slicing |
+| Load a reference assembly by name (download + prepare) | ✅ `Genome("sacCer3")` | ❌ manual `wget` + `samtools faidx` |
+| Read sequence from a `.2bit` file | ✅ `TwoBit(path).sequence(...)` | ❌ parsing 2bit bytes by hand |
+| Get chromosome sizes / names | ✅ `Genome(...).chrom_sizes` / `.chromosomes` | |
 | Reverse-complement a DNA/RNA string | ✅ `DNA(s).reverse_complement()` or `genome revcomp` | ❌ hand-written `str.translate` |
 | Transcribe DNA → RNA | ✅ `DNA(s).transcribe()` | |
 | Validate a sequence's alphabet | ✅ `DNA(s)` raises `ValueError` listing offending characters | |
@@ -34,6 +43,69 @@ This skill teaches you how to use the `liulab-genome` package (import name
 | Parse a VCF / GTF / BED file | _(planned — not yet implemented)_ | use samtools/bedtools directly for now |
 | Sequences containing `N` or other IUPAC codes | ❌ — out of scope by design | use Biopython or pyfaidx |
 | Anything that needs whole-genome streaming | ❌ — these classes hold the full sequence in memory | use `samtools view`/`bedtools intersect` directly |
+
+## The `Genome` class — main entry point
+
+`Genome` is what most users want. Name a UCSC assembly; on construction it
+downloads the FASTA (if not cached) and prepares the `.fai`/`.2bit`/`chrom.sizes`,
+then serves sequence queries.
+
+```python
+from genome import Genome
+
+g = Genome("sacCer3")                 # download + prepare on first use; cached after
+g.fetch_sequence("chrIV:0-10")        # DNA('ACACCACACC')
+g["chrIV:0-10"]                       # indexing is sugar for fetch_sequence
+g.fetch_sequence("chrM")              # bare chromosome name -> whole sequence
+g.chromosomes                         # ['chrI', 'chrII', ..., 'chrM']
+g.chrom_sizes["chrIV"]                # 1531933  (pandas Series, copy)
+```
+
+**Coordinates are 0-based, half-open** (`chrIV:0-10` = the first ten bases). This
+matches the package's internal convention — there is **no** 1-based conversion.
+Do not "fix" a user's locus by adding 1; if they hand you a 1-based coordinate
+(from IGV, VCF, GTF, a paper), subtract 1 from the start yourself before calling.
+
+Key behaviors to rely on (and to tell the user about):
+
+- The result is a [`DNA`](#biological-transforms), so transforms chain directly:
+  `g.fetch_sequence("chrIV:0-100").gc_content`.
+- **Soft-masking is preserved** (lower-case repeat-masked bases). The reference
+  may contain `N` runs — `DNA` stores them verbatim (it does not validate).
+- A `Region` with strand `"-"` is returned **reverse-complemented**; a bare
+  string is always forward-strand.
+- **Out-of-range coordinates raise `ValueError`** — an over-long `end` is never
+  silently clamped. `end == chromosome length` is valid; `end >` it is an error.
+- `Genome` holds the `.2bit` open; use it as a context manager
+  (`with Genome("hg38") as g: ...`) or call `g.close()` to release the handle.
+
+### Coordinates: `Region` and `parse_region`
+
+`genome.region` is the shared coordinate layer (the primitive future features
+build on):
+
+```python
+from genome import Region
+from genome.region import parse_region
+
+Region("chr1", 0, 10)                 # frozen, 0-based half-open, strand '.'
+Region("chr1", 0, 10, "-")            # strand is explicit; never default to '+'
+len(Region("chr1", 0, 10))            # 10
+parse_region("chr1:1,000-2,000")      # ('chr1', 1000, 2000) — separators tolerated
+parse_region("chrM")                  # ('chrM', None, None) — bare chromosome
+```
+
+### Reading a `.2bit` directly: `TwoBit`
+
+When you already have a `.2bit` file (and don't need the download/prepare flow):
+
+```python
+from genome.io.twobit import TwoBit
+
+with TwoBit("sacCer3.2bit") as tb:    # holds the handle open; reuse for many queries
+    tb.chroms()                       # {'chrI': 230218, ...}
+    tb.sequence("chrIV", 0, 10)       # 'ACACCACACC' (0-based, half-open, bounds-checked)
+```
 
 ## CLI
 

@@ -14,6 +14,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from genome.io.fasta import (
@@ -21,6 +22,7 @@ from genome.io.fasta import (
     faidx,
     fasta_to_2bit,
     prepare_fasta,
+    read_chrom_sizes,
     twobit_to_chrom_sizes,
 )
 
@@ -156,3 +158,26 @@ def test_prepare_fasta_end_to_end(fasta: Path) -> None:
         for line in files.chrom_sizes.read_text().splitlines()
     }
     assert sizes == {"chr1": len(_CHR1), "chr2": len(_CHR2)}
+
+
+# --- read_chrom_sizes (no binaries: just parses a text file into pandas) ---
+
+
+def test_read_chrom_sizes_returns_labelled_series(tmp_path: Path) -> None:
+    path = tmp_path / "x.chrom.sizes"
+    path.write_text("chr1\t100\nchr2\t50\n")
+
+    sizes = read_chrom_sizes(path)
+
+    assert isinstance(sizes, pd.Series)
+    assert list(sizes.index) == ["chr1", "chr2"]  # file order preserved
+    assert sizes.index.name == "chrom"
+    assert sizes.name == "length"
+    assert sizes["chr1"] == 100
+    assert sizes["chr2"] == 50
+    assert sizes.dtype == "int64"
+
+
+def test_read_chrom_sizes_missing_input_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="not found"):
+        read_chrom_sizes(tmp_path / "nope.chrom.sizes")

@@ -5,12 +5,29 @@ A library for handling reference genomes, including genome assembly, annotation,
 ## Where to go next
 
 - [**Usage**](usage.md) — installation, environment setup, and the CLI.
+- [**Genome**](genome.md) — the `Genome` class, the main entry point: name an
+  assembly, query its sequence.
 - [**Sequences**](sequences.md) — the typed `DNA` / `RNA` / `Protein` classes,
   with worked examples.
+- [**Genome files**](genome-files.md) — the download/prepare machinery behind
+  `Genome` (`UCSCGenomeDownloader`, `prepare_fasta`).
 - [**API reference**](reference.md) — auto-generated from docstrings (secondary
  to the hand-authored pages above).
 
 ## At a glance
+
+The `Genome` class is the main entry point — name an assembly and query it in
+**0-based, half-open** coordinates:
+
+```python
+from genome import Genome
+
+sacCer3 = Genome("sacCer3")              # download + prepare on first use (cached)
+sacCer3.fetch_sequence("chrIV:0-10")     # DNA('ACACCACACC')
+sacCer3["chrIV:0-10"].reverse_complement()  # indexing is sugar; result is a DNA
+```
+
+The typed sequence classes it returns stand alone too:
 
 ```python
 from genome import DNA
