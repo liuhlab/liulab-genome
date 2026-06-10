@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command' | grep -Eq 'git[[:space:]]+(add|commit|push)|gh[[:space:]]+pr[[:space:]]+create' && jq -nc --arg m 'REMINDER (CLAUDE.md §1A): this command puts changes into git. If you have NOT yet finalized this batch, finalize first — docstrings + the docs/*.md page, the CHANGELOG Unreleased entry, tests written from the ledger specs, and a green `pixi run check` — then re-run. If finalize is already complete, proceed.' '{hookSpecificOutput:{hookEventName:\"PreToolUse\",additionalContext:$m}}' || true",
+            "statusMessage": "Checking finalize before git…"
+          }
+        ]
+      }
+    ]
+  }
+}
