@@ -44,6 +44,7 @@ fasta = dl.fetch_fasta()               # -> Path to hg38.fa (cached, multi-GB)
 ```
 
 Use `decompress=False` to keep the `.fa.gz`, or `progressbar=False` to silence the bar.
+A mistyped assembly fails fast with a clear error naming the unknown name.
 
 #### One-step pipeline: `fetch_genome`
 
