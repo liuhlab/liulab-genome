@@ -20,18 +20,28 @@ from genome.io.fasta import (
     read_chrom_sizes,
     twobit_to_chrom_sizes,
 )
+from genome.io.gtf import (
+    GtfAnnotation,
+    annotation_dir,
+    list_annotations,
+    register_gtf,
+)
 from genome.io.twobit import TwoBit
 
 __all__ = [
     "Downloader",
     "GenomeFiles",
+    "GtfAnnotation",
     "TwoBit",
     "UCSCGenomeDownloader",
+    "annotation_dir",
     "assembly_data_dir",
     "faidx",
     "fasta_to_2bit",
+    "list_annotations",
     "liulab_data_dir",
     "prepare_fasta",
     "read_chrom_sizes",
+    "register_gtf",
     "twobit_to_chrom_sizes",
 ]

@@ -1,0 +1,7 @@
+assembly_name	species	ucsc_name	ncbi_name	ncbi_assembly_id	ncbi_taxid
+hg38	Homo sapiens	hg38	GRCh38	GCF_000001405.40	9606
+hg19	Homo sapiens	hg19	GRCh37	GCF_000001405.25	9606
+mm39	Mus musculus	mm39	GRCm39	GCF_000001635.27	10090
+mm10	Mus musculus	mm10	GRCm38	GCF_000001635.26	10090
+sacCer3	Saccharomyces cerevisiae	sacCer3	R64-1-1	GCF_000146045.2	559292
+ce11	Caenorhabditis elegans	ce11	WBcel235	GCF_000002985.6	6239
