@@ -29,8 +29,8 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   - `Genome.build_star_index(gtf, **kwargs)` (via `AlignerMixin`) — a thin entry point that
     builds the STAR index for a constructed `Genome` against the registered annotation
     named `gtf`.
-  - STAR is an **optional** dependency: a `star` pixi feature (bioconda) and an `aligners`
-    environment, deliberately kept out of `default`; it is only required when a
+  - STAR (and any other aligner) is **not** provisioned by the pixi manifest; it is
+    expected to be supplied by the runtime environment on `PATH`. It is only required when a
     `build_*_index` call is made, and the aligner checks for it then.
 - Initial pixi scaffold: `pyproject.toml` with `[tool.pixi.*]` manifest, conda-forge +
   bioconda channels, `samtools`/`bedtools` runtime deps, py312/py313 environments,
