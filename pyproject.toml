@@ -52,7 +52,13 @@ packages = ["src/genome"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge", "bioconda"]
-platforms = ["linux-64"]
+platforms = ["osx-arm64", "linux-64", "osx-64"]
+
+# Solve against the OLDEST glibc we need to support (CentOS/RHEL 7 = glibc 2.17)
+# so the same lock file runs on both old and new Linux servers. Without this,
+# the solver may pick packages requiring glibc >=2.28, which fail on old hosts.
+[tool.pixi.system-requirements]
+libc = "2.17"
 
 # Editable install of this package into every env
 [tool.pixi.pypi-dependencies]
@@ -88,6 +94,7 @@ pyright = "*"
 pre-commit = "*"
 python-build = "*"
 hatch-vcs = "*"
+ipykernel = "*"   # lets the pixi env back a Jupyter kernel (notebook dev)
 
 # Docs feature
 [tool.pixi.feature.docs.dependencies]
@@ -119,6 +126,10 @@ test-cov  = "pytest --cov=genome --cov-report=term-missing"
 check     = { depends-on = ["lint", "fmt-check", "typecheck", "test"] }
 build     = "python -m build"
 docs      = "mkdocs serve"
+# Register THIS env's Python as a Jupyter kernel (idempotent). Run once so a
+# standalone Jupyter Lab can pick the "Python (liulab-genome)" kernel and import
+# genome. Re-run after recreating the env (the kernelspec path changes).
+register-kernel = "python -m ipykernel install --user --name liulab-genome --display-name \"Python (liulab-genome)\""
 
 # -------- tool config (minimal in Phase 1; tightened in Phase 2) --------
 
@@ -151,6 +162,10 @@ ignore = [
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer uses call expressions (Option/Argument) as parameter defaults by design.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [

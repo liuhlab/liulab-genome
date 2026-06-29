@@ -41,6 +41,13 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   numpy docstring convention; pyright in basic mode targeting py3.12 minimum; pytest
   with `--strict-config`, `xfail_strict`, and warnings-as-errors; branch coverage config.
 - `.pre-commit-config.yaml`: ruff hooks (pinned) + pyright as a local pixi-backed hook.
+- Toolchain & portability: pinned the conda solve to a glibc 2.17 floor
+  (`[tool.pixi.system-requirements] libc = "2.17"`) so one lock file runs on old
+  (CentOS/RHEL 7) and new Linux hosts; added `osx-arm64` and `osx-64` to `platforms`
+  so pixi runs on macOS as well as Linux; added a `register-kernel` pixi task (and
+  `ipykernel` to the `dev` feature) that installs the env as the `Python (liulab-genome)`
+  Jupyter kernel for notebook use; and exempted `typer.Argument`/`typer.Option` from
+  ruff's flake8-bugbear `B008` so the Typer CLI lints cleanly.
 - Typed biological sequence classes `genome.DNA`, `genome.RNA`, `genome.Protein` —
   `str` subclasses that preserve the value verbatim (case preserved), with typed
   slicing, biological transforms (`complement`, `reverse_complement`, `transcribe`,
