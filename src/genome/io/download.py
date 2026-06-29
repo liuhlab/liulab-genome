@@ -17,13 +17,18 @@ Examples
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pooch
 import requests
 
+from genome.external import _resolve
 from genome.io.fasta import GenomeFiles, prepare_fasta
+from genome.io.utils import _gunzip
 
 # A pooch post-processor: called with (fname, action, pooch_instance) and
 # returns the path (or paths) to use as the result of the download.
@@ -86,6 +91,29 @@ def assembly_data_dir(assembly: str) -> Path:
     >>> del os.environ["LIULAB_DATA"]
     """
     return liulab_data_dir() / "genome" / assembly
+
+
+def _looks_like_url(source: str) -> bool:
+    """Return whether ``source`` is an http(s)/ftp URL rather than a local path."""
+    return urlparse(source).scheme.lower() in {"http", "https", "ftp", "ftps"}
+
+
+def _curl_download(url: str, dest: Path, *, progressbar: bool = True) -> Path:
+    """Download ``url`` to ``dest`` with ``curl``, writing atomically via a ``.part`` file."""
+    curl = _resolve("curl")
+    part = dest.with_name(dest.name + ".part")
+    verbosity = "-#" if progressbar else "-sS"
+    args = [curl, "-fL", verbosity, "--retry", "3", "-o", str(part), url]
+    try:
+        subprocess.run(args, check=True)
+    except subprocess.CalledProcessError as err:
+        part.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"curl failed (exit {err.returncode}) downloading {url!r}. Check the URL "
+            f"and your network/proxy settings (HTTP(S)_PROXY)."
+        ) from err
+    part.replace(dest)
+    return dest
 
 
 class Downloader:
@@ -362,6 +390,88 @@ class UCSCGenomeDownloader(Downloader):
             progressbar=progressbar,
         )
         return prepare_fasta(fasta, overwrite=overwrite)
+
+    def fetch_genome_from(
+        self,
+        source: str | Path,
+        *,
+        progressbar: bool = True,
+        overwrite: bool = False,
+    ) -> GenomeFiles:
+        """Prepare the genome from a user-provided FASTA instead of downloading from UCSC.
+
+        Use this to seed an assembly from a file you already have or a non-UCSC
+        URL — handy when the UCSC golden path is unreachable (firewall/proxy) or
+        for a custom reference. ``source`` is either a **local filesystem path**
+        (copied into :attr:`cache_dir`) or an **http(s)/ftp URL** (downloaded with
+        ``curl``). Gzipped sources (``.gz``) are decompressed. The resulting
+        ``<assembly>.fa`` is then indexed/2bit/chrom.sizes-prepared exactly as
+        :meth:`fetch_genome` does. UCSC is never contacted.
+
+        Parameters
+        ----------
+        source : str or pathlib.Path
+            Local FASTA path or http(s)/ftp URL. ``.gz`` is decompressed.
+        progressbar : bool, default True
+            Show curl's progress meter while downloading a URL (ignored for a
+            local copy).
+        overwrite : bool, default False
+            Re-fetch the source and rerun preparation even when a fresh
+            ``<assembly>.fa`` is already cached.
+
+        Returns
+        -------
+        genome.io.fasta.GenomeFiles
+            Paths to the prepared FASTA and its three derived files.
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``source`` is a local path that does not exist.
+        genome.external.ToolNotFoundError
+            If ``curl`` (for a URL) or a preparation tool is not on ``PATH``.
+        RuntimeError
+            If the curl download or any native preparation tool fails.
+        """
+        fasta = self._materialize_fasta(source, progressbar=progressbar, overwrite=overwrite)
+        return prepare_fasta(fasta, overwrite=overwrite)
+
+    def _materialize_fasta(
+        self,
+        source: str | Path,
+        *,
+        progressbar: bool = True,
+        overwrite: bool = False,
+    ) -> Path:
+        """Place ``source`` into the cache as ``<assembly>.fa`` and return that path.
+
+        Copies a local file or downloads a URL with curl, decompressing a ``.gz``
+        source. A fresh existing ``<assembly>.fa`` is reused unless ``overwrite``.
+        """
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        fasta = self.cache_dir / f"{self.assembly}.fa"
+        if fasta.is_file() and not overwrite:
+            return fasta
+
+        src = str(source)
+        gzipped = src.endswith(".gz")
+        download = self.cache_dir / (f"{self.assembly}.fa.gz" if gzipped else f"{self.assembly}.fa")
+
+        if _looks_like_url(src):
+            _curl_download(src, download, progressbar=progressbar)
+        else:
+            local_source = Path(src).expanduser()
+            if not local_source.is_file():
+                raise FileNotFoundError(
+                    f"local FASTA source not found: {local_source}. Pass an existing "
+                    f"file path or an http(s)/ftp URL."
+                )
+            if local_source.resolve() != download.resolve():
+                shutil.copy2(local_source, download)
+
+        if gzipped:
+            _gunzip(download, fasta)
+        return fasta
 
 
 if __name__ == "__main__":

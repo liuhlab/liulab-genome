@@ -7,6 +7,8 @@ right URL and selects a decompression processor.
 
 from __future__ import annotations
 
+import gzip
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -296,3 +298,179 @@ def test_fetch_genome_forwards_known_hash_and_decompresses(
     assert captured["known_hash"] == "md5:abc"
     # the pipeline always decompresses, so a Decompress processor is selected.
     assert isinstance(captured["processor"], pooch.Decompress)
+
+
+# --- seeding from a user-provided FASTA (path_or_url) -----------------------
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("https://x/y.fa.gz", True),
+        ("http://x/y.fa", True),
+        ("ftp://x/y.fa", True),
+        ("ftps://x/y.fa", True),
+        ("/data/ref.fa", False),
+        ("ref.fa.gz", False),
+        ("~/ref.fa", False),
+        ("relative/path.fa", False),
+    ],
+)
+def test_looks_like_url(source: str, expected: bool) -> None:
+    assert download_mod._looks_like_url(source) is expected
+
+
+def test_materialize_fasta_copies_local_plain(tmp_path: Path) -> None:
+    src = tmp_path / "src.fa"
+    src.write_text(">chr\nACGT\n")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path / "cache")
+
+    out = dl._materialize_fasta(src)
+
+    assert out == tmp_path / "cache" / "tiny.fa"
+    assert out.read_text() == ">chr\nACGT\n"
+
+
+def test_materialize_fasta_decompresses_local_gz(tmp_path: Path) -> None:
+    src = tmp_path / "src.fa.gz"
+    with gzip.open(src, "wt") as fh:
+        fh.write(">chr\nACGT\n")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path / "cache")
+
+    out = dl._materialize_fasta(src)
+
+    assert out == tmp_path / "cache" / "tiny.fa"
+    assert out.read_text() == ">chr\nACGT\n"
+    # the compressed download is kept alongside the decompressed FASTA
+    assert (tmp_path / "cache" / "tiny.fa.gz").is_file()
+
+
+def test_materialize_fasta_missing_local_raises(tmp_path: Path) -> None:
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
+    with pytest.raises(FileNotFoundError, match="local FASTA source not found"):
+        dl._materialize_fasta(tmp_path / "nope.fa")
+
+
+def test_materialize_fasta_reuses_existing_unless_overwrite(tmp_path: Path) -> None:
+    src = tmp_path / "src.fa"
+    src.write_text("ONE")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path / "cache")
+
+    dl._materialize_fasta(src)
+    src.write_text("TWO")
+
+    # a fresh <assembly>.fa is reused without re-reading the source...
+    assert dl._materialize_fasta(src).read_text() == "ONE"
+    # ...unless overwrite forces a refresh.
+    assert dl._materialize_fasta(src, overwrite=True).read_text() == "TWO"
+
+
+def test_materialize_fasta_url_uses_curl(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_curl(url: str, dest: Path, *, progressbar: bool = True) -> Path:
+        captured["url"] = url
+        captured["dest"] = dest
+        dest.write_text(">chr\nACGT\n")
+        return dest
+
+    monkeypatch.setattr(download_mod, "_curl_download", fake_curl)
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
+
+    out = dl._materialize_fasta("https://example.org/tiny.fa")
+
+    assert out == tmp_path / "tiny.fa"
+    assert captured["url"] == "https://example.org/tiny.fa"
+    assert captured["dest"] == tmp_path / "tiny.fa"
+
+
+def test_materialize_fasta_url_gz_is_decompressed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def fake_curl(url: str, dest: Path, *, progressbar: bool = True) -> Path:
+        with gzip.open(dest, "wt") as fh:
+            fh.write(">chr\nACGT\n")
+        return dest
+
+    monkeypatch.setattr(download_mod, "_curl_download", fake_curl)
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
+
+    out = dl._materialize_fasta("https://example.org/tiny.fa.gz")
+
+    assert out == tmp_path / "tiny.fa"
+    assert out.read_text() == ">chr\nACGT\n"
+
+
+def test_curl_download_writes_atomically_on_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(download_mod, "_resolve", lambda _name: "curl")
+
+    def fake_run(args: list[str], **_kwargs: object) -> None:
+        part = Path(args[args.index("-o") + 1])
+        part.write_text("DATA")
+
+    monkeypatch.setattr(download_mod.subprocess, "run", fake_run)
+    dest = tmp_path / "out.fa"
+
+    result = download_mod._curl_download("https://x/y.fa", dest)
+
+    assert result == dest
+    assert dest.read_text() == "DATA"
+    assert not dest.with_name("out.fa.part").exists()
+
+
+def test_curl_download_failure_cleans_part_and_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(download_mod, "_resolve", lambda _name: "curl")
+
+    def fake_run(args: list[str], **_kwargs: object) -> None:
+        part = Path(args[args.index("-o") + 1])
+        part.write_text("partial")
+        raise subprocess.CalledProcessError(22, args)
+
+    monkeypatch.setattr(download_mod.subprocess, "run", fake_run)
+    dest = tmp_path / "out.fa"
+
+    with pytest.raises(RuntimeError, match="curl failed"):
+        download_mod._curl_download("https://x/y.fa", dest)
+
+    # the partial download is cleaned up and no final file is left behind
+    assert not dest.with_name("out.fa.part").exists()
+    assert not dest.exists()
+
+
+def test_fetch_genome_from_chains_materialize_and_prepare(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head_recorder: _HeadRecorder
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_materialize(
+        self: UCSCGenomeDownloader,
+        source: object,
+        *,
+        progressbar: bool = True,
+        overwrite: bool = False,
+    ) -> Path:
+        seen["source"] = source
+        seen["overwrite"] = overwrite
+        return tmp_path / "tiny.fa"
+
+    def fake_prepare(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        seen["prepared"] = fasta_path
+        fasta = Path(fasta_path)
+        return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
+
+    monkeypatch.setattr(UCSCGenomeDownloader, "_materialize_fasta", fake_materialize)
+    monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare)
+
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
+    files = dl.fetch_genome_from("/some/ref.fa", overwrite=True)
+
+    assert seen["source"] == "/some/ref.fa"
+    assert seen["overwrite"] is True
+    assert seen["prepared"] == tmp_path / "tiny.fa"
+    assert files.fasta == tmp_path / "tiny.fa"
+    # UCSC is never contacted when seeding from a user-provided FASTA.
+    assert head_recorder.calls == []

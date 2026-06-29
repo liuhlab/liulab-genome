@@ -17,10 +17,13 @@ module is only the I/O boundary.
 from __future__ import annotations
 
 import shutil
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 import gffutils
+
+from genome.io.utils import _gunzip
 
 #: Subdirectory under an assembly's data dir holding all its GTF annotations.
 _GTF_SUBDIR = "gtf"
@@ -75,7 +78,10 @@ def register_gtf(
     disable_infer_genes: bool = True,
     disable_infer_transcripts: bool = True,
 ) -> GtfAnnotation:
-    """Register an unzipped GTF under ``name`` and build its gffutils database.
+    """Register a GTF under ``name`` and build its gffutils database.
+
+    A gzipped (``.gz``) source is decompressed automatically into the registered
+    ``<name>.gtf``; a plain GTF is copied as-is.
 
     Gene/transcript inference is disabled by default — standard annotation GTFs
     (GENCODE, Ensembl, RefSeq) already declare ``gene``/``transcript`` features,
@@ -85,23 +91,25 @@ def register_gtf(
     source = Path(gtf)
     if not source.is_file():
         raise FileNotFoundError(f"GTF file not found: {source}")
-    if source.suffix == ".gz":
-        raise ValueError(
-            f"GTF must be unzipped, got {source.name!r}; decompress it first (e.g. `gunzip`)."
-        )
 
     annotation = _annotation_files(assembly_dir, name)
     if not force and (annotation.db.exists() or annotation_dir(assembly_dir, name).exists()):
-        raise FileExistsError(
+        warnings.warn(
             f"annotation {name!r} is already registered for this assembly at "
-            f"{annotation_dir(assembly_dir, name)}; pass force=True to overwrite."
+            f"{annotation_dir(assembly_dir, name)}; skipping (pass force=True to overwrite).",
+            stacklevel=2,
         )
+        return annotation
 
     annotation.db.parent.mkdir(parents=True, exist_ok=True)
-    if source.resolve() != annotation.gtf.resolve():
+    # A gzipped source is stream-decompressed into the registered <name>.gtf;
+    # a plain GTF is copied as-is (skipping a copy onto itself).
+    if source.suffix == ".gz":
+        _gunzip(source, annotation.gtf)
+    elif source.resolve() != annotation.gtf.resolve():
         shutil.copy2(source, annotation.gtf)
 
-    gffutils.create_db(
+    db = gffutils.create_db(
         str(annotation.gtf),
         str(annotation.db),
         force=force,
@@ -111,4 +119,7 @@ def register_gtf(
         disable_infer_genes=disable_infer_genes,
         disable_infer_transcripts=disable_infer_transcripts,
     )
+    # The on-disk database is now fully written; release the SQLite connection
+    # so we don't leak an open file handle (the build is the only thing we need).
+    db.conn.close()
     return annotation

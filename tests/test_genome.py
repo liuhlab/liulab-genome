@@ -114,3 +114,21 @@ def test_context_manager_closes_handle(genome: Genome) -> None:
         assert g.fetch_sequence("chrA:0-4") == DNA("ACGT")
     with pytest.raises(ValueError, match="closed"):
         g.fetch_sequence("chrA:0-4")
+
+
+def test_path_or_url_seeds_from_local_fasta(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A local FASTA seed prepares the assembly end-to-end (copy + native tools)
+    # without ever contacting UCSC.
+    src = tmp_path / "src.fa"
+    src.write_text(f">chrA\n{_CHR_A}\n>chrB\n{_CHR_B}\n")
+
+    def boom(self: object, **_kwargs: object) -> None:
+        raise AssertionError("UCSC fetch_genome must not run when path_or_url is given")
+
+    monkeypatch.setattr(genome_mod.UCSCGenomeDownloader, "fetch_genome", boom)
+
+    with Genome("tiny", path_or_url=src, cache_dir=tmp_path / "cache") as g:
+        assert g.fetch_sequence("chrA:0-8") == DNA("ACGTACGT")
+        assert g.chromosomes == ["chrA", "chrB"]

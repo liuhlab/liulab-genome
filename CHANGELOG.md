@@ -10,6 +10,11 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- `Genome(assembly, path_or_url=...)` — seed an assembly from your own FASTA instead of
+  downloading from UCSC: pass a local file path (copied into the cache) or an http(s)/ftp
+  URL (downloaded with `curl`). Gzipped (`.gz`) sources are decompressed. Useful when the
+  UCSC golden path is unreachable (firewall/proxy) or for a custom reference; UCSC is not
+  contacted in this mode. Backed by `UCSCGenomeDownloader.fetch_genome_from`.
 - `genome.aligner` — building aligner genome indexes, with STAR as the first aligner:
   - `Aligner`, an abstract base owning the cross-aligner plumbing — it checks the tool is
     installed at construction (printing install instructions and raising `ToolNotFoundError`
@@ -139,3 +144,11 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   definition-of-done checklist (types + NumPy docstring + tests + Markdown
   doc + skill update + CHANGELOG + green CI). Designed so issues are tight
   enough to hand directly to `@claude`.
+
+### Changed
+
+- `register_gtf` (and `Genome.register_gtf`) now accept a gzipped (`.gz`) GTF and
+  decompress it automatically into the registered `<name>.gtf`, instead of rejecting it.
+- `register_gtf` no longer raises `FileExistsError` when an annotation `name` is already
+  registered; it now emits a warning and returns the existing annotation unchanged (pass
+  `force=True` to rebuild).

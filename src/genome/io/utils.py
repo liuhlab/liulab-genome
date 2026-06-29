@@ -7,11 +7,20 @@ These back the ``io`` layer's shelling-out to pixi-managed binaries (``samtools`
 
 from __future__ import annotations
 
+import gzip
+import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 from genome.external import _resolve
+
+
+def _gunzip(src: Path, dest: Path) -> Path:
+    """Stream-decompress gzip ``src`` into ``dest`` (chunked; never fully in memory)."""
+    with gzip.open(src, "rb") as fin, dest.open("wb") as fout:
+        shutil.copyfileobj(fin, fout)
+    return dest
 
 
 def _run(name: str, args: Sequence[str]) -> None:

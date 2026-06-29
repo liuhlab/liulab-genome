@@ -57,8 +57,17 @@ class Genome(AlignerMixin):
     Parameters
     ----------
     assembly : str
-        UCSC assembly name, e.g. ``"sacCer3"``, ``"hg38"``, ``"mm39"``. Validated
-        against UCSC before any download, so a typo fails fast.
+        UCSC assembly name, e.g. ``"sacCer3"``, ``"hg38"``, ``"mm39"``. When
+        ``path_or_url`` is omitted, the FASTA is downloaded from UCSC and the name
+        is validated against UCSC first, so a typo fails fast. When
+        ``path_or_url`` is given, the name only labels the cache directory and
+        files; UCSC is not contacted.
+    path_or_url : str or pathlib.Path, optional
+        Seed the assembly from your own FASTA instead of downloading from UCSC —
+        either a local file path (copied into the cache) or an http(s)/ftp URL
+        (downloaded with ``curl``). Gzipped (``.gz``) sources are decompressed.
+        Useful when UCSC is unreachable (firewall/proxy) or for a custom
+        reference. See :meth:`~genome.io.download.UCSCGenomeDownloader.fetch_genome_from`.
     cache_dir : str or pathlib.Path, optional
         Override the storage directory for this assembly's files. Defaults to the
         shared per-assembly reference directory.
@@ -91,6 +100,7 @@ class Genome(AlignerMixin):
         self,
         assembly: str,
         *,
+        path_or_url: str | Path | None = None,
         cache_dir: str | Path | None = None,
         progressbar: bool = True,
         assembly_name: str | None = None,
@@ -112,7 +122,11 @@ class Genome(AlignerMixin):
         )
         self._downloader = UCSCGenomeDownloader(assembly, cache_dir)
         self._assembly_dir: Path = self._downloader.cache_dir
-        self.files: GenomeFiles = self._downloader.fetch_genome(progressbar=progressbar)
+        self.files: GenomeFiles = (
+            self._downloader.fetch_genome_from(path_or_url, progressbar=progressbar)
+            if path_or_url is not None
+            else self._downloader.fetch_genome(progressbar=progressbar)
+        )
         self._chrom_sizes: pd.Series = read_chrom_sizes(self.files.chrom_sizes)
         self._twobit = TwoBit(self.files.twobit)
         self._set_default_gtf(default_gtf)
@@ -170,11 +184,12 @@ class Genome(AlignerMixin):
         disable_infer_genes: bool = True,
         disable_infer_transcripts: bool = True,
     ) -> GtfAnnotation:
-        """Register an unzipped GTF under ``name`` and build its gffutils database.
+        """Register a GTF under ``name`` and build its gffutils database.
 
-        The GTF is copied to ``<assembly dir>/gtf/<name>/`` and a gffutils
-        database is built beside it. If no default GTF is set and this becomes
-        the only annotation, it is adopted as :attr:`default_gtf`.
+        The GTF is placed under ``<assembly dir>/gtf/<name>/`` (a gzipped
+        ``.gz`` source is decompressed automatically) and a gffutils database is
+        built beside it. If no default GTF is set and this becomes the only
+        annotation, it is adopted as :attr:`default_gtf`.
         """
         annotation = register_gtf(
             self._assembly_dir,

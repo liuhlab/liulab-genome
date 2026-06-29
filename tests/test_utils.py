@@ -8,6 +8,7 @@ drive its error handling.
 
 from __future__ import annotations
 
+import gzip
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -16,7 +17,20 @@ import pytest
 
 from genome.external import ToolNotFoundError
 from genome.io import utils as utils_mod
-from genome.io.utils import _is_fresh, _run, _run_to
+from genome.io.utils import _gunzip, _is_fresh, _run, _run_to
+
+
+def test_gunzip_round_trips(tmp_path: Path) -> None:
+    payload = b"".join(b">seq%d\nACGTACGTNN\n" % i for i in range(1000))
+    src = tmp_path / "data.gz"
+    with gzip.open(src, "wb") as fh:
+        fh.write(payload)
+
+    dest = tmp_path / "data"
+    result = _gunzip(src, dest)
+
+    assert result == dest
+    assert dest.read_bytes() == payload
 
 
 def test_is_fresh_rules(tmp_path: Path, touch_newer_than: Callable[..., None]) -> None:
