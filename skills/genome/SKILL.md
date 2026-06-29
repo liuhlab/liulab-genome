@@ -82,6 +82,12 @@ Key behaviors to rely on (and to tell the user about):
   silently clamped. `end == chromosome length` is valid; `end >` it is an error.
 - `Genome` holds the `.2bit` open; use it as a context manager
   (`with Genome("hg38") as g: ...`) or call `g.close()` to release the handle.
+- **Offline / firewalled / custom reference?** Pass `path_or_url=` to seed the
+  assembly from your own FASTA instead of downloading from UCSC — a local path
+  (copied in) or an `http(s)`/`ftp` URL (fetched with `curl`); `.gz` is
+  decompressed. UCSC is not contacted, so the name only labels the cache.
+  `Genome("ce11", path_or_url="/data/ce11.fa.gz")`. This is the fix to reach for
+  when a UCSC download times out (a `ConnectTimeout` to `hgdownload.soe.ucsc.edu`).
 
 ### Coordinates: `Region` and `parse_region`
 
@@ -129,9 +135,10 @@ g.build_star_index(gtf="ensembl", threads=8)            # -> index/star_ensembl/
 
 Key behaviors to rely on (and to tell the user about):
 
-- **The GTF must be unzipped.** `register_gtf` rejects a `.gz` path with an
-  actionable error — `gunzip` it first. Re-registering an existing name raises
-  `FileExistsError` unless `force=True`.
+- **Gzipped GTFs are accepted.** `register_gtf` decompresses a `.gz` source
+  automatically into the stored `<name>.gtf`. Re-registering an existing name is
+  a no-op that warns and returns the existing annotation; pass `force=True` to
+  rebuild.
 - **Gene/transcript inference is off by default** (standard GTFs already declare
   those features; inferring is the gffutils slow path). Pass
   `disable_infer_genes=False` only for a bare exon-level GTF.

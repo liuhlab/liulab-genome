@@ -46,6 +46,29 @@ construction is cheap and works offline. The underlying machinery is documented
 in [Downloading and preparing genomes](genome-files.md); `Genome` is the
 high-level front door to it.
 
+### Seeding from your own FASTA (offline, mirrors, custom references)
+
+When UCSC is unreachable (a firewalled compute node, a proxy-only network) or
+you have a custom reference that isn't on the golden path, pass `path_or_url=`
+to seed the assembly from a FASTA you provide instead of downloading from UCSC:
+
+```python
+# a local file — copied into the assembly's cache, then prepared
+Genome("ce11", path_or_url="/data/ce11.fa.gz")
+
+# a non-UCSC URL (e.g. a UCSC mirror) — downloaded with curl
+Genome("ce11", path_or_url="https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11/bigZips/ce11.fa.gz")
+```
+
+In this mode **UCSC is never contacted** — there is no assembly-name validation,
+so the name only labels the cache directory and the prepared files. A gzipped
+(`.gz`) source is decompressed automatically. Everything else is identical to the
+UCSC path: the `.fai`, `.2bit`, and `chrom.sizes` are prepared and cached under
+`<LIULAB_DATA>/genome/<assembly>/`, so later plain `Genome("ce11")` calls reuse
+them. See
+[Seeding from a local file or URL](genome-files.md#seeding-from-a-local-file-or-url)
+for the underlying `fetch_genome_from`.
+
 ## Fetching sequence
 
 `fetch_sequence` accepts a locus string, a bare chromosome name, or a
@@ -120,10 +143,15 @@ database built from it:
 
 ```python
 sacCer3.register_gtf("sacCer3.ensGene.gtf", name="ensembl")
+sacCer3.register_gtf("sacCer3.ensGene.gtf.gz", name="ensembl")  # .gz is decompressed for you
 sacCer3.annotations              # ['ensembl'] — registered names
 sacCer3.get_gtf_path("ensembl")  # Path to the placed .gtf
 sacCer3.default_gtf              # 'ensembl' when it is the only one
 ```
+
+A gzipped GTF is accepted and decompressed automatically. Re-registering a name
+that already exists is a no-op that emits a warning (pass `force=True` to
+rebuild).
 
 Annotations are the basis for building aligner indexes (a STAR index is built
 against a specific GTF). Registration, the default-annotation rules, and

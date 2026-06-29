@@ -30,17 +30,12 @@ Each annotation lives in its own directory next to the sequence files:
 
 ```
 <LIULAB_DATA>/genome/<assembly>/gtf/<name>/
-    <name>.gtf      # the (unzipped) annotation, copied in
+    <name>.gtf      # the annotation, stored uncompressed (a .gz source is decompressed)
     <name>.db       # the gffutils SQLite database built from it
 ```
 
 A few things to know:
 
-- **The GTF must be unzipped.** A `.gz` path is rejected with an actionable
-  error — decompress it first (`gunzip`). (Standard annotations are small enough
-  uncompressed that this is rarely a burden.)
-- **Re-registering the same name raises** `FileExistsError` unless you pass
-  `force=True` — annotations are not silently overwritten.
 - **Gene/transcript inference is off by default** (`disable_infer_genes` /
   `disable_infer_transcripts` are `True`). Standard annotation GTFs already
   declare `gene`/`transcript` features, and inferring them is the classic

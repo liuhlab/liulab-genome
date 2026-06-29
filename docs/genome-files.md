@@ -81,6 +81,40 @@ Pass `known_hash="md5:…"` to verify the download.
     index for it the way `.fai` is for the FASTA, so the pipeline indexes the FASTA
     (`.fai`) and materializes the 2bit's internal index as `chrom.sizes`.
 
+#### Seeding from a local file or URL
+
+When the UCSC golden path is unreachable (firewall/proxy) or you have a custom
+reference, `fetch_genome_from` prepares the genome from a FASTA **you** provide
+instead of downloading from UCSC. The source is either a local path (copied into
+the cache) or an `http(s)`/`ftp` URL (downloaded with `curl`); a gzipped (`.gz`)
+source is decompressed. UCSC is never contacted — there is no assembly-name
+validation.
+
+```python
+from genome.io.download import UCSCGenomeDownloader
+
+dl = UCSCGenomeDownloader("ce11")
+
+# from a local file
+files = dl.fetch_genome_from("/data/ce11.fa.gz")
+
+# or from a non-UCSC URL, e.g. a mirror
+files = dl.fetch_genome_from(
+    "https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11/bigZips/ce11.fa.gz"
+)
+```
+
+The source is normalized to `<assembly>.fa` in the cache and then run through the
+same `prepare_fasta` pipeline as `fetch_genome`, so it returns the identical
+`GenomeFiles` record and the outputs land in the same per-assembly directory. A
+fresh `<assembly>.fa` is reused on later calls unless you pass `overwrite=True`.
+The [`Genome`](genome.md#seeding-from-your-own-fasta-offline-mirrors-custom-references)
+constructor's `path_or_url=` argument is the high-level front door to this.
+
+!!! note "`curl` is required for URLs"
+    Downloading a URL shells out to `curl`; a local-file source does not need it.
+    If `curl` is missing the call raises `ToolNotFoundError` with a `pixi add` hint.
+
 #### Where files are stored
 
 Unlike `Downloader` (which uses pooch's per-user cache), `UCSCGenomeDownloader` stores
