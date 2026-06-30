@@ -39,7 +39,7 @@ LIULAB_DATA_ENV = "LIULAB_DATA"
 
 #: Well-known lab data roots, tried in order when ``LIULAB_DATA`` is unset.
 DEFAULT_LIULAB_DATA_PATHS = [
-    "/share/liulab/liulab_data",
+    "/share/lhqlab/liulab_data",
 ]
 
 
