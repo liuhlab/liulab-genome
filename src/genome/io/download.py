@@ -42,6 +42,11 @@ DEFAULT_LIULAB_DATA_PATHS = [
     "/share/lhqlab/liulab_data",
 ]
 
+#: Sentinel file written in an assembly's cache dir once its FASTA pipeline
+#: (download/seed → faidx → 2bit → chrom.sizes) has completed successfully.
+#: Its presence lets repeat constructions skip fetching entirely.
+PREPARED_MARKER = ".genome_prepared"
+
 
 def liulab_data_dir() -> Path:
     """Return the root directory for lab reference data.
@@ -258,6 +263,52 @@ class UCSCGenomeDownloader(Downloader):
         """URL of the gzipped whole-genome FASTA for this assembly."""
         return f"{self.BASE_URL}/{self.assembly}/bigZips/{self.assembly}.fa.gz"
 
+    @property
+    def prepared_marker(self) -> Path:
+        """Path to the FASTA-pipeline-done sentinel for this assembly.
+
+        See :data:`PREPARED_MARKER`. Lives directly in :attr:`cache_dir`.
+        """
+        return self.cache_dir / PREPARED_MARKER
+
+    def _expected_genome_files(self) -> GenomeFiles:
+        """Paths the FASTA pipeline produces for this assembly (whether or not they exist).
+
+        Both :meth:`fetch_genome` and :meth:`fetch_genome_from` materialize the
+        FASTA as ``<assembly>.fa`` and derive identically named companions, so a
+        single layout describes either entry point.
+        """
+        fasta = self.cache_dir / f"{self.assembly}.fa"
+        return GenomeFiles(
+            fasta=fasta,
+            fai=fasta.with_name(fasta.name + ".fai"),
+            twobit=self.cache_dir / f"{self.assembly}.2bit",
+            chrom_sizes=self.cache_dir / f"{self.assembly}.chrom.sizes",
+        )
+
+    def _completed_genome(self, *, overwrite: bool) -> GenomeFiles | None:
+        """Return the cached GenomeFiles when the pipeline is already done, else ``None``.
+
+        Skips short-circuiting when ``overwrite`` is set. Treats the
+        :attr:`prepared_marker` as authoritative, but still confirms every
+        derived file is present so a partially deleted cache falls through to a
+        fresh fetch instead of returning dangling paths.
+        """
+        if overwrite or not self.prepared_marker.is_file():
+            return None
+        files = self._expected_genome_files()
+        if all(p.is_file() for p in (files.fasta, files.fai, files.twobit, files.chrom_sizes)):
+            return files
+        return None
+
+    def _mark_prepared(self) -> None:
+        """Write the :attr:`prepared_marker` flag recording a completed FASTA pipeline."""
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.prepared_marker.write_text(
+            f"FASTA pipeline complete for {self.assembly!r}.\n"
+            "Presence of this file makes Genome construction skip re-fetching.\n"
+        )
+
     def validate_assembly(self, *, timeout: float = 30.0) -> None:
         """Check that ``assembly`` is a real golden-path directory at UCSC.
 
@@ -393,12 +444,17 @@ class UCSCGenomeDownloader(Downloader):
         >>> files.fai.name, files.twobit.name, files.chrom_sizes.name   # doctest: +SKIP
         ('hg38.fa.fai', 'hg38.2bit', 'hg38.chrom.sizes')
         """
+        cached = self._completed_genome(overwrite=overwrite)
+        if cached is not None:
+            return cached
         fasta = self.fetch_fasta(
             known_hash=known_hash,
             decompress=True,
             progressbar=progressbar,
         )
-        return prepare_fasta(fasta, overwrite=overwrite)
+        files = prepare_fasta(fasta, overwrite=overwrite)
+        self._mark_prepared()
+        return files
 
     def fetch_genome_from(
         self,
@@ -442,8 +498,13 @@ class UCSCGenomeDownloader(Downloader):
         RuntimeError
             If the curl download or any native preparation tool fails.
         """
+        cached = self._completed_genome(overwrite=overwrite)
+        if cached is not None:
+            return cached
         fasta = self._materialize_fasta(source, progressbar=progressbar, overwrite=overwrite)
-        return prepare_fasta(fasta, overwrite=overwrite)
+        files = prepare_fasta(fasta, overwrite=overwrite)
+        self._mark_prepared()
+        return files
 
     def _materialize_fasta(
         self,
