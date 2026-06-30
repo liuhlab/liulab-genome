@@ -37,14 +37,20 @@ _Processor = Callable[..., object]
 #: Environment variable naming the lab data root directory.
 LIULAB_DATA_ENV = "LIULAB_DATA"
 
+#: Well-known lab data roots, tried in order when ``LIULAB_DATA`` is unset.
+DEFAULT_LIULAB_DATA_PATHS = [
+    "/share/liulab/liulab_data",
+]
+
 
 def liulab_data_dir() -> Path:
     """Return the root directory for lab reference data.
 
-    The location is read from the ``LIULAB_DATA`` environment variable; when that
-    is unset (or empty) it defaults to ``~/liulab_data``. The path is expanded
-    (``~`` resolved) but **not** created here — callers create the specific
-    subdirectory they need on first write.
+    The location is read from the ``LIULAB_DATA`` environment variable. When that
+    is unset (or empty), each entry in :data:`DEFAULT_LIULAB_DATA_PATHS` is checked
+    in order and the first that exists is used as the root. If none exist, it falls
+    back to ``~/liulab_data``. The path is expanded (``~`` resolved) but **not**
+    created here — callers create the specific subdirectory they need on first write.
 
     Returns
     -------
@@ -58,12 +64,15 @@ def liulab_data_dir() -> Path:
     >>> liulab_data_dir()
     PosixPath('/scratch/liulab')
     >>> del os.environ["LIULAB_DATA"]
-    >>> liulab_data_dir() == Path.home() / "liulab_data"
-    True
     """
     env = os.environ.get(LIULAB_DATA_ENV)
-    root = Path(env) if env else Path.home() / "liulab_data"
-    return root.expanduser()
+    if env:
+        return Path(env).expanduser()
+    for candidate in DEFAULT_LIULAB_DATA_PATHS:
+        path = Path(candidate).expanduser()
+        if path.exists():
+            return path
+    return (Path.home() / "liulab_data").expanduser()
 
 
 def assembly_data_dir(assembly: str) -> Path:

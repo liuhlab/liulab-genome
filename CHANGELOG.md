@@ -8,6 +8,12 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ## [Unreleased]
 
+### Changed
+
+- `liulab_data_dir()` now probes `DEFAULT_LIULAB_DATA_PATHS` (e.g. `/share/liulab/liulab_data`)
+  in order when `LIULAB_DATA` is unset, using the first existing path as the root, before
+  falling back to `~/liulab_data`.
+
 ### Added
 
 - `Genome(assembly, path_or_url=...)` — seed an assembly from your own FASTA instead of
