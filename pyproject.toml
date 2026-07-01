@@ -123,7 +123,7 @@ docs      = "mkdocs serve"
 # Register THIS env's Python as a Jupyter kernel (idempotent). Run once so a
 # standalone Jupyter Lab can pick the "Python (liulab-genome)" kernel and import
 # genome. Re-run after recreating the env (the kernelspec path changes).
-register-kernel = "python -m ipykernel install --user --name liulab-genome --display-name \"Python (liulab-genome)\""
+register-kernel = "python -m ipykernel install --user --name liulab-genome --display-name \"Python (liulab-genome dev)\""
 
 # -------- tool config (minimal in Phase 1; tightened in Phase 2) --------
 
