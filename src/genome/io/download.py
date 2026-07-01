@@ -40,6 +40,7 @@ LIULAB_DATA_ENV = "LIULAB_DATA"
 #: Well-known lab data roots, tried in order when ``LIULAB_DATA`` is unset.
 DEFAULT_LIULAB_DATA_PATHS = [
     "/share/lhqlab/liulab_data",
+    "/large_storage/zhoulab/hanliu/liulab_data",
 ]
 
 #: Sentinel file written in an assembly's cache dir once its FASTA pipeline
