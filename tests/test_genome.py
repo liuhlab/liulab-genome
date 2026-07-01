@@ -91,6 +91,16 @@ def test_chromosomes_preserve_reference_order(genome: Genome) -> None:
     assert genome.chromosomes == ["chrA", "chrB"]
 
 
+def test_file_path_properties_mirror_genome_files(genome: Genome) -> None:
+    assert genome.fasta_path == genome.files.fasta
+    assert genome.twobit_path == genome.files.twobit
+    assert genome.chrom_sizes_path == genome.files.chrom_sizes
+    # chrom_sizes_path is the on-disk file, distinct from the in-memory sizes Series.
+    assert isinstance(genome.chrom_sizes_path, Path)
+    assert genome.chrom_sizes_path.is_file()
+    assert isinstance(genome.chrom_sizes, pd.Series)
+
+
 def test_repr(genome: Genome) -> None:
     assert repr(genome) == "Genome('tiny', 2 sequences)"
 

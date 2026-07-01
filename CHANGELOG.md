@@ -16,6 +16,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- `Genome.fasta_path`, `Genome.twobit_path`, and `Genome.chrom_sizes_path` — properties
+  exposing the on-disk reference file paths (the FASTA, its `.2bit` encoding, and the
+  `chrom.sizes` file) directly, without reaching into `Genome.files`. Named with the `_path`
+  suffix to avoid colliding with `Genome.chrom_sizes`, which returns the lengths Series.
 - `Genome(assembly, path_or_url=...)` — seed an assembly from your own FASTA instead of
   downloading from UCSC: pass a local file path (copied into the cache) or an http(s)/ftp
   URL (downloaded with `curl`). Gzipped (`.gz`) sources are decompressed. Useful when the

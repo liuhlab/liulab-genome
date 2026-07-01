@@ -242,6 +242,21 @@ class Genome(AlignerMixin):
         self.close()
 
     @property
+    def fasta_path(self) -> Path:
+        """Path to the reference FASTA file."""
+        return self.files.fasta
+
+    @property
+    def twobit_path(self) -> Path:
+        """Path to the ``.2bit`` encoding of the reference."""
+        return self.files.twobit
+
+    @property
+    def chrom_sizes_path(self) -> Path:
+        r"""Path to the ``chrom.sizes`` file (``<name>\t<length>`` per sequence)."""
+        return self.files.chrom_sizes
+
+    @property
     def chrom_sizes(self) -> pd.Series:
         """Chromosome lengths as a pandas Series (a defensive copy).
 
