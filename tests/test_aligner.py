@@ -17,6 +17,7 @@ import pandas as pd
 import pytest
 
 import genome.aligner.aligner as aligner_mod
+from genome.aligner.mixin import AlignerMixin, _resolve_aligner
 from genome.aligner.star import STAR, _kwargs_to_flags
 from genome.external import ToolNotFoundError
 
@@ -178,6 +179,61 @@ def test_index_emits_sjdb_flags_from_bound_gtf(
     assert meta["parameters"]["gtf"] == "toy"
     assert meta["parameters"]["sjdb_gtf_file"] == gtf_path
     assert meta["parameters"]["sjdb_overhang"] == 49
+
+
+# -- mixin: build/get index entry points ------------------------------------
+
+
+@pytest.fixture
+def mixin_genome(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Genome:
+    """A Genome-like object carrying :class:`AlignerMixin`, with STAR stubbed."""
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(STAR, "_detect_version", lambda _self: "0.0-test")
+
+    stub = _make_genome(tmp_path)
+
+    class _MixinGenome(AlignerMixin):
+        pass
+
+    genome = _MixinGenome()
+    for attr in ("assembly", "files", "chrom_sizes", "get_gtf_path"):
+        setattr(genome, attr, getattr(stub, attr))
+    return cast("Genome", genome)
+
+
+def test_resolve_aligner_is_case_insensitive() -> None:
+    assert _resolve_aligner("star") is STAR
+    assert _resolve_aligner("STAR") is STAR
+
+
+def test_resolve_aligner_unknown_raises() -> None:
+    with pytest.raises(ValueError, match="Unknown aligner 'bowtie'"):
+        _resolve_aligner("bowtie")
+
+
+def test_get_index_returns_built_index_path(
+    mixin_genome: Genome, captured_run: list[list[str]]
+) -> None:
+    built = mixin_genome.build_star_index("toy")
+    assert mixin_genome.get_index("star", gtf="toy") == built
+
+
+def test_get_star_index_matches_generic_get_index(
+    mixin_genome: Genome, captured_run: list[list[str]]
+) -> None:
+    mixin_genome.build_star_index("toy")
+    assert mixin_genome.get_star_index("toy") == mixin_genome.get_index("star", gtf="toy")
+
+
+def test_get_index_raises_before_build(mixin_genome: Genome) -> None:
+    with pytest.raises(RuntimeError, match="No successful star index"):
+        mixin_genome.get_index("star", gtf="toy")
+
+
+def test_get_index_unknown_aligner_raises(mixin_genome: Genome) -> None:
+    with pytest.raises(ValueError, match="Unknown aligner 'bowtie'"):
+        mixin_genome.get_index("bowtie", gtf="toy")
 
 
 # -- integration (require a real STAR) --------------------------------------

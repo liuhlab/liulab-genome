@@ -44,6 +44,11 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   - `Genome.build_star_index(gtf, **kwargs)` (via `AlignerMixin`) — a thin entry point that
     builds the STAR index for a constructed `Genome` against the registered annotation
     named `gtf`.
+  - `Genome.get_index(aligner, **kwargs)` and `Genome.get_star_index(gtf)` (via
+    `AlignerMixin`) — return the path of an already-built index (STAR's genomeDir), for
+    dropping into the aligner command line (e.g. `--genomeDir`). `get_index` dispatches on
+    the case-insensitive aligner name and raises `ValueError` for an unknown aligner;
+    both raise `RuntimeError` when no successful index exists yet. Nothing is built.
   - STAR is an **optional** dependency: a `star` pixi feature (bioconda) and an `aligners`
     environment, deliberately kept out of `default`; it is only required when a
     `build_*_index` call is made, and the aligner checks for it then.

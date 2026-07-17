@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
+    from genome.aligner.aligner import Aligner
     from genome.genome import Genome
 
 
@@ -42,3 +43,78 @@ class AlignerMixin:
         from genome.aligner.star import STAR
 
         return STAR(cast("Genome", self), gtf=gtf).index(**kwargs)
+
+    def get_index(self, aligner: str, **kwargs: Any) -> Path:
+        """Return the path of an already-built index, for use in aligner commands.
+
+        Locates the index a prior ``build_<aligner>_index`` produced and returns
+        the file or prefix to hand to the aligner's own command line (e.g. STAR's
+        ``--genomeDir``). Nothing is built here; if no successful index exists yet
+        this raises, directing you to build it first.
+
+        The aligner-specific selectors that identify *which* index are passed as
+        keyword arguments, mirroring the matching ``build_*`` method — for STAR,
+        the annotation ``gtf`` key that named the index.
+
+        Parameters
+        ----------
+        aligner : str
+            Aligner identifier, case-insensitive (e.g. ``"star"``).
+        **kwargs : Any
+            Aligner-specific selectors forwarded to the aligner constructor to
+            pin down the index. STAR requires ``gtf``.
+
+        Returns
+        -------
+        pathlib.Path
+            The built index file or prefix, ready to drop into the aligner command.
+
+        Raises
+        ------
+        ValueError
+            If ``aligner`` is not a known aligner.
+        RuntimeError
+            If no successful index exists yet — build it first with the
+            corresponding ``build_<aligner>_index`` method.
+        """
+        aligner_cls = _resolve_aligner(aligner)
+        return aligner_cls(cast("Genome", self), **kwargs).index_path
+
+    def get_star_index(self, gtf: str) -> Path:
+        """Return the path of the STAR *genomeDir* built for annotation ``gtf``.
+
+        Convenience wrapper over :meth:`get_index` for STAR — the returned
+        directory is what STAR's ``--genomeDir`` expects at mapping time.
+
+        Parameters
+        ----------
+        gtf : str
+            Name of the GTF annotation the index was built against (the same key
+            passed to :meth:`build_star_index`).
+
+        Returns
+        -------
+        pathlib.Path
+            The STAR genome directory.
+
+        Raises
+        ------
+        RuntimeError
+            If no successful STAR index exists yet for ``gtf`` — build it first
+            with :meth:`build_star_index`.
+        """
+        return self.get_index("star", gtf=gtf)
+
+
+def _resolve_aligner(name: str) -> type[Aligner]:
+    """Look up an :class:`~genome.aligner.aligner.Aligner` subclass by its name.
+
+    Raises :class:`ValueError` with the known names if ``name`` is unregistered.
+    """
+    from genome.aligner.star import STAR
+
+    registry: dict[str, type[Aligner]] = {STAR.name: STAR}
+    try:
+        return registry[name.lower()]
+    except KeyError:
+        raise ValueError(f"Unknown aligner {name!r}; known aligners: {sorted(registry)}.") from None
