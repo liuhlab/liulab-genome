@@ -48,5 +48,8 @@ site/
 # Claude Code local settings (project-wide settings.json may be committed)
 .claude/settings.local.json
 
+# Codex agent local dir (installed skills / symlinks, not committed here)
+.codex/
+
 # playground contains manual test code
 playground/
