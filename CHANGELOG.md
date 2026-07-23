@@ -49,9 +49,21 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
     dropping into the aligner command line (e.g. `--genomeDir`). `get_index` dispatches on
     the case-insensitive aligner name and raises `ValueError` for an unknown aligner;
     both raise `RuntimeError` when no successful index exists yet. Nothing is built.
-  - STAR is an **optional** dependency: a `star` pixi feature (bioconda) and an `aligners`
-    environment, deliberately kept out of `default`; it is only required when a
-    `build_*_index` call is made, and the aligner checks for it then.
+  - `Chromap` — a second aligner, for chromatin profiles (ATAC-seq/scATAC-seq, ChIP-seq,
+    Hi-C). Runs `chromap --build-index`, which needs only the reference FASTA — **no gene
+    annotation** — so there is exactly one index per assembly (contrast STAR's
+    per-annotation genomeDir). The artifact is a single file `index/chromap/chromap.index`
+    (not a directory), which chromap consumes at mapping time via `-x/--index`. Its
+    `index()` names the two minimizer knobs (`kmer`, `window`) and forwards any other
+    `--build-index` flag through `**kwargs` (underscores become hyphens, matching chromap's
+    long-flag spelling). Successful indexes are cached and reused unless `overwrite=True`.
+  - `Genome.build_chromap_index(**kwargs)` and `Genome.get_chromap_index()` (via
+    `AlignerMixin`) — build, and return the path of, the chromap index for a constructed
+    `Genome`. No `gtf`/selector argument: one chromap index serves the whole assembly.
+  - STAR and chromap are **optional** dependencies: `star` and `chromap` pixi features
+    (bioconda), both included in the `aligners` environment and deliberately kept out of
+    `default`; each is only required when its `build_*_index` call is made, and the aligner
+    checks for it then.
 - Initial pixi scaffold: `pyproject.toml` with `[tool.pixi.*]` manifest, conda-forge +
   bioconda channels, `samtools`/`bedtools` runtime deps, py312/py313 environments,
   and standard tasks (`lint`, `fmt`, `typecheck`, `test`, `check`, `build`, `docs`).
