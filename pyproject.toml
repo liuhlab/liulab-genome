@@ -103,9 +103,12 @@ ruff = "*"   # used by mkdocstrings to format rendered signatures
 [tool.pixi.feature.star.dependencies]
 star = "*"
 
+[tool.pixi.feature.chromap.dependencies]
+chromap = "*"
+
 [tool.pixi.environments]
 default    = { features = ["py313", "dev", "test", "docs"], solve-group = "default" }
-aligners   = { features = ["py313", "dev", "test", "docs", "star"], solve-group = "default" }
+aligners   = { features = ["py313", "dev", "test", "docs", "star", "chromap"], solve-group = "default" }
 test-py312 = { features = ["py312", "test"], solve-group = "py312" }
 test-py313 = { features = ["py313", "test"], solve-group = "py313" }
 docs       = { features = ["py313", "docs"], solve-group = "default" }
