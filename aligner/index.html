@@ -534,10 +534,49 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#star-is-an-optional-dependency" class="md-nav__link">
+  <a href="#building-a-chromap-index" class="md-nav__link">
     <span class="md-ellipsis">
       
-        STAR is an optional dependency
+        Building a chromap index
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building a chromap index">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retrieving-a-built-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retrieving a built index
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-aligners-are-optional-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The aligners are optional dependencies
       
     </span>
   </a>
@@ -684,10 +723,49 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#star-is-an-optional-dependency" class="md-nav__link">
+  <a href="#building-a-chromap-index" class="md-nav__link">
     <span class="md-ellipsis">
       
-        STAR is an optional dependency
+        Building a chromap index
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building a chromap index">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#retrieving-a-built-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retrieving a built index
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-aligners-are-optional-dependencies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The aligners are optional dependencies
       
     </span>
   </a>
@@ -732,14 +810,41 @@
 
 <h1 id="annotations-aligner-indexes">Annotations &amp; aligner indexes<a class="headerlink" href="#annotations-aligner-indexes" title="Permanent link">&para;</a></h1>
 <p>A reference assembly is sequence; most analyses also need a <strong>gene annotation</strong>
-(a GTF) and an <strong>aligner index</strong> built from both. <code>Genome</code> ties these together:
-you register one or more GTF annotations on the genome, then build an aligner
-index against a chosen annotation.</p>
+(a GTF) and an <strong>aligner index</strong>. <code>Genome</code> ties these together: you register one
+or more GTF annotations on the genome, then build an index with whichever aligner
+your pipeline maps with.</p>
+<p>Two aligners ship today, and they differ in whether an annotation is involved at
+all:</p>
+<table>
+<thead>
+<tr>
+<th>Aligner</th>
+<th>Maps</th>
+<th>Annotation</th>
+<th>Index</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/alexdobin/STAR">STAR</a></td>
+<td>RNA-seq (splice-aware)</td>
+<td><strong>required</strong> — one index per GTF</td>
+<td><code>index/star_&lt;gtf&gt;/</code> — a directory</td>
+</tr>
+<tr>
+<td><a href="https://github.com/haowenz/chromap">chromap</a></td>
+<td>chromatin profiles: ATAC-seq/scATAC-seq, ChIP-seq, Hi-C</td>
+<td>none</td>
+<td><code>index/chromap/chromap.index</code> — a single file</td>
+</tr>
+</tbody>
+</table>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">Genome</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">g</span> <span class="o">=</span> <span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">g</span><span class="o">.</span><span class="n">register_gtf</span><span class="p">(</span><span class="s2">&quot;sacCer3.ensGene.gtf&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>   <span class="c1"># place + index the GTF</span>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>            <span class="c1"># STAR index for that annotation</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">g</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>                                 <span class="c1"># chromap needs no annotation</span>
 </code></pre></div>
 <h2 id="registering-a-gtf-annotation">Registering a GTF annotation<a class="headerlink" href="#registering-a-gtf-annotation" title="Permanent link">&para;</a></h2>
 <p>A genome can carry several annotations (GENCODE, Ensembl, RefSeq, …), each under
@@ -825,19 +930,85 @@ bookkeeping artifacts:</p>
   resolved parameters (including the <code>gtf</code> key and the GTF path), and the exact
   command that was run, so an index is self-describing.</li>
 </ul>
-<h2 id="star-is-an-optional-dependency">STAR is an optional dependency<a class="headerlink" href="#star-is-an-optional-dependency" title="Permanent link">&para;</a></h2>
-<p>STAR is <strong>not</strong> in the default environment — it is only needed when you actually
-build an index. Install it into the project's aligner environment:</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>pixi<span class="w"> </span>add<span class="w"> </span>star<span class="w">            </span><span class="c1"># from bioconda</span>
+<h2 id="building-a-chromap-index">Building a chromap index<a class="headerlink" href="#building-a-chromap-index" title="Permanent link">&para;</a></h2>
+<p><a href="https://github.com/haowenz/chromap">chromap</a> is a fast aligner and preprocessor
+for chromatin profiles (ATAC-seq/scATAC-seq, ChIP-seq, Hi-C). Its index is built
+from the genome FASTA <strong>alone</strong> — no gene annotation — so there is no <code>gtf</code>
+argument, and one index serves every use of the assembly:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>
 </code></pre></div>
-<p>If STAR is missing, the build fails fast with install instructions and a
-<code>genome.external.ToolNotFoundError</code>, rather than a cryptic error deep in the
-run.</p>
+<p>Unlike STAR's <em>genomeDir</em>, the result is a single file:</p>
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/index/chromap/chromap.index
+</code></pre></div>
+<p>That file is what chromap's <code>-x/--index</code> expects at mapping time.</p>
+<h3 id="options_1">Options<a class="headerlink" href="#options_1" title="Permanent link">&para;</a></h3>
+<p><code>build_chromap_index</code> is a thin pass-through to chromap's <code>index()</code>. Only the two
+minimizer knobs are named; everything else is forwarded as a raw <code>--build-index</code>
+flag:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">(</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">kmer</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>               <span class="c1"># -k/--kmer</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">window</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>             <span class="c1"># -w/--window</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>        <span class="c1"># rebuild even if a finished index exists</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">min_frag_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>    <span class="c1"># any other --build-index flag; underscores become hyphens</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">)</span>
+</code></pre></div>
+<ul>
+<li><strong><code>kmer</code></strong> and <strong><code>window</code></strong> (both default <code>None</code>) — left off the command line
+  entirely unless you set them, so chromap's own defaults (17 and 7) apply rather
+  than a copy of them frozen here that could drift out of date.</li>
+<li><strong><code>overwrite</code></strong> (default <code>False</code>) — as with STAR, a finished index is <strong>cached
+  and reused</strong>; pass <code>overwrite=True</code> to force a rebuild.</li>
+<li><strong>arbitrary chromap flags</strong> — a keyword maps to chromap's long option with
+  underscores turned into hyphens (<code>min_frag_length=30</code> → <code>--min-frag-length 30</code>);
+  a list or tuple expands to several arguments after the flag.</li>
+<li><strong>there is no <code>threads</code> option</strong>, unlike STAR. chromap's <code>-t/--num-threads</code> is a
+  <em>mapping</em> parameter; building the index is single-threaded.</li>
+</ul>
+<p>The bookkeeping matches STAR's: a <code>.success</code> marker gates the index, and
+<code>chromap.index.json</code> records the chromap version, the assembly, the resolved
+parameters, and the exact command.</p>
+<h2 id="retrieving-a-built-index">Retrieving a built index<a class="headerlink" href="#retrieving-a-built-index" title="Permanent link">&para;</a></h2>
+<p>Building an index and <em>using</em> it are separate jobs — a mapping pipeline needs the
+path of an index that was built earlier, possibly by someone else. The <code>get_*</code>
+methods return that path and build nothing:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">g</span><span class="o">.</span><span class="n">get_star_index</span><span class="p">(</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>   <span class="c1"># .../index/star_ensembl           -&gt; STAR --genomeDir</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">g</span><span class="o">.</span><span class="n">get_chromap_index</span><span class="p">()</span>         <span class="c1"># .../index/chromap/chromap.index  -&gt; chromap -x</span>
+</code></pre></div>
+<p>Both are convenience wrappers over a generic form that takes the aligner name
+plus whatever selectors identify the index — the annotation for STAR, nothing for
+chromap:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">g</span><span class="o">.</span><span class="n">get_index</span><span class="p">(</span><span class="s2">&quot;star&quot;</span><span class="p">,</span> <span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">g</span><span class="o">.</span><span class="n">get_index</span><span class="p">(</span><span class="s2">&quot;chromap&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>The name is case-insensitive; an unknown aligner raises <code>ValueError</code> listing the
+ones that are known. If the index was never built — or a build was interrupted
+and so left no <code>.success</code> marker — you get a <code>RuntimeError</code> naming the directory
+and the method to call:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">get_chromap_index</span><span class="p">()</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="c1"># RuntimeError: No successful chromap index for &#39;sacCer3&#39; at</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="c1"># .../index/chromap (missing success flag &#39;.success&#39;). Build it first, ...</span>
+</code></pre></div>
+<p>One thing to know: looking a path up still constructs the aligner object, and
+that constructor checks the binary. Retrieving an index path therefore requires
+the aligner to be installed, even though nothing is built.</p>
+<h2 id="the-aligners-are-optional-dependencies">The aligners are optional dependencies<a class="headerlink" href="#the-aligners-are-optional-dependencies" title="Permanent link">&para;</a></h2>
+<p>Neither STAR nor chromap is in the default environment — an aligner is only
+needed when you actually build or look up an index, and each checks for itself at
+that moment. Install whichever you need:</p>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>pixi<span class="w"> </span>add<span class="w"> </span>star<span class="w">            </span><span class="c1"># from bioconda</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>pixi<span class="w"> </span>add<span class="w"> </span>chromap<span class="w">         </span><span class="c1"># from bioconda</span>
+</code></pre></div>
+<p>Both are already provisioned together in the project's <code>aligners</code> environment
+(<code>pixi run -e aligners ...</code>). If the binary is missing, the call fails fast with
+install instructions and a <code>genome.external.ToolNotFoundError</code>, rather than a
+cryptic error deep in the run.</p>
 <h2 id="domain-invariant-the-annotation-is-always-explicit">Domain invariant: the annotation is always explicit<a class="headerlink" href="#domain-invariant-the-annotation-is-always-explicit" title="Permanent link">&para;</a></h2>
 <p>Mirroring the assembly rule, the annotation an index is built against is never
 implicit. <code>build_star_index</code> requires a named <code>gtf</code>, the index directory encodes
 that name, and the metadata sidecar records it — so you can never silently align
-against the wrong annotation or overwrite one index with another.</p>
+against the wrong annotation or overwrite one index with another. A chromap index
+has no annotation to get wrong, and its layout says so: one <code>index/chromap/</code> per
+assembly, with the sidecar still recording exactly how it was built.</p>
 
 
 
