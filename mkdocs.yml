@@ -1,8 +1,8 @@
 site_name: liulab-genome
 site_description: Handling genomic files — metadata, processing, feature extraction.
-site_url: https://lhqing.github.io/liulab-genome/
-repo_url: https://github.com/lhqing/liulab-genome
-repo_name: lhqing/liulab-genome
+site_url: https://liuhlab.github.io/liulab-genome/
+repo_url: https://github.com/liuhlab/liulab-genome
+repo_name: liuhlab/liulab-genome
 edit_uri: edit/main/docs/
 
 theme:
