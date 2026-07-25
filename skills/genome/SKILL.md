@@ -8,13 +8,16 @@ description: |
   and query its sequence in 0-based half-open coordinates), a `Region` coordinate
   primitive, typed sequence classes (`DNA`, `RNA`, `Protein`) with biological
   transforms (complement, reverse_complement, transcribe, back_transcribe,
-  gc_content), GTF gene-annotation registration and STAR aligner-index building,
-  and a `genome` CLI (`revcomp`, `doctor`, `version`).
+  gc_content), GTF gene-annotation registration and aligner-index building (STAR
+  for RNA-seq, chromap for ATAC/ChIP/Hi-C), and a `genome` CLI (`revcomp`,
+  `doctor`, `version`).
   TRIGGER when: user wants the sequence of a locus / region (e.g. "chrIV:0-10"),
   loads a reference genome or assembly (hg38, mm39, sacCer3, ...), reads a `.2bit`,
   or needs chromosome sizes; user mentions reverse complement, transcription, GC
   content, or a DNA/RNA/protein string; user wants to register a GTF gene
-  annotation or build a STAR genome index for RNA-seq alignment; user imports
+  annotation, build a STAR genome index for RNA-seq alignment or a chromap index
+  for ATAC-seq/scATAC-seq/ChIP-seq/Hi-C, or needs the path of an index that was
+  already built; user imports
   `genome` or runs `genome <subcommand>`; user asks about samtools/bedtools
   versions or "is the tooling installed"; user is working in a project whose
   pyproject lists `liulab-genome`.
@@ -39,6 +42,8 @@ This skill teaches you how to use the `liulab-genome` package (import name
 | Get chromosome sizes / names | ✅ `Genome(...).chrom_sizes` / `.chromosomes` | |
 | Register a gene annotation (GTF) on a genome | ✅ `Genome(...).register_gtf(path, name="ensembl")` | ❌ ad-hoc copy + gffutils by hand |
 | Build a STAR index for RNA-seq alignment | ✅ `Genome(...).build_star_index(gtf="ensembl")` | ❌ hand-rolled `STAR --runMode genomeGenerate` |
+| Build a chromap index for ATAC/ChIP/Hi-C | ✅ `Genome(...).build_chromap_index()` | ❌ hand-rolled `chromap --build-index` |
+| Get the path of an already-built index | ✅ `Genome(...).get_star_index("ensembl")` / `.get_chromap_index()` | ❌ hand-assembled `.../index/...` paths |
 | Reverse-complement a DNA/RNA string | ✅ `DNA(s).reverse_complement()` or `genome revcomp` | ❌ hand-written `str.translate` |
 | Transcribe DNA → RNA | ✅ `DNA(s).transcribe()` | |
 | Validate a sequence's alphabet | ✅ `DNA(s)` raises `ValueError` listing offending characters | |
@@ -120,7 +125,8 @@ with TwoBit("sacCer3.2bit") as tb:    # holds the handle open; reuse for many qu
 ## Gene annotations and aligner indexes
 
 A `Genome` can carry one or more **GTF gene annotations**, and build an **aligner
-index** (currently STAR) against a chosen annotation. Full narrative:
+index** — STAR (RNA-seq, splice-aware, per-annotation) or chromap (chromatin
+profiles: ATAC-seq/scATAC-seq, ChIP-seq, Hi-C; no annotation). Full narrative:
 [`docs/aligner.md`](../../docs/aligner.md).
 
 ```python
@@ -131,6 +137,10 @@ g.register_gtf("sacCer3.ensGene.gtf", name="ensembl")   # place GTF + build gffu
 g.annotations                       # ['ensembl']
 g.get_gtf_path("ensembl")           # Path to the placed .gtf
 g.build_star_index(gtf="ensembl", threads=8)            # -> index/star_ensembl/
+g.build_chromap_index()                                 # -> index/chromap/chromap.index
+
+g.get_star_index("ensembl")         # path of an index built earlier (builds nothing)
+g.get_chromap_index()
 ```
 
 Key behaviors to rely on (and to tell the user about):
@@ -152,9 +162,23 @@ Key behaviors to rely on (and to tell the user about):
   `threads`, `overwrite`. Any other `genomeGenerate` flag passes through as a
   keyword (e.g. `genomeSAindexNbases=11`); the suffix-array size auto-reduces for
   small genomes.
-- **STAR is an optional dependency** — not in the default env. If it's missing
-  the build fails fast with install instructions and `ToolNotFoundError`. Install
-  with `pixi add star` (bioconda). Do **not** `pip install` it.
+- **`build_chromap_index()` takes no annotation** — chromap maps DNA, so one index
+  per assembly at `index/chromap/chromap.index` (a *file*, not a directory). Named
+  options are `kmer` (`-k`) and `window` (`-w`), both omitted by default so
+  chromap's own defaults apply, plus `overwrite`; any other `--build-index` flag
+  passes through with underscores becoming hyphens (`min_frag_length=30` →
+  `--min-frag-length 30`). There is **no `threads` option** — chromap's `-t` is a
+  mapping parameter.
+- **Use `get_star_index(gtf)` / `get_chromap_index()` to consume an index** rather
+  than rebuilding or hand-assembling the path; both raise `RuntimeError` if no
+  finished index exists. The generic form is `get_index("star", gtf=...)` /
+  `get_index("chromap")`, case-insensitive, `ValueError` on an unknown aligner.
+  Note these still require the aligner binary on `PATH`, since they construct the
+  aligner to resolve the layout.
+- **The aligners are optional dependencies** — not in the default env. If one is
+  missing the call fails fast with install instructions and `ToolNotFoundError`.
+  Install with `pixi add star` / `pixi add chromap` (bioconda), or use the
+  `aligners` environment. Do **not** `pip install` them.
 
 ## CLI
 

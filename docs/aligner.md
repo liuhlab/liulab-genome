@@ -1,9 +1,17 @@
 # Annotations & aligner indexes
 
 A reference assembly is sequence; most analyses also need a **gene annotation**
-(a GTF) and an **aligner index** built from both. `Genome` ties these together:
-you register one or more GTF annotations on the genome, then build an aligner
-index against a chosen annotation.
+(a GTF) and an **aligner index**. `Genome` ties these together: you register one
+or more GTF annotations on the genome, then build an index with whichever aligner
+your pipeline maps with.
+
+Two aligners ship today, and they differ in whether an annotation is involved at
+all:
+
+| Aligner | Maps | Annotation | Index |
+|---------|------|------------|-------|
+| [STAR](https://github.com/alexdobin/STAR) | RNA-seq (splice-aware) | **required** — one index per GTF | `index/star_<gtf>/` — a directory |
+| [chromap](https://github.com/haowenz/chromap) | chromatin profiles: ATAC-seq/scATAC-seq, ChIP-seq, Hi-C | none | `index/chromap/chromap.index` — a single file |
 
 ```python
 from genome import Genome
@@ -11,6 +19,7 @@ from genome import Genome
 g = Genome("sacCer3")
 g.register_gtf("sacCer3.ensGene.gtf", name="ensembl")   # place + index the GTF
 g.build_star_index(gtf="ensembl", threads=8)            # STAR index for that annotation
+g.build_chromap_index()                                 # chromap needs no annotation
 ```
 
 ## Registering a GTF annotation
@@ -124,22 +133,111 @@ bookkeeping artifacts:
   resolved parameters (including the `gtf` key and the GTF path), and the exact
   command that was run, so an index is self-describing.
 
-## STAR is an optional dependency
+## Building a chromap index
 
-STAR is **not** in the default environment — it is only needed when you actually
-build an index. Install it into the project's aligner environment:
+[chromap](https://github.com/haowenz/chromap) is a fast aligner and preprocessor
+for chromatin profiles (ATAC-seq/scATAC-seq, ChIP-seq, Hi-C). Its index is built
+from the genome FASTA **alone** — no gene annotation — so there is no `gtf`
+argument, and one index serves every use of the assembly:
+
+```python
+g.build_chromap_index()
+```
+
+Unlike STAR's *genomeDir*, the result is a single file:
+
+```
+<LIULAB_DATA>/genome/<assembly>/index/chromap/chromap.index
+```
+
+That file is what chromap's `-x/--index` expects at mapping time.
+
+### Options
+
+`build_chromap_index` is a thin pass-through to chromap's `index()`. Only the two
+minimizer knobs are named; everything else is forwarded as a raw `--build-index`
+flag:
+
+```python
+g.build_chromap_index(
+    kmer=20,               # -k/--kmer
+    window=10,             # -w/--window
+    overwrite=True,        # rebuild even if a finished index exists
+    min_frag_length=30,    # any other --build-index flag; underscores become hyphens
+)
+```
+
+- **`kmer`** and **`window`** (both default `None`) — left off the command line
+  entirely unless you set them, so chromap's own defaults (17 and 7) apply rather
+  than a copy of them frozen here that could drift out of date.
+- **`overwrite`** (default `False`) — as with STAR, a finished index is **cached
+  and reused**; pass `overwrite=True` to force a rebuild.
+- **arbitrary chromap flags** — a keyword maps to chromap's long option with
+  underscores turned into hyphens (`min_frag_length=30` → `--min-frag-length 30`);
+  a list or tuple expands to several arguments after the flag.
+- **there is no `threads` option**, unlike STAR. chromap's `-t/--num-threads` is a
+  *mapping* parameter; building the index is single-threaded.
+
+The bookkeeping matches STAR's: a `.success` marker gates the index, and
+`chromap.index.json` records the chromap version, the assembly, the resolved
+parameters, and the exact command.
+
+## Retrieving a built index
+
+Building an index and *using* it are separate jobs — a mapping pipeline needs the
+path of an index that was built earlier, possibly by someone else. The `get_*`
+methods return that path and build nothing:
+
+```python
+g.get_star_index("ensembl")   # .../index/star_ensembl           -> STAR --genomeDir
+g.get_chromap_index()         # .../index/chromap/chromap.index  -> chromap -x
+```
+
+Both are convenience wrappers over a generic form that takes the aligner name
+plus whatever selectors identify the index — the annotation for STAR, nothing for
+chromap:
+
+```python
+g.get_index("star", gtf="ensembl")
+g.get_index("chromap")
+```
+
+The name is case-insensitive; an unknown aligner raises `ValueError` listing the
+ones that are known. If the index was never built — or a build was interrupted
+and so left no `.success` marker — you get a `RuntimeError` naming the directory
+and the method to call:
+
+```python
+Genome("sacCer3").get_chromap_index()
+# RuntimeError: No successful chromap index for 'sacCer3' at
+# .../index/chromap (missing success flag '.success'). Build it first, ...
+```
+
+One thing to know: looking a path up still constructs the aligner object, and
+that constructor checks the binary. Retrieving an index path therefore requires
+the aligner to be installed, even though nothing is built.
+
+## The aligners are optional dependencies
+
+Neither STAR nor chromap is in the default environment — an aligner is only
+needed when you actually build or look up an index, and each checks for itself at
+that moment. Install whichever you need:
 
 ```bash
 pixi add star            # from bioconda
+pixi add chromap         # from bioconda
 ```
 
-If STAR is missing, the build fails fast with install instructions and a
-`genome.external.ToolNotFoundError`, rather than a cryptic error deep in the
-run.
+Both are already provisioned together in the project's `aligners` environment
+(`pixi run -e aligners ...`). If the binary is missing, the call fails fast with
+install instructions and a `genome.external.ToolNotFoundError`, rather than a
+cryptic error deep in the run.
 
 ## Domain invariant: the annotation is always explicit
 
 Mirroring the assembly rule, the annotation an index is built against is never
 implicit. `build_star_index` requires a named `gtf`, the index directory encodes
 that name, and the metadata sidecar records it — so you can never silently align
-against the wrong annotation or overwrite one index with another.
+against the wrong annotation or overwrite one index with another. A chromap index
+has no annotation to get wrong, and its layout says so: one `index/chromap/` per
+assembly, with the sidecar still recording exactly how it was built.
