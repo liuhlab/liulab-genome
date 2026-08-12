@@ -19,8 +19,9 @@ native binaries (managed by pixi). They never reimplement what those binaries do
 
 ## Downloading
 
-`Downloader` is a thin wrapper over `pooch.retrieve`. It downloads a URL once and caches
-it, so asking for the same file again is served from disk.
+Every download in the package goes through one fetch step, `fetch_url`, which is the only
+place pooch is called. `Downloader` binds that step to a cache directory: it downloads a
+URL once and caches it, so asking for the same file again is served from disk.
 
 ```python
 from genome.io.download import Downloader
@@ -86,7 +87,7 @@ Pass `known_hash="md5:…"` to verify the download.
 When the UCSC golden path is unreachable (firewall/proxy) or you have a custom
 reference, `fetch_genome_from` prepares the genome from a FASTA **you** provide
 instead of downloading from UCSC. The source is either a local path (copied into
-the cache) or an `http(s)`/`ftp` URL (downloaded with `curl`); a gzipped (`.gz`)
+the cache) or an `http(s)`/`ftp`/`sftp` URL (fetched with pooch); a gzipped (`.gz`)
 source is decompressed. UCSC is never contacted — there is no assembly-name
 validation.
 
@@ -111,9 +112,10 @@ fresh `<assembly>.fa` is reused on later calls unless you pass `overwrite=True`.
 The [`Genome`](genome.md#seeding-from-your-own-fasta-offline-mirrors-custom-references)
 constructor's `path_or_url=` argument is the high-level front door to this.
 
-!!! note "`curl` is required for URLs"
-    Downloading a URL shells out to `curl`; a local-file source does not need it.
-    If `curl` is missing the call raises `ToolNotFoundError` with a `pixi add` hint.
+!!! note "`sftp://` sources need `paramiko`"
+    pooch handles `http(s)` and `ftp` out of the box. An `sftp://` source additionally
+    needs `paramiko`, which is not a dependency of this package — install it yourself if
+    you need that scheme.
 
 #### Where files are stored
 

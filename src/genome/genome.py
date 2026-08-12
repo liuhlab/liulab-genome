@@ -64,8 +64,8 @@ class Genome(AlignerMixin):
         files; UCSC is not contacted.
     path_or_url : str or pathlib.Path, optional
         Seed the assembly from your own FASTA instead of downloading from UCSC —
-        either a local file path (copied into the cache) or an http(s)/ftp URL
-        (downloaded with ``curl``). Gzipped (``.gz``) sources are decompressed.
+        either a local file path (copied into the cache) or an http(s)/ftp/sftp
+        URL (fetched with pooch). Gzipped (``.gz``) sources are decompressed.
         Useful when UCSC is unreachable (firewall/proxy) or for a custom
         reference. See :meth:`~genome.io.download.UCSCGenomeDownloader.fetch_genome_from`.
     cache_dir : str or pathlib.Path, optional

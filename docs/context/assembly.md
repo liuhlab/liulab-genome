@@ -35,7 +35,8 @@ request rather than three minutes into a download.
 _Avoid_: fetcher, client, mirror, provider
 
 **Source**:
-A local FASTA path or an http(s)/ftp URL an assembly is seeded from *instead of* the golden path.
+A local FASTA path or an http(s)/ftp/sftp URL an assembly is seeded from *instead of* the golden
+path.
 Giving a source means UCSC is never contacted and never consulted — the assembly name degrades to a
 label for the directory and the files inside it.
 _Avoid_: input, custom genome, reference; and never for UCSC's own FASTA, which a **Downloader**

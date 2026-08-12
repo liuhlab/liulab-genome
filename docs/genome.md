@@ -56,7 +56,7 @@ to seed the assembly from a FASTA you provide instead of downloading from UCSC:
 # a local file — copied into the assembly's cache, then prepared
 Genome("ce11", path_or_url="/data/ce11.fa.gz")
 
-# a non-UCSC URL (e.g. a UCSC mirror) — downloaded with curl
+# a non-UCSC URL (e.g. a UCSC mirror)
 Genome("ce11", path_or_url="https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11/bigZips/ce11.fa.gz")
 ```
 
