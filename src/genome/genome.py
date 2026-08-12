@@ -103,6 +103,12 @@ class Genome(AlignerMixin):
     ------
     ValueError
         If ``assembly`` is unknown to UCSC.
+    genome.io.completion.RegistrationError
+        If the assembly's directory holds a registration that cannot be trusted —
+        files with no record (an interrupted run), or a record that disagrees with
+        what is on disk. The message names the file and
+        ``genome register <assembly> --force``, which repairs it (ADR-0007). An
+        absent or empty directory is not this: that is a fresh registration.
     genome.external.ToolNotFoundError
         If a required native tool (``samtools``, ``faToTwoBit``, ``twoBitInfo``)
         is not on ``PATH``.

@@ -24,7 +24,13 @@ import requests
 
 from genome import __version__
 from genome.io import download as download_mod
-from genome.io.completion import read_record, record_path, work_dir
+from genome.io.completion import (
+    RegistrationMismatchError,
+    UnfinishedRegistrationError,
+    read_record,
+    record_path,
+    work_dir,
+)
 from genome.io.download import (
     Downloader,
     UCSCGenomeDownloader,
@@ -32,6 +38,8 @@ from genome.io.download import (
     assembly_table_row,
     fetch_url,
     liulab_data_dir,
+    register_assembly,
+    verify_assembly,
 )
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.io.utils import ChecksumMismatchError, sha256_file
@@ -634,23 +642,6 @@ def test_the_record_is_written_after_every_derived_file_exists(
     assert record_path(tmp_path).is_file()
 
 
-def test_a_record_that_disagrees_with_disk_is_not_a_finished_registration(
-    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
-) -> None:
-    # A file deleted after registration means "unfinished" here, exactly as the old
-    # marker's absence did — turning that into an error that names the repair is a
-    # separate piece of work.
-    fake_fetch.serve("tiny.fa.gz")
-    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row())
-    files = dl.fetch_genome()
-    files.twobit.unlink()
-
-    dl.fetch_genome()
-
-    assert len(fake_fetch.calls) == 2  # registered again rather than trusted
-    assert files.twobit.is_file()
-
-
 def test_overwrite_registers_again_even_with_a_record_present(
     fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
 ) -> None:
@@ -661,6 +652,254 @@ def test_overwrite_registers_again_even_with_a_record_present(
     dl.fetch_genome(overwrite=True)
 
     assert len(fake_fetch.calls) == 2
+
+
+# --- a broken registration raises; a forced one repairs ----------------------
+
+
+def test_files_with_no_record_refuse_to_be_resumed(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    # A run killed between placing the FASTA and writing the record. A complete build
+    # whose record never landed and the wreckage of one killed half-way look identical
+    # on disk, so neither is trusted and neither is quietly rebuilt.
+    (tmp_path / "tiny.fa").write_text(">chrI\nACGT\n")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row())
+
+    with pytest.raises(UnfinishedRegistrationError) as excinfo:
+        dl.fetch_genome()
+
+    message = str(excinfo.value)
+    assert "tiny.fa" in message  # what is there
+    assert "genome register tiny --force" in message  # and what to do about it
+    assert fake_fetch.calls == []  # nothing was fetched over the top of it
+
+
+def test_a_record_that_disagrees_with_disk_raises_naming_the_file(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row())
+    files = dl.fetch_genome()
+    recorded = files.twobit.stat().st_size
+    files.twobit.write_text("")  # truncated behind our back
+
+    with pytest.raises(RegistrationMismatchError) as excinfo:
+        dl.fetch_genome()
+
+    message = str(excinfo.value)
+    assert f"tiny.2bit: recorded {recorded} bytes, found 0" in message
+    assert "genome register tiny --force" in message
+    assert len(fake_fetch.calls) == 1  # not silently registered again either
+
+
+def test_an_absent_directory_registers_normally(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    fresh = tmp_path / "never-registered"
+
+    files = UCSCGenomeDownloader("tiny", cache_dir=fresh, metadata=_row()).fetch_genome()
+
+    assert files.fasta == fresh / "tiny.fa"
+    assert read_record(fresh) is not None
+
+
+def test_an_empty_directory_registers_normally(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+
+    files = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row()).fetch_genome()
+
+    assert files.fasta.is_file()
+
+
+def test_a_directory_holding_only_an_interrupted_download_registers_normally(
+    fake_fetch: FakeFetch, tmp_path: Path, data_dir: Path, no_native_prepare: None
+) -> None:
+    # The working area holds working state rather than claimed outputs, so a preempted
+    # download is not a broken registration.
+    fake_fetch.serve("tiny.fa.gz")
+    work_dir(tmp_path).mkdir(parents=True)
+    shutil.copy2(data_dir / "tiny.fa.gz", work_dir(tmp_path) / "tiny.fa.gz")
+
+    files = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row()).fetch_genome()
+
+    assert files.fasta.is_file()
+
+
+def test_a_forced_re_registration_keeps_a_fasta_that_matches_the_pin(
+    fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    rebuilt: list[bool] = []
+
+    def watching_prepare(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        rebuilt.append(overwrite)
+        return _derive(Path(fasta_path))
+
+    monkeypatch.setattr(download_mod, "prepare_fasta", watching_prepare)
+    dl = UCSCGenomeDownloader(
+        "tiny",
+        cache_dir=tmp_path,
+        metadata=_row(source_url=_PINNED_URL, sha256=_TINY_FA_SHA256),
+    )
+    dl.fetch_genome()
+    (tmp_path / "tiny.2bit").unlink()  # a derived file lost; the FASTA is still good
+
+    files = dl.fetch_genome(overwrite=True)
+
+    assert len(fake_fetch.calls) == 1  # a whole genome is not downloaded twice
+    assert rebuilt == [False, True]  # only the derived files were rebuilt
+    assert files.twobit.is_file()
+
+
+@pytest.mark.parametrize(
+    ("pinned", "damage"),
+    [
+        (_TINY_FA_SHA256, "delete"),
+        (_TINY_FA_SHA256, "corrupt"),
+        (None, "none"),
+    ],
+    ids=["fasta-missing", "fasta-wrong", "nothing-pinned"],
+)
+def test_a_forced_re_registration_fetches_again_unless_the_fasta_is_provably_good(
+    fake_fetch: FakeFetch,
+    tmp_path: Path,
+    no_native_prepare: None,
+    pinned: str | None,
+    damage: str,
+) -> None:
+    # With nothing pinned there is no way to prove the FASTA on disk is the right one,
+    # so it is not trusted — the source is read again.
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader(
+        "tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL, sha256=pinned)
+    )
+    files = dl.fetch_genome()
+    if damage == "delete":
+        files.fasta.unlink()
+    elif damage == "corrupt":
+        files.fasta.write_text(">chrI\nNNNN\n")
+
+    dl.fetch_genome(overwrite=True)
+
+    assert len(fake_fetch.calls) == 2
+    assert files.fasta.read_text().startswith(">chrI")
+
+
+def test_a_seeded_assembly_names_its_own_source_in_the_repair(
+    tmp_path: Path, data_dir: Path, no_native_prepare: None
+) -> None:
+    # `genome register tiny --force` would fetch from the golden path, which is not
+    # where this assembly came from, so the repair names the source it was seeded from.
+    source = data_dir / "tiny.fa.gz"
+    (tmp_path / "tiny.fa").write_text(">chrI\nACGT\n")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
+
+    with pytest.raises(UnfinishedRegistrationError) as excinfo:
+        dl.fetch_genome_from(source)
+
+    assert f"genome register tiny --force --source {source}" in str(excinfo.value)
+
+
+# --- registering and verifying an assembly by name ---------------------------
+
+
+def test_register_assembly_reports_what_it_registered(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+
+    payload = register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
+
+    assert payload["assembly"] == "tiny"
+    assert payload["directory"] == str(tmp_path)
+    assert payload["sha256"] == _TINY_FA_SHA256
+    assert payload["source_url"] == UCSCGenomeDownloader("tiny").fasta_url
+    assert payload["files"] == {
+        name: (tmp_path / name).stat().st_size
+        for name in ("tiny.fa", "tiny.fa.fai", "tiny.2bit", "tiny.chrom.sizes")
+    }
+
+
+def test_register_assembly_repairs_a_broken_directory_when_forced(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    # The command the error message names has to be the command that fixes it.
+    fake_fetch.serve("tiny.fa.gz")
+    (tmp_path / "tiny.fa").write_text("half a genome\n")
+
+    with pytest.raises(UnfinishedRegistrationError, match="genome register tiny --force"):
+        register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
+
+    payload = register_assembly("tiny", cache_dir=tmp_path, force=True, progressbar=False)
+
+    assert payload["sha256"] == _TINY_FA_SHA256
+
+
+def test_register_assembly_seeds_from_a_source_when_given_one(
+    tmp_path: Path, data_dir: Path, no_native_prepare: None, head_recorder: _HeadRecorder
+) -> None:
+    source = data_dir / "tiny.fa.gz"
+
+    payload = register_assembly("tiny", source=source, cache_dir=tmp_path, progressbar=False)
+
+    assert payload["source_url"] == str(source)
+    assert head_recorder.calls == []  # UCSC is never consulted about a seeded assembly
+
+
+def test_verify_assembly_rehashes_the_registered_fasta(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
+
+    payload = verify_assembly("tiny", cache_dir=tmp_path)
+
+    assert payload["fasta"] == str(tmp_path / "tiny.fa")
+    assert payload["sha256"] == _TINY_FA_SHA256
+    assert payload["expected"] is None  # no row lists "tiny", so nothing to check against
+    assert payload["verified"] is False
+
+
+def test_verify_assembly_confirms_a_fasta_that_matches_the_pin(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    row = _row(source_url=_PINNED_URL, sha256=_TINY_FA_SHA256)
+    register_assembly("tiny", cache_dir=tmp_path, progressbar=False, metadata=row)
+
+    payload = verify_assembly("tiny", cache_dir=tmp_path, metadata=row)
+
+    assert payload["verified"] is True
+    assert payload["expected"] == _TINY_FA_SHA256
+    assert payload["sha256"] == _TINY_FA_SHA256
+
+
+def test_verify_assembly_checks_a_hand_copied_fasta_against_the_official_row(
+    tmp_path: Path, data_dir: Path
+) -> None:
+    # sacCer3's shipped row pins the real genome's digest and the fixture is a
+    # subsample of it, so a file checked against that row is caught before anything is
+    # built on it. Nothing needs to be registered for this.
+    with pytest.raises(ChecksumMismatchError) as excinfo:
+        verify_assembly("sacCer3", fasta=data_dir / "tiny.fa", cache_dir=tmp_path)
+
+    assert _TINY_FA_SHA256 in str(excinfo.value)
+
+
+def test_verify_assembly_refuses_a_directory_that_is_broken(tmp_path: Path) -> None:
+    (tmp_path / "tiny.fa").write_text("half a genome\n")
+
+    with pytest.raises(UnfinishedRegistrationError, match="genome register tiny --force"):
+        verify_assembly("tiny", cache_dir=tmp_path)
+
+
+def test_verify_assembly_says_what_to_run_when_nothing_is_registered(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="genome register tiny"):
+        verify_assembly("tiny", cache_dir=tmp_path)
 
 
 def test_seeding_from_a_local_fasta_records_where_it_came_from(

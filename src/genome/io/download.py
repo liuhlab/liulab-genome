@@ -19,6 +19,11 @@ out of it, and the whole area is discarded once
 record owns the judgment pooch's cache would otherwise make: what is already here, and
 whether it is usable.
 
+A directory that cannot be trusted stops the work rather than being quietly rebuilt:
+:func:`~genome.io.completion.check_registration` turns files-without-a-record and a
+record-that-disagrees into errors naming ``genome register <assembly> --force``, and
+that command is what repairs them (ADR-0007).
+
 Examples
 --------
 >>> from genome.io.download import UCSCGenomeDownloader
@@ -31,8 +36,10 @@ Examples
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 from collections.abc import Callable
+from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -40,9 +47,11 @@ import pooch
 import requests
 
 from genome.io.completion import (
+    RECORD_NAME,
+    RegistrationError,
     build_record,
+    check_registration,
     clear_work_dir,
-    disagreements,
     read_record,
     work_dir,
     write_record,
@@ -384,22 +393,50 @@ class UCSCGenomeDownloader(Downloader):
             chrom_sizes=self.cache_dir / f"{self.assembly}.chrom.sizes",
         )
 
-    def _completed_genome(self, *, overwrite: bool) -> GenomeFiles | None:
+    def _repair_command(self, source: str | Path | None = None) -> str:
+        """Return the command that re-registers this assembly from scratch.
+
+        Quoted verbatim into every error a broken directory raises, so it has to be a
+        command that exists and does the job. A seeded assembly carries its own source
+        into it: ``genome register tiny --force`` would fetch from the golden path,
+        which is not where such an assembly came from.
+        """
+        base = f"genome register {self.assembly} --force"
+        return base if source is None else f"{base} --source {shlex.quote(str(source))}"
+
+    def _completed_genome(self, *, overwrite: bool, repair: str) -> GenomeFiles | None:
         """Return the prepared GenomeFiles when the record says so, else ``None``.
 
         The completion record is the only thing consulted: it must be there, and every
         file it claims must be present at the size it claims. That is one ``stat`` per
-        file and no file contents, so reopening a prepared genome is instant. Anything
-        else — no record, or a record disagreeing with disk — reads as unfinished here
-        and falls through to a fresh registration, exactly as the absence of the old
-        marker did. ``overwrite`` skips the question entirely.
+        file and no file contents, so reopening a prepared genome is instant. An absent
+        or empty directory answers ``None`` — a fresh registration, which proceeds
+        normally — while a directory that cannot be trusted raises (see
+        :func:`~genome.io.completion.check_registration`). ``overwrite`` skips the
+        question entirely, which is what makes it the repair.
         """
         if overwrite:
             return None
-        record = read_record(self.cache_dir)
-        if record is None or disagreements(self.cache_dir, record):
+        if check_registration(self.cache_dir, repair=repair) is None:
             return None
         return self._expected_genome_files()
+
+    def _proven_fasta(self) -> tuple[Path, str] | None:
+        """Return the FASTA already on disk with its digest, when it is provably right.
+
+        What makes repairing cheap: a re-registration that can prove the unpacked FASTA
+        is the pinned one keeps it and rebuilds only the derived files, rather than
+        pulling a whole genome down again. ``None`` — fetch the source again — in all
+        three of the cases where it cannot be proven: the FASTA is missing, its digest
+        is a different one, or **this assembly pins no digest at all**, since with
+        nothing to compare against there is no way to show what is there is right.
+        """
+        expected = self._expected_sha256
+        fasta = self._expected_genome_files().fasta
+        if expected is None or not fasta.is_file():
+            return None
+        actual = sha256_file(fasta)
+        return (fasta, actual) if actual == expected else None
 
     def _record_completion(
         self, files: GenomeFiles, *, source_url: str | None, sha256: str | None
@@ -598,8 +635,15 @@ class UCSCGenomeDownloader(Downloader):
         package version and the time. That record is what makes a later call cheap: it
         is read, its claims are checked against disk by size alone, and nothing is
         fetched. The archive is deleted with the rest of the working area at that point
-        — and only then, so an interrupted run still repairs from it. Pass
-        ``overwrite=True`` to register again from scratch.
+        — and only then, so an interrupted run still repairs from it.
+
+        A directory that cannot be trusted — files with no record, or a record that
+        disagrees with what is on disk — **raises** rather than being rebuilt or
+        trusted, naming ``genome register <assembly> --force`` (ADR-0007). That is what
+        ``overwrite=True`` is: it skips the question, keeps the unpacked FASTA when its
+        digest can be shown to be the pinned one, and fetches the source again when it
+        cannot (see :meth:`_proven_fasta`). An absent or empty directory is not a broken
+        state — it is a fresh registration and proceeds normally.
 
         Parameters
         ----------
@@ -623,6 +667,10 @@ class UCSCGenomeDownloader(Downloader):
 
         Raises
         ------
+        genome.io.completion.UnfinishedRegistrationError
+            If the assembly directory holds files but no record.
+        genome.io.completion.RegistrationMismatchError
+            If its record disagrees with what is on disk.
         requests.exceptions.HTTPError
             If the download fails (e.g. a wrong assembly name 404s).
         ValueError
@@ -642,19 +690,23 @@ class UCSCGenomeDownloader(Downloader):
         >>> files.fai.name, files.twobit.name, files.chrom_sizes.name   # doctest: +SKIP
         ('hg38.fa.fai', 'hg38.2bit', 'hg38.chrom.sizes')
         """
-        cached = self._completed_genome(overwrite=overwrite)
-        if cached is not None:
-            return cached
-        downloaded = self.fetch_fasta(
-            known_hash=known_hash,
-            decompress=True,
-            progressbar=progressbar,
-        )
-        # Checked before it is placed, so a FASTA that is not the pinned one never
-        # reaches the assembly dir; recorded from here, so a whole genome is not
-        # hashed a second time just to write the record.
-        digest = self.verify_fasta(downloaded)
-        fasta = self._place_fasta(downloaded)
+        registered = self._completed_genome(overwrite=overwrite, repair=self._repair_command())
+        if registered is not None:
+            return registered
+        kept = self._proven_fasta()
+        if kept is not None:
+            fasta, digest = kept
+        else:
+            downloaded = self.fetch_fasta(
+                known_hash=known_hash,
+                decompress=True,
+                progressbar=progressbar,
+            )
+            # Checked before it is placed, so a FASTA that is not the pinned one never
+            # reaches the assembly dir; recorded from here, so a whole genome is not
+            # hashed a second time just to write the record.
+            digest = self.verify_fasta(downloaded)
+            fasta = self._place_fasta(downloaded)
         files = prepare_fasta(fasta, overwrite=overwrite)
         self._record_completion(files, source_url=self.fasta_url, sha256=digest)
         return files
@@ -699,6 +751,12 @@ class UCSCGenomeDownloader(Downloader):
 
         Raises
         ------
+        genome.io.completion.RegistrationError
+            If the assembly directory holds files but no record, or a record that
+            disagrees with what is on disk. The message names this same call as the
+            repair — ``genome register <assembly> --force --source <source>`` — rather
+            than the plain one, which would fetch from somewhere this assembly never
+            came from.
         FileNotFoundError
             If ``source`` is a local path that does not exist.
         ValueError
@@ -708,9 +766,11 @@ class UCSCGenomeDownloader(Downloader):
         RuntimeError
             If any native preparation tool fails.
         """
-        cached = self._completed_genome(overwrite=overwrite)
-        if cached is not None:
-            return cached
+        registered = self._completed_genome(
+            overwrite=overwrite, repair=self._repair_command(source)
+        )
+        if registered is not None:
+            return registered
         fasta = self._materialize_fasta(source, progressbar=progressbar, overwrite=overwrite)
         files = prepare_fasta(fasta, overwrite=overwrite)
         self._record_completion(files, source_url=str(source), sha256=sha256_file(fasta))
@@ -764,6 +824,168 @@ class UCSCGenomeDownloader(Downloader):
         if gzipped:
             downloaded = _gunzip(downloaded, work / f"{self.assembly}.fa")
         return self._place_fasta(downloaded)
+
+
+def register_assembly(
+    assembly: str,
+    *,
+    source: str | Path | None = None,
+    force: bool = False,
+    cache_dir: str | Path | None = None,
+    progressbar: bool = True,
+    metadata: AssemblyMetadata | None = None,
+) -> dict[str, object]:
+    """Prepare ``assembly`` on disk and return the record of what that did.
+
+    Naming an assembly is enough: where its FASTA comes from and which digest it must
+    match are the metadata table's to know. The whole pipeline runs — fetch, unpack,
+    verify, index, derive — and the completion record lands last. An assembly that is
+    already registered is returned from its record without fetching anything.
+
+    A directory that cannot be trusted raises instead (see :meth:`
+    UCSCGenomeDownloader.fetch_genome`); ``force=True`` is what repairs one, and it
+    keeps an unpacked FASTA it can prove is the pinned one rather than downloading a
+    whole genome again.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to register, e.g. ``"hg38"``.
+    source : str or pathlib.Path, optional
+        Seed the assembly from this FASTA — a local path or an http(s)/ftp/sftp URL —
+        instead of fetching the source its metadata pins. See
+        :meth:`UCSCGenomeDownloader.fetch_genome_from`.
+    force : bool, default False
+        Register again from scratch, repairing a directory that raises.
+    cache_dir : str or pathlib.Path, optional
+        Override which directory the assembly is registered in. Defaults to
+        :func:`assembly_data_dir(assembly) <assembly_data_dir>`.
+    progressbar : bool, default True
+        Show a download progress bar (requires ``tqdm``).
+    metadata : genome.metadata.AssemblyMetadata, optional
+        A complete metadata record to use instead of the curated table's row.
+
+    Returns
+    -------
+    dict
+        The completion record's own fields — ``files``, ``source_url``, ``sha256``,
+        ``tool_versions``, ``completed_at`` and the rest — plus ``assembly`` and the
+        ``directory`` they live in. Ready to serialize as it is.
+
+    Raises
+    ------
+    genome.io.completion.RegistrationError
+        If the directory holds a build that cannot be trusted as finished, or (with
+        ``force``) if the run somehow left no record behind.
+    genome.io.utils.ChecksumMismatchError
+        If the metadata pins a sha256 and the unpacked FASTA is not it.
+    genome.external.ToolNotFoundError
+        If ``samtools``, ``faToTwoBit`` or ``twoBitInfo`` are not on ``PATH``.
+
+    Examples
+    --------
+    >>> register_assembly("sacCer3")                       # doctest: +SKIP
+    {'kind': 'genome', 'name': 'sacCer3', 'files': {...}, ...}
+    """
+    downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=metadata)
+    if source is None:
+        downloader.fetch_genome(progressbar=progressbar, overwrite=force)
+    else:
+        downloader.fetch_genome_from(source, progressbar=progressbar, overwrite=force)
+    record = read_record(downloader.cache_dir)
+    if record is None:
+        raise RegistrationError(
+            f"{assembly} was prepared in {downloader.cache_dir} but no {RECORD_NAME} is "
+            f"there, so nothing can vouch for it. Register it again with "
+            f"`{downloader._repair_command(source)}`."
+        )
+    payload: dict[str, object] = dict(asdict(record))
+    payload["assembly"] = assembly
+    payload["directory"] = str(downloader.cache_dir)
+    return payload
+
+
+def verify_assembly(
+    assembly: str,
+    *,
+    fasta: str | Path | None = None,
+    cache_dir: str | Path | None = None,
+    metadata: AssemblyMetadata | None = None,
+) -> dict[str, object]:
+    """Re-read a FASTA and check its sha256 against the one ``assembly``'s row pins.
+
+    The one operation that reads bytes rather than sizes. Registering an assembly and
+    reopening it both go by presence and size, which is what makes them instant; this
+    is the deliberate re-verification for when integrity is actually in doubt, and it
+    costs a full pass over the file.
+
+    With no ``fasta`` it verifies the assembly's own registered FASTA, and the
+    registration must be intact — a directory that cannot be trusted raises here as it
+    does anywhere else. Point ``fasta`` at any file to check that instead: a copy taken
+    from a mirror or handed over by hand is checkable against the official row before
+    anything is built on it, and nothing needs to be registered first.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly whose row supplies the digest to check against, e.g. ``"hg38"``.
+    fasta : str or pathlib.Path, optional
+        A FASTA to check instead of the assembly's registered one.
+    cache_dir : str or pathlib.Path, optional
+        Override which directory the assembly is registered in.
+    metadata : genome.metadata.AssemblyMetadata, optional
+        A complete metadata record to use instead of the curated table's row.
+
+    Returns
+    -------
+    dict
+        ``assembly``, the ``fasta`` that was read, its computed ``sha256``, the
+        ``expected`` digest the row pins (``None`` when it pins none), and
+        ``verified`` — whether there was a pin to check against at all. A digest that
+        disagrees raises rather than reporting ``False``.
+
+    Raises
+    ------
+    genome.io.utils.ChecksumMismatchError
+        If the row pins a sha256 and the file's digest is a different one.
+    genome.io.completion.RegistrationError
+        If the assembly's directory holds a build that cannot be trusted as finished.
+    FileNotFoundError
+        If there is no file to read — nothing registered for ``assembly``, or no file
+        at an explicit ``fasta``.
+
+    Examples
+    --------
+    >>> verify_assembly("sacCer3")                          # doctest: +SKIP
+    {'assembly': 'sacCer3', 'fasta': '...', 'sha256': '6ff72f07...', ...}
+    >>> verify_assembly("sacCer3", fasta="/tmp/copied.fa")  # doctest: +SKIP
+    {'assembly': 'sacCer3', 'fasta': '/tmp/copied.fa', ...}
+    """
+    downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=metadata)
+    if fasta is not None:
+        target = Path(fasta).expanduser()
+        if not target.is_file():
+            raise FileNotFoundError(
+                f"no FASTA at {target}: pass the path of a file to check against "
+                f"{assembly}'s row, or omit it to check {assembly}'s own registered FASTA."
+            )
+    else:
+        target = downloader._expected_genome_files().fasta
+        registered = check_registration(downloader.cache_dir, repair=downloader._repair_command())
+        if registered is None or not target.is_file():
+            raise FileNotFoundError(
+                f"{assembly} is not registered in {downloader.cache_dir}, so there is "
+                f"nothing to verify. Register it with `genome register {assembly}`, or "
+                f"pass the FASTA to check with --fasta."
+            )
+    expected = downloader._expected_sha256
+    return {
+        "assembly": assembly,
+        "fasta": str(target),
+        "sha256": downloader.verify_fasta(target),
+        "expected": expected,
+        "verified": expected is not None,
+    }
 
 
 def assembly_table_row(

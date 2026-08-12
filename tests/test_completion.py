@@ -21,7 +21,10 @@ from genome.io.completion import (
     RECORD_NAME,
     WORK_DIR_NAME,
     CompletionRecord,
+    RegistrationMismatchError,
+    UnfinishedRegistrationError,
     build_record,
+    check_registration,
     clear_work_dir,
     disagreements,
     read_record,
@@ -249,6 +252,62 @@ def test_a_same_size_edit_goes_unnoticed_because_contents_are_never_read(tmp_pat
     fasta.write_text("y" * 100)
 
     assert disagreements(tmp_path, record) == []
+
+
+# --- finished, fresh, or broken ----------------------------------------------
+
+_REPAIR = "genome register tiny --force"
+
+
+def test_a_finished_build_answers_with_its_record(tmp_path: Path) -> None:
+    (fasta,) = _build(tmp_path, "tiny.fa")
+    written = build_record(tmp_path, kind="genome", name="tiny", files=[fasta])
+    write_record(tmp_path, written)
+
+    assert check_registration(tmp_path, repair=_REPAIR) == written
+
+
+def test_an_absent_directory_is_fresh_rather_than_broken(tmp_path: Path) -> None:
+    assert check_registration(tmp_path / "never-built", repair=_REPAIR) is None
+
+
+def test_an_empty_directory_is_fresh_rather_than_broken(tmp_path: Path) -> None:
+    assert check_registration(tmp_path, repair=_REPAIR) is None
+
+
+def test_a_directory_holding_only_a_download_is_still_fresh(tmp_path: Path) -> None:
+    # The working area is working state, not a claimed output, so an interrupted
+    # download does not make a directory that was never registered look broken.
+    _build(work_dir(tmp_path), "tiny.fa.gz")
+
+    assert check_registration(tmp_path, repair=_REPAIR) is None
+
+
+def test_files_with_no_record_raise_and_name_the_repair(tmp_path: Path) -> None:
+    _build(tmp_path, "tiny.fa", "tiny.2bit")
+
+    with pytest.raises(UnfinishedRegistrationError) as excinfo:
+        check_registration(tmp_path, repair=_REPAIR)
+
+    message = str(excinfo.value)
+    assert "tiny.fa" in message
+    assert _REPAIR in message
+
+
+def test_a_record_that_disagrees_raises_naming_which_file_and_how(tmp_path: Path) -> None:
+    fasta, twobit = _build(tmp_path, "tiny.fa", "tiny.2bit", size=100)
+    write_record(
+        tmp_path, build_record(tmp_path, kind="genome", name="tiny", files=[fasta, twobit])
+    )
+    twobit.write_text("x")  # truncated behind our back
+
+    with pytest.raises(RegistrationMismatchError) as excinfo:
+        check_registration(tmp_path, repair=_REPAIR)
+
+    message = str(excinfo.value)
+    assert "tiny.2bit: recorded 100 bytes, found 1" in message
+    assert "tiny.fa:" not in message  # the file that still agrees is not accused
+    assert _REPAIR in message
 
 
 # --- the working area --------------------------------------------------------

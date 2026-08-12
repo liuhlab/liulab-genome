@@ -16,7 +16,8 @@ import pytest
 
 import genome.genome as genome_mod
 from genome import DNA, Genome, Region
-from genome.io.completion import read_record
+from genome.io.completion import RegistrationMismatchError, read_record
+from genome.io.download import register_assembly
 from genome.io.fasta import prepare_fasta
 from genome.metadata import METADATA_FIELDS, AssemblyMetadata
 
@@ -189,23 +190,27 @@ def test_assembly_absent_from_the_table_still_constructs(prepared_dir: Path) -> 
         assert g.chromosomes == ["chrA", "chrB"]
 
 
+#: A record injected instead of the shipped table's row: it pins a URL, so nothing
+#: contacts UCSC to validate the name, and no checksum, so the fixture FASTA served in
+#: place of a download has nothing to disagree with.
+_UNPINNED = AssemblyMetadata(
+    assembly_name="hg38",
+    species="Homo sapiens",
+    ucsc_name="hg38",
+    ncbi_name="GRCh38",
+    ncbi_assembly_id="GCF_000001405.40",
+    ncbi_taxid=9606,
+    source_url="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz",
+)
+
+
 def test_registering_an_assembly_records_it_and_reopening_costs_no_fetch(
     fake_fetch: FakeFetch, tmp_path: Path
 ) -> None:
     # The one end-to-end pass: a real download (from the fixture), the real native
-    # tools, and the record that says it finished. The record is injected rather than
-    # read from the shipped table: it pins a URL, so nothing contacts UCSC to validate
-    # the name, and no checksum, so the fixture has nothing to disagree with.
+    # tools, and the record that says it finished.
     fake_fetch.serve("tiny.fa.gz")
-    unpinned = AssemblyMetadata(
-        assembly_name="hg38",
-        species="Homo sapiens",
-        ucsc_name="hg38",
-        ncbi_name="GRCh38",
-        ncbi_assembly_id="GCF_000001405.40",
-        ncbi_taxid=9606,
-        source_url="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz",
-    )
+    unpinned = _UNPINNED
 
     with Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=unpinned) as first:
         assert first.chromosomes == ["chrI", "chrII", "chrIII"]
@@ -222,6 +227,39 @@ def test_registering_an_assembly_records_it_and_reopening_costs_no_fetch(
         assert again.fetch_sequence("chrI:0-4") == opening
 
     assert len(fake_fetch.calls) == 1  # the record answered; nothing was fetched twice
+
+
+def test_opening_a_genome_over_a_damaged_registration_raises(
+    fake_fetch: FakeFetch, tmp_path: Path
+) -> None:
+    # A file truncated after registration surfaces here, naming the file and the
+    # command that fixes it — rather than as a confusing failure from deep inside
+    # py2bit or an aligner much later.
+    fake_fetch.serve("tiny.fa.gz")
+    with Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=_UNPINNED):
+        pass
+    (tmp_path / "hg38.2bit").write_text("")
+
+    with pytest.raises(RegistrationMismatchError) as excinfo:
+        Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=_UNPINNED)
+
+    message = str(excinfo.value)
+    assert "hg38.2bit" in message
+    assert "genome register hg38 --force" in message
+
+
+def test_a_forced_re_registration_repairs_what_the_error_named(
+    fake_fetch: FakeFetch, tmp_path: Path
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    with Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=_UNPINNED):
+        pass
+    (tmp_path / "hg38.2bit").write_text("")
+
+    register_assembly("hg38", cache_dir=tmp_path, force=True, progressbar=False, metadata=_UNPINNED)
+
+    with Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=_UNPINNED) as repaired:
+        assert repaired.fetch_sequence("chrI:0-4") == DNA("CCAC")
 
 
 def test_path_or_url_seeds_from_local_fasta(
