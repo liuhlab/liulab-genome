@@ -14,8 +14,17 @@ from genome import __version__ as _package_version
 from genome.external import ToolNotFoundError
 from genome.external import doctor as _doctor
 from genome.io.download import assembly_table_row as _assembly_table_row
+from genome.io.download import register_assembly as _register_assembly
+from genome.io.download import verify_assembly as _verify_assembly
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
+
+#: What a failed assembly command raises, in one place. Every one of them is already
+#: actionable — a checksum mismatch, a registration that cannot be trusted, a missing
+#: native tool — so the CLI prints the message and exits non-zero rather than adding to
+#: it. ``RegistrationError`` and ``ToolNotFoundError`` are ``RuntimeError``s;
+#: ``ChecksumMismatchError`` is a ``ValueError``; a failed download is an ``OSError``.
+_ASSEMBLY_ERRORS = (ValueError, OSError, RuntimeError)
 
 app = typer.Typer(help="Tools for handling genomic files.", no_args_is_help=True)
 
@@ -77,6 +86,89 @@ def doctor(
 # --- assembly commands -------------------------------------------------------
 
 
+@app.command()
+def register(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'hg38'."),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Seed from this FASTA (local path or http(s)/ftp/sftp URL) instead of the "
+        "source the metadata table pins.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Register again from scratch — the repair for a directory that raises.",
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Prepare an assembly on disk: fetch, verify, index, and record it.
+
+    Downloads the FASTA from the source the metadata table pins (or the UCSC golden
+    path for an assembly no row lists), checks it against the pinned sha256, derives
+    the `.fai`, `.2bit` and `chrom.sizes`, and writes the registration record that says
+    all of it finished. An assembly that is already registered is reported from its
+    record without fetching anything.
+
+    Exits with code 1 when the directory holds a registration that cannot be trusted —
+    files with no record, or a record that disagrees with what is on disk. Re-run with
+    `--force` to repair it: an unpacked FASTA that still matches the pinned checksum is
+    kept and only the derived files are rebuilt.
+    """
+    try:
+        payload = _register_assembly(assembly, source=source, force=force, progressbar=not json)
+    except _ASSEMBLY_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(payload))
+        return
+    claimed = payload["files"]
+    names = sorted(claimed) if isinstance(claimed, dict) else []
+    typer.echo(f"registered {payload['assembly']} in {payload['directory']}")
+    typer.echo(f"  source  {payload['source_url']}")
+    typer.echo(f"  sha256  {payload['sha256']}")
+    typer.echo(f"  files   {', '.join(names)}")
+
+
+@app.command()
+def verify(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'sacCer3'."),
+    fasta: str | None = typer.Option(
+        None,
+        "--fasta",
+        help="Check this FASTA instead of the assembly's registered one — a copy from a "
+        "mirror or handed over by hand, checkable before anything is built on it.",
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Re-read an assembly's FASTA and check its sha256 against the table's row.
+
+    Registering an assembly and reopening it go by presence and size, which is what
+    makes them instant. This is the deliberate re-verification for when integrity is
+    actually in doubt: it reads the whole file and computes its digest.
+
+    Exits with code 1 when the digest is not the one the row pins, when there is
+    nothing registered to verify, or when the assembly's directory cannot be trusted.
+    """
+    try:
+        payload = _verify_assembly(assembly, fasta=fasta)
+    except _ASSEMBLY_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(payload))
+        return
+    tail = (
+        "matches the digest pinned for it"
+        if payload["verified"]
+        else f"({assembly} pins no digest, so there was nothing to check it against)"
+    )
+    typer.echo(f"{payload['fasta']}: sha256 {payload['sha256']} {tail}")
+
+
 @app.command("table-row")
 def table_row(
     assembly: str = typer.Argument(..., help="Assembly name, e.g. 'sacCer3'."),
@@ -94,7 +186,7 @@ def table_row(
     """
     try:
         row = _assembly_table_row(assembly, progressbar=not json)
-    except (ValueError, OSError, RuntimeError) as err:
+    except _ASSEMBLY_ERRORS as err:
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
 

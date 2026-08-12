@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json as _json
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,8 @@ from typer.testing import CliRunner
 
 from genome.cli import app
 from genome.external import REQUIRED_TOOLS
+from genome.io import download as download_mod
+from genome.io.fasta import GenomeFiles
 
 from .conftest import FakeFetch
 
@@ -19,6 +22,45 @@ _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
 
 #: sha256 of the committed ``tiny.fa``, which the fake fetch serves as any assembly.
 _TINY_FA_SHA256 = "9316629bab14f9298a043f8b92e1e04a573b12d6a367ccc07c8f8040e5a13981"
+
+
+def _output(result: object) -> str:
+    """Return a result's stdout and stderr together, wherever the runner put them."""
+    return (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
+
+
+@dataclass
+class _OkResponse:
+    """Stand-in for the ``HEAD`` response the golden-path name check reads."""
+
+    status_code: int = 200
+
+    def raise_for_status(self) -> None:
+        """Succeed, as a 200 does."""
+
+
+@pytest.fixture
+def offline_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the native preparation and the UCSC name check, so a CLI run needs neither.
+
+    The three derived files are written as ``prepare_fasta`` names them, which is all
+    the completion record claims of them.
+    """
+
+    def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        fasta = Path(fasta_path)
+        files = GenomeFiles(
+            fasta=fasta,
+            fai=fasta.with_name(fasta.name + ".fai"),
+            twobit=fasta.with_name(fasta.stem + ".2bit"),
+            chrom_sizes=fasta.with_name(fasta.stem + ".chrom.sizes"),
+        )
+        for derived in (files.fai, files.twobit, files.chrom_sizes):
+            derived.write_text(f"derived from {fasta.name}\n")
+        return files
+
+    monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
+    monkeypatch.setattr(download_mod.requests, "head", lambda url, **kwargs: _OkResponse())
 
 
 class TestVersion:
@@ -68,6 +110,128 @@ class TestDoctor:
         assert result.exit_code == 0
         payload = _json.loads(result.stdout)
         assert set(payload.keys()) == set(REQUIRED_TOOLS)
+
+
+class TestRegister:
+    """``genome register`` — prepare an assembly and say what landed.
+
+    Offline throughout: ``fake_fetch`` serves the committed ``tiny.fa.gz`` in place of
+    any download, the ``HEAD`` name check is stubbed, and ``LIULAB_DATA`` points the
+    assembly directory at a temp dir. The assembly is ``tiny``, which no shipped row
+    lists, so nothing is pinned for the fixture to disagree with.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _offline(
+        self,
+        fake_fetch: FakeFetch,
+        offline_prepare: None,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_fetch.serve("tiny.fa.gz")
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    def test_registers_and_reports_where_it_landed(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["register", "tiny"])
+
+        assert result.exit_code == 0
+        assert str(tmp_path / "genome" / "tiny") in result.stdout
+        assert _TINY_FA_SHA256 in result.stdout
+        assert (tmp_path / "genome" / "tiny" / "tiny.fa").is_file()
+
+    def test_json(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["register", "tiny", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["assembly"] == "tiny"
+        assert payload["directory"] == str(tmp_path / "genome" / "tiny")
+        assert payload["sha256"] == _TINY_FA_SHA256
+        assert sorted(payload["files"]) == [
+            "tiny.2bit",
+            "tiny.chrom.sizes",
+            "tiny.fa",
+            "tiny.fa.fai",
+        ]
+
+    def test_a_broken_directory_exits_non_zero_naming_the_repair(self, tmp_path: Path) -> None:
+        directory = tmp_path / "genome" / "tiny"
+        directory.mkdir(parents=True)
+        (directory / "tiny.fa").write_text("half a genome\n")
+
+        result = runner.invoke(app, ["register", "tiny"])
+
+        assert result.exit_code == 1
+        assert "genome register tiny --force" in _output(result)
+
+    def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
+        directory = tmp_path / "genome" / "tiny"
+        directory.mkdir(parents=True)
+        (directory / "tiny.fa").write_text("half a genome\n")
+
+        result = runner.invoke(app, ["register", "tiny", "--force", "--json"])
+
+        assert result.exit_code == 0
+        assert _json.loads(result.stdout)["sha256"] == _TINY_FA_SHA256
+
+    def test_registering_from_a_source_never_asks_ucsc(self, data_dir: Path) -> None:
+        result = runner.invoke(
+            app, ["register", "tiny", "--source", str(data_dir / "tiny.fa.gz"), "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert _json.loads(result.stdout)["source_url"] == str(data_dir / "tiny.fa.gz")
+
+
+class TestVerify:
+    """``genome verify`` — re-read a FASTA and check it against the official row."""
+
+    @pytest.fixture(autouse=True)
+    def _offline(
+        self,
+        fake_fetch: FakeFetch,
+        offline_prepare: None,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_fetch.serve("tiny.fa.gz")
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    def test_reports_the_digest_of_a_registered_assembly(self, tmp_path: Path) -> None:
+        assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
+
+        result = runner.invoke(app, ["verify", "tiny"])
+
+        assert result.exit_code == 0
+        assert _TINY_FA_SHA256 in result.stdout
+
+    def test_json(self) -> None:
+        assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
+
+        result = runner.invoke(app, ["verify", "tiny", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["sha256"] == _TINY_FA_SHA256
+        assert payload["expected"] is None  # no row lists "tiny"
+        assert payload["verified"] is False
+
+    def test_a_hand_copied_fasta_is_checkable_against_the_official_row(
+        self, data_dir: Path
+    ) -> None:
+        # sacCer3's row pins the real genome's digest; the fixture is a subsample of it,
+        # so this is the mismatch a copy from a bad mirror would produce.
+        result = runner.invoke(app, ["verify", "sacCer3", "--fasta", str(data_dir / "tiny.fa")])
+
+        assert result.exit_code == 1
+        assert "sha256 mismatch" in _output(result)
+
+    def test_nothing_registered_exits_non_zero_naming_the_command(self) -> None:
+        result = runner.invoke(app, ["verify", "tiny"])
+
+        assert result.exit_code == 1
+        assert "genome register tiny" in _output(result)
 
 
 class TestTableRow:
