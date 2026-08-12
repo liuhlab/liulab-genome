@@ -311,7 +311,9 @@ def build_record(
     ... )
     CompletionRecord(kind='genome', name='hg38', ...)
     """
-    from genome import __version__  # deferred: the package imports this module
+    # Deferred: the package root sets __version__ after importing Genome, which reaches
+    # this module, so importing the name at module level would be circular.
+    from genome import __version__
 
     return CompletionRecord(
         kind=kind,

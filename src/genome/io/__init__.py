@@ -9,6 +9,7 @@ in ``core``/``features``; this layer only moves bytes.
 from genome.io.completion import (
     CompletionRecord,
     FileDisagreement,
+    build_record,
     disagreements,
     read_record,
     write_record,
@@ -49,6 +50,7 @@ __all__ = [
     "annotation_dir",
     "assembly_data_dir",
     "assembly_table_row",
+    "build_record",
     "disagreements",
     "faidx",
     "fasta_to_2bit",

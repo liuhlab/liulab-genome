@@ -782,14 +782,17 @@ def assembly_table_row(
     those identifiers are ones only a person can supply.
 
     Only the FASTA is fetched: no ``.fai``, ``.2bit`` or ``chrom.sizes`` is built, so
-    this needs no native tools.
+    this needs no native tools. Nothing is registered either — both the download and its
+    unpacked form stay in the assembly's working area, so hashing a genome for the table
+    never leaves an unregistered FASTA among that assembly's own files, and re-running it
+    reuses what is already there.
 
     Parameters
     ----------
     assembly : str
         The assembly to fetch, e.g. ``"sacCer3"``.
     cache_dir : str or pathlib.Path, optional
-        Override where the FASTA is stored. Defaults to
+        Override which assembly directory the download works in. Defaults to
         :func:`assembly_data_dir(assembly) <assembly_data_dir>`.
     progressbar : bool, default True
         Show a download progress bar (requires ``tqdm``).
