@@ -92,10 +92,12 @@ class Genome(AlignerMixin):
         Paths to the prepared FASTA and its derived index/companion files.
     metadata : genome.metadata.AssemblyMetadata or None
         The assembly's metadata record — the one passed in, else the curated
-        table's row, else ``None`` for an assembly the table does not list. Its
-        fields are also read directly off the genome, as :attr:`assembly_name`,
-        :attr:`species`, :attr:`ucsc_name`, :attr:`ncbi_name`,
-        :attr:`ncbi_assembly_id` and :attr:`ncbi_taxid`.
+        table's row, else ``None`` for an assembly the table does not list. It is
+        also what says where this assembly's FASTA is fetched from and which
+        checksum it must match. Its fields are read directly off the genome too, as
+        :attr:`assembly_name`, :attr:`species`, :attr:`ucsc_name`,
+        :attr:`ncbi_name`, :attr:`ncbi_assembly_id`, :attr:`ncbi_taxid`,
+        :attr:`source_url` and :attr:`sha256`.
 
     Raises
     ------
