@@ -10,6 +10,25 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **Agent-facing documentation restructured.** `AGENTS.md` is now the router and `CLAUDE.md` is a
+  symlink to it — one canonical copy, no fork. It carries a nine-row table of non-negotiable rules
+  citing records by number, a "Where to read next" block, and a "Working here" section holding only
+  the quality bars a fresh contributor cannot re-derive. Terms move to `CONTEXT-MAP.md` (a ten-word
+  shared kernel) plus one glossary per bounded context under `docs/context/` — Sequence, Assembly,
+  Annotation, Index. Decisions move to `docs/adr/`. All three trees are excluded from the built site.
+- **The `1A. Working mode` ceremony is gone**, along with the `PreToolUse` hook in
+  `.claude/settings.json` that enforced it on every git command. Draft/finalize/documentation modes
+  and their two ledgers prescribed *when* the gates ran and mandated a fixed command sequence; the
+  gates themselves are unchanged and `pixi run check` is still what must pass. Removing it trades a
+  predictable ritual for letting a contributor find the shortest honest route to green — the reason
+  it earned no record is that reversing it is a revert, not a migration.
+- Claims that were false have been deleted rather than migrated: the repository-layout tree named
+  `core/` and `features/`, which do not exist; a "py312/313/314 matrix" naming a Python this project
+  never supported; "assume bgzipped + indexed" when `bgzip` appears nowhere in `src/`; and
+  "metadata is first-class — sample IDs travel with the data", which has no referent here and
+  contradicts a `DNA` deliberately carrying no assembly, region or strand. The same three deletions
+  were applied to `skills/genome/SKILL.md`, `docs/index.md` and the feature-request issue template,
+  which restated them.
 - `liulab_data_dir()` now probes `DEFAULT_LIULAB_DATA_PATHS` (e.g. `/share/liulab/liulab_data`)
   in order when `LIULAB_DATA` is unset, using the first existing path as the root, before
   falling back to `~/liulab_data`.

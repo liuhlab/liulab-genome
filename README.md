@@ -20,7 +20,7 @@ pixi shell              # activate the env
 pixi run check          # lint + fmt-check + typecheck + test (the CI gate)
 ```
 
-See [`CLAUDE.md`](./CLAUDE.md) for the full contributor/agent working agreement.
+See [`AGENTS.md`](./AGENTS.md) (`CLAUDE.md` symlinks to it) for the full contributor/agent working agreement.
 
 ## License
 
