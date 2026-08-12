@@ -16,8 +16,11 @@ import pytest
 
 import genome.genome as genome_mod
 from genome import DNA, Genome, Region
+from genome.io.completion import read_record
 from genome.io.fasta import prepare_fasta
 from genome.metadata import METADATA_FIELDS, AssemblyMetadata
+
+from .conftest import FakeFetch
 
 _REQUIRED = ("samtools", "faToTwoBit", "twoBitInfo")
 _TOOLS_PRESENT = all(shutil.which(t) is not None for t in _REQUIRED)
@@ -184,6 +187,31 @@ def test_assembly_absent_from_the_table_still_constructs(prepared_dir: Path) -> 
         assert g.metadata is None
         assert all(getattr(g, field) is None for field in METADATA_FIELDS)
         assert g.chromosomes == ["chrA", "chrB"]
+
+
+def test_registering_an_assembly_records_it_and_reopening_costs_no_fetch(
+    fake_fetch: FakeFetch, tmp_path: Path
+) -> None:
+    # The one end-to-end pass: a real download (from the fixture), the real native
+    # tools, and the record that says it finished. hg38's row pins a URL and no
+    # checksum, so it fetches cleanly offline with nothing to disagree with.
+    fake_fetch.serve("tiny.fa.gz")
+
+    with Genome("hg38", cache_dir=tmp_path, progressbar=False) as first:
+        assert first.chromosomes == ["chrI", "chrII", "chrIII"]
+        source_url, opening = first.source_url, first.fetch_sequence("chrI:0-4")
+
+    record = read_record(tmp_path)
+    assert record is not None
+    assert record.source_url == source_url
+    assert sorted(record.files) == ["hg38.2bit", "hg38.chrom.sizes", "hg38.fa", "hg38.fa.fai"]
+    assert all((tmp_path / name).stat().st_size == size for name, size in record.files.items())
+    assert list(tmp_path.rglob("*.gz")) == []  # the archive went with the working area
+
+    with Genome("hg38", cache_dir=tmp_path, progressbar=False) as again:
+        assert again.fetch_sequence("chrI:0-4") == opening
+
+    assert len(fake_fetch.calls) == 1  # the record answered; nothing was fetched twice
 
 
 def test_path_or_url_seeds_from_local_fasta(

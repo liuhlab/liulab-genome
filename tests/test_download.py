@@ -13,14 +13,18 @@ reads or fakes the shipped TSV; the table itself is tested in test_metadata.
 from __future__ import annotations
 
 import hashlib
+import shutil
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import pooch
 import pytest
 import requests
 
+from genome import __version__
 from genome.io import download as download_mod
+from genome.io.completion import read_record, record_path, work_dir
 from genome.io.download import (
     Downloader,
     UCSCGenomeDownloader,
@@ -29,7 +33,7 @@ from genome.io.download import (
     fetch_url,
     liulab_data_dir,
 )
-from genome.io.fasta import GenomeFiles
+from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.io.utils import ChecksumMismatchError, sha256_file
 from genome.metadata import AssemblyMetadata
 
@@ -97,13 +101,29 @@ def _row(*, source_url: str | None = None, sha256: str | None = None) -> Assembl
     )
 
 
+def _derive(fasta: Path) -> GenomeFiles:
+    """Write what a real preparation derives from ``fasta`` and return the whole set.
+
+    Stands in for the native tools: the three companion files exist and are named as
+    ``prepare_fasta`` names them, which is all a completion record is claiming.
+    """
+    files = GenomeFiles(
+        fasta=fasta,
+        fai=fasta.with_name(fasta.name + ".fai"),
+        twobit=fasta.with_name(fasta.stem + ".2bit"),
+        chrom_sizes=fasta.with_name(fasta.stem + ".chrom.sizes"),
+    )
+    for derived in (files.fai, files.twobit, files.chrom_sizes):
+        derived.write_text(f"derived from {fasta.name}\n")
+    return files
+
+
 @pytest.fixture
 def no_native_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub the FASTA preparation step so registration runs without native binaries."""
 
     def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
-        fasta = Path(fasta_path)
-        return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
+        return _derive(Path(fasta_path))
 
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
@@ -266,9 +286,12 @@ def test_fetch_fasta_decompresses_by_default(
     result = dl.fetch_fasta()
 
     assert fake_fetch.last.url == dl.fasta_url
-    # the compressed download is unpacked to <assembly>.fa beside it
-    assert result == tmp_path / "hg38.fa"
+    # Both the download and its unpacked form land in the working area, never among
+    # the assembly's own files: fetch_genome is what moves the FASTA into place.
+    assert result == work_dir(tmp_path) / "hg38.fa"
     assert result.read_text() == (data_dir / "tiny.fa").read_text()
+    assert (work_dir(tmp_path) / "hg38.fa.gz").is_file()
+    assert not (tmp_path / "hg38.fa").exists()
 
 
 def test_fetch_fasta_without_decompress_keeps_the_archive(
@@ -296,12 +319,7 @@ def test_fetch_genome_runs_full_pipeline(
         prepared["fasta"] = fasta_path
         prepared["overwrite"] = overwrite
         fasta = Path(fasta_path)
-        return GenomeFiles(
-            fasta=fasta,
-            fai=fasta.with_name(fasta.name + ".fai"),
-            twobit=fasta.with_name("hg38.2bit"),
-            chrom_sizes=fasta.with_name("hg38.chrom.sizes"),
-        )
+        return _derive(fasta)
 
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
@@ -327,8 +345,7 @@ def test_fetch_genome_forwards_overwrite(
 
     def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
         prepared["overwrite"] = overwrite
-        fasta = Path(fasta_path)
-        return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
+        return _derive(Path(fasta_path))
 
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
@@ -345,8 +362,7 @@ def test_fetch_genome_forwards_known_hash_and_decompresses(
 
     def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
         assert overwrite is False  # default: no forced regeneration
-        fasta = Path(fasta_path)
-        return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
+        return _derive(Path(fasta_path))
 
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
@@ -474,11 +490,13 @@ def test_a_blank_checksum_registers_and_reports_the_computed_value(
 
 
 def test_verify_fasta_defaults_to_the_assemblys_own_fasta(
-    fake_fetch: FakeFetch, tmp_path: Path
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
 ) -> None:
+    # Re-verifying an assembly means the FASTA it registered, in the assembly dir —
+    # not whatever a download left in the working area.
     fake_fetch.serve("tiny.fa.gz")
     dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL))
-    dl.fetch_fasta()
+    dl.fetch_genome()
 
     assert dl.verify_fasta() == _TINY_FA_SHA256
 
@@ -504,6 +522,159 @@ def test_table_row_leaves_a_new_assemblys_identifiers_blank(
     assert row["species"] is None  # only a person can supply this
     assert str(row["source_url"]).endswith("/newAsm/bigZips/newAsm.fa.gz")
     assert row["sha256"] == _TINY_FA_SHA256
+
+
+# --- the record a finished registration writes -------------------------------
+
+
+def test_a_finished_registration_writes_a_record_of_what_it_did(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL))
+
+    files = dl.fetch_genome()
+
+    record = read_record(tmp_path)
+    assert record is not None
+    assert (record.kind, record.name) == ("genome", "tiny")
+    assert record.source_url == _PINNED_URL
+    assert record.sha256 == _TINY_FA_SHA256
+    assert record.package_version == __version__
+    assert datetime.fromisoformat(record.completed_at).utcoffset() is not None
+    # every file it claims, with the size it is on disk, addressed relative to the
+    # assembly dir so the whole directory can be moved
+    assert record.files == {
+        "tiny.fa": files.fasta.stat().st_size,
+        "tiny.fa.fai": files.fai.stat().st_size,
+        "tiny.2bit": files.twobit.stat().st_size,
+        "tiny.chrom.sizes": files.chrom_sizes.stat().st_size,
+    }
+    assert set(record.tool_versions) <= set(PREPARATION_TOOLS)
+
+
+@pytest.mark.skipif(shutil.which("samtools") is None, reason="samtools not on PATH")
+def test_the_record_names_the_versions_of_the_tools_that_prepared_it(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+
+    UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row()).fetch_genome()
+
+    record = read_record(tmp_path)
+    assert record is not None
+    assert record.tool_versions["samtools"].startswith("samtools")
+
+
+def test_reopening_a_registered_assembly_reads_the_record_and_fetches_nothing(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL))
+    first = dl.fetch_genome()
+
+    again = UCSCGenomeDownloader(
+        "tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL)
+    ).fetch_genome()
+
+    assert again == first
+    assert len(fake_fetch.calls) == 1  # the record answered; nothing was fetched
+
+
+def test_the_archive_is_gone_once_the_record_is_written(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    # Every prepared assembly used to keep its plain-gzip download forever, which no
+    # external tool can even read in place.
+    fake_fetch.serve("tiny.fa.gz")
+
+    UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row()).fetch_genome()
+
+    assert list(tmp_path.rglob("*.gz")) == []
+    assert not work_dir(tmp_path).exists()
+
+
+def test_the_archive_stays_while_a_run_is_still_unfinished(
+    fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A preempted job must repair from what it already downloaded rather than pull a
+    # whole genome down again, so nothing is discarded until the record is written.
+    fake_fetch.serve("tiny.fa.gz")
+
+    def failing_prepare(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        raise RuntimeError("samtools fell over")
+
+    monkeypatch.setattr(download_mod, "prepare_fasta", failing_prepare)
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row())
+
+    with pytest.raises(RuntimeError, match="fell over"):
+        dl.fetch_genome()
+
+    assert (work_dir(tmp_path) / "tiny.fa.gz").is_file()
+    assert read_record(tmp_path) is None  # unfinished, so nothing claims to be finished
+
+
+def test_the_record_is_written_after_every_derived_file_exists(
+    fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    seen: dict[str, bool] = {}
+
+    def watching_prepare(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        seen["record_exists_during_preparation"] = record_path(tmp_path).exists()
+        return _derive(Path(fasta_path))
+
+    monkeypatch.setattr(download_mod, "prepare_fasta", watching_prepare)
+
+    UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row()).fetch_genome()
+
+    assert seen["record_exists_during_preparation"] is False
+    assert record_path(tmp_path).is_file()
+
+
+def test_a_record_that_disagrees_with_disk_is_not_a_finished_registration(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    # A file deleted after registration means "unfinished" here, exactly as the old
+    # marker's absence did — turning that into an error that names the repair is a
+    # separate piece of work.
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row())
+    files = dl.fetch_genome()
+    files.twobit.unlink()
+
+    dl.fetch_genome()
+
+    assert len(fake_fetch.calls) == 2  # registered again rather than trusted
+    assert files.twobit.is_file()
+
+
+def test_overwrite_registers_again_even_with_a_record_present(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row())
+    dl.fetch_genome()
+
+    dl.fetch_genome(overwrite=True)
+
+    assert len(fake_fetch.calls) == 2
+
+
+def test_seeding_from_a_local_fasta_records_where_it_came_from(
+    tmp_path: Path, data_dir: Path, no_native_prepare: None
+) -> None:
+    source = data_dir / "tiny.fa.gz"
+    cache = tmp_path / "cache"
+
+    UCSCGenomeDownloader("tiny", cache_dir=cache).fetch_genome_from(source)
+
+    record = read_record(cache)
+    assert record is not None
+    assert record.source_url == str(source)
+    assert record.sha256 == _TINY_FA_SHA256  # what arrived, recorded rather than compared
+    assert sorted(record.files) == ["tiny.2bit", "tiny.chrom.sizes", "tiny.fa", "tiny.fa.fai"]
+    assert not work_dir(cache).exists()
 
 
 # --- seeding from a user-provided FASTA (path_or_url) -----------------------
@@ -543,8 +714,9 @@ def test_materialize_fasta_decompresses_local_gz(tmp_path: Path, data_dir: Path)
 
     assert out == tmp_path / "cache" / "tiny.fa"
     assert out.read_text() == (data_dir / "tiny.fa").read_text()
-    # the compressed download is kept alongside the decompressed FASTA
-    assert (tmp_path / "cache" / "tiny.fa.gz").is_file()
+    # the compressed source stays in the working area, never beside the prepared FASTA
+    assert (work_dir(tmp_path / "cache") / "tiny.fa.gz").is_file()
+    assert not (tmp_path / "cache" / "tiny.fa.gz").exists()
 
 
 def test_materialize_fasta_missing_local_raises(tmp_path: Path) -> None:
@@ -584,8 +756,8 @@ def test_materialize_fasta_url_goes_through_the_fetch_step(
     assert out.read_text() == (data_dir / "tiny.fa").read_text()
     call = fake_fetch.last
     assert call.url == "https://example.org/whatever.fa"
-    assert call.dest_dir == tmp_path
-    assert call.fname == "tiny.fa"  # the download lands as <assembly>.fa
+    assert call.dest_dir == work_dir(tmp_path)  # downloaded into the working area...
+    assert call.fname == "tiny.fa"  # ...as <assembly>.fa, then moved into place
     assert call.progressbar is False
 
 
@@ -628,12 +800,13 @@ def test_fetch_genome_from_chains_materialize_and_prepare(
     ) -> Path:
         seen["source"] = source
         seen["overwrite"] = overwrite
-        return tmp_path / "tiny.fa"
+        fasta = tmp_path / "tiny.fa"
+        fasta.write_text(">chr1\nACGT\n")
+        return fasta
 
     def fake_prepare(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
         seen["prepared"] = fasta_path
-        fasta = Path(fasta_path)
-        return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
+        return _derive(Path(fasta_path))
 
     monkeypatch.setattr(UCSCGenomeDownloader, "_materialize_fasta", fake_materialize)
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare)

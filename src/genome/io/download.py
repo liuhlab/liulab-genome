@@ -12,6 +12,13 @@ after decompression rather than by pooch: pooch hashes the bytes it downloaded, 
 are the ``.fa.gz``, and gzip bytes change under recompression while the FASTA inside
 does not (ADR-0006).
 
+pooch is used as a downloader and nothing more — its own cache is deliberately not
+relied on. Downloads land in the assembly's working area, the unpacked FASTA is moved
+out of it, and the whole area is discarded once
+:class:`~genome.io.completion.CompletionRecord` says the registration finished. That
+record owns the judgment pooch's cache would otherwise make: what is already here, and
+whether it is usable.
+
 Examples
 --------
 >>> from genome.io.download import UCSCGenomeDownloader
@@ -32,7 +39,15 @@ from urllib.parse import urlparse
 import pooch
 import requests
 
-from genome.io.fasta import GenomeFiles, prepare_fasta
+from genome.io.completion import (
+    build_record,
+    clear_work_dir,
+    disagreements,
+    read_record,
+    work_dir,
+    write_record,
+)
+from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles, prepare_fasta
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import METADATA_FIELDS, AssemblyMetadata, lookup_assembly
 
@@ -48,11 +63,6 @@ DEFAULT_LIULAB_DATA_PATHS = [
     "/share/lhqlab/liulab_data",
     "/large_storage/zhoulab/hanliu/liulab_data",
 ]
-
-#: Sentinel file written in an assembly's cache dir once its FASTA pipeline
-#: (download/seed → faidx → 2bit → chrom.sizes) has completed successfully.
-#: Its presence lets repeat constructions skip fetching entirely.
-PREPARED_MARKER = ".genome_prepared"
 
 #: URL schemes a source may use, matching the downloaders pooch ships. Anything
 #: else is a local path (or an error, if it carries a scheme we cannot fetch).
@@ -350,12 +360,14 @@ class UCSCGenomeDownloader(Downloader):
         return f"{self.BASE_URL}/{self.assembly}/bigZips/{self.assembly}.fa.gz"
 
     @property
-    def prepared_marker(self) -> Path:
-        """Path to the FASTA-pipeline-done sentinel for this assembly.
+    def _work_dir(self) -> Path:
+        """The disposable working area this assembly downloads into.
 
-        See :data:`PREPARED_MARKER`. Lives directly in :attr:`cache_dir`.
+        Inside :attr:`cache_dir` on purpose: same filesystem, so placing the unpacked
+        FASTA is a rename rather than a copy, and it goes when the assembly does. See
+        :func:`~genome.io.completion.work_dir`.
         """
-        return self.cache_dir / PREPARED_MARKER
+        return work_dir(self.cache_dir)
 
     def _expected_genome_files(self) -> GenomeFiles:
         """Paths the FASTA pipeline produces for this assembly (whether or not they exist).
@@ -373,27 +385,55 @@ class UCSCGenomeDownloader(Downloader):
         )
 
     def _completed_genome(self, *, overwrite: bool) -> GenomeFiles | None:
-        """Return the cached GenomeFiles when the pipeline is already done, else ``None``.
+        """Return the prepared GenomeFiles when the record says so, else ``None``.
 
-        Skips short-circuiting when ``overwrite`` is set. Treats the
-        :attr:`prepared_marker` as authoritative, but still confirms every
-        derived file is present so a partially deleted cache falls through to a
-        fresh fetch instead of returning dangling paths.
+        The completion record is the only thing consulted: it must be there, and every
+        file it claims must be present at the size it claims. That is one ``stat`` per
+        file and no file contents, so reopening a prepared genome is instant. Anything
+        else — no record, or a record disagreeing with disk — reads as unfinished here
+        and falls through to a fresh registration, exactly as the absence of the old
+        marker did. ``overwrite`` skips the question entirely.
         """
-        if overwrite or not self.prepared_marker.is_file():
+        if overwrite:
             return None
-        files = self._expected_genome_files()
-        if all(p.is_file() for p in (files.fasta, files.fai, files.twobit, files.chrom_sizes)):
-            return files
-        return None
+        record = read_record(self.cache_dir)
+        if record is None or disagreements(self.cache_dir, record):
+            return None
+        return self._expected_genome_files()
 
-    def _mark_prepared(self) -> None:
-        """Write the :attr:`prepared_marker` flag recording a completed FASTA pipeline."""
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.prepared_marker.write_text(
-            f"FASTA pipeline complete for {self.assembly!r}.\n"
-            "Presence of this file makes Genome construction skip re-fetching.\n"
+    def _record_completion(
+        self, files: GenomeFiles, *, source_url: str | None, sha256: str | None
+    ) -> None:
+        """Write this assembly's completion record, then discard the working area.
+
+        Called last, once every derived file exists — writing the record is what makes
+        the registration finished, and the archive is only disposable after that. An
+        interrupted run therefore leaves its download in place and repairs without
+        fetching a whole genome again.
+        """
+        record = build_record(
+            self.cache_dir,
+            kind="genome",
+            name=self.assembly,
+            files=[files.fasta, files.fai, files.twobit, files.chrom_sizes],
+            source_url=source_url,
+            sha256=sha256,
+            tools=PREPARATION_TOOLS,
         )
+        write_record(self.cache_dir, record)
+        clear_work_dir(self.cache_dir)
+
+    def _place_fasta(self, unpacked: Path) -> Path:
+        """Move ``unpacked`` out of the working area to ``<assembly>.fa`` and return it.
+
+        A rename within one filesystem, since the working area sits inside
+        :attr:`cache_dir` — no second copy of a whole genome is ever made.
+        """
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        fasta = self._expected_genome_files().fasta
+        if unpacked.resolve() != fasta.resolve():
+            unpacked.replace(fasta)
+        return fasta
 
     def validate_assembly(self, *, timeout: float = 30.0) -> None:
         """Check that ``assembly`` is a real golden-path directory at UCSC.
@@ -482,7 +522,12 @@ class UCSCGenomeDownloader(Downloader):
         decompress: bool = True,
         progressbar: bool = True,
     ) -> Path:
-        """Download (and optionally decompress) the genome FASTA.
+        """Download (and optionally decompress) the genome FASTA into the working area.
+
+        Both files land in the assembly's working area rather than beside its prepared
+        files: nothing there is claimed by a completion record, and the whole area is
+        discarded once one is written. :meth:`fetch_genome` is what moves the unpacked
+        FASTA out of it.
 
         When the URL had to be derived from the assembly name, the assembly is first
         confirmed to exist at UCSC via :meth:`validate_assembly`, so a typo fails fast
@@ -506,8 +551,10 @@ class UCSCGenomeDownloader(Downloader):
         Returns
         -------
         pathlib.Path
-            Path to the decompressed ``<assembly>.fa`` (or the ``.fa.gz`` when
-            ``decompress=False``).
+            Path **inside the working area** to the decompressed ``<assembly>.fa`` (or
+            to the ``<assembly>.fa.gz`` when ``decompress=False``). The archive is kept
+            there for the duration of the run, so an interrupted registration repairs
+            without downloading a whole genome again.
 
         Raises
         ------
@@ -519,9 +566,13 @@ class UCSCGenomeDownloader(Downloader):
         processor: _Processor | None = (
             pooch.Decompress(method="gzip", name=f"{self.assembly}.fa") if decompress else None
         )
-        return self.fetch(
+        # The archive is named after the assembly, not after the URL: a pinned source
+        # need not be UCSC, so its file name says nothing about which assembly this is.
+        return fetch_url(
             self.fasta_url,
+            self._work_dir,
             known_hash=known_hash,
+            fname=f"{self.assembly}.fa.gz",
             processor=processor,
             progressbar=progressbar,
         )
@@ -537,12 +588,18 @@ class UCSCGenomeDownloader(Downloader):
 
         Chains :meth:`fetch_fasta`, :meth:`verify_fasta` and
         :func:`genome.io.fasta.prepare_fasta`: download ``<assembly>.fa.gz`` from the
-        assembly's source, decompress it, check the unpacked FASTA against the sha256
-        its metadata pins, then build the ``.fai`` index, ``.2bit`` encoding, and
-        ``.chrom.sizes``. All outputs land in :attr:`cache_dir`
-        (``<LIULAB_DATA>/genome/<assembly>/`` by default), co-located with the kept
-        ``.fa.gz`` download. Every step is cached; pass ``overwrite=True`` to force the
-        preparation steps to rerun.
+        assembly's source into the working area, decompress it, check the unpacked FASTA
+        against the sha256 its metadata pins, move it to :attr:`cache_dir`, then build
+        the ``.fai`` index, ``.2bit`` encoding, and ``.chrom.sizes`` beside it
+        (``<LIULAB_DATA>/genome/<assembly>/`` by default).
+
+        A completion record is written last, once all four files exist, holding the URL
+        fetched, the digest computed, every file with its size, the tool versions, the
+        package version and the time. That record is what makes a later call cheap: it
+        is read, its claims are checked against disk by size alone, and nothing is
+        fetched. The archive is deleted with the rest of the working area at that point
+        — and only then, so an interrupted run still repairs from it. Pass
+        ``overwrite=True`` to register again from scratch.
 
         Parameters
         ----------
@@ -554,9 +611,10 @@ class UCSCGenomeDownloader(Downloader):
         progressbar : bool, default True
             Show a download progress bar (requires ``tqdm``).
         overwrite : bool, default False
-            Force the preparation steps (faidx, 2bit, chrom.sizes) to rerun even
-            when their outputs look fresh. The pooch download/decompression cache is
-            unaffected.
+            Register again from scratch: the assembly's completion record is not
+            consulted, and the preparation steps (faidx, 2bit, chrom.sizes) rerun even
+            when their outputs look fresh. An archive still sitting in the working area
+            is reused rather than downloaded again.
 
         Returns
         -------
@@ -587,14 +645,18 @@ class UCSCGenomeDownloader(Downloader):
         cached = self._completed_genome(overwrite=overwrite)
         if cached is not None:
             return cached
-        fasta = self.fetch_fasta(
+        downloaded = self.fetch_fasta(
             known_hash=known_hash,
             decompress=True,
             progressbar=progressbar,
         )
-        self.verify_fasta(fasta)
+        # Checked before it is placed, so a FASTA that is not the pinned one never
+        # reaches the assembly dir; recorded from here, so a whole genome is not
+        # hashed a second time just to write the record.
+        digest = self.verify_fasta(downloaded)
+        fasta = self._place_fasta(downloaded)
         files = prepare_fasta(fasta, overwrite=overwrite)
-        self._mark_prepared()
+        self._record_completion(files, source_url=self.fasta_url, sha256=digest)
         return files
 
     def fetch_genome_from(
@@ -609,13 +671,15 @@ class UCSCGenomeDownloader(Downloader):
         Use this to seed an assembly from a file you already have or a non-UCSC
         URL — handy when the UCSC golden path is unreachable (firewall/proxy) or
         for a custom reference. ``source`` is either a **local filesystem path**
-        (copied into :attr:`cache_dir`) or a **URL** (fetched with
+        (copied into the working area) or a **URL** (fetched with
         :func:`fetch_url`, so http(s), ftp and sftp all work). Gzipped sources
         (``.gz``) are decompressed. The resulting ``<assembly>.fa`` is then
-        indexed/2bit/chrom.sizes-prepared exactly as :meth:`fetch_genome` does.
-        UCSC is never contacted. Neither is the metadata row's pinned source or
-        checksum: a seeded FASTA is whatever the caller handed over, and the assembly
-        name is only a label for the directory it lands in.
+        indexed/2bit/chrom.sizes-prepared exactly as :meth:`fetch_genome` does, and a
+        completion record is written last, recording the source it was given and the
+        digest of what arrived. UCSC is never contacted. Neither is the metadata row's
+        pinned source or checksum: a seeded FASTA is whatever the caller handed over —
+        it is recorded, never compared — and the assembly name is only a label for the
+        directory it lands in.
 
         Parameters
         ----------
@@ -625,8 +689,8 @@ class UCSCGenomeDownloader(Downloader):
             Show a download progress bar while fetching a URL (ignored for a
             local copy).
         overwrite : bool, default False
-            Re-fetch the source and rerun preparation even when a fresh
-            ``<assembly>.fa`` is already cached.
+            Re-read the source and rerun preparation even when this assembly's
+            completion record already says it is registered.
 
         Returns
         -------
@@ -649,7 +713,7 @@ class UCSCGenomeDownloader(Downloader):
             return cached
         fasta = self._materialize_fasta(source, progressbar=progressbar, overwrite=overwrite)
         files = prepare_fasta(fasta, overwrite=overwrite)
-        self._mark_prepared()
+        self._record_completion(files, source_url=str(source), sha256=sha256_file(fasta))
         return files
 
     def _materialize_fasta(
@@ -659,27 +723,28 @@ class UCSCGenomeDownloader(Downloader):
         progressbar: bool = True,
         overwrite: bool = False,
     ) -> Path:
-        """Place ``source`` into the cache as ``<assembly>.fa`` and return that path.
+        """Place ``source`` at ``<assembly>.fa`` in :attr:`cache_dir` and return that path.
 
-        Copies a local file or fetches a URL through :func:`fetch_url`, decompressing a
-        ``.gz`` source. A fresh existing ``<assembly>.fa`` is reused unless
-        ``overwrite``, which also discards any kept download so the source is read
-        again rather than reused.
+        Copies a local file or fetches a URL through :func:`fetch_url` into the working
+        area, decompresses a ``.gz`` source there, then moves the FASTA into place. A
+        fresh existing ``<assembly>.fa`` is reused unless ``overwrite``, which also
+        discards any kept download so the source is read again rather than reused.
         """
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        fasta = self.cache_dir / f"{self.assembly}.fa"
+        fasta = self._expected_genome_files().fasta
         if fasta.is_file() and not overwrite:
             return fasta
 
+        work = self._work_dir
+        work.mkdir(parents=True, exist_ok=True)
         src = str(source)
         gzipped = src.endswith(".gz")
         name = f"{self.assembly}.fa.gz" if gzipped else f"{self.assembly}.fa"
-        downloaded = self.cache_dir / name
+        downloaded = work / name
 
         if _looks_like_url(src):
             if overwrite:
                 downloaded.unlink(missing_ok=True)
-            fetch_url(src, self.cache_dir, fname=name, progressbar=progressbar)
+            fetch_url(src, work, fname=name, progressbar=progressbar)
         else:
             local_source = Path(src).expanduser()
             if not local_source.is_file():
@@ -694,12 +759,11 @@ class UCSCGenomeDownloader(Downloader):
                     f"local FASTA source not found: {local_source}. Pass an existing "
                     f"file path or an http(s)/ftp/sftp URL."
                 )
-            if local_source.resolve() != downloaded.resolve():
-                shutil.copy2(local_source, downloaded)
+            shutil.copy2(local_source, downloaded)
 
         if gzipped:
-            _gunzip(downloaded, fasta)
-        return fasta
+            downloaded = _gunzip(downloaded, work / f"{self.assembly}.fa")
+        return self._place_fasta(downloaded)
 
 
 def assembly_table_row(
