@@ -224,6 +224,7 @@ class Genome(AlignerMixin):
         force: bool = False,
         progressbar: bool = True,
         metadata: AnnotationMetadata | None = None,
+        check_chromosomes: bool = True,
         disable_infer_genes: bool = True,
         disable_infer_transcripts: bool = True,
     ) -> GtfAnnotation:
@@ -231,9 +232,10 @@ class Genome(AlignerMixin):
 
         Naming it is enough: the curated annotation table says where the GTF comes
         from and what it must hash to. It is fetched, verified against that digest,
-        placed under ``<assembly dir>/gtf/<name>/``, built into a gffutils database
-        and recorded. If no default GTF is set and this becomes the only annotation,
-        it is adopted as :attr:`default_gtf`.
+        checked against this assembly's chromosome names, placed under
+        ``<assembly dir>/gtf/<name>/``, built into a gffutils database and recorded. If
+        no default GTF is set and this becomes the only annotation, it is adopted as
+        :attr:`default_gtf`.
 
         One that is already registered is returned silently — nothing is fetched and
         nothing is rebuilt — while a directory that cannot be trusted raises and names
@@ -251,6 +253,10 @@ class Genome(AlignerMixin):
             A complete annotation record, used *instead of* the curated table's row for
             ``name`` — the same all-or-nothing override the constructor takes for the
             assembly's own metadata.
+        check_chromosomes : bool, default True
+            Refuse a GTF naming sequences this assembly does not carry, before paying
+            for the database build. Pass ``False`` to register one whose mismatch you
+            have inspected and accept.
         disable_infer_genes : bool, default True
             Do not reconstruct ``gene`` features from exon lines.
         disable_infer_transcripts : bool, default True
@@ -265,6 +271,8 @@ class Genome(AlignerMixin):
         ------
         ValueError
             If the table lists no annotation ``name`` for this assembly.
+        genome.io.gtf.ChromosomeMismatchError
+            If the GTF names sequences this assembly does not carry.
         genome.io.utils.ChecksumMismatchError
             If the fetched GTF is not the digest the row pins.
         genome.io.completion.RegistrationError
@@ -284,6 +292,7 @@ class Genome(AlignerMixin):
                 force=force,
                 progressbar=progressbar,
                 metadata=metadata,
+                check_chromosomes=check_chromosomes,
                 disable_infer_genes=disable_infer_genes,
                 disable_infer_transcripts=disable_infer_transcripts,
             )
@@ -295,17 +304,21 @@ class Genome(AlignerMixin):
         name: str,
         *,
         force: bool = False,
+        check_chromosomes: bool = True,
         disable_infer_genes: bool = True,
         disable_infer_transcripts: bool = True,
     ) -> GtfAnnotation:
         """Register the GTF at ``gtf`` under ``name`` and build its gffutils database.
 
         The escape hatch for an annotation the curated table does not list —
-        :meth:`register_annotation` is the way in for one it does. The GTF is placed
-        under ``<assembly dir>/gtf/<name>/`` (a gzipped ``.gz`` source is decompressed
-        automatically), a gffutils database is built beside it, and the record that says
-        so is written last. If no default GTF is set and this becomes the only
-        annotation, it is adopted as :attr:`default_gtf`.
+        :meth:`register_annotation` is the way in for one it does. Its chromosome names
+        are checked against this genome's own before anything is created, the GTF is
+        placed under ``<assembly dir>/gtf/<name>/`` (a gzipped ``.gz`` source is
+        decompressed automatically), a gffutils database is built beside it, and the
+        record that says so is written last. If no default GTF is set and this becomes
+        the only annotation, it is adopted as :attr:`default_gtf`. ``check_chromosomes``
+        is as it is on :meth:`register_annotation`; see
+        :func:`~genome.io.gtf.register_gtf` for the rest.
         """
         return self._adopt(
             register_gtf(
@@ -313,6 +326,8 @@ class Genome(AlignerMixin):
                 gtf,
                 name,
                 force=force,
+                chrom_sizes=self.chrom_sizes_path,
+                check_chromosomes=check_chromosomes,
                 disable_infer_genes=disable_infer_genes,
                 disable_infer_transcripts=disable_infer_transcripts,
             )

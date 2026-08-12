@@ -249,7 +249,11 @@ def test_registering_an_annotation_by_name_adopts_it_and_survives_reopening(
 
     with Genome("tiny", cache_dir=prepared_dir) as g:
         assert g.annotations == []
-        annotation = g.register_annotation("ensgene_v101", progressbar=False, metadata=_ANNOTATION)
+        # The fixture assembly is chrA/chrB while the committed GTF is chrI to chrIII, so
+        # the chromosome check is stood down here; it has its own tests in test_gtf.
+        annotation = g.register_annotation(
+            "ensgene_v101", progressbar=False, metadata=_ANNOTATION, check_chromosomes=False
+        )
         assert g.annotations == ["ensgene_v101"]
         assert g.default_gtf == "ensgene_v101"
         assert g.default_gtf_path == annotation.gtf

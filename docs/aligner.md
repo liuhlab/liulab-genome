@@ -27,7 +27,8 @@ g.build_chromap_index()                                 # chromap needs no annot
 A genome can carry several annotations (GENCODE, Ensembl, RefSeq, …), each under
 a unique `name`. The shipped annotation table lists which ones the lab supports
 for each assembly, so naming one is enough: it is fetched from the URL that table
-pins, its unpacked GTF is checked against the pinned sha256, and a
+pins, its unpacked GTF is checked against the pinned sha256 and against the
+assembly's chromosome names, and a
 [gffutils](https://gffutils.readthedocs.io/) database is built beside it.
 
 ```python
@@ -68,6 +69,63 @@ A few things to know:
   declare `gene`/`transcript` features, and inferring them is the classic
   gffutils slow path. Enable it (`disable_infer_genes=False`) only for a bare
   exon-level GTF that lacks those records.
+
+### The chromosome names have to match
+
+An annotation and its assembly are one unit or they are nothing, so every
+sequence the GTF names must be one the assembly's `chrom.sizes` carries.
+Registering an Ensembl-spelled GTF (`1`, `2`, `MT`) against a UCSC-spelled
+assembly (`chr1`, `chr2`, `chrM`) would otherwise build an annotation where every
+feature sits on a sequence the assembly has never heard of — nothing lines up,
+nothing complains, and every query answers nothing while looking healthy.
+
+```python
+g.register_annotation("gencode_v44")
+# ChromosomeMismatchError: the GTF for 'gencode_v44' names 25 chromosomes the
+# assembly does not carry: 1, 10, 11, 12, 13, 14, 15, 16, 17, 18 (and 15 more).
+# An annotation and its assembly must spell chromosomes the same way, and the
+# usual cause is a UCSC-versus-Ensembl mismatch ('chr1' against '1', 'chrM'
+# against 'MtDNA'). The assembly carries: chr1, chr10, ... Register the
+# annotation built for this assembly, or pass check_chromosomes=False to
+# register this one anyway.
+```
+
+Three things about it are deliberate:
+
+- **It is strict in one direction only.** The GTF's names must be among the
+  assembly's; the reverse is not required. An assembly carrying scaffolds,
+  patches or alt contigs the annotation never mentions is completely normal and
+  is not an error.
+- **It runs before the database build**, on a GTF still in the working area, so
+  a mismatch costs one streaming pass over the file rather than the many minutes
+  the gffutils build takes — and leaves the annotation directory exactly as it
+  found it, so the next call reports the same problem rather than an interrupted
+  registration. The GTF is streamed, never loaded: a GENCODE GTF is well over a
+  gigabyte unpacked.
+- **The override is `check_chromosomes=False`**, on `register_annotation`,
+  `register_gtf` and their module-level forms. It is for the case where you have
+  looked at the mismatch and accept it — one unusual contig should not block a
+  legitimate annotation:
+
+```python
+g.register_annotation("gencode_v44", check_chromosomes=False)
+```
+
+Whether the names were actually checked is recorded, so you can tell months
+later:
+
+```python
+import json
+record = json.loads((g.get_gtf_path("gencode_v44").parent / ".completion.json").read_text())
+record["details"]["chromosomes_checked"]      # True when they were checked
+```
+
+That flag is `False` for the override, and also when there was nothing to check
+against — registering an annotation for an assembly that has not been prepared
+yet means no `chrom.sizes` exists to compare with. `register_gtf` at module level
+is given no assembly name and so cannot find that file on its own: pass
+`chrom_sizes=<path>` to have the names checked, which is what `Genome.register_gtf`
+does for you.
 
 ### The default annotation
 

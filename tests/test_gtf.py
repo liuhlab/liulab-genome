@@ -18,6 +18,8 @@ from pathlib import Path
 
 import gffutils
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from genome.io.completion import (
     RegistrationMismatchError,
@@ -27,6 +29,8 @@ from genome.io.completion import (
     work_dir,
 )
 from genome.io.gtf import (
+    ChromosomeMismatchError,
+    _reject_unknown_chromosomes,
     annotation_dir,
     fetch_annotation,
     list_annotations,
@@ -72,6 +76,14 @@ def _row(*, url: str = _PINNED_URL, sha256: str | None = None) -> AnnotationMeta
         sha256=sha256,
         default=True,
     )
+
+
+def _write_chrom_sizes(assembly_dir: Path, *names: str, assembly: str = "tiny") -> Path:
+    """Write ``<assembly>.chrom.sizes`` naming ``names``, where an assembly's own sits."""
+    assembly_dir.mkdir(parents=True, exist_ok=True)
+    path = assembly_dir / f"{assembly}.chrom.sizes"
+    path.write_text("".join(f"{name}\t10000\n" for name in names))
+    return path
 
 
 class TestRegisterByPath:
@@ -340,6 +352,212 @@ class TestListAnnotations:
         assert list_annotations(tmp_path) == {}
 
 
+class TestChromosomeNames:
+    """A GTF's sequence names must be the assembly's, and are checked before the build.
+
+    The mismatch case is the committed ``ensembl_style.gtf`` — ``tiny.gtf``'s own 85
+    features with the ``chr`` prefix stripped — against a ``chrI``/``chrII``/``chrIII``
+    assembly: the UCSC-versus-Ensembl case in real bytes.
+    """
+
+    #: How the fixture assembly spells its three sequences.
+    _UCSC = ("chrI", "chrII", "chrIII")
+
+    def test_an_ensembl_spelled_gtf_is_refused_naming_every_offender(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
+
+        with pytest.raises(ChromosomeMismatchError) as excinfo:
+            register_gtf(tmp_path, data_dir / "ensembl_style.gtf", _NAME, chrom_sizes=sizes)
+
+        assert excinfo.value.missing == ("I", "II", "III")
+        message = str(excinfo.value)
+        assert "I, II, III" in message
+        assert "chrI" in message  # what the assembly spells them as
+        assert "check_chromosomes=False" in message
+
+    def test_a_refused_gtf_costs_neither_a_database_nor_a_directory(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # The check runs before the build, and before anything is placed: the annotation
+        # directory is left exactly as it was found.
+        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
+
+        with pytest.raises(ChromosomeMismatchError):
+            register_gtf(tmp_path, data_dir / "ensembl_style.gtf", _NAME, chrom_sizes=sizes)
+
+        assert not annotation_dir(tmp_path, _NAME).exists()
+        assert list(tmp_path.rglob("*.db")) == []
+
+    def test_refused_by_name_it_stays_refused_rather_than_reading_as_interrupted(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        fake_fetch.serve("ensembl_style.gtf")
+        _write_chrom_sizes(tmp_path, *self._UCSC)
+        row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
+
+        with pytest.raises(ChromosomeMismatchError):
+            fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+
+        directory = annotation_dir(tmp_path, _NAME)
+        assert not (directory / f"{_NAME}.gtf").exists()  # never placed
+        assert list(tmp_path.rglob("*.db")) == []  # never paid for the build
+        assert read_record(directory) is None
+
+        # Running it again reports the same problem, not an interrupted registration.
+        with pytest.raises(ChromosomeMismatchError):
+            fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+
+    def test_sequences_the_annotation_never_mentions_are_not_an_error(self, tmp_path: Path) -> None:
+        # Strict one way only: the GTF names chrI alone, the assembly carries five.
+        sizes = _write_chrom_sizes(tmp_path, *self._UCSC, "chrM", "scaffold_17")
+        source = tmp_path / "one-chromosome.gtf"
+        source.write_text(_GTF)
+
+        annotation = register_gtf(tmp_path, source, "WS298", chrom_sizes=sizes)
+
+        assert annotation.db.is_file()
+        record = read_record(annotation_dir(tmp_path, "WS298"))
+        assert record is not None
+        assert record.details["chromosomes_checked"] is True
+
+    def test_a_gzipped_source_is_checked_without_being_unpacked_first(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        source = tmp_path / "ensembl_style.gtf.gz"
+        with gzip.open(source, "wt") as handle:
+            handle.write((data_dir / "ensembl_style.gtf").read_text())
+        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
+
+        with pytest.raises(ChromosomeMismatchError):
+            register_gtf(tmp_path, source, _NAME, chrom_sizes=sizes)
+
+        assert not annotation_dir(tmp_path, _NAME).exists()
+
+    def test_a_wholesale_mismatch_lists_ten_names_and_counts_the_rest(self, tmp_path: Path) -> None:
+        offenders = [f"scaffold_{n}" for n in range(25)]
+        source = tmp_path / "many.gtf"
+        source.write_text(
+            "".join(f'{name}\ttest\texon\t1\t100\t.\t+\t.\tgene_id "g1";\n' for name in offenders)
+        )
+        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
+
+        with pytest.raises(ChromosomeMismatchError) as excinfo:
+            register_gtf(tmp_path, source, _NAME, chrom_sizes=sizes)
+
+        assert len(excinfo.value.missing) == 25  # every one of them is on the exception
+        assert "(and 15 more)" in str(excinfo.value)  # ten of them are in the message
+
+    def test_comment_lines_are_not_taken_for_chromosomes(self, tmp_path: Path) -> None:
+        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
+        source = tmp_path / "commented.gtf"
+        source.write_text("##description: a header\n#!genome-build tiny\n" + _GTF)
+
+        assert register_gtf(tmp_path, source, "WS298", chrom_sizes=sizes).db.is_file()
+
+    def test_the_override_registers_a_mismatched_gtf_anyway(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
+
+        annotation = register_gtf(
+            tmp_path,
+            data_dir / "ensembl_style.gtf",
+            _NAME,
+            chrom_sizes=sizes,
+            check_chromosomes=False,
+        )
+
+        database = gffutils.FeatureDB(str(annotation.db))
+        try:
+            assert {feature.seqid for feature in database.features_of_type("transcript")} == {
+                "I",
+                "II",
+                "III",
+            }
+        finally:
+            database.conn.close()
+        record = read_record(annotation_dir(tmp_path, _NAME))
+        assert record is not None
+        assert record.details["chromosomes_checked"] is False
+
+    def test_the_override_registers_by_name_too(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        fake_fetch.serve("ensembl_style.gtf")
+        _write_chrom_sizes(tmp_path, *self._UCSC)
+        row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
+
+        annotation = fetch_annotation(
+            tmp_path, "tiny", _NAME, progressbar=False, metadata=row, check_chromosomes=False
+        )
+
+        assert annotation.db.is_file()
+        record = read_record(annotation_dir(tmp_path, _NAME))
+        assert record is not None
+        assert record.details["chromosomes_checked"] is False
+
+    def test_a_matching_gtf_registered_by_name_records_that_it_was_checked(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        fake_fetch.serve("tiny.gtf.gz")
+        _write_chrom_sizes(tmp_path, *self._UCSC)
+
+        fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
+
+        record = read_record(annotation_dir(tmp_path, _NAME))
+        assert record is not None
+        assert record.details["chromosomes_checked"] is True
+
+    def test_without_a_chrom_sizes_there_is_nothing_to_check_and_the_record_says_so(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        # An annotation registered before its assembly was prepared: no chrom.sizes
+        # exists, so the names cannot be checked. The record says they were not.
+        fake_fetch.serve("ensembl_style.gtf")
+        row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
+
+        annotation = fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+
+        assert annotation.db.is_file()
+        record = read_record(annotation_dir(tmp_path, _NAME))
+        assert record is not None
+        assert record.details["chromosomes_checked"] is False
+
+
+@pytest.fixture(scope="session")
+def gtf_scratch(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A reusable GTF path for the property test (session-scoped: hypothesis-safe)."""
+    return tmp_path_factory.mktemp("chromosomes") / "generated.gtf"
+
+
+#: Sequence names that look like the ones references actually use, kept free of
+#: whitespace so every generated line is a well-formed GTF record.
+_chrom_name = st.text(alphabet="chrIVXM_.0123456789", min_size=1, max_size=12)
+
+
+@given(
+    in_gtf=st.lists(_chrom_name, max_size=8),
+    in_assembly=st.lists(_chrom_name, max_size=8),
+)
+def test_the_check_names_every_offender_never_a_subset(
+    gtf_scratch: Path, in_gtf: list[str], in_assembly: list[str]
+) -> None:
+    gtf_scratch.write_text(
+        "".join(f'{name}\ttest\texon\t1\t100\t.\t+\t.\tgene_id "g1";\n' for name in in_gtf)
+    )
+    known = frozenset(in_assembly)
+    missing = set(in_gtf) - known
+
+    if not missing:
+        _reject_unknown_chromosomes(gtf_scratch, known, name=_NAME)
+        return
+    with pytest.raises(ChromosomeMismatchError) as excinfo:
+        _reject_unknown_chromosomes(gtf_scratch, known, name=_NAME)
+    assert excinfo.value.missing == tuple(sorted(missing))
+
+
 class TestRegisterAnnotation:
     """``register_annotation`` — the same by assembly name, answering with the record."""
 
@@ -365,6 +583,32 @@ class TestRegisterAnnotation:
         directory = annotation_dir(tmp_path, _NAME)
         assert payload["files"] == {
             name: (directory / name).stat().st_size for name in (f"{_NAME}.gtf", f"{_NAME}.db")
+        }
+
+    def test_the_chromosome_check_reaches_this_way_in_too(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        fake_fetch.serve("ensembl_style.gtf")
+        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
+        row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
+
+        with pytest.raises(ChromosomeMismatchError):
+            register_annotation("tiny", _NAME, cache_dir=tmp_path, progressbar=False, metadata=row)
+
+        payload = register_annotation(
+            "tiny",
+            _NAME,
+            cache_dir=tmp_path,
+            progressbar=False,
+            metadata=row,
+            check_chromosomes=False,
+        )
+
+        assert payload["details"] == {
+            "provider": "UCSC",
+            "version": "ensGene.v101",
+            "gffutils_version": gffutils.__version__,
+            "chromosomes_checked": False,
         }
 
     def test_it_files_the_annotation_under_the_assembly_data_dir(

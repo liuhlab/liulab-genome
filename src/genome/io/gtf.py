@@ -17,6 +17,15 @@ the sha256 the row pins (ADR-0006), builds the database and writes the record;
 record itself, and is what the CLI drives. :func:`register_gtf` takes a **path** instead
 and is the escape hatch for a GTF no row lists.
 
+**A GTF belongs to its assembly or to nothing.** Either way in checks that every
+**Chromosome** the GTF names is one the assembly's ``chrom.sizes`` carries, and raises
+:class:`ChromosomeMismatchError` when it is not — the Ensembl-versus-UCSC spelling
+(``1`` against ``chr1``) is what this catches, and an annotation whose every feature sits
+on a sequence the assembly never heard of is worse than no annotation at all. The check
+is strict one way only, since an assembly may carry scaffolds the annotation never
+mentions; it streams the GTF; and it runs *before* the database build and before the GTF
+is placed, so a mismatch costs seconds and leaves nothing behind.
+
 **A record is the only thing that says an annotation is registered.** A database file's
 mere existence never is — a `gffutils` build killed half-way leaves a partial database
 that answers queries with most of the genes missing, which is exactly what the
@@ -35,10 +44,12 @@ Examples
 
 from __future__ import annotations
 
+import gzip
 import shutil
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
 import gffutils
 import pooch
@@ -55,11 +66,69 @@ from genome.io.completion import (
     work_dir,
     write_record,
 )
+from genome.io.fasta import read_chrom_sizes
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import AnnotationMetadata, list_annotation_metadata, lookup_annotation
 
 #: Subdirectory under an assembly's data dir holding all its GTF annotations.
 _GTF_SUBDIR = "gtf"
+
+#: How many names an error lists before saying how many it left out. A whole-genome
+#: mismatch offends in the thousands, and a message that long is one nobody reads.
+_MAX_LISTED_NAMES = 10
+
+
+class ChromosomeMismatchError(ValueError):
+    """A GTF names **Chromosome**s its assembly does not carry, so the two do not line up.
+
+    Registering it would build an annotation where nothing matches: every feature would
+    sit on a sequence the assembly has never heard of, and every query over it would
+    answer nothing while looking perfectly healthy. The usual cause is a spelling
+    difference rather than a wrong file, so the message says which one out loud and
+    names the argument that registers it anyway.
+
+    The check behind it is strict in one direction only. An assembly carrying scaffolds
+    the annotation never mentions is normal and is not this.
+
+    Parameters
+    ----------
+    name : str
+        The **Registered name** the annotation was being registered under.
+    missing : iterable of str
+        Every name the GTF uses that the assembly's ``chrom.sizes`` does not list.
+    known : iterable of str
+        The names the assembly does carry, for the message to contrast against.
+
+    Attributes
+    ----------
+    name : str
+        The registered name.
+    missing : tuple of str
+        **Every** offending name, sorted — the message lists at most ten of them and
+        counts the rest, this is the whole set.
+    known : tuple of str
+        The names the assembly carries, as they were passed in.
+
+    Examples
+    --------
+    >>> raise ChromosomeMismatchError("gencode_v44", ["1", "2"], ["chr1", "chr2"])
+    Traceback (most recent call last):
+    genome.io.gtf.ChromosomeMismatchError: the GTF for 'gencode_v44' names 2 ...
+    """
+
+    def __init__(self, name: str, missing: Iterable[str], known: Iterable[str]) -> None:
+        self.name = name
+        self.missing: tuple[str, ...] = tuple(sorted(missing))
+        self.known: tuple[str, ...] = tuple(known)
+        count = len(self.missing)
+        super().__init__(
+            f"the GTF for {name!r} names {count} chromosome{'' if count == 1 else 's'} the "
+            f"assembly does not carry: {_elide(self.missing)}. An annotation and its assembly "
+            f"must spell chromosomes the same way, and the usual cause is a UCSC-versus-Ensembl "
+            f"mismatch ('chr1' against '1', 'chrM' against 'MtDNA'). The assembly carries: "
+            f"{_elide(self.known)}. Register the annotation built for this assembly, or pass "
+            f"check_chromosomes=False to register this one anyway."
+        )
 
 
 @dataclass(frozen=True)
@@ -153,6 +222,8 @@ def register_gtf(
     name: str,
     *,
     force: bool = False,
+    chrom_sizes: str | Path | None = None,
+    check_chromosomes: bool = True,
     disable_infer_genes: bool = True,
     disable_infer_transcripts: bool = True,
 ) -> GtfAnnotation:
@@ -163,6 +234,13 @@ def register_gtf(
     A gzipped (``.gz``) source is decompressed into the registered ``<name>.gtf``; a
     plain GTF is copied as-is. The digest recorded is of the placed GTF — nothing is
     compared against, because an unlisted annotation has no pinned digest to compare to.
+
+    The source's chromosome names are checked against ``chrom_sizes`` before anything is
+    created, so a GTF that does not line up with the assembly leaves the annotation
+    directory exactly as it was found. Unlike :func:`fetch_annotation`, this form is
+    given no assembly name and so cannot derive where that file is — pass it, or accept
+    that nothing is checked. What was decided is written into the record either way, as
+    ``details["chromosomes_checked"]``.
 
     Gene/transcript inference is disabled by default — standard annotation GTFs
     (GENCODE, Ensembl, RefSeq) already declare ``gene``/``transcript`` features, and
@@ -179,6 +257,13 @@ def register_gtf(
         The **Registered name** to address it by, unique within the assembly.
     force : bool, default False
         Register again from scratch — the repair for a directory that raises.
+    chrom_sizes : str or pathlib.Path, optional
+        The assembly's ``chrom.sizes``, whose names the GTF's must be among. Omitted —
+        or pointing at a file that is not there — there is nothing to check against and
+        the names are not checked.
+    check_chromosomes : bool, default True
+        Check the GTF's chromosome names against the assembly's. Pass ``False`` to
+        register a GTF whose mismatch you have inspected and accept.
     disable_infer_genes : bool, default True
         Do not reconstruct ``gene`` features from exon lines.
     disable_infer_transcripts : bool, default True
@@ -193,6 +278,9 @@ def register_gtf(
     ------
     FileNotFoundError
         If ``gtf`` is not a file.
+    ChromosomeMismatchError
+        If the GTF names sequences the assembly does not carry; the message lists them
+        and names the usual cause.
     genome.io.completion.UnfinishedRegistrationError
         If the annotation's directory holds files but no record.
     genome.io.completion.RegistrationMismatchError
@@ -218,6 +306,17 @@ def register_gtf(
     if _already_registered(directory, force=force, repair=_path_repair_command(source, name)):
         return annotation
 
+    known = (
+        _assembly_chromosomes(Path(chrom_sizes))
+        if check_chromosomes and chrom_sizes is not None
+        else None
+    )
+    # Against the source, before the directory is even created: a mismatch then leaves
+    # nothing behind, so the next call reports the same problem rather than the files
+    # of an interrupted registration. A .gz source is streamed twice — once here and
+    # once to place it — which buys that, and costs a fraction of the database build.
+    _reject_unknown_chromosomes(source, known, name=name)
+
     directory.mkdir(parents=True, exist_ok=True)
     # A gzipped source is stream-decompressed into the registered <name>.gtf;
     # a plain GTF is copied as-is (skipping a copy onto itself).
@@ -230,7 +329,7 @@ def register_gtf(
         annotation,
         source_url=str(source),
         sha256=sha256_file(annotation.gtf),
-        details={},
+        details={"chromosomes_checked": known is not None},
         disable_infer_genes=disable_infer_genes,
         disable_infer_transcripts=disable_infer_transcripts,
     )
@@ -244,6 +343,7 @@ def fetch_annotation(
     force: bool = False,
     progressbar: bool = True,
     metadata: AnnotationMetadata | None = None,
+    check_chromosomes: bool = True,
     disable_infer_genes: bool = True,
     disable_infer_transcripts: bool = True,
 ) -> GtfAnnotation:
@@ -254,6 +354,14 @@ def fetch_annotation(
     area, the **unpacked** GTF is checked against the sha256 the row pins (ADR-0006) —
     so a GTF that is not the pinned one never reaches the annotation directory — the
     gffutils database is built, and the record is written last.
+
+    Its chromosome names are checked too, against ``<assembly_dir>/<assembly>.chrom.sizes``
+    and while the GTF is still in the working area: every name the GTF uses must be one
+    the assembly carries, so an Ensembl-spelled GTF registered against a UCSC-spelled
+    assembly fails in seconds rather than after the minutes the database build takes.
+    The reverse is not required — an assembly may carry scaffolds the annotation never
+    mentions. An assembly with no ``chrom.sizes`` yet has nothing to check against, and
+    the record says so in ``details["chromosomes_checked"]``.
 
     An annotation that already has a valid record is returned silently: nothing is
     fetched, nothing is rebuilt and nothing is warned about. A directory that cannot be
@@ -277,6 +385,9 @@ def fetch_annotation(
     metadata : genome.metadata.AnnotationMetadata, optional
         A complete annotation record to use *instead of* the curated table's row. Omit
         it and the row is looked up here.
+    check_chromosomes : bool, default True
+        Check the GTF's chromosome names against the assembly's. Pass ``False`` to
+        register an annotation whose mismatch you have inspected and accept.
     disable_infer_genes : bool, default True
         Do not reconstruct ``gene`` features from exon lines.
     disable_infer_transcripts : bool, default True
@@ -292,6 +403,9 @@ def fetch_annotation(
     ValueError
         If the table lists no annotation ``name`` for ``assembly``; the message lists
         what it does offer and points at the path-based form for an unlisted GTF.
+    ChromosomeMismatchError
+        If the GTF names sequences the assembly does not carry; the message lists them
+        and names the usual cause.
     genome.io.utils.ChecksumMismatchError
         If the row pins a sha256 and the unpacked GTF is not it; the message names both
         digests.
@@ -322,15 +436,27 @@ def fetch_annotation(
     if _already_registered(directory, force=force, repair=_repair_command(assembly, name)):
         return annotation
 
+    known = (
+        _assembly_chromosomes(assembly_dir / f"{assembly}.chrom.sizes")
+        if check_chromosomes
+        else None
+    )
     digest = _proven_gtf(annotation.gtf, row.sha256)
     if digest is None:
-        digest = _fetch_gtf(annotation, row, progressbar=progressbar)
+        digest = _fetch_gtf(annotation, row, progressbar=progressbar, known=known)
+    else:
+        # Kept from a previous run, so it is already placed; there is nothing to undo.
+        _reject_unknown_chromosomes(annotation.gtf, known, name=name)
 
     return _build_and_record(
         annotation,
         source_url=row.url,
         sha256=digest,
-        details={"provider": row.provider, "version": row.version},
+        details={
+            "provider": row.provider,
+            "version": row.version,
+            "chromosomes_checked": known is not None,
+        },
         disable_infer_genes=disable_infer_genes,
         disable_infer_transcripts=disable_infer_transcripts,
     )
@@ -344,6 +470,7 @@ def register_annotation(
     cache_dir: str | Path | None = None,
     progressbar: bool = True,
     metadata: AnnotationMetadata | None = None,
+    check_chromosomes: bool = True,
 ) -> dict[str, object]:
     """Register ``name`` for ``assembly`` and return the record of what that did.
 
@@ -367,6 +494,9 @@ def register_annotation(
         Show a download progress bar (requires ``tqdm``).
     metadata : genome.metadata.AnnotationMetadata, optional
         A complete annotation record to use instead of the curated table's row.
+    check_chromosomes : bool, default True
+        Check the GTF's chromosome names against the assembly's. Pass ``False`` to
+        register an annotation whose mismatch you have inspected and accept.
 
     Returns
     -------
@@ -379,6 +509,8 @@ def register_annotation(
     ------
     ValueError
         If the table lists no annotation ``name`` for ``assembly``.
+    ChromosomeMismatchError
+        If the GTF names sequences the assembly does not carry.
     genome.io.completion.RegistrationError
         If the directory holds a build that cannot be trusted as finished, or (with
         ``force``) if the run somehow left no record behind.
@@ -402,6 +534,7 @@ def register_annotation(
         force=force,
         progressbar=progressbar,
         metadata=metadata,
+        check_chromosomes=check_chromosomes,
     )
     directory = annotation_dir(assembly_dir, name)
     record = read_record(directory)
@@ -444,15 +577,84 @@ def _proven_gtf(gtf: Path, expected: str | None) -> str | None:
     return actual if actual == expected else None
 
 
+def _elide(names: Sequence[str], limit: int = _MAX_LISTED_NAMES) -> str:
+    """Return ``names`` comma-joined, cut to ``limit`` and counting what was cut."""
+    listed = ", ".join(names[:limit])
+    hidden = len(names) - limit
+    return listed if hidden <= 0 else f"{listed} (and {hidden} more)"
+
+
+def _open_text(path: Path) -> IO[str]:
+    """Open ``path`` for line-by-line reading, decompressing a ``.gz`` as it goes."""
+    if path.suffix == ".gz":
+        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
+    return path.open("rt", encoding="utf-8", errors="replace")
+
+
+def _gtf_chromosomes(gtf: Path) -> set[str]:
+    """Return the distinct sequence names ``gtf`` uses, reading it one line at a time.
+
+    A GENCODE GTF is well over a gigabyte unpacked, so this is a single streaming pass
+    that keeps only the distinct values of the first column — the file is never held in
+    memory, and a ``.gz`` is decompressed as it streams rather than unpacked first.
+    Comment lines and anything without a column separator are skipped, so a header never
+    becomes a chromosome.
+    """
+    names: set[str] = set()
+    with _open_text(gtf) as handle:
+        for line in handle:
+            if line.startswith("#"):
+                continue
+            chrom, separator, _ = line.partition("\t")
+            if separator:
+                names.add(chrom)
+    return names
+
+
+def _assembly_chromosomes(chrom_sizes: Path | None) -> frozenset[str] | None:
+    """Return the names in ``chrom_sizes``, or ``None`` when there is none to read.
+
+    ``None`` means *nothing to check against* rather than *no chromosomes*: an
+    annotation can be registered before its assembly is prepared, and then no
+    ``chrom.sizes`` exists yet. The registration then records that the names were not
+    checked rather than claiming they were.
+    """
+    if chrom_sizes is None or not chrom_sizes.is_file():
+        return None
+    return frozenset(str(name) for name in read_chrom_sizes(chrom_sizes).index)
+
+
+def _reject_unknown_chromosomes(gtf: Path, known: frozenset[str] | None, *, name: str) -> None:
+    """Raise :class:`ChromosomeMismatchError` if ``gtf`` names anything outside ``known``.
+
+    One-directional on purpose: only the names the GTF uses are looked up, since an
+    assembly carrying scaffolds the annotation never mentions is normal. ``known`` of
+    ``None`` is the check turned off, or no ``chrom.sizes`` to run it against, and
+    nothing happens. Call it *before* the database build and before the GTF is placed —
+    a mismatch then costs a streaming pass rather than the minutes a build takes, and
+    leaves the annotation directory as it was found.
+    """
+    if known is None:
+        return
+    missing = _gtf_chromosomes(gtf) - known
+    if missing:
+        raise ChromosomeMismatchError(name, missing, sorted(known))
+
+
 def _fetch_gtf(
-    annotation: GtfAnnotation, row: AnnotationMetadata, *, progressbar: bool = True
+    annotation: GtfAnnotation,
+    row: AnnotationMetadata,
+    *,
+    progressbar: bool = True,
+    known: frozenset[str] | None = None,
 ) -> str:
     """Download ``row``'s GTF, verify the unpacked file, place it, and return its digest.
 
     Both the archive and the file it unpacks to land in the annotation's working area,
     which is on the same filesystem, so placing the GTF is a rename rather than a copy
-    and the archive survives an interrupted run. Verification happens before the file is
-    placed, so a GTF that is not the pinned one never reaches the annotation directory.
+    and the archive survives an interrupted run. Both verifications — the pinned digest
+    and the chromosome names — happen while the GTF is still in the working area, so a
+    GTF this assembly cannot use never reaches the annotation directory.
     """
     directory = annotation.gtf.parent
     gzipped = row.url.endswith(".gz")
@@ -468,6 +670,7 @@ def _fetch_gtf(
     digest = sha256_file(fetched)
     if row.sha256 is not None and digest != row.sha256:
         raise ChecksumMismatchError(fetched, row.sha256, digest)
+    _reject_unknown_chromosomes(fetched, known, name=annotation.name)
     directory.mkdir(parents=True, exist_ok=True)
     fetched.replace(annotation.gtf)
     return digest
