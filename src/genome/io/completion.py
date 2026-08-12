@@ -52,6 +52,33 @@ RECORD_NAME = ".completion.json"
 WORK_DIR_NAME = ".work"
 
 
+class RegistrationError(RuntimeError):
+    """A directory holds a build that cannot be trusted as finished.
+
+    The base of the two broken states a caller must distinguish. Both name the command
+    that repairs them, because a caller who cannot act on the message is left guessing.
+    """
+
+
+class UnfinishedRegistrationError(RegistrationError):
+    """A directory holds files but no record, so a build was interrupted part-way.
+
+    Raised rather than silently resumed: the files present may be a complete build
+    whose record was never written, or the wreckage of one killed half-way, and
+    nothing on disk distinguishes them. An **absent or empty** directory is not this —
+    that is a fresh registration and proceeds normally.
+    """
+
+
+class RegistrationMismatchError(RegistrationError):
+    """A record disagrees with what is on disk, so something changed behind our back.
+
+    Raised rather than rebuilt: a file that was deleted or truncated after
+    registration is a fact worth surfacing, and guessing which of the two is right
+    risks silently wrong results.
+    """
+
+
 @dataclass(frozen=True)
 class CompletionRecord:
     """What one finished build did, written down where it left its files.
@@ -470,3 +497,81 @@ def _claimed_files(
             )
         claimed[relative.as_posix()] = path.stat().st_size
     return claimed
+
+
+def check_registration(directory: Path, *, repair: str) -> CompletionRecord | None:
+    """Return ``directory``'s record when it is finished, ``None`` when it is fresh.
+
+    The one question every kind of build asks before deciding whether to do any work,
+    and the only place the two broken states are turned into errors. A caller gets
+    exactly three answers:
+
+    - a :class:`CompletionRecord` — finished, and every file it claims is present at
+      the size it claims;
+    - ``None`` — the directory is absent, or empty but for the working area, so this
+      is a fresh registration and proceeds normally;
+    - an exception — the directory holds something that cannot be trusted.
+
+    The working area (:data:`WORK_DIR_NAME`) is ignored throughout: it holds working
+    state rather than claimed outputs, so an interrupted run's half-finished download
+    never makes a fresh directory look broken.
+
+    Parameters
+    ----------
+    directory : pathlib.Path
+        The directory a build writes its outputs and its record into.
+    repair : str
+        The command that fixes a broken state, quoted verbatim in the error message —
+        e.g. ``"genome register hg38 --force"``. An error a caller cannot act on is a
+        bug, not an error message.
+
+    Returns
+    -------
+    CompletionRecord or None
+        The record when the build is finished, or ``None`` when nothing is there yet.
+
+    Raises
+    ------
+    UnfinishedRegistrationError
+        If files are present but no record is — an interrupted or preempted run.
+    RegistrationMismatchError
+        If a record is present but disagrees with what is on disk. The message names
+        every file that differs and how.
+
+    Examples
+    --------
+    >>> check_registration(Path("/data/genome/hg38"), repair="genome register hg38")
+    ... # doctest: +SKIP
+    CompletionRecord(kind='genome', name='hg38', ...)
+    """
+    record = read_record(directory)
+    if record is None:
+        leftovers = _unclaimed_contents(directory)
+        if not leftovers:
+            return None
+        listed = ", ".join(leftovers[:5]) + (", ..." if len(leftovers) > 5 else "")
+        raise UnfinishedRegistrationError(
+            f"{directory} holds files but no {RECORD_NAME}, so a previous run was "
+            f"interrupted before it finished: {listed}. Nothing here can be trusted as "
+            f"complete. Re-register it with `{repair}`."
+        )
+
+    differing = disagreements(directory, record)
+    if differing:
+        listed = "; ".join(str(d) for d in differing)
+        raise RegistrationMismatchError(
+            f"{directory} disagrees with its {RECORD_NAME}: {listed}. Something changed "
+            f"these files after they were registered. Re-register it with `{repair}`."
+        )
+    return record
+
+
+def _unclaimed_contents(directory: Path) -> list[str]:
+    """Return the names in ``directory`` that a record would be expected to claim.
+
+    The working area is excluded — it is working state, not a claimed output — so a
+    directory holding only an interrupted download still counts as fresh.
+    """
+    if not directory.is_dir():
+        return []
+    return sorted(entry.name for entry in directory.iterdir() if entry.name != WORK_DIR_NAME)
