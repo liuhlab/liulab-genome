@@ -290,25 +290,25 @@ invariants (they are landmines if violated):
    half-open `[start, end)`**. Convert to/from 1-based-inclusive (VCF,
    GFF/GTF, SAM) **only at I/O boundaries**, and document that conversion in
    the function's docstring. Never assume.
-2. **Reference assembly is never implicit**. Carry the assembly (GRCh37 vs
-   GRCh38, mm10 vs mm39, etc.) in metadata. Mixing assemblies is an error
-   that should raise, not a warning.
+2. **Reference assembly is never implicit**. Carry the assembly (`hg38` vs
+   `hg19`, `mm39` vs `mm10`, etc.) in metadata. Mixing assemblies is an error
+   that should raise, not a warning. The assembly id is a local key, so pass
+   the id the table resolves — `GRCh38` is a cross-reference field on the
+   `hg38` record, not a name you can construct a `Genome` with.
 3. **Chromosome naming**: normalize `chr1` vs `1` at ingest. Document which
    form is canonical internally before relying on equality.
 4. **Strand** is `+` / `-` / `.` (unknown). Never default silently to `+`.
 5. **Large files stream**. Do not read a whole genomic file into memory.
-   Assume bgzipped + indexed input. The sequence classes are for in-memory
-   strings (e.g. a single read, an exon, a peak summit ±100 bp), not whole
-   chromosomes.
-6. **Metadata is first-class**. Sample IDs, assembly, provenance travel
-   *with* the data. Dropping metadata across a transform is a bug.
+   The sequence classes are for in-memory strings (e.g. a single read, an
+   exon, a peak summit ±100 bp), not whole chromosomes.
 
-These come from `CLAUDE.md §5`; check the project's `CLAUDE.md` for any
-updates before adding new features.
+These are the package's domain invariants, defined in `CONTEXT-MAP.md` and the
+four glossaries it lists; check them for any updates before adding new
+features.
 
 ## Adding to the package
 
-If the user asks you to extend `liulab-genome`, follow `CLAUDE.md` strictly:
+If the user asks you to extend `liulab-genome`, follow `AGENTS.md` strictly:
 
 - src layout; package code lives under `src/genome/`, tests under `tests/`.
 - **Full type annotations** on every public function.

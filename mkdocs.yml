@@ -62,6 +62,8 @@ nav:
 # layer on top of them. A dated measurement is not a docs page, and CI builds --strict,
 # so an unexcluded file here would fail the build for not being in the nav.
 exclude_docs: |
+  adr/
+  context/
   research/
 
 markdown_extensions:
