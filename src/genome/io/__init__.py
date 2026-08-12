@@ -24,6 +24,8 @@ from genome.io.download import (
     assembly_data_dir,
     assembly_table_row,
     liulab_data_dir,
+    register_assembly,
+    verify_assembly,
 )
 from genome.io.fasta import (
     GenomeFiles,
@@ -67,8 +69,10 @@ __all__ = [
     "prepare_fasta",
     "read_chrom_sizes",
     "read_record",
+    "register_assembly",
     "register_gtf",
     "sha256_file",
     "twobit_to_chrom_sizes",
+    "verify_assembly",
     "write_record",
 ]
