@@ -38,7 +38,9 @@ from genome.io.fasta import (
 from genome.io.gtf import (
     GtfAnnotation,
     annotation_dir,
+    fetch_annotation,
     list_annotations,
+    register_annotation,
     register_gtf,
 )
 from genome.io.twobit import TwoBit
@@ -64,11 +66,13 @@ __all__ = [
     "disagreements",
     "faidx",
     "fasta_to_2bit",
+    "fetch_annotation",
     "list_annotations",
     "liulab_data_dir",
     "prepare_fasta",
     "read_chrom_sizes",
     "read_record",
+    "register_annotation",
     "register_assembly",
     "register_gtf",
     "sha256_file",

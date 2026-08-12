@@ -33,9 +33,9 @@ import pandas as pd
 from genome.aligner.mixin import AlignerMixin
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
-from genome.io.gtf import GtfAnnotation, list_annotations, register_gtf
+from genome.io.gtf import GtfAnnotation, fetch_annotation, list_annotations, register_gtf
 from genome.io.twobit import TwoBit
-from genome.metadata import AssemblyMetadata, lookup_assembly
+from genome.metadata import AnnotationMetadata, AssemblyMetadata, lookup_assembly
 from genome.region import Region, parse_region
 from genome.seq import DNA
 
@@ -217,6 +217,78 @@ class Genome(AlignerMixin):
         """Names of the GTF annotations registered for this assembly."""
         return list(self._annotations)
 
+    def register_annotation(
+        self,
+        name: str,
+        *,
+        force: bool = False,
+        progressbar: bool = True,
+        metadata: AnnotationMetadata | None = None,
+        disable_infer_genes: bool = True,
+        disable_infer_transcripts: bool = True,
+    ) -> GtfAnnotation:
+        """Register the annotation this assembly's table row lists as ``name``.
+
+        Naming it is enough: the curated annotation table says where the GTF comes
+        from and what it must hash to. It is fetched, verified against that digest,
+        placed under ``<assembly dir>/gtf/<name>/``, built into a gffutils database
+        and recorded. If no default GTF is set and this becomes the only annotation,
+        it is adopted as :attr:`default_gtf`.
+
+        One that is already registered is returned silently — nothing is fetched and
+        nothing is rebuilt — while a directory that cannot be trusted raises and names
+        its repair. See :func:`~genome.io.gtf.fetch_annotation`.
+
+        Parameters
+        ----------
+        name : str
+            The **Registered name** the table lists for this assembly.
+        force : bool, default False
+            Register again from scratch — the repair for a directory that raises.
+        progressbar : bool, default True
+            Show a download progress bar (requires ``tqdm``).
+        metadata : genome.metadata.AnnotationMetadata, optional
+            A complete annotation record, used *instead of* the curated table's row for
+            ``name`` — the same all-or-nothing override the constructor takes for the
+            assembly's own metadata.
+        disable_infer_genes : bool, default True
+            Do not reconstruct ``gene`` features from exon lines.
+        disable_infer_transcripts : bool, default True
+            Do not reconstruct ``transcript`` features from exon lines.
+
+        Returns
+        -------
+        genome.io.gtf.GtfAnnotation
+            The registered annotation's name and its two file paths.
+
+        Raises
+        ------
+        ValueError
+            If the table lists no annotation ``name`` for this assembly.
+        genome.io.utils.ChecksumMismatchError
+            If the fetched GTF is not the digest the row pins.
+        genome.io.completion.RegistrationError
+            If the annotation's directory cannot be trusted as finished.
+
+        Examples
+        --------
+        >>> sacCer3 = Genome("sacCer3")                        # doctest: +SKIP
+        >>> sacCer3.register_annotation("ensgene_v101")        # doctest: +SKIP
+        GtfAnnotation(name='ensgene_v101', ...)
+        """
+        return self._adopt(
+            fetch_annotation(
+                self._assembly_dir,
+                self.assembly,
+                name,
+                force=force,
+                progressbar=progressbar,
+                metadata=metadata,
+                disable_infer_genes=disable_infer_genes,
+                disable_infer_transcripts=disable_infer_transcripts,
+            )
+        )
+
     def register_gtf(
         self,
         gtf: str | Path,
@@ -226,24 +298,31 @@ class Genome(AlignerMixin):
         disable_infer_genes: bool = True,
         disable_infer_transcripts: bool = True,
     ) -> GtfAnnotation:
-        """Register a GTF under ``name`` and build its gffutils database.
+        """Register the GTF at ``gtf`` under ``name`` and build its gffutils database.
 
-        The GTF is placed under ``<assembly dir>/gtf/<name>/`` (a gzipped
-        ``.gz`` source is decompressed automatically) and a gffutils database is
-        built beside it. If no default GTF is set and this becomes the only
+        The escape hatch for an annotation the curated table does not list —
+        :meth:`register_annotation` is the way in for one it does. The GTF is placed
+        under ``<assembly dir>/gtf/<name>/`` (a gzipped ``.gz`` source is decompressed
+        automatically), a gffutils database is built beside it, and the record that says
+        so is written last. If no default GTF is set and this becomes the only
         annotation, it is adopted as :attr:`default_gtf`.
         """
-        annotation = register_gtf(
-            self._assembly_dir,
-            gtf,
-            name,
-            force=force,
-            disable_infer_genes=disable_infer_genes,
-            disable_infer_transcripts=disable_infer_transcripts,
+        return self._adopt(
+            register_gtf(
+                self._assembly_dir,
+                gtf,
+                name,
+                force=force,
+                disable_infer_genes=disable_infer_genes,
+                disable_infer_transcripts=disable_infer_transcripts,
+            )
         )
-        self._annotations[name] = annotation
+
+    def _adopt(self, annotation: GtfAnnotation) -> GtfAnnotation:
+        """Add a freshly registered annotation to the registry, adopting it if it is alone."""
+        self._annotations[annotation.name] = annotation
         if self.default_gtf is None and len(self._annotations) == 1:
-            self.default_gtf = name
+            self.default_gtf = annotation.name
         return annotation
 
     def get_gtf_path(self, name: str) -> Path:

@@ -1,29 +1,62 @@
-"""GTF annotation registration — place a GTF and build its gffutils database.
+"""Annotation registration — place a GTF, build its database, and record that it finished.
 
-A reference assembly may carry several gene annotations (e.g. GENCODE,
-RefSeq, Ensembl). Each is registered under a unique ``name`` and lives in its
-own directory beside the assembly's sequence files::
+I/O boundary module. A reference assembly may carry several gene annotations (GENCODE,
+RefSeq, WormBase, …). Each is registered under a **Registered name** and lives in its own
+directory beside the assembly's sequence files::
 
     <LIULAB_DATA>/genome/<assembly>/gtf/<name>/
-        <name>.gtf      # the (unzipped) annotation, copied in
-        <name>.db       # the gffutils SQLite database built from it
+        <name>.gtf          # the annotation, kept decompressed
+        <name>.db           # the gffutils SQLite database built from it
+        .completion.json    # the record saying all of that finished
+        .work/              # the disposable working area a fetch downloads into
 
-:func:`register_gtf` does the placement + database build; :func:`list_annotations`
-discovers what has already been registered. Richer GTF query types build on the
-:class:`GtfAnnotation` records these return — that work lives elsewhere; this
-module is only the I/O boundary.
+There are two ways in. :func:`fetch_annotation` takes the **name** the curated annotation
+table lists for this assembly, fetches that row's URL, checks the unpacked GTF against
+the sha256 the row pins (ADR-0006), builds the database and writes the record;
+:func:`register_annotation` is the same thing addressed by assembly name, returning the
+record itself, and is what the CLI drives. :func:`register_gtf` takes a **path** instead
+and is the escape hatch for a GTF no row lists.
+
+**A record is the only thing that says an annotation is registered.** A database file's
+mere existence never is — a `gffutils` build killed half-way leaves a partial database
+that answers queries with most of the genes missing, which is exactly what the
+**Completion marker** exists to distrust. So :func:`list_annotations` reports what has a
+record that agrees with disk, re-registering something that already has one returns it
+silently, and a directory holding files but no record raises and names its repair
+(ADR-0007).
+
+Examples
+--------
+>>> from pathlib import Path
+>>> from genome.io.gtf import annotation_dir
+>>> annotation_dir(Path("/data/genome/sacCer3"), "ensgene_v101").name
+'ensgene_v101'
 """
 
 from __future__ import annotations
 
 import shutil
-import warnings
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 import gffutils
+import pooch
 
-from genome.io.utils import _gunzip
+from genome.io import download
+from genome.io.completion import (
+    RECORD_NAME,
+    RegistrationError,
+    build_record,
+    check_registration,
+    clear_work_dir,
+    disagreements,
+    read_record,
+    work_dir,
+    write_record,
+)
+from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
+from genome.metadata import AnnotationMetadata, list_annotation_metadata, lookup_annotation
 
 #: Subdirectory under an assembly's data dir holding all its GTF annotations.
 _GTF_SUBDIR = "gtf"
@@ -54,8 +87,51 @@ def _annotation_files(assembly_dir: Path, name: str) -> GtfAnnotation:
     return GtfAnnotation(name=name, gtf=directory / f"{name}.gtf", db=directory / f"{name}.db")
 
 
+def _repair_command(assembly: str, name: str) -> str:
+    """Return the command that registers ``name`` again from scratch.
+
+    Quoted verbatim into every error a broken annotation directory raises, so it has to
+    be a command that exists and does the job.
+    """
+    return f"genome register-annotation {assembly} {name} --force"
+
+
+def _path_repair_command(source: Path, name: str) -> str:
+    """Return the call that registers an unlisted GTF again from scratch.
+
+    A GTF no row lists cannot be repaired by name — nothing knows where it came from
+    but the caller who passed the path — so the repair names the call, with the path.
+    """
+    return f"register_gtf(<assembly dir>, {str(source)!r}, {name!r}, force=True)"
+
+
 def list_annotations(assembly_dir: Path) -> dict[str, GtfAnnotation]:
-    """Return registered annotations (those with a built database), keyed by name."""
+    """Return the annotations registered under ``assembly_dir``, keyed by name.
+
+    Registered means *a record is there and agrees with what is on disk* — never that a
+    database file exists, which is true of a build killed half-way through as well as of
+    a finished one. Anything else in the ``gtf/`` subtree is left out rather than raised
+    over: listing is a question about this machine, and one unfinished annotation must
+    not stop a genome from opening. Registering that name again is what reports it as
+    broken.
+
+    Parameters
+    ----------
+    assembly_dir : pathlib.Path
+        The assembly directory whose ``gtf/`` subtree is listed.
+
+    Returns
+    -------
+    dict of str to GtfAnnotation
+        Registered name to its files, in directory-name order. Empty when nothing is
+        registered.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> list_annotations(Path("/tmp/definitely-not-an-assembly"))
+    {}
+    """
     root = _annotations_root(assembly_dir)
     if not root.is_dir():
         return {}
@@ -63,9 +139,11 @@ def list_annotations(assembly_dir: Path) -> dict[str, GtfAnnotation]:
     for directory in sorted(root.iterdir()):
         if not directory.is_dir():
             continue
+        record = read_record(directory)
+        if record is None or disagreements(directory, record):
+            continue
         annotation = _annotation_files(assembly_dir, directory.name)
-        if annotation.db.exists():
-            found[annotation.name] = annotation
+        found[annotation.name] = annotation
     return found
 
 
@@ -78,30 +156,69 @@ def register_gtf(
     disable_infer_genes: bool = True,
     disable_infer_transcripts: bool = True,
 ) -> GtfAnnotation:
-    """Register a GTF under ``name`` and build its gffutils database.
+    """Register the GTF at ``gtf`` under ``name`` and build its gffutils database.
 
-    A gzipped (``.gz``) source is decompressed automatically into the registered
-    ``<name>.gtf``; a plain GTF is copied as-is.
+    The escape hatch for an annotation the curated table does not list: the caller says
+    where the file is, and it is placed, built and recorded exactly as a listed one is.
+    A gzipped (``.gz``) source is decompressed into the registered ``<name>.gtf``; a
+    plain GTF is copied as-is. The digest recorded is of the placed GTF — nothing is
+    compared against, because an unlisted annotation has no pinned digest to compare to.
 
     Gene/transcript inference is disabled by default — standard annotation GTFs
-    (GENCODE, Ensembl, RefSeq) already declare ``gene``/``transcript`` features,
-    and inferring them is the classic gffutils slow path. Enable it only for a
-    bare exon-level GTF.
+    (GENCODE, Ensembl, RefSeq) already declare ``gene``/``transcript`` features, and
+    inferring them is the classic gffutils slow path. Enable it only for a bare
+    exon-level GTF.
+
+    Parameters
+    ----------
+    assembly_dir : pathlib.Path
+        The assembly directory this annotation is filed under.
+    gtf : str or pathlib.Path
+        Path to the source GTF, plain or ``.gz``.
+    name : str
+        The **Registered name** to address it by, unique within the assembly.
+    force : bool, default False
+        Register again from scratch — the repair for a directory that raises.
+    disable_infer_genes : bool, default True
+        Do not reconstruct ``gene`` features from exon lines.
+    disable_infer_transcripts : bool, default True
+        Do not reconstruct ``transcript`` features from exon lines.
+
+    Returns
+    -------
+    GtfAnnotation
+        The registered annotation's name and its two file paths.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``gtf`` is not a file.
+    genome.io.completion.UnfinishedRegistrationError
+        If the annotation's directory holds files but no record.
+    genome.io.completion.RegistrationMismatchError
+        If its record disagrees with what is on disk.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> register_gtf(                                    # doctest: +SKIP
+    ...     Path("/data/genome/sacCer3"), "custom.gtf.gz", "custom"
+    ... )
+    GtfAnnotation(name='custom', ...)
     """
     source = Path(gtf)
     if not source.is_file():
-        raise FileNotFoundError(f"GTF file not found: {source}")
+        raise FileNotFoundError(
+            f"GTF file not found: {source}. Pass the path of an existing .gtf or "
+            f".gtf.gz, or register a listed annotation by name instead."
+        )
 
     annotation = _annotation_files(assembly_dir, name)
-    if not force and (annotation.db.exists() or annotation_dir(assembly_dir, name).exists()):
-        warnings.warn(
-            f"annotation {name!r} is already registered for this assembly at "
-            f"{annotation_dir(assembly_dir, name)}; skipping (pass force=True to overwrite).",
-            stacklevel=2,
-        )
+    directory = annotation_dir(assembly_dir, name)
+    if _already_registered(directory, force=force, repair=_path_repair_command(source, name)):
         return annotation
 
-    annotation.db.parent.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(parents=True, exist_ok=True)
     # A gzipped source is stream-decompressed into the registered <name>.gtf;
     # a plain GTF is copied as-is (skipping a copy onto itself).
     if source.suffix == ".gz":
@@ -109,10 +226,280 @@ def register_gtf(
     elif source.resolve() != annotation.gtf.resolve():
         shutil.copy2(source, annotation.gtf)
 
-    db = gffutils.create_db(
+    return _build_and_record(
+        annotation,
+        source_url=str(source),
+        sha256=sha256_file(annotation.gtf),
+        details={},
+        disable_infer_genes=disable_infer_genes,
+        disable_infer_transcripts=disable_infer_transcripts,
+    )
+
+
+def fetch_annotation(
+    assembly_dir: Path,
+    assembly: str,
+    name: str,
+    *,
+    force: bool = False,
+    progressbar: bool = True,
+    metadata: AnnotationMetadata | None = None,
+    disable_infer_genes: bool = True,
+    disable_infer_transcripts: bool = True,
+) -> GtfAnnotation:
+    """Register the annotation the table lists for ``assembly`` as ``name``.
+
+    Naming an annotation is enough: where its GTF comes from and which digest it must
+    match are the curated table's to know. The row's URL is fetched into the working
+    area, the **unpacked** GTF is checked against the sha256 the row pins (ADR-0006) —
+    so a GTF that is not the pinned one never reaches the annotation directory — the
+    gffutils database is built, and the record is written last.
+
+    An annotation that already has a valid record is returned silently: nothing is
+    fetched, nothing is rebuilt and nothing is warned about. A directory that cannot be
+    trusted — files with no record, or a record that disagrees with disk — **raises**,
+    naming ``genome register-annotation <assembly> <name> --force`` (ADR-0007). That is
+    what ``force=True`` is: it skips the question, keeps a GTF whose digest can be shown
+    to be the pinned one, and fetches the source again when it cannot.
+
+    Parameters
+    ----------
+    assembly_dir : pathlib.Path
+        The assembly directory this annotation is filed under.
+    assembly : str
+        The assembly whose table row is looked up, e.g. ``"hg38"``.
+    name : str
+        The **Registered name** the table lists, e.g. ``"gencode_v50"``.
+    force : bool, default False
+        Register again from scratch, repairing a directory that raises.
+    progressbar : bool, default True
+        Show a download progress bar (requires ``tqdm``).
+    metadata : genome.metadata.AnnotationMetadata, optional
+        A complete annotation record to use *instead of* the curated table's row. Omit
+        it and the row is looked up here.
+    disable_infer_genes : bool, default True
+        Do not reconstruct ``gene`` features from exon lines.
+    disable_infer_transcripts : bool, default True
+        Do not reconstruct ``transcript`` features from exon lines.
+
+    Returns
+    -------
+    GtfAnnotation
+        The registered annotation's name and its two file paths.
+
+    Raises
+    ------
+    ValueError
+        If the table lists no annotation ``name`` for ``assembly``; the message lists
+        what it does offer and points at the path-based form for an unlisted GTF.
+    genome.io.utils.ChecksumMismatchError
+        If the row pins a sha256 and the unpacked GTF is not it; the message names both
+        digests.
+    genome.io.completion.UnfinishedRegistrationError
+        If the annotation's directory holds files but no record.
+    genome.io.completion.RegistrationMismatchError
+        If its record disagrees with what is on disk.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> fetch_annotation(                                # doctest: +SKIP
+    ...     Path("/data/genome/sacCer3"), "sacCer3", "ensgene_v101"
+    ... )
+    GtfAnnotation(name='ensgene_v101', ...)
+    """
+    row = metadata if metadata is not None else lookup_annotation(assembly, name)
+    if row is None:
+        offered = ", ".join(r.name for r in list_annotation_metadata(assembly)) or "(none)"
+        raise ValueError(
+            f"no annotation named {name!r} is listed for {assembly!r}. Listed for it: "
+            f"{offered}. An annotation the table does not list is registered by path "
+            f"instead — Genome.register_gtf(<path>, {name!r})."
+        )
+
+    annotation = _annotation_files(assembly_dir, name)
+    directory = annotation_dir(assembly_dir, name)
+    if _already_registered(directory, force=force, repair=_repair_command(assembly, name)):
+        return annotation
+
+    digest = _proven_gtf(annotation.gtf, row.sha256)
+    if digest is None:
+        digest = _fetch_gtf(annotation, row, progressbar=progressbar)
+
+    return _build_and_record(
+        annotation,
+        source_url=row.url,
+        sha256=digest,
+        details={"provider": row.provider, "version": row.version},
+        disable_infer_genes=disable_infer_genes,
+        disable_infer_transcripts=disable_infer_transcripts,
+    )
+
+
+def register_annotation(
+    assembly: str,
+    name: str,
+    *,
+    force: bool = False,
+    cache_dir: str | Path | None = None,
+    progressbar: bool = True,
+    metadata: AnnotationMetadata | None = None,
+) -> dict[str, object]:
+    """Register ``name`` for ``assembly`` and return the record of what that did.
+
+    :func:`fetch_annotation` addressed by assembly name rather than by directory, and
+    answering with the record rather than the paths — the one call the CLI makes, and
+    the one a script makes when it wants to serialize what happened. An annotation that
+    is already registered is returned from its record without fetching anything.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly the annotation belongs to, e.g. ``"hg38"``.
+    name : str
+        The **Registered name** the table lists, e.g. ``"gencode_v50"``.
+    force : bool, default False
+        Register again from scratch, repairing a directory that raises.
+    cache_dir : str or pathlib.Path, optional
+        Override which **assembly** directory the annotation is filed under. Defaults to
+        :func:`assembly_data_dir(assembly) <genome.io.download.assembly_data_dir>`.
+    progressbar : bool, default True
+        Show a download progress bar (requires ``tqdm``).
+    metadata : genome.metadata.AnnotationMetadata, optional
+        A complete annotation record to use instead of the curated table's row.
+
+    Returns
+    -------
+    dict
+        The completion record's own fields — ``files``, ``source_url``, ``sha256``,
+        ``details``, ``completed_at`` and the rest — plus the ``assembly`` and the
+        ``directory`` they live in. Ready to serialize as it is.
+
+    Raises
+    ------
+    ValueError
+        If the table lists no annotation ``name`` for ``assembly``.
+    genome.io.completion.RegistrationError
+        If the directory holds a build that cannot be trusted as finished, or (with
+        ``force``) if the run somehow left no record behind.
+    genome.io.utils.ChecksumMismatchError
+        If the row pins a sha256 and the unpacked GTF is not it.
+
+    Examples
+    --------
+    >>> register_annotation("sacCer3", "ensgene_v101")   # doctest: +SKIP
+    {'kind': 'annotation', 'name': 'ensgene_v101', 'files': {...}, ...}
+    """
+    assembly_dir = (
+        Path(cache_dir).expanduser()
+        if cache_dir is not None
+        else download.assembly_data_dir(assembly)
+    )
+    fetch_annotation(
+        assembly_dir,
+        assembly,
+        name,
+        force=force,
+        progressbar=progressbar,
+        metadata=metadata,
+    )
+    directory = annotation_dir(assembly_dir, name)
+    record = read_record(directory)
+    if record is None:
+        raise RegistrationError(
+            f"{name} was registered for {assembly} in {directory} but no {RECORD_NAME} is "
+            f"there, so nothing can vouch for it. Register it again with "
+            f"`{_repair_command(assembly, name)}`."
+        )
+    payload: dict[str, object] = dict(asdict(record))
+    payload["assembly"] = assembly
+    payload["directory"] = str(directory)
+    return payload
+
+
+def _already_registered(directory: Path, *, force: bool, repair: str) -> bool:
+    """Return whether ``directory`` holds a finished annotation that needs no work.
+
+    The record is the only thing consulted, and the two ways a directory can contradict
+    it raise from :func:`~genome.io.completion.check_registration`. ``force`` skips the
+    question entirely, which is what makes it the repair.
+    """
+    if force:
+        return False
+    return check_registration(directory, repair=repair) is not None
+
+
+def _proven_gtf(gtf: Path, expected: str | None) -> str | None:
+    """Return the placed GTF's digest when it is provably the pinned one, else ``None``.
+
+    What makes repairing cheap: a re-registration that can prove the GTF on disk is the
+    pinned one keeps it and rebuilds only the database. ``None`` — fetch the source
+    again — in all three of the cases where it cannot be proven: the GTF is missing, its
+    digest is a different one, or **the row pins no digest at all**, since with nothing
+    to compare against there is no way to show that what is there is right.
+    """
+    if expected is None or not gtf.is_file():
+        return None
+    actual = sha256_file(gtf)
+    return actual if actual == expected else None
+
+
+def _fetch_gtf(
+    annotation: GtfAnnotation, row: AnnotationMetadata, *, progressbar: bool = True
+) -> str:
+    """Download ``row``'s GTF, verify the unpacked file, place it, and return its digest.
+
+    Both the archive and the file it unpacks to land in the annotation's working area,
+    which is on the same filesystem, so placing the GTF is a rename rather than a copy
+    and the archive survives an interrupted run. Verification happens before the file is
+    placed, so a GTF that is not the pinned one never reaches the annotation directory.
+    """
+    directory = annotation.gtf.parent
+    gzipped = row.url.endswith(".gz")
+    # Named after the annotation, not after the URL: a provider's file name says
+    # nothing about the name the lab registered it under.
+    fetched = download.fetch_url(
+        row.url,
+        work_dir(directory),
+        fname=f"{annotation.name}.gtf.gz" if gzipped else annotation.gtf.name,
+        processor=pooch.Decompress(method="gzip", name=annotation.gtf.name) if gzipped else None,
+        progressbar=progressbar,
+    )
+    digest = sha256_file(fetched)
+    if row.sha256 is not None and digest != row.sha256:
+        raise ChecksumMismatchError(fetched, row.sha256, digest)
+    directory.mkdir(parents=True, exist_ok=True)
+    fetched.replace(annotation.gtf)
+    return digest
+
+
+def _build_and_record(
+    annotation: GtfAnnotation,
+    *,
+    source_url: str,
+    sha256: str,
+    details: dict[str, Any],
+    disable_infer_genes: bool,
+    disable_infer_transcripts: bool,
+) -> GtfAnnotation:
+    """Build the database beside the placed GTF, then write the record that ends the job.
+
+    The record is written last, once both files exist, and the working area goes only
+    after it — so an interrupted run leaves its download in place and repairs without
+    fetching the GTF again.
+
+    gffutils' version is recorded in ``details`` rather than in ``tool_versions``,
+    which is for **External tool**s: a tool resolved on ``PATH``, version-detected by
+    running it, and installable by a command an error can name. gffutils is an installed
+    Python library and none of that applies to it, so recording it there would blur the
+    one word the package keeps sharp for binaries it shells out to.
+    """
+    database = gffutils.create_db(
         str(annotation.gtf),
         str(annotation.db),
-        force=force,
+        # Reached only when the annotation is being built, so an older database left by
+        # an interrupted or forced re-registration is replaced rather than refused.
+        force=True,
         keep_order=True,
         merge_strategy="create_unique",
         sort_attribute_values=True,
@@ -121,5 +508,18 @@ def register_gtf(
     )
     # The on-disk database is now fully written; release the SQLite connection
     # so we don't leak an open file handle (the build is the only thing we need).
-    db.conn.close()
+    database.conn.close()
+
+    directory = annotation.gtf.parent
+    record = build_record(
+        directory,
+        kind="annotation",
+        name=annotation.name,
+        files=[annotation.gtf, annotation.db],
+        source_url=source_url,
+        sha256=sha256,
+        details={**details, "gffutils_version": gffutils.__version__},
+    )
+    write_record(directory, record)
+    clear_work_dir(directory)
     return annotation

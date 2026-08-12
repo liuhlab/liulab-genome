@@ -19,7 +19,7 @@ from genome import DNA, Genome, Region
 from genome.io.completion import RegistrationMismatchError, read_record
 from genome.io.download import register_assembly
 from genome.io.fasta import prepare_fasta
-from genome.metadata import METADATA_FIELDS, AssemblyMetadata
+from genome.metadata import METADATA_FIELDS, AnnotationMetadata, AssemblyMetadata
 
 from .conftest import FakeFetch
 
@@ -227,6 +227,50 @@ def test_registering_an_assembly_records_it_and_reopening_costs_no_fetch(
         assert again.fetch_sequence("chrI:0-4") == opening
 
     assert len(fake_fetch.calls) == 1  # the record answered; nothing was fetched twice
+
+
+#: An annotation row injected instead of the shipped table's: it points at the committed
+#: fixture the fake fetch serves and pins that file's digest.
+_ANNOTATION = AnnotationMetadata(
+    assembly="tiny",
+    name="ensgene_v101",
+    provider="UCSC",
+    version="ensGene.v101",
+    url="https://mirror.example.invalid/annotations/tiny.gtf.gz",
+    sha256="255f43bd9abef76424d1c2d89a40cccc1a36215409bbc8f32dcead49ca3baf5e",
+    default=True,
+)
+
+
+def test_registering_an_annotation_by_name_adopts_it_and_survives_reopening(
+    fake_fetch: FakeFetch, prepared_dir: Path
+) -> None:
+    fake_fetch.serve("tiny.gtf.gz")
+
+    with Genome("tiny", cache_dir=prepared_dir) as g:
+        assert g.annotations == []
+        annotation = g.register_annotation("ensgene_v101", progressbar=False, metadata=_ANNOTATION)
+        assert g.annotations == ["ensgene_v101"]
+        assert g.default_gtf == "ensgene_v101"
+        assert g.default_gtf_path == annotation.gtf
+
+    # A record was written, so the annotation is registered for anyone who opens the
+    # genome next — and opening it fetches nothing.
+    with Genome("tiny", cache_dir=prepared_dir) as again:
+        assert again.annotations == ["ensgene_v101"]
+    assert len(fake_fetch.calls) == 1
+
+
+def test_a_half_built_annotation_is_not_reported_as_registered(prepared_dir: Path) -> None:
+    # A gffutils build killed part-way leaves a database and no record. Opening the
+    # genome must not report it as an annotation, whatever files are lying there.
+    directory = prepared_dir / "gtf" / "halfway"
+    directory.mkdir(parents=True)
+    (directory / "halfway.db").write_bytes(b"half a database")
+
+    with Genome("tiny", cache_dir=prepared_dir) as g:
+        assert g.annotations == []
+        assert g.default_gtf is None
 
 
 def test_opening_a_genome_over_a_damaged_registration_raises(
