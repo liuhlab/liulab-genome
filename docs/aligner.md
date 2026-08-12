@@ -96,12 +96,13 @@ Three things about it are deliberate:
   assembly's; the reverse is not required. An assembly carrying scaffolds,
   patches or alt contigs the annotation never mentions is completely normal and
   is not an error.
-- **It runs before the database build**, on a GTF still in the working area, so
-  a mismatch costs one streaming pass over the file rather than the many minutes
-  the gffutils build takes — and leaves the annotation directory exactly as it
-  found it, so the next call reports the same problem rather than an interrupted
-  registration. The GTF is streamed, never loaded: a GENCODE GTF is well over a
-  gigabyte unpacked.
+- **It runs before the database build**, and on a GTF that has not been placed
+  yet — still in the working area when it was fetched, still where you pointed at
+  it when it was not. A mismatch therefore costs one streaming pass over the file
+  rather than the many minutes the gffutils build takes, and leaves the annotation
+  directory exactly as it found it, so the next call reports the same problem
+  rather than an interrupted registration. The GTF is streamed, never loaded: a
+  GENCODE GTF is well over a gigabyte unpacked.
 - **The override is `check_chromosomes=False`**, on `register_annotation`,
   `register_gtf` and their module-level forms. It is for the case where you have
   looked at the mismatch and accept it — one unusual contig should not block a
