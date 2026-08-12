@@ -109,10 +109,10 @@ code), data root, download dir, workdir
 The record written only after a multi-step build finished, so its absence means *unfinished*, never
 *missing*. One spelling — `.completion.json`, in the directory the build filled — carrying the
 provenance as well as the verdict: where the bytes came from, their checksum, every file claimed with
-its size, the **External tool** versions, the package version, and when it finished. Confirming one
-compares presence and size and reads no contents, so it is the cheap answer to *is this finished* and
-the only answer to *how was this made*. An **Index** still gates on a bare `.success` flag and is the
-one build yet to write one.
+its size, the **External tool** versions, the package version, when it finished, and whatever else its
+own kind must be able to explain — for an **Index**, the exact command it ran, the parameters and the
+FASTA consumed. Confirming one compares presence and size and reads no contents, so it is the cheap
+answer to *is this finished* and the only answer to *how was this made*.
 _Avoid_: flag, success flag, sentinel, stamp, lock file; and never an output file's mere existence,
 which is what this word exists to distrust
 
