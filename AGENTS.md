@@ -68,9 +68,8 @@ mechanises it.**
   the Records column above. A record number is permanent; an R-number is positional and re-points
   silently when a row is inserted. Held at review; no guard test.
 - **Docs are hand-authored Markdown** under [`docs/`](docs/) (MkDocs Material) — the prose page is
-  primary, `mkdocstrings` secondary — and stale committed docs are broken code, `skills/genome/SKILL.md`
-  included. `docs/adr/`, `docs/context/` and `docs/research/` are agent-facing and excluded from the
-  built site.
+  primary, `mkdocstrings` secondary — and stale committed docs are broken code. `docs/adr/`,
+  `docs/context/` and `docs/research/` are agent-facing and excluded from the built site.
 - **Versioning: CalVer `YYYY.MM.MICRO`, from the git tag.** A tag is a release; never hand-edit a
   version. Update the Unreleased section of `CHANGELOG.md`.
 - **Git.** Small, single-purpose PRs — one issue, one focused diff. Conventional Commits. Green CI is

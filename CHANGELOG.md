@@ -8,6 +8,16 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ## [Unreleased]
 
+### Removed
+
+- **`skills/genome/SKILL.md` and the `skills/` tree.** This package is API- and CLI-driven; it was
+  never consumed as an agent skill, nothing referenced its frontmatter, and it shipped in no wheel.
+  Every section duplicated a hand-authored page under `docs/` — and, being exercised by nothing, it
+  had drifted into asserting behaviour the package does not have: it documented `DNA("ATCX")`,
+  `RNA("ATCG")` and `Protein("MKTAYN")` as raising `ValueError`, while contradicting itself two
+  hundred lines earlier by noting that `DNA` "does not validate". None of the three raises. The one
+  decision it recorded that lived nowhere else is now ADR-0005.
+
 ### Changed
 
 - **Agent-facing documentation restructured.** `AGENTS.md` is now the router and `CLAUDE.md` is a
@@ -26,9 +36,8 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   `core/` and `features/`, which do not exist; a "py312/313/314 matrix" naming a Python this project
   never supported; "assume bgzipped + indexed" when `bgzip` appears nowhere in `src/`; and
   "metadata is first-class — sample IDs travel with the data", which has no referent here and
-  contradicts a `DNA` deliberately carrying no assembly, region or strand. The same three deletions
-  were applied to `skills/genome/SKILL.md`, `docs/index.md` and the feature-request issue template,
-  which restated them.
+  contradicts a `DNA` deliberately carrying no assembly, region or strand. The same deletions were
+  applied to `docs/index.md` and the feature-request issue template, which restated them.
 - `liulab_data_dir()` now probes `DEFAULT_LIULAB_DATA_PATHS` (e.g. `/share/liulab/liulab_data`)
   in order when `LIULAB_DATA` is unset, using the first existing path as the root, before
   falling back to `~/liulab_data`.

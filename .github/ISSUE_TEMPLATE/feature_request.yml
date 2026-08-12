@@ -157,8 +157,6 @@ body:
           required: true
         - label: Hand-authored Markdown page added/updated under `docs/` (the primary doc — not just the auto-rendered reference)
           required: true
-        - label: Skill (`skills/genome/SKILL.md`) updated if the public API or CLI surface changed
-          required: true
         - label: "`CHANGELOG.md` Unreleased section updated"
           required: true
         - label: "`pixi run check` is green"
