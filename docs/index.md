@@ -51,6 +51,6 @@ bedtools: bedtools v2.31.1
 
 This project follows a strict set of domain invariants (0-based half-open
 intervals, explicit reference assembly, normalized chromosome names, streaming
-I/O, metadata-as-first-class). They are documented in
-[`CLAUDE.md`](https://github.com/lhqing/liulab-genome/blob/main/CLAUDE.md);
+I/O). They are documented in
+[`AGENTS.md`](https://github.com/lhqing/liulab-genome/blob/main/AGENTS.md);
 read it before contributing.
