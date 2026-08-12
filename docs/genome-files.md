@@ -1,12 +1,14 @@
 # Downloading and preparing genomes
 
-Two modules in `genome.io` cover getting a reference genome onto disk and turning it
+Three modules in `genome.io` cover getting a reference genome onto disk and turning it
 into the index/companion files most tools expect:
 
-- [`genome.io.download`](#downloading) — cache large files from the network with
+- [`genome.io.download`](#downloading) — fetch large files from the network with
   [pooch](https://www.fatiando.org/pooch/), with a UCSC-aware subclass.
 - [`genome.io.fasta`](#preparing-a-fasta) — shell out to `samtools`, `faToTwoBit`, and
   `twoBitInfo` to index a FASTA and derive its `.2bit` and `chrom.sizes`.
+- [`genome.io.completion`](#the-registration-record) — the record a finished
+  registration writes, which is the only thing that says it finished.
 
 Both live at the **I/O boundary**: they touch the network and the filesystem and invoke
 native binaries (managed by pixi). They never reimplement what those binaries do.
@@ -54,13 +56,15 @@ dl = UCSCGenomeDownloader("hg38")
 dl.fasta_url
 # 'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz'
 
-fasta = dl.fetch_fasta()               # -> Path to hg38.fa (cached, multi-GB)
+fasta = dl.fetch_fasta()               # -> Path to .work/hg38.fa (multi-GB)
 ```
 
-Use `decompress=False` to keep the `.fa.gz`, or `progressbar=False` to silence the bar.
-When the URL had to be derived, a mistyped assembly fails fast on a `HEAD` request with a
-clear error naming the unknown name; when a row pins the URL there is nothing to guess,
-so that check is skipped.
+Both the download and its unpacked form land in the assembly's **working area**, not
+beside its prepared files — see [The working area](#the-working-area). Use
+`decompress=False` to get the `.fa.gz` back instead, or `progressbar=False` to silence
+the bar. When the URL had to be derived, a mistyped assembly fails fast on a `HEAD`
+request with a clear error naming the unknown name; when a row pins the URL there is
+nothing to guess, so that check is skipped.
 
 #### Pinned sources and checksums
 
@@ -113,10 +117,63 @@ files.chrom_sizes  # hg38.chrom.sizes
 ```
 
 Everything lands under the assembly's reference directory
-(`<LIULAB_DATA>/genome/hg38/`), and the gzipped download is kept alongside the outputs.
-The unpacked FASTA is checked against the assembly's pinned checksum before anything is
-derived from it (see [Pinned sources and checksums](#pinned-sources-and-checksums)); pass
+(`<LIULAB_DATA>/genome/hg38/`). The unpacked FASTA is checked against the assembly's
+pinned checksum before it is moved there, so a FASTA that is not the pinned one never
+arrives (see [Pinned sources and checksums](#pinned-sources-and-checksums)); pass
 `known_hash="md5:…"` to additionally have pooch verify the compressed download.
+
+#### The registration record
+
+`fetch_genome` finishes by writing one **completion record**, `.completion.json`, in the
+assembly directory. It holds the URL that was fetched, the sha256 of the unpacked FASTA,
+every file it claims with that file's size, the versions of the native tools that
+prepared them, the package version, and when it finished:
+
+```python
+from genome.io.completion import read_record
+
+record = read_record(assembly_data_dir("hg38"))
+record.source_url     # 'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz'
+record.sha256         # digest of the unpacked hg38.fa
+record.files          # {'hg38.fa': 3099922541, 'hg38.fa.fai': 22262, ...}
+record.tool_versions  # {'samtools': 'samtools 1.21'}
+record.completed_at   # '2026-08-12T09:14:03+00:00'
+```
+
+That record is the **only** thing that answers "is this registered?". It is written
+last, after every derived file exists, and atomically, so it is never seen half-written.
+Preparing the same assembly again reads it, confirms every file it claims is present and
+the right size — presence and size only, no file contents — and returns without
+fetching anything. Reopening a prepared human genome therefore costs four `stat` calls
+rather than a pass over three gigabytes.
+
+Paths in the record are relative to the assembly directory, so the whole directory can be
+moved without invalidating it. Deleting `.completion.json` (or `--overwrite`) makes the
+next call register from scratch.
+
+!!! note "pooch is a downloader; its cache is deliberately not relied on"
+    pooch is used here to move bytes — for its retries, progress reporting and
+    ftp/sftp support — and for nothing else. Its own cache is not what decides whether
+    a file is already here and usable: the completion record owns that judgment, because
+    it knows about the unpacked FASTA and the three derived files, and pooch only ever
+    knew about the archive it downloaded.
+
+#### The working area
+
+Downloads go to `<LIULAB_DATA>/genome/<assembly>/.work/`, a hidden, disposable directory
+inside the assembly's own directory:
+
+- it is on the same filesystem as the outputs, so placing the unpacked FASTA is a rename
+  rather than a second multi-gigabyte copy;
+- nothing in it is ever claimed by the completion record, so it holds working state and
+  never a result;
+- it survives an interrupted run — the archive stays put, so a preempted cluster job
+  repairs from it instead of downloading a genome again;
+- the whole thing, archive included, is deleted as soon as the record is written.
+
+Prepared assemblies used to keep their `.fa.gz` beside the FASTA forever. It is plain
+gzip rather than bgzip, so no external tool can read it in place; on one developer
+machine holding three modest genomes that was 770 MB of pure duplication.
 
 !!! note "Indexing the 2bit"
     The 2bit format is **self-indexed** — it carries an internal per-sequence index,
@@ -129,8 +186,8 @@ derived from it (see [Pinned sources and checksums](#pinned-sources-and-checksum
 When the UCSC golden path is unreachable (firewall/proxy) or you have a custom
 reference, `fetch_genome_from` prepares the genome from a FASTA **you** provide
 instead of downloading from UCSC. The source is either a local path (copied into
-the cache) or an `http(s)`/`ftp`/`sftp` URL (fetched with pooch); a gzipped (`.gz`)
-source is decompressed. UCSC is never contacted — there is no assembly-name
+the working area) or an `http(s)`/`ftp`/`sftp` URL (fetched with pooch); a gzipped
+(`.gz`) source is decompressed. UCSC is never contacted — there is no assembly-name
 validation — and neither the pinned source nor the pinned checksum of any table row
 is consulted: what you hand over is what you get.
 
@@ -148,11 +205,14 @@ files = dl.fetch_genome_from(
 )
 ```
 
-The source is normalized to `<assembly>.fa` in the cache and then run through the
-same `prepare_fasta` pipeline as `fetch_genome`, so it returns the identical
-`GenomeFiles` record and the outputs land in the same per-assembly directory. A
-fresh `<assembly>.fa` is reused on later calls unless you pass `overwrite=True`.
-The [`Genome`](genome.md#seeding-from-your-own-fasta-offline-mirrors-custom-references)
+The source is normalized to `<assembly>.fa` in the assembly directory and then run
+through the same `prepare_fasta` pipeline as `fetch_genome`, so it returns the identical
+`GenomeFiles` record and the outputs land in the same per-assembly directory. It also
+writes the same completion record, with the path or URL you gave as its source and the
+digest of what actually arrived — recorded, not compared, since a seeded FASTA is
+whatever you handed over. A registered assembly is reused on later calls unless you pass
+`overwrite=True`. The
+[`Genome`](genome.md#seeding-from-your-own-fasta-offline-mirrors-custom-references)
 constructor's `path_or_url=` argument is the high-level front door to this.
 
 !!! note "`sftp://` sources need `paramiko`"
@@ -168,6 +228,12 @@ and any other reference files for that build live together:
 
 ```
 <LIULAB_DATA>/genome/<assembly>/
+├── <assembly>.fa               # the unpacked FASTA
+├── <assembly>.fa.fai           # samtools faidx index
+├── <assembly>.2bit             # faToTwoBit
+├── <assembly>.chrom.sizes      # twoBitInfo
+├── .completion.json            # the record: written last, read first
+└── .work/                      # downloads in progress; gone once the record lands
 ```
 
 The lab data root comes from the `LIULAB_DATA` environment variable and falls back to
@@ -223,9 +289,10 @@ prepare_fasta("hg38.fa", overwrite=True)  # force regeneration
 ```
 
 Pass `overwrite=True` to any of `faidx`, `fasta_to_2bit`, `twobit_to_chrom_sizes`,
-`prepare_fasta`, or `UCSCGenomeDownloader.fetch_genome` to rebuild unconditionally. The
-download and decompression are cached independently by pooch and are unaffected by
-`overwrite`.
+`prepare_fasta`, or `UCSCGenomeDownloader.fetch_genome` to rebuild unconditionally. For
+`fetch_genome` that also means ignoring the assembly's
+[completion record](#the-registration-record) and registering from scratch; an archive
+still sitting in the working area is reused rather than downloaded again.
 
 !!! note "Binaries come from pixi"
     `samtools`, `faToTwoBit`, and `twoBitInfo` are conda/bioconda runtime dependencies.

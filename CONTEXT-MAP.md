@@ -106,9 +106,13 @@ _Avoid_: cache, cache dir (a cache may be evicted; this may not — though it is
 code), data root, download dir, workdir
 
 **Completion marker**:
-A sentinel file written only after a multi-step build finished, so its absence means *unfinished*,
-never *missing*. One concept spelled two ways today — `.genome_prepared` for the FASTA pipeline
-(`io/download.py:49`) and `.success` for an index (`aligner/aligner.py:30`).
+The record written only after a multi-step build finished, so its absence means *unfinished*, never
+*missing*. One spelling — `.completion.json`, in the directory the build filled — carrying the
+provenance as well as the verdict: where the bytes came from, their checksum, every file claimed with
+its size, the **External tool** versions, the package version, and when it finished. Confirming one
+compares presence and size and reads no contents, so it is the cheap answer to *is this finished* and
+the only answer to *how was this made*. An **Index** still gates on a bare `.success` flag and is the
+one build yet to write one.
 _Avoid_: flag, success flag, sentinel, stamp, lock file; and never an output file's mere existence,
 which is what this word exists to distrust
 

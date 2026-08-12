@@ -41,13 +41,17 @@ On construction `Genome`:
    against UCSC (a typo fails fast),
 3. checks the unpacked FASTA against the row's checksum, when it pins one,
 4. prepares the `.fai` index, `.2bit` encoding, and `chrom.sizes`,
-5. opens the `.2bit` for reading.
+5. writes the registration record that says all of that finished,
+6. opens the `.2bit` for reading.
 
-All of this is cached under `<LIULAB_DATA>/genome/<assembly>/` (configurable via
-the `LIULAB_DATA` environment variable; default `~/liulab_data`), so the second
-construction is cheap and works offline. The underlying machinery is documented
-in [Downloading and preparing genomes](genome-files.md); `Genome` is the
-high-level front door to it.
+Everything lands under `<LIULAB_DATA>/genome/<assembly>/` (configurable via the
+`LIULAB_DATA` environment variable; default `~/liulab_data`). A second construction
+reads that assembly's [registration record](genome-files.md#the-registration-record),
+confirms every file it claims is present and the right size — no file contents are read
+— and opens the `.2bit`, so it is instant and works offline. Nothing is downloaded
+twice, and the compressed download is deleted once the record is written. The underlying
+machinery is documented in [Downloading and preparing genomes](genome-files.md);
+`Genome` is the high-level front door to it.
 
 ### Where the bytes came from
 
@@ -72,7 +76,7 @@ you have a custom reference that isn't on the golden path, pass `path_or_url=`
 to seed the assembly from a FASTA you provide instead of downloading from UCSC:
 
 ```python
-# a local file — copied into the assembly's cache, then prepared
+# a local file — copied into the assembly's directory, then prepared
 Genome("ce11", path_or_url="/data/ce11.fa.gz")
 
 # a non-UCSC URL (e.g. a UCSC mirror)
@@ -80,12 +84,13 @@ Genome("ce11", path_or_url="https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11
 ```
 
 In this mode **UCSC is never contacted** — there is no assembly-name validation,
-so the name only labels the cache directory and the prepared files, and no pinned
+so the name only labels the directory and the prepared files, and no pinned
 source or checksum from the metadata table is consulted. A gzipped
 (`.gz`) source is decompressed automatically. Everything else is identical to the
-UCSC path: the `.fai`, `.2bit`, and `chrom.sizes` are prepared and cached under
-`<LIULAB_DATA>/genome/<assembly>/`, so later plain `Genome("ce11")` calls reuse
-them. See
+UCSC path: the `.fai`, `.2bit`, and `chrom.sizes` are prepared under
+`<LIULAB_DATA>/genome/<assembly>/` and the same registration record is written — with
+the path you gave as its source and the digest of what arrived — so later plain
+`Genome("ce11")` calls reuse them. See
 [Seeding from a local file or URL](genome-files.md#seeding-from-a-local-file-or-url)
 for the underlying `fetch_genome_from`.
 

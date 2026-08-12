@@ -25,7 +25,10 @@ _Avoid_: registry, catalog, database, manifest — each implies the table decide
 **Assembly dir**:
 The single directory holding everything tied to one **Assembly**, `<data dir>/genome/<assembly>/` —
 the FASTA and its derived files, plus the `gtf/` and `index/` subtrees other contexts own. Addressed
-by assembly name alone, so the name is the only thing a caller ever needs to find any of it.
+by assembly name alone, so the name is the only thing a caller ever needs to find any of it. It also
+holds a hidden, disposable working area, `.work/`, that a registration downloads into: same
+filesystem, so placing an unpacked file is a rename; nothing in it is ever claimed by a **Completion
+marker**; and it is discarded once one is written.
 _Avoid_: cache dir (this is the lab's reference data, not something an eviction policy may delete);
 genome dir, download dir
 
