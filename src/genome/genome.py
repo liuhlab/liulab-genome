@@ -35,7 +35,7 @@ from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import GtfAnnotation, list_annotations, register_gtf
 from genome.io.twobit import TwoBit
-from genome.metadata import lookup_assembly
+from genome.metadata import AssemblyMetadata, lookup_assembly
 from genome.region import Region, parse_region
 from genome.seq import DNA
 
@@ -73,6 +73,16 @@ class Genome(AlignerMixin):
         shared per-assembly reference directory.
     progressbar : bool, default True
         Show a download progress bar on first fetch (requires ``tqdm``).
+    metadata : genome.metadata.AssemblyMetadata, optional
+        A complete metadata record, used *instead of* the curated table's row for
+        ``assembly``. All-or-nothing: pass a record and every identifier comes
+        from it; omit it and every identifier comes from the table — or is
+        ``None`` when the table does not list ``assembly``, which is legal, since
+        the table is a cross-reference rather than an allow-list.
+    default_gtf : str, optional
+        Name of the registered annotation to serve as :attr:`default_gtf`. Must
+        already be registered for this assembly. Defaults to the sole registered
+        annotation when there is exactly one, otherwise to no default.
 
     Attributes
     ----------
@@ -80,6 +90,12 @@ class Genome(AlignerMixin):
         The assembly name.
     files : genome.io.fasta.GenomeFiles
         Paths to the prepared FASTA and its derived index/companion files.
+    metadata : genome.metadata.AssemblyMetadata or None
+        The assembly's metadata record — the one passed in, else the curated
+        table's row, else ``None`` for an assembly the table does not list. Its
+        fields are also read directly off the genome, as :attr:`assembly_name`,
+        :attr:`species`, :attr:`ucsc_name`, :attr:`ncbi_name`,
+        :attr:`ncbi_assembly_id` and :attr:`ncbi_taxid`.
 
     Raises
     ------
@@ -103,22 +119,12 @@ class Genome(AlignerMixin):
         path_or_url: str | Path | None = None,
         cache_dir: str | Path | None = None,
         progressbar: bool = True,
-        assembly_name: str | None = None,
-        species: str | None = None,
-        ucsc_name: str | None = None,
-        ncbi_name: str | None = None,
-        ncbi_assembly_id: str | None = None,
-        ncbi_taxid: int | None = None,
+        metadata: AssemblyMetadata | None = None,
         default_gtf: str | None = None,
     ) -> None:
         self.assembly = assembly
-        self._set_metadata(
-            assembly_name=assembly_name,
-            species=species,
-            ucsc_name=ucsc_name,
-            ncbi_name=ncbi_name,
-            ncbi_assembly_id=ncbi_assembly_id,
-            ncbi_taxid=ncbi_taxid,
+        self.metadata: AssemblyMetadata | None = (
+            metadata if metadata is not None else lookup_assembly(assembly)
         )
         self._downloader = UCSCGenomeDownloader(assembly, cache_dir)
         self._assembly_dir: Path = self._downloader.cache_dir
@@ -131,28 +137,35 @@ class Genome(AlignerMixin):
         self._twobit = TwoBit(self.files.twobit)
         self._set_default_gtf(default_gtf)
 
-    def _set_metadata(
-        self,
-        *,
-        assembly_name: str | None,
-        species: str | None,
-        ucsc_name: str | None,
-        ncbi_name: str | None,
-        ncbi_assembly_id: str | None,
-        ncbi_taxid: int | None,
-    ) -> None:
-        """Set metadata attributes, filling unset ones from the curated table when known."""
-        table = lookup_assembly(self.assembly)
-        self.assembly_name: str | None = assembly_name or (table.assembly_name if table else None)
-        self.species: str | None = species or (table.species if table else None)
-        self.ucsc_name: str | None = ucsc_name or (table.ucsc_name if table else None)
-        self.ncbi_name: str | None = ncbi_name or (table.ncbi_name if table else None)
-        self.ncbi_assembly_id: str | None = ncbi_assembly_id or (
-            table.ncbi_assembly_id if table else None
-        )
-        self.ncbi_taxid: int | None = (
-            ncbi_taxid if ncbi_taxid is not None else (table.ncbi_taxid if table else None)
-        )
+    @property
+    def assembly_name(self) -> str | None:
+        """Canonical name of the assembly, or ``None`` when its metadata is unknown."""
+        return self.metadata.assembly_name if self.metadata else None
+
+    @property
+    def species(self) -> str | None:
+        """Species this assembly is a reference for, or ``None`` when unknown."""
+        return self.metadata.species if self.metadata else None
+
+    @property
+    def ucsc_name(self) -> str | None:
+        """UCSC's name for the assembly, or ``None`` when unknown."""
+        return self.metadata.ucsc_name if self.metadata else None
+
+    @property
+    def ncbi_name(self) -> str | None:
+        """NCBI's name for the assembly (e.g. ``"GRCh38"``), or ``None`` when unknown."""
+        return self.metadata.ncbi_name if self.metadata else None
+
+    @property
+    def ncbi_assembly_id(self) -> str | None:
+        """NCBI assembly accession (e.g. ``"GCF_000001405.40"``), or ``None`` when unknown."""
+        return self.metadata.ncbi_assembly_id if self.metadata else None
+
+    @property
+    def ncbi_taxid(self) -> int | None:
+        """NCBI taxonomy id of the species, or ``None`` when unknown."""
+        return self.metadata.ncbi_taxid if self.metadata else None
 
     def _set_default_gtf(self, default_gtf: str | None) -> None:
         """Discover registered annotations and pick the default GTF."""

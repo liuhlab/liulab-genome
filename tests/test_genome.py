@@ -17,6 +17,7 @@ import pytest
 import genome.genome as genome_mod
 from genome import DNA, Genome, Region
 from genome.io.fasta import prepare_fasta
+from genome.metadata import METADATA_FIELDS, AssemblyMetadata
 
 _REQUIRED = ("samtools", "faToTwoBit", "twoBitInfo")
 _TOOLS_PRESENT = all(shutil.which(t) is not None for t in _REQUIRED)
@@ -30,17 +31,26 @@ _CHR_B = "TTTTGGGG"
 
 
 @pytest.fixture
-def genome(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Genome]:
+def prepared_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Prepare a tiny assembly on disk and return the cache dir to construct against.
+
+    Skips the network/UCSC validation entirely: every ``Genome(...)`` built with
+    this cache dir is handed back the prebuilt files, whatever it is named.
+    """
     fasta = tmp_path / "tiny.fa"
     fasta.write_text(f">chrA\n{_CHR_A}\n>chrB\n{_CHR_B}\n")
     files = prepare_fasta(fasta)
-    # Skip the network/UCSC validation entirely: hand back the prebuilt files.
     monkeypatch.setattr(
         genome_mod.UCSCGenomeDownloader,
         "fetch_genome",
         lambda self, **kwargs: files,
     )
-    g = Genome("tiny", cache_dir=tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+def genome(prepared_dir: Path) -> Iterator[Genome]:
+    g = Genome("tiny", cache_dir=prepared_dir)
     yield g
     g.close()
 
@@ -124,6 +134,48 @@ def test_context_manager_closes_handle(genome: Genome) -> None:
         assert g.fetch_sequence("chrA:0-4") == DNA("ACGT")
     with pytest.raises(ValueError, match="closed"):
         g.fetch_sequence("chrA:0-4")
+
+
+_OVERRIDE = AssemblyMetadata(
+    assembly_name="tinyAsm",
+    species="Testus minimus",
+    ucsc_name="tinyUcsc",
+    ncbi_name="TINY.1",
+    ncbi_assembly_id="GCF_000000000.0",
+    ncbi_taxid=1,
+)
+
+
+def test_metadata_record_replaces_the_curated_row(prepared_dir: Path) -> None:
+    # sacCer3 is listed in the shipped table; a record given here wins over every field of it.
+    with Genome("sacCer3", cache_dir=prepared_dir, metadata=_OVERRIDE) as g:
+        assert g.metadata == _OVERRIDE
+        assert [getattr(g, field) for field in METADATA_FIELDS] == [
+            "tinyAsm",
+            "Testus minimus",
+            "tinyUcsc",
+            "TINY.1",
+            "GCF_000000000.0",
+            1,
+        ]
+
+
+def test_metadata_falls_back_to_the_curated_table(prepared_dir: Path) -> None:
+    with Genome("sacCer3", cache_dir=prepared_dir) as g:
+        assert g.assembly_name == "sacCer3"
+        assert g.species == "Saccharomyces cerevisiae"
+        assert g.ucsc_name == "sacCer3"
+        assert g.ncbi_name == "R64-1-1"
+        assert g.ncbi_assembly_id == "GCF_000146045.2"
+        assert g.ncbi_taxid == 559292
+
+
+def test_assembly_absent_from_the_table_still_constructs(prepared_dir: Path) -> None:
+    # The table is a cross-reference, not an allow-list: every identifier is simply unknown.
+    with Genome("tiny", cache_dir=prepared_dir) as g:
+        assert g.metadata is None
+        assert all(getattr(g, field) is None for field in METADATA_FIELDS)
+        assert g.chromosomes == ["chrA", "chrB"]
 
 
 def test_path_or_url_seeds_from_local_fasta(

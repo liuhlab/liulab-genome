@@ -16,7 +16,7 @@ the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
 The curated TSV row cross-referencing one **Assembly** across three naming authorities:
 `assembly_name`, `species`, `ucsc_name`, `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid`. A
 cross-reference and never an allow-list — an assembly absent from the table is perfectly legal, and
-every field is overridable by a `Genome(...)` keyword.
+a complete record handed to `Genome(...)` replaces the row wholesale, every field or none.
 _Avoid_: registry, catalog, database, manifest — each implies the table decides what exists
 
 **Assembly dir**:
