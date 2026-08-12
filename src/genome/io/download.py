@@ -1,9 +1,10 @@
 """Download and cache large genomic files with `pooch <https://www.fatiando.org/pooch/>`_.
 
-I/O boundary module: it reaches out to the network. :class:`Downloader` is a thin,
-reusable wrapper over :func:`pooch.retrieve` that fetches a URL once and caches it;
-:class:`UCSCGenomeDownloader` specializes it for reference-genome FASTA files from
-the UCSC golden path. See each class for caching, storage layout, and hashing.
+I/O boundary module: it reaches out to the network. :func:`fetch_url` is the package's
+single fetch step — every download goes through it and it is the only call site of
+:func:`pooch.retrieve`. :class:`Downloader` binds that step to a cache directory, and
+:class:`UCSCGenomeDownloader` specializes it for reference-genome FASTA files from the
+UCSC golden path. See each for caching, storage layout, and hashing.
 
 Examples
 --------
@@ -18,7 +19,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
@@ -26,7 +26,6 @@ from urllib.parse import urlparse
 import pooch
 import requests
 
-from genome.external import _resolve
 from genome.io.fasta import GenomeFiles, prepare_fasta
 from genome.io.utils import _gunzip
 
@@ -47,6 +46,10 @@ DEFAULT_LIULAB_DATA_PATHS = [
 #: (download/seed → faidx → 2bit → chrom.sizes) has completed successfully.
 #: Its presence lets repeat constructions skip fetching entirely.
 PREPARED_MARKER = ".genome_prepared"
+
+#: URL schemes a source may use, matching the downloaders pooch ships. Anything
+#: else is a local path (or an error, if it carries a scheme we cannot fetch).
+_URL_SCHEMES = frozenset({"http", "https", "ftp", "sftp"})
 
 
 def liulab_data_dir() -> Path:
@@ -109,26 +112,88 @@ def assembly_data_dir(assembly: str) -> Path:
 
 
 def _looks_like_url(source: str) -> bool:
-    """Return whether ``source`` is an http(s)/ftp URL rather than a local path."""
-    return urlparse(source).scheme.lower() in {"http", "https", "ftp", "ftps"}
+    """Return whether ``source`` is a fetchable URL rather than a local path."""
+    return urlparse(source).scheme.lower() in _URL_SCHEMES
 
 
-def _curl_download(url: str, dest: Path, *, progressbar: bool = True) -> Path:
-    """Download ``url`` to ``dest`` with ``curl``, writing atomically via a ``.part`` file."""
-    curl = _resolve("curl")
-    part = dest.with_name(dest.name + ".part")
-    verbosity = "-#" if progressbar else "-sS"
-    args = [curl, "-fL", verbosity, "--retry", "3", "-o", str(part), url]
-    try:
-        subprocess.run(args, check=True)
-    except subprocess.CalledProcessError as err:
-        part.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"curl failed (exit {err.returncode}) downloading {url!r}. Check the URL "
-            f"and your network/proxy settings (HTTP(S)_PROXY)."
-        ) from err
-    part.replace(dest)
-    return dest
+def fetch_url(
+    url: str,
+    dest_dir: Path,
+    *,
+    known_hash: str | None = None,
+    fname: str | None = None,
+    processor: _Processor | None = None,
+    progressbar: bool = True,
+) -> Path:
+    """Download ``url`` into ``dest_dir`` and return the local path.
+
+    The package's one fetch step: every download it performs goes through here, and
+    this is the only call site of :func:`pooch.retrieve`. pooch picks its transport
+    from the URL scheme, so ``http``, ``https``, ``ftp`` and ``sftp`` all work — the
+    last additionally needs ``paramiko`` installed, which pooch will say for itself.
+    A file already sitting at the destination is reused (verified against
+    ``known_hash`` when one is given) and no network call is made.
+
+    Reach this function through the module, never by importing the name: write
+    ``from genome.io import download`` and call ``download.fetch_url(...)``, so that a
+    single ``monkeypatch.setattr(download, "fetch_url", ...)`` takes every download in
+    the package offline. Callers inside this module call it as a module global for the
+    same reason.
+
+    Parameters
+    ----------
+    url : str
+        The file URL to download, including its scheme.
+    dest_dir : pathlib.Path
+        Directory the file is written into. Created when a download actually happens.
+    known_hash : str, optional
+        Expected hash as ``"<algorithm>:<hexdigest>"`` (e.g. ``"md5:8f3c..."``), or a
+        bare hex digest for sha256. If ``None``, verification is skipped and pooch logs
+        the computed hash so you can pin it next time.
+    fname : str, optional
+        Local file name to save as. Defaults to a hash-prefixed unique name pooch
+        derives from ``url``.
+    processor : callable, optional
+        A pooch post-processor applied after the download, such as
+        :class:`pooch.Decompress` or :class:`pooch.Untar`. Its return value becomes the
+        path returned here.
+    progressbar : bool, default True
+        Show a textual download progress bar (requires ``tqdm``).
+
+    Returns
+    -------
+    pathlib.Path
+        Absolute path to the downloaded (and, if ``processor`` was given, processed)
+        file.
+
+    Raises
+    ------
+    requests.exceptions.HTTPError
+        If an http(s) download fails (e.g. the URL 404s).
+    ValueError
+        If ``known_hash`` is given and the file does not match it, or if no downloader
+        exists for the URL's scheme.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> from genome.io import download
+    >>> download.fetch_url(                                  # doctest: +SKIP
+    ...     "https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz",
+    ...     Path("/scratch/liulab/genome/sacCer3"),
+    ...     fname="sacCer3.fa.gz",
+    ... )
+    PosixPath('/scratch/liulab/genome/sacCer3/sacCer3.fa.gz')
+    """
+    result = pooch.retrieve(
+        url=url,
+        known_hash=known_hash,
+        fname=fname,
+        path=dest_dir,
+        processor=processor,
+        progressbar=progressbar,
+    )
+    return Path(result)
 
 
 class Downloader:
@@ -164,51 +229,25 @@ class Downloader:
         processor: _Processor | None = None,
         progressbar: bool = True,
     ) -> Path:
-        """Download ``url`` into the cache and return the local path.
+        """Download ``url`` into :attr:`cache_dir` and return the local path.
 
-        If a previously downloaded copy is already present (and matches
-        ``known_hash`` when one is given), it is reused without hitting the
-        network.
-
-        Parameters
-        ----------
-        url : str
-            The file URL to download.
-        known_hash : str, optional
-            Expected hash as ``"<algorithm>:<hexdigest>"`` (e.g.
-            ``"md5:8f3c..."``). If ``None``, verification is skipped and pooch
-            logs the computed hash so you can pin it next time.
-        fname : str, optional
-            Local file name to save as. Defaults to the basename of ``url``.
-        processor : callable, optional
-            A pooch post-processor applied after download, such as
-            :class:`pooch.Decompress` or :class:`pooch.Untar`. Its return value
-            becomes the path returned by this method.
-        progressbar : bool, default True
-            Show a textual download progress bar (requires ``tqdm``).
+        :func:`fetch_url` bound to this downloader's cache directory — see it for the
+        arguments, the reuse-without-network behaviour, the hashing and what raises.
 
         Returns
         -------
         pathlib.Path
-            Absolute path to the cached (and, if ``processor`` was given,
-            processed) file.
-
-        Raises
-        ------
-        requests.exceptions.HTTPError
-            If the download fails (e.g. the URL 404s).
-        ValueError
-            If ``known_hash`` is given and the downloaded file does not match.
+            Absolute path to the cached (and, if ``processor`` was given, processed)
+            file.
         """
-        result = pooch.retrieve(
-            url=url,
+        return fetch_url(
+            url,
+            self.cache_dir,
             known_hash=known_hash,
             fname=fname,
-            path=self.cache_dir,
             processor=processor,
             progressbar=progressbar,
         )
-        return Path(result)
 
 
 class UCSCGenomeDownloader(Downloader):
@@ -469,17 +508,18 @@ class UCSCGenomeDownloader(Downloader):
         Use this to seed an assembly from a file you already have or a non-UCSC
         URL — handy when the UCSC golden path is unreachable (firewall/proxy) or
         for a custom reference. ``source`` is either a **local filesystem path**
-        (copied into :attr:`cache_dir`) or an **http(s)/ftp URL** (downloaded with
-        ``curl``). Gzipped sources (``.gz``) are decompressed. The resulting
-        ``<assembly>.fa`` is then indexed/2bit/chrom.sizes-prepared exactly as
-        :meth:`fetch_genome` does. UCSC is never contacted.
+        (copied into :attr:`cache_dir`) or a **URL** (fetched with
+        :func:`fetch_url`, so http(s), ftp and sftp all work). Gzipped sources
+        (``.gz``) are decompressed. The resulting ``<assembly>.fa`` is then
+        indexed/2bit/chrom.sizes-prepared exactly as :meth:`fetch_genome` does.
+        UCSC is never contacted.
 
         Parameters
         ----------
         source : str or pathlib.Path
-            Local FASTA path or http(s)/ftp URL. ``.gz`` is decompressed.
+            Local FASTA path or http(s)/ftp/sftp URL. ``.gz`` is decompressed.
         progressbar : bool, default True
-            Show curl's progress meter while downloading a URL (ignored for a
+            Show a download progress bar while fetching a URL (ignored for a
             local copy).
         overwrite : bool, default False
             Re-fetch the source and rerun preparation even when a fresh
@@ -494,10 +534,12 @@ class UCSCGenomeDownloader(Downloader):
         ------
         FileNotFoundError
             If ``source`` is a local path that does not exist.
+        ValueError
+            If ``source`` carries a URL scheme no downloader handles.
         genome.external.ToolNotFoundError
-            If ``curl`` (for a URL) or a preparation tool is not on ``PATH``.
+            If a preparation tool is not on ``PATH``.
         RuntimeError
-            If the curl download or any native preparation tool fails.
+            If any native preparation tool fails.
         """
         cached = self._completed_genome(overwrite=overwrite)
         if cached is not None:
@@ -516,8 +558,10 @@ class UCSCGenomeDownloader(Downloader):
     ) -> Path:
         """Place ``source`` into the cache as ``<assembly>.fa`` and return that path.
 
-        Copies a local file or downloads a URL with curl, decompressing a ``.gz``
-        source. A fresh existing ``<assembly>.fa`` is reused unless ``overwrite``.
+        Copies a local file or fetches a URL through :func:`fetch_url`, decompressing a
+        ``.gz`` source. A fresh existing ``<assembly>.fa`` is reused unless
+        ``overwrite``, which also discards any kept download so the source is read
+        again rather than reused.
         """
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         fasta = self.cache_dir / f"{self.assembly}.fa"
@@ -526,22 +570,32 @@ class UCSCGenomeDownloader(Downloader):
 
         src = str(source)
         gzipped = src.endswith(".gz")
-        download = self.cache_dir / (f"{self.assembly}.fa.gz" if gzipped else f"{self.assembly}.fa")
+        name = f"{self.assembly}.fa.gz" if gzipped else f"{self.assembly}.fa"
+        downloaded = self.cache_dir / name
 
         if _looks_like_url(src):
-            _curl_download(src, download, progressbar=progressbar)
+            if overwrite:
+                downloaded.unlink(missing_ok=True)
+            fetch_url(src, self.cache_dir, fname=name, progressbar=progressbar)
         else:
             local_source = Path(src).expanduser()
             if not local_source.is_file():
+                scheme = urlparse(src).scheme.lower()
+                if scheme:
+                    raise ValueError(
+                        f"cannot fetch {src!r}: no downloader for the {scheme!r} scheme. "
+                        f"Pass a local file path, or a URL using one of: "
+                        f"{', '.join(sorted(_URL_SCHEMES))}."
+                    )
                 raise FileNotFoundError(
                     f"local FASTA source not found: {local_source}. Pass an existing "
-                    f"file path or an http(s)/ftp URL."
+                    f"file path or an http(s)/ftp/sftp URL."
                 )
-            if local_source.resolve() != download.resolve():
-                shutil.copy2(local_source, download)
+            if local_source.resolve() != downloaded.resolve():
+                shutil.copy2(local_source, downloaded)
 
         if gzipped:
-            _gunzip(download, fasta)
+            _gunzip(downloaded, fasta)
         return fasta
 
 

@@ -1,14 +1,15 @@
 """Tests for genome.io.download.
 
-Network access is avoided by monkeypatching pooch.retrieve: we assert that our
-wrappers wire the right arguments through, and that the UCSC subclass builds the
-right URL and selects a decompression processor.
+Every download in the package goes through ``download.fetch_url``, so the suite stays
+offline by replacing that one function with the shared ``fake_fetch`` fixture (see
+tests/conftest.py) and asserting the arguments each caller wires through. ``fetch_url``
+itself is exercised for real against an already-present file, which pooch serves without
+touching the network. Nothing here monkeypatches pooch's own retrieve function.
 """
 
 from __future__ import annotations
 
-import gzip
-import subprocess
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,9 +22,12 @@ from genome.io.download import (
     Downloader,
     UCSCGenomeDownloader,
     assembly_data_dir,
+    fetch_url,
     liulab_data_dir,
 )
 from genome.io.fasta import GenomeFiles
+
+from .conftest import FakeFetch
 
 
 @dataclass
@@ -60,6 +64,11 @@ def head_recorder(monkeypatch: pytest.MonkeyPatch) -> _HeadRecorder:
     recorder = _HeadRecorder()
     monkeypatch.setattr(download_mod.requests, "head", recorder)
     return recorder
+
+
+def _sha256(path: Path) -> str:
+    """Return the sha256 of ``path`` in the ``algorithm:hexdigest`` form pooch accepts."""
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_liulab_data_dir_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -100,15 +109,47 @@ def test_explicit_cache_dir_is_used(tmp_path: Path) -> None:
     assert dl.cache_dir == tmp_path / "cache"
 
 
-def test_fetch_passes_arguments_to_pooch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    captured: dict[str, object] = {}
+# --- the one fetch step ------------------------------------------------------
 
-    def fake_retrieve(**kwargs: object) -> str:
-        captured.update(kwargs)
-        return str(tmp_path / "downloaded.bin")
 
-    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
+def test_fetch_url_serves_a_matching_local_file_without_downloading(
+    tmp_path: Path, data_dir: Path
+) -> None:
+    # A file already at the destination whose hash matches is handed back as-is:
+    # no downloader is ever constructed, so this exercises fetch_url offline.
+    dest = tmp_path / "tiny.fa"
+    dest.write_bytes((data_dir / "tiny.fa").read_bytes())
 
+    result = fetch_url(
+        "https://example.org/tiny.fa",
+        tmp_path,
+        known_hash=_sha256(dest),
+        fname="tiny.fa",
+        progressbar=False,
+    )
+
+    assert result.resolve() == dest.resolve()
+    assert result.read_bytes() == (data_dir / "tiny.fa").read_bytes()
+
+
+def test_fetch_url_returns_the_processor_output(tmp_path: Path, data_dir: Path) -> None:
+    dest = tmp_path / "sacCer3.fa.gz"
+    dest.write_bytes((data_dir / "tiny.fa.gz").read_bytes())
+
+    result = fetch_url(
+        "https://example.org/sacCer3.fa.gz",
+        tmp_path,
+        known_hash=_sha256(dest),
+        fname="sacCer3.fa.gz",
+        processor=pooch.Decompress(method="gzip", name="sacCer3.fa"),
+        progressbar=False,
+    )
+
+    assert result.resolve() == (tmp_path / "sacCer3.fa").resolve()
+    assert result.read_text() == (data_dir / "tiny.fa").read_text()
+
+
+def test_fetch_passes_arguments_to_the_fetch_step(fake_fetch: FakeFetch, tmp_path: Path) -> None:
     dl = Downloader(cache_dir=tmp_path)
     result = dl.fetch(
         "https://example.org/big.bed.gz",
@@ -116,12 +157,13 @@ def test_fetch_passes_arguments_to_pooch(monkeypatch: pytest.MonkeyPatch, tmp_pa
         fname="big.bed.gz",
     )
 
-    assert result == tmp_path / "downloaded.bin"
-    assert captured["url"] == "https://example.org/big.bed.gz"
-    assert captured["known_hash"] == "md5:abc"
-    assert captured["fname"] == "big.bed.gz"
-    assert captured["path"] == tmp_path
-    assert captured["progressbar"] is True
+    assert result == tmp_path / "big.bed.gz"
+    call = fake_fetch.last
+    assert call.url == "https://example.org/big.bed.gz"
+    assert call.known_hash == "md5:abc"
+    assert call.fname == "big.bed.gz"
+    assert call.dest_dir == tmp_path
+    assert call.progressbar is True
 
 
 def test_ucsc_fasta_url() -> None:
@@ -159,71 +201,57 @@ def test_validate_assembly_other_status_raises_http_error(head_recorder: _HeadRe
 
 
 def test_fetch_fasta_validates_by_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head_recorder: _HeadRecorder
+    fake_fetch: FakeFetch, tmp_path: Path, head_recorder: _HeadRecorder
 ) -> None:
-    monkeypatch.setattr(pooch, "retrieve", lambda **_kwargs: str(tmp_path / "hg38.fa"))
+    fake_fetch.serve("tiny.fa.gz")
     UCSCGenomeDownloader("hg38", cache_dir=tmp_path).fetch_fasta()
     assert len(head_recorder.calls) == 1
 
 
 def test_fetch_fasta_aborts_before_download_on_bad_assembly(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, head_recorder: _HeadRecorder
+    fake_fetch: FakeFetch, tmp_path: Path, head_recorder: _HeadRecorder
 ) -> None:
     head_recorder.status_code = 404
 
-    def fail_retrieve(**kwargs: object) -> str:
-        raise AssertionError("download must not start when validation fails")
-
-    monkeypatch.setattr(pooch, "retrieve", fail_retrieve)
     with pytest.raises(ValueError, match="Unknown UCSC assembly"):
         UCSCGenomeDownloader("bad", cache_dir=tmp_path).fetch_fasta()
 
+    assert fake_fetch.calls == []  # validation fails before anything is fetched
+
 
 def test_fetch_fasta_decompresses_by_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    fake_fetch: FakeFetch, tmp_path: Path, data_dir: Path
 ) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_retrieve(**kwargs: object) -> str:
-        captured.update(kwargs)
-        return str(tmp_path / "hg38.fa")
-
-    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
-
+    fake_fetch.serve("tiny.fa.gz")
     dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
+
     result = dl.fetch_fasta()
 
+    assert fake_fetch.last.url == dl.fasta_url
+    # the compressed download is unpacked to <assembly>.fa beside it
     assert result == tmp_path / "hg38.fa"
-    assert captured["url"] == dl.fasta_url
-    processor = captured["processor"]
-    assert isinstance(processor, pooch.Decompress)
-    assert processor.name == "hg38.fa"
+    assert result.read_text() == (data_dir / "tiny.fa").read_text()
 
 
-def test_fetch_fasta_without_decompress_has_no_processor(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_fetch_fasta_without_decompress_keeps_the_archive(
+    fake_fetch: FakeFetch, tmp_path: Path
 ) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_retrieve(**kwargs: object) -> str:
-        captured.update(kwargs)
-        return str(tmp_path / "hg38.fa.gz")
-
-    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
-
+    fake_fetch.serve("tiny.fa.gz")
     dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
-    dl.fetch_fasta(decompress=False)
 
-    assert captured["processor"] is None
+    result = dl.fetch_fasta(decompress=False)
+
+    assert fake_fetch.last.processor is None
+    assert result.name.endswith(".fa.gz")
 
 
-def test_fetch_genome_runs_full_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_fetch_genome_runs_full_pipeline(
+    fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     # fetch_genome chains fetch_fasta (network) and prepare_fasta (native tools);
-    # stub both so the test stays offline and binary-free, then assert the wiring.
-    def fake_retrieve(**kwargs: object) -> str:
-        assert kwargs["url"] == dl.fasta_url
-        return str(tmp_path / "hg38.fa")
-
+    # the fetch step is replaced by the fixture, prepare_fasta is stubbed here, so the
+    # test stays offline and binary-free and asserts the wiring.
+    fake_fetch.serve("tiny.fa.gz")
     prepared: dict[str, object] = {}
 
     def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
@@ -237,12 +265,12 @@ def test_fetch_genome_runs_full_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_pa
             chrom_sizes=fasta.with_name("hg38.chrom.sizes"),
         )
 
-    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
     dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
     files = dl.fetch_genome()
 
+    assert fake_fetch.last.url == dl.fasta_url
     # fetch_fasta's decompressed output is handed to prepare_fasta...
     assert prepared["fasta"] == tmp_path / "hg38.fa"
     assert prepared["overwrite"] is False  # default: caches reused
@@ -253,19 +281,17 @@ def test_fetch_genome_runs_full_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert files.chrom_sizes == tmp_path / "hg38.chrom.sizes"
 
 
-def test_fetch_genome_forwards_overwrite(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_fetch_genome_forwards_overwrite(
+    fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
     prepared: dict[str, object] = {}
-
-    def fake_retrieve(**kwargs: object) -> str:
-        assert kwargs["url"] == dl.fasta_url
-        return str(tmp_path / "hg38.fa")
 
     def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
         prepared["overwrite"] = overwrite
         fasta = Path(fasta_path)
         return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
 
-    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
     dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
@@ -275,29 +301,25 @@ def test_fetch_genome_forwards_overwrite(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_fetch_genome_forwards_known_hash_and_decompresses(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_retrieve(**kwargs: object) -> str:
-        captured.update(kwargs)
-        return str(tmp_path / "hg38.fa")
+    fake_fetch.serve("tiny.fa.gz")
 
     def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
         assert overwrite is False  # default: no forced regeneration
         fasta = Path(fasta_path)
         return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
 
-    monkeypatch.setattr(pooch, "retrieve", fake_retrieve)
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
     dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
     dl.fetch_genome(known_hash="md5:abc")
 
-    assert captured["url"] == dl.fasta_url
-    assert captured["known_hash"] == "md5:abc"
+    call = fake_fetch.last
+    assert call.url == dl.fasta_url
+    assert call.known_hash == "md5:abc"
     # the pipeline always decompresses, so a Decompress processor is selected.
-    assert isinstance(captured["processor"], pooch.Decompress)
+    assert isinstance(call.processor, pooch.Decompress)
 
 
 # --- seeding from a user-provided FASTA (path_or_url) -----------------------
@@ -309,7 +331,8 @@ def test_fetch_genome_forwards_known_hash_and_decompresses(
         ("https://x/y.fa.gz", True),
         ("http://x/y.fa", True),
         ("ftp://x/y.fa", True),
-        ("ftps://x/y.fa", True),
+        ("sftp://x/y.fa", True),
+        ("ftps://x/y.fa", False),  # pooch ships no ftps downloader
         ("/data/ref.fa", False),
         ("ref.fa.gz", False),
         ("~/ref.fa", False),
@@ -320,27 +343,22 @@ def test_looks_like_url(source: str, expected: bool) -> None:
     assert download_mod._looks_like_url(source) is expected
 
 
-def test_materialize_fasta_copies_local_plain(tmp_path: Path) -> None:
-    src = tmp_path / "src.fa"
-    src.write_text(">chr\nACGT\n")
+def test_materialize_fasta_copies_local_plain(tmp_path: Path, data_dir: Path) -> None:
     dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path / "cache")
 
-    out = dl._materialize_fasta(src)
+    out = dl._materialize_fasta(data_dir / "tiny.fa")
 
     assert out == tmp_path / "cache" / "tiny.fa"
-    assert out.read_text() == ">chr\nACGT\n"
+    assert out.read_text() == (data_dir / "tiny.fa").read_text()
 
 
-def test_materialize_fasta_decompresses_local_gz(tmp_path: Path) -> None:
-    src = tmp_path / "src.fa.gz"
-    with gzip.open(src, "wt") as fh:
-        fh.write(">chr\nACGT\n")
+def test_materialize_fasta_decompresses_local_gz(tmp_path: Path, data_dir: Path) -> None:
     dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path / "cache")
 
-    out = dl._materialize_fasta(src)
+    out = dl._materialize_fasta(data_dir / "tiny.fa.gz")
 
     assert out == tmp_path / "cache" / "tiny.fa"
-    assert out.read_text() == ">chr\nACGT\n"
+    assert out.read_text() == (data_dir / "tiny.fa").read_text()
     # the compressed download is kept alongside the decompressed FASTA
     assert (tmp_path / "cache" / "tiny.fa.gz").is_file()
 
@@ -349,6 +367,12 @@ def test_materialize_fasta_missing_local_raises(tmp_path: Path) -> None:
     dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
     with pytest.raises(FileNotFoundError, match="local FASTA source not found"):
         dl._materialize_fasta(tmp_path / "nope.fa")
+
+
+def test_materialize_fasta_unfetchable_scheme_raises(tmp_path: Path) -> None:
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
+    with pytest.raises(ValueError, match="no downloader for the 'ftps' scheme"):
+        dl._materialize_fasta("ftps://example.org/tiny.fa")
 
 
 def test_materialize_fasta_reuses_existing_unless_overwrite(tmp_path: Path) -> None:
@@ -365,80 +389,45 @@ def test_materialize_fasta_reuses_existing_unless_overwrite(tmp_path: Path) -> N
     assert dl._materialize_fasta(src, overwrite=True).read_text() == "TWO"
 
 
-def test_materialize_fasta_url_uses_curl(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    captured: dict[str, object] = {}
-
-    def fake_curl(url: str, dest: Path, *, progressbar: bool = True) -> Path:
-        captured["url"] = url
-        captured["dest"] = dest
-        dest.write_text(">chr\nACGT\n")
-        return dest
-
-    monkeypatch.setattr(download_mod, "_curl_download", fake_curl)
+def test_materialize_fasta_url_goes_through_the_fetch_step(
+    fake_fetch: FakeFetch, tmp_path: Path, data_dir: Path
+) -> None:
     dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
 
-    out = dl._materialize_fasta("https://example.org/tiny.fa")
+    out = dl._materialize_fasta("https://example.org/whatever.fa", progressbar=False)
 
     assert out == tmp_path / "tiny.fa"
-    assert captured["url"] == "https://example.org/tiny.fa"
-    assert captured["dest"] == tmp_path / "tiny.fa"
+    assert out.read_text() == (data_dir / "tiny.fa").read_text()
+    call = fake_fetch.last
+    assert call.url == "https://example.org/whatever.fa"
+    assert call.dest_dir == tmp_path
+    assert call.fname == "tiny.fa"  # the download lands as <assembly>.fa
+    assert call.progressbar is False
 
 
 def test_materialize_fasta_url_gz_is_decompressed(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    fake_fetch: FakeFetch, tmp_path: Path, data_dir: Path
 ) -> None:
-    def fake_curl(url: str, dest: Path, *, progressbar: bool = True) -> Path:
-        with gzip.open(dest, "wt") as fh:
-            fh.write(">chr\nACGT\n")
-        return dest
-
-    monkeypatch.setattr(download_mod, "_curl_download", fake_curl)
+    fake_fetch.serve("tiny.fa.gz")
     dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
 
-    out = dl._materialize_fasta("https://example.org/tiny.fa.gz")
+    out = dl._materialize_fasta("https://example.org/whatever.fa.gz")
 
+    assert fake_fetch.last.fname == "tiny.fa.gz"
     assert out == tmp_path / "tiny.fa"
-    assert out.read_text() == ">chr\nACGT\n"
+    assert out.read_text() == (data_dir / "tiny.fa").read_text()
 
 
-def test_curl_download_writes_atomically_on_success(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(download_mod, "_resolve", lambda _name: "curl")
+def test_materialize_fasta_url_overwrite_refetches(fake_fetch: FakeFetch, tmp_path: Path) -> None:
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
+    url = "https://example.org/whatever.fa"
 
-    def fake_run(args: list[str], **_kwargs: object) -> None:
-        part = Path(args[args.index("-o") + 1])
-        part.write_text("DATA")
+    dl._materialize_fasta(url)
+    dl._materialize_fasta(url, overwrite=True)
 
-    monkeypatch.setattr(download_mod.subprocess, "run", fake_run)
-    dest = tmp_path / "out.fa"
-
-    result = download_mod._curl_download("https://x/y.fa", dest)
-
-    assert result == dest
-    assert dest.read_text() == "DATA"
-    assert not dest.with_name("out.fa.part").exists()
-
-
-def test_curl_download_failure_cleans_part_and_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(download_mod, "_resolve", lambda _name: "curl")
-
-    def fake_run(args: list[str], **_kwargs: object) -> None:
-        part = Path(args[args.index("-o") + 1])
-        part.write_text("partial")
-        raise subprocess.CalledProcessError(22, args)
-
-    monkeypatch.setattr(download_mod.subprocess, "run", fake_run)
-    dest = tmp_path / "out.fa"
-
-    with pytest.raises(RuntimeError, match="curl failed"):
-        download_mod._curl_download("https://x/y.fa", dest)
-
-    # the partial download is cleaned up and no final file is left behind
-    assert not dest.with_name("out.fa.part").exists()
-    assert not dest.exists()
+    # overwrite discards the kept download, so the source is fetched again rather
+    # than served from disk.
+    assert len(fake_fetch.calls) == 2
 
 
 def test_fetch_genome_from_chains_materialize_and_prepare(
