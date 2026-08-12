@@ -148,8 +148,48 @@ fetching anything. Reopening a prepared human genome therefore costs four `stat`
 rather than a pass over three gigabytes.
 
 Paths in the record are relative to the assembly directory, so the whole directory can be
-moved without invalidating it. Deleting `.completion.json` (or `--overwrite`) makes the
-next call register from scratch.
+moved without invalidating it.
+
+#### When a registration cannot be trusted
+
+A directory that contradicts its record is an error rather than something to rebuild
+quietly or trust quietly (ADR-0007). There are four answers, and only one of them raises
+in two flavours:
+
+| What is on disk | What happens |
+|---|---|
+| Nothing, or only `.work/` | A fresh registration — it proceeds normally |
+| A record whose every claim holds | Registered — returned without fetching anything |
+| Files, but no `.completion.json` | `UnfinishedRegistrationError` — an interrupted or preempted run |
+| A record disagreeing with disk | `RegistrationMismatchError`, naming every file that differs and how |
+
+Both errors quote the command that repairs them:
+
+```console
+$ genome register hg38
+error: /data/genome/hg38 disagrees with its .completion.json: hg38.2bit: recorded
+841756144 bytes, found 0. Something changed these files after they were registered.
+Re-register it with `genome register hg38 --force`.
+```
+
+A forced re-registration keeps whatever is provably good: if the unpacked `<assembly>.fa`
+is present and its sha256 is still the one the row pins, it is kept and only the `.fai`,
+`.2bit` and `chrom.sizes` are rebuilt, so a preempted cluster job costs seconds rather
+than a gigabyte. If that FASTA is missing, if its digest is a different one, or if the row
+pins no digest at all — leaving nothing to prove it against — the source is fetched again.
+
+!!! warning "Interrupting a first registration leaves a state that raises"
+    While a first registration is running, the directory holds files that no record claims
+    yet. A run killed in that window therefore leaves exactly the first error above: the
+    next call raises and needs `genome register <assembly> --force`. That is the accepted
+    trade-off, chosen over silently resuming — a complete build whose record never landed
+    and the wreckage of one killed half-way are indistinguishable on disk, and guessing
+    between them risks answering sequence queries from a partial genome. The archive stays
+    in `.work/`, so repairing usually downloads nothing.
+
+Deleting `.completion.json` by hand does not reset an assembly, then — it produces the
+first of the two errors. `--force` (`overwrite=True` in Python) is the supported way to
+register again from scratch.
 
 !!! note "pooch is a downloader; its cache is deliberately not relied on"
     pooch is used here to move bytes — for its retries, progress reporting and
@@ -157,6 +197,32 @@ next call register from scratch.
     a file is already here and usable: the completion record owns that judgment, because
     it knows about the unpacked FASTA and the three derived files, and pooch only ever
     knew about the archive it downloaded.
+
+#### By name: `register_assembly` and `verify_assembly`
+
+Two module functions wrap all of the above so that naming an assembly is enough. They are
+what `genome register` and `genome verify` call, so a script and the CLI hit one code path:
+
+```python
+from genome.io.download import register_assembly, verify_assembly
+
+register_assembly("sacCer3")                            # fetch, verify, prepare, record
+register_assembly("sacCer3", force=True)                # repair a directory that raises
+register_assembly("ce11", source="/data/ce11.fa.gz")    # seed from your own FASTA
+
+verify_assembly("sacCer3")                              # re-read and re-hash what is registered
+verify_assembly("sacCer3", fasta="/tmp/from-a-colleague.fa")
+```
+
+`register_assembly` returns the completion record's own fields plus the `directory` they
+live in, ready to serialize — that is exactly what `--json` prints.
+
+Verifying is the one operation that reads bytes rather than sizes. Registering and
+reopening go by presence and size, which is what makes them instant; this is the
+deliberate re-check for when integrity is actually in doubt, and it costs a full pass over
+the file. Because the pinned digest covers unpacked content, a FASTA you were handed or
+copied from a mirror is checkable against the official row before anything is built on it
+— that is what `fasta=` is for, and it needs nothing registered.
 
 #### The working area
 
@@ -211,7 +277,9 @@ through the same `prepare_fasta` pipeline as `fetch_genome`, so it returns the i
 writes the same completion record, with the path or URL you gave as its source and the
 digest of what actually arrived — recorded, not compared, since a seeded FASTA is
 whatever you handed over. A registered assembly is reused on later calls unless you pass
-`overwrite=True`. The
+`overwrite=True`, and a seeded one that needs repairing carries its source into the
+message: `genome register ce11 --force --source /data/ce11.fa.gz`, since the plain
+command would fetch from a golden path this assembly never came from. The
 [`Genome`](genome.md#seeding-from-your-own-fasta-offline-mirrors-custom-references)
 constructor's `path_or_url=` argument is the high-level front door to this.
 

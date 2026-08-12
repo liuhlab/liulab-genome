@@ -53,6 +53,26 @@ twice, and the compressed download is deleted once the record is written. The un
 machinery is documented in [Downloading and preparing genomes](genome-files.md);
 `Genome` is the high-level front door to it.
 
+### A registration that cannot be trusted stops you
+
+If that directory holds files but no record (an interrupted preparation), or a record
+that disagrees with what is on disk (a file deleted or truncated afterwards), construction
+raises a `RegistrationError` naming the file and the command that fixes it — rather than
+rebuilding quietly, or handing back a genome that answers queries from a partial file:
+
+```python
+Genome("hg38")
+# RegistrationMismatchError: /data/genome/hg38 disagrees with its .completion.json:
+# hg38.2bit: recorded 841756144 bytes, found 0. Something changed these files after they
+# were registered. Re-register it with `genome register hg38 --force`.
+```
+
+An absent or empty directory is not this — that is a fresh registration and proceeds
+normally. `genome verify <assembly>` re-reads and re-checksums on demand when you suspect
+a problem but nothing has raised. See
+[When a registration cannot be trusted](genome-files.md#when-a-registration-cannot-be-trusted)
+for the repair and the one trade-off it carries.
+
 ### Where the bytes came from
 
 An assembly the lab officially supports carries its source and, once someone has
