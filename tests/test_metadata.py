@@ -63,12 +63,14 @@ def test_every_declared_field_is_filled_from_the_table() -> None:
 
 def test_every_shipped_row_pins_a_source_url() -> None:
     # The checksum column fills in over time, but every officially supported assembly
-    # says where its FASTA comes from.
+    # says where its FASTA comes from. The URL's file name is the source's business,
+    # not the assembly's — ce11 is pinned to WormBase, whose names carry the
+    # bioproject and release rather than the assembly.
     for assembly in ("hg38", "hg19", "mm39", "mm10", "sacCer3", "ce11"):
         record = lookup_assembly(assembly)
         assert record is not None
         assert record.source_url is not None
-        assert record.source_url.endswith(f"/{assembly}.fa.gz")
+        assert record.source_url.endswith(".fa.gz")
 
 
 def test_a_pinned_checksum_is_read_back_as_text() -> None:
@@ -79,7 +81,7 @@ def test_a_pinned_checksum_is_read_back_as_text() -> None:
 
 def test_a_blank_optional_cell_reads_back_as_none() -> None:
     # An unpinned checksum is unverified, not wrong — and never the string "nan".
-    record = lookup_assembly("ce11")
+    record = lookup_assembly("hg19")
     assert record is not None
     assert record.sha256 is None
 
