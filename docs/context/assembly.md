@@ -17,7 +17,9 @@ The curated TSV row cross-referencing one **Assembly** across three naming autho
 `assembly_name`, `species`, `ucsc_name`, `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid` — and, where
 the lab has pinned them, the **Source** that assembly's **FASTA** is fetched from and the sha256 of
 the *unpacked* FASTA that source yields, checked after decompression rather than over the archive.
-Both may be blank: an unpinned checksum is unverified rather than wrong. A cross-reference and never
+Both may be blank: an unpinned checksum is unverified rather than wrong. So may `ucsc_name` — the
+lab supports references UCSC has never carried, and those have no name in that namespace at all. A
+cross-reference and never
 an allow-list — an assembly absent from the table is perfectly legal, and a complete record handed to
 `Genome(...)` replaces the row wholesale, every field or none.
 _Avoid_: registry, catalog, database, manifest — each implies the table decides what exists

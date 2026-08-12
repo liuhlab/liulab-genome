@@ -157,7 +157,13 @@ class Genome(AlignerMixin):
 
     @property
     def ucsc_name(self) -> str | None:
-        """UCSC's name for the assembly, or ``None`` when unknown."""
+        """UCSC's name for the assembly, or ``None`` when it has none.
+
+        ``None`` covers both an assembly the metadata table does not list and one it
+        lists that UCSC has never carried — the assembly id is a local key and UCSC is
+        only the default source, so a reference can be fully supported here and have no
+        name in that namespace at all (ADR-0003).
+        """
         return self.metadata.ucsc_name if self.metadata else None
 
     @property
