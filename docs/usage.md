@@ -43,6 +43,7 @@ $ genome revcomp ATCG
 $ genome revcomp aTcG --json
 $ genome doctor [--json]
 $ genome register hg38 [--source PATH_OR_URL] [--force] [--json]
+$ genome register-annotation hg38 gencode_v50 [--force] [--json]
 $ genome verify hg38 [--fasta PATH] [--json]
 $ genome table-row sacCer3 [--json]
 ```
@@ -81,6 +82,28 @@ $ genome register sacCer3 --force
 derived files; it fetches the source again when it cannot prove that. Interrupting a
 **first** registration leaves a directory that raises next time and needs exactly this —
 see [When a registration cannot be trusted](genome-files.md#when-a-registration-cannot-be-trusted).
+
+### Registering an annotation
+
+`genome register-annotation` does the same job one level down. The shipped annotation
+table lists what each assembly officially supports, so naming one is enough — it is
+fetched, the unpacked GTF is checked against the pinned checksum, the gffutils database
+is built, and the record that says all of it finished is written last:
+
+```console
+$ genome register-annotation sacCer3 ensgene_v101
+registered ensgene_v101 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/ensgene_v101
+  source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz
+  sha256  d3f33fbf97deef26e2495f709f1c5bb2e2e1bf1ce71fb80758c2c9de42ad7026
+  files   ensgene_v101.db, ensgene_v101.gtf
+```
+
+Running it again on a registered annotation reads the record and downloads nothing. It
+exits `1` when the table lists no such annotation for that assembly (the message says
+what it does list), when the GTF is not the checksum pinned for it, or when the
+directory cannot be trusted — a half-built database from an interrupted run, say, which
+`--force` repairs. A GTF the table does not list is registered by path from Python
+instead, with `Genome.register_gtf`.
 
 ### Verifying one
 

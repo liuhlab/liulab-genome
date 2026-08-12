@@ -182,21 +182,32 @@ genome's own view.
 
 ## Gene annotations (GTF)
 
-Beyond sequence, a `Genome` can carry one or more gene annotations. Register a
-GTF under a name and it is placed alongside the assembly's files with a gffutils
-database built from it:
+Beyond sequence, a `Genome` can carry one or more gene annotations. Name one the
+annotation table lists for this assembly and it is fetched, checked against the
+checksum that table pins, placed alongside the assembly's files and built into a
+gffutils database:
 
 ```python
-sacCer3.register_gtf("sacCer3.ensGene.gtf", name="ensembl")
-sacCer3.register_gtf("sacCer3.ensGene.gtf.gz", name="ensembl")  # .gz is decompressed for you
-sacCer3.annotations              # ['ensembl'] — registered names
-sacCer3.get_gtf_path("ensembl")  # Path to the placed .gtf
-sacCer3.default_gtf              # 'ensembl' when it is the only one
+sacCer3.register_annotation("ensgene_v101")   # fetch + verify + build + record
+sacCer3.annotations                  # ['ensgene_v101'] — registered names
+sacCer3.get_gtf_path("ensgene_v101") # Path to the placed .gtf
+sacCer3.default_gtf                  # 'ensgene_v101' when it is the only one
 ```
 
-A gzipped GTF is accepted and decompressed automatically. Re-registering a name
-that already exists is a no-op that emits a warning (pass `force=True` to
-rebuild).
+For a GTF the table does not list, hand over the path instead:
+
+```python
+sacCer3.register_gtf("custom.gtf", name="custom")
+sacCer3.register_gtf("custom.gtf.gz", name="custom")  # .gz is decompressed for you
+```
+
+Either way the registration ends with the same record the assembly writes, and
+that record is the only thing that ever says the annotation is finished — never
+the database file's existence, which is equally true of a build killed half-way.
+Re-registering a name whose record is valid returns it silently: nothing is
+fetched and nothing is rebuilt. A directory holding files without a valid record
+raises instead, naming `genome register-annotation <assembly> <name> --force`,
+which is also what repairs it.
 
 Annotations are the basis for building aligner indexes (a STAR index is built
 against a specific GTF). Registration, the default-annotation rules, and

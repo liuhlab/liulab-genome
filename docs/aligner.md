@@ -22,29 +22,47 @@ g.build_star_index(gtf="ensembl", threads=8)            # STAR index for that an
 g.build_chromap_index()                                 # chromap needs no annotation
 ```
 
-## Registering a GTF annotation
+## Registering an annotation
 
 A genome can carry several annotations (GENCODE, Ensembl, RefSeq, …), each under
-a unique `name`. `register_gtf` copies the GTF into the assembly's data
-directory and builds a [gffutils](https://gffutils.readthedocs.io/) database
-beside it:
+a unique `name`. The shipped annotation table lists which ones the lab supports
+for each assembly, so naming one is enough: it is fetched from the URL that table
+pins, its unpacked GTF is checked against the pinned sha256, and a
+[gffutils](https://gffutils.readthedocs.io/) database is built beside it.
 
 ```python
-g.register_gtf("path/to/annotation.gtf", name="ensembl")
-g.annotations                      # ['ensembl'] — registered names
-g.get_gtf_path("ensembl")          # Path to the placed .gtf
+g.register_annotation("ensgene_v101")   # fetch + verify + build + record
+g.annotations                           # ['ensgene_v101'] — registered names
+g.get_gtf_path("ensgene_v101")          # Path to the placed .gtf
+```
+
+`register_gtf` is the escape hatch for a GTF no row lists — you say where the
+file is, and it is placed, built and recorded the same way:
+
+```python
+g.register_gtf("path/to/annotation.gtf", name="custom")
 ```
 
 Each annotation lives in its own directory next to the sequence files:
 
 ```
 <LIULAB_DATA>/genome/<assembly>/gtf/<name>/
-    <name>.gtf      # the annotation, stored uncompressed (a .gz source is decompressed)
-    <name>.db       # the gffutils SQLite database built from it
+    <name>.gtf          # the annotation, stored uncompressed (a .gz source is decompressed)
+    <name>.db           # the gffutils SQLite database built from it
+    .completion.json    # the record saying all of that finished
 ```
 
 A few things to know:
 
+- **The record is what "registered" means.** A database file's existence proves
+  nothing — a build killed half-way leaves one that answers queries with most of
+  the genes missing. `g.annotations` lists what has a record that agrees with
+  disk; anything else is not registered, however many files are lying there.
+- **Re-registering a valid annotation is a silent no-op.** Nothing is fetched,
+  nothing is rebuilt, no warning is emitted. A directory that cannot be trusted
+  raises instead and names `genome register-annotation <assembly> <name> --force`,
+  which is also the repair: it keeps a GTF whose checksum still matches and only
+  rebuilds the database.
 - **Gene/transcript inference is off by default** (`disable_infer_genes` /
   `disable_infer_transcripts` are `True`). Standard annotation GTFs already
   declare `gene`/`transcript` features, and inferring them is the classic

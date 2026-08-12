@@ -51,6 +51,14 @@
 
 ::: genome.io.fasta
 
+## `genome.io.gtf`
+
+::: genome.io.gtf
+
+## `genome.metadata`
+
+::: genome.metadata
+
 ## `genome.io.twobit`
 
 ::: genome.io.twobit
