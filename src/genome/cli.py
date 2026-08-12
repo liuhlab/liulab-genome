@@ -16,6 +16,7 @@ from genome.external import doctor as _doctor
 from genome.io.download import assembly_table_row as _assembly_table_row
 from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
+from genome.io.gtf import register_annotation as _register_annotation
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
 
@@ -127,6 +128,46 @@ def register(
     claimed = payload["files"]
     names = sorted(claimed) if isinstance(claimed, dict) else []
     typer.echo(f"registered {payload['assembly']} in {payload['directory']}")
+    typer.echo(f"  source  {payload['source_url']}")
+    typer.echo(f"  sha256  {payload['sha256']}")
+    typer.echo(f"  files   {', '.join(names)}")
+
+
+@app.command("register-annotation")
+def register_annotation(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'hg38'."),
+    name: str = typer.Argument(..., help="Registered annotation name, e.g. 'gencode_v50'."),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Register again from scratch — the repair for a directory that raises.",
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Register one of an assembly's annotations by name: fetch, verify, build, record.
+
+    Downloads the GTF from the URL the annotation table pins for this assembly, checks
+    the unpacked file against the pinned sha256, builds the gffutils database, and
+    writes the registration record that says all of it finished. An annotation that is
+    already registered is reported from its record without fetching anything.
+
+    Exits with code 1 when the table lists no such annotation, when the GTF is not the
+    digest pinned for it, or when the directory holds a registration that cannot be
+    trusted — files with no record, or a record that disagrees with what is on disk.
+    Re-run with `--force` to repair it.
+    """
+    try:
+        payload = _register_annotation(assembly, name, force=force, progressbar=not json)
+    except _ASSEMBLY_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(payload))
+        return
+    claimed = payload["files"]
+    names = sorted(claimed) if isinstance(claimed, dict) else []
+    typer.echo(f"registered {payload['name']} for {payload['assembly']} in {payload['directory']}")
     typer.echo(f"  source  {payload['source_url']}")
     typer.echo(f"  sha256  {payload['sha256']}")
     typer.echo(f"  files   {', '.join(names)}")

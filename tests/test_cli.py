@@ -7,9 +7,11 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
+from genome import metadata
 from genome.cli import app
 from genome.external import REQUIRED_TOOLS
 from genome.io import download as download_mod
@@ -22,6 +24,12 @@ _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
 
 #: sha256 of the committed ``tiny.fa``, which the fake fetch serves as any assembly.
 _TINY_FA_SHA256 = "9316629bab14f9298a043f8b92e1e04a573b12d6a367ccc07c8f8040e5a13981"
+
+#: sha256 of the committed ``tiny.gtf`` — the unpacked bytes ``tiny.gtf.gz`` yields.
+_TINY_GTF_SHA256 = "255f43bd9abef76424d1c2d89a40cccc1a36215409bbc8f32dcead49ca3baf5e"
+
+#: The URL the stood-in annotation row pins, served from ``tests/data``.
+_ANNOTATION_URL = "https://mirror.example.invalid/annotations/tiny.gtf.gz"
 
 
 def _output(result: object) -> str:
@@ -232,6 +240,88 @@ class TestVerify:
 
         assert result.exit_code == 1
         assert "genome register tiny" in _output(result)
+
+
+class TestRegisterAnnotation:
+    """``genome register-annotation`` — fetch, verify and build an annotation by name.
+
+    The CLI is a thin client over the shipped table and takes no metadata argument by
+    design, so the table itself is what is stood in for here: one row pointing at the
+    committed ``tiny.gtf.gz`` and pinning its digest. The registration it drives — the
+    fetch, the checksum, the real gffutils build, the record — is the shipped code.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _offline(
+        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_fetch.serve("tiny.gtf.gz")
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+        table = pd.DataFrame(
+            [
+                {
+                    "assembly": "tiny",
+                    "name": "ensgene_v101",
+                    "provider": "UCSC",
+                    "version": "ensGene.v101",
+                    "url": _ANNOTATION_URL,
+                    "sha256": _TINY_GTF_SHA256,
+                    "default": "yes",
+                }
+            ],
+            dtype=str,
+        )
+        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+
+    def test_registers_and_reports_where_it_landed(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+
+        directory = tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101"
+        assert result.exit_code == 0
+        assert str(directory) in result.stdout
+        assert _TINY_GTF_SHA256 in result.stdout
+        assert (directory / "ensgene_v101.gtf").is_file()
+        assert (directory / "ensgene_v101.db").is_file()
+
+    def test_json(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["assembly"] == "tiny"
+        assert payload["name"] == "ensgene_v101"
+        assert payload["directory"] == str(tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101")
+        assert payload["source_url"] == _ANNOTATION_URL
+        assert payload["sha256"] == _TINY_GTF_SHA256
+        assert sorted(payload["files"]) == ["ensgene_v101.db", "ensgene_v101.gtf"]
+
+    def test_a_name_no_row_lists_exits_non_zero_saying_what_is_offered(self) -> None:
+        result = runner.invoke(app, ["register-annotation", "tiny", "nope"])
+
+        assert result.exit_code == 1
+        assert "ensgene_v101" in _output(result)
+
+    def test_a_broken_directory_exits_non_zero_naming_the_repair(self, tmp_path: Path) -> None:
+        directory = tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101"
+        directory.mkdir(parents=True)
+        (directory / "ensgene_v101.db").write_bytes(b"half a database")
+
+        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+
+        assert result.exit_code == 1
+        assert "genome register-annotation tiny ensgene_v101 --force" in _output(result)
+
+    def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
+        directory = tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101"
+        directory.mkdir(parents=True)
+        (directory / "ensgene_v101.db").write_bytes(b"half a database")
+
+        result = runner.invoke(
+            app, ["register-annotation", "tiny", "ensgene_v101", "--force", "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert _json.loads(result.stdout)["sha256"] == _TINY_GTF_SHA256
 
 
 class TestTableRow:
