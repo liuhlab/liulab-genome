@@ -193,11 +193,21 @@ def test_registering_an_assembly_records_it_and_reopening_costs_no_fetch(
     fake_fetch: FakeFetch, tmp_path: Path
 ) -> None:
     # The one end-to-end pass: a real download (from the fixture), the real native
-    # tools, and the record that says it finished. hg38's row pins a URL and no
-    # checksum, so it fetches cleanly offline with nothing to disagree with.
+    # tools, and the record that says it finished. The record is injected rather than
+    # read from the shipped table: it pins a URL, so nothing contacts UCSC to validate
+    # the name, and no checksum, so the fixture has nothing to disagree with.
     fake_fetch.serve("tiny.fa.gz")
+    unpinned = AssemblyMetadata(
+        assembly_name="hg38",
+        species="Homo sapiens",
+        ucsc_name="hg38",
+        ncbi_name="GRCh38",
+        ncbi_assembly_id="GCF_000001405.40",
+        ncbi_taxid=9606,
+        source_url="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz",
+    )
 
-    with Genome("hg38", cache_dir=tmp_path, progressbar=False) as first:
+    with Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=unpinned) as first:
         assert first.chromosomes == ["chrI", "chrII", "chrIII"]
         source_url, opening = first.source_url, first.fetch_sequence("chrI:0-4")
 
@@ -208,7 +218,7 @@ def test_registering_an_assembly_records_it_and_reopening_costs_no_fetch(
     assert all((tmp_path / name).stat().st_size == size for name, size in record.files.items())
     assert list(tmp_path.rglob("*.gz")) == []  # the archive went with the working area
 
-    with Genome("hg38", cache_dir=tmp_path, progressbar=False) as again:
+    with Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=unpinned) as again:
         assert again.fetch_sequence("chrI:0-4") == opening
 
     assert len(fake_fetch.calls) == 1  # the record answered; nothing was fetched twice

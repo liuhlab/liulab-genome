@@ -323,7 +323,9 @@ def test_fetch_genome_runs_full_pipeline(
 
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
-    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
+    # An unpinned record: this test is about the pipeline, not about verification,
+    # and every shipped row pins a checksum the fixture deliberately is not.
+    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path, metadata=_row())
     files = dl.fetch_genome()
 
     assert fake_fetch.last.url == dl.fasta_url
@@ -349,7 +351,7 @@ def test_fetch_genome_forwards_overwrite(
 
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
-    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
+    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path, metadata=_row())
     dl.fetch_genome(overwrite=True)
 
     assert prepared["overwrite"] is True
@@ -366,7 +368,7 @@ def test_fetch_genome_forwards_known_hash_and_decompresses(
 
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
-    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path)
+    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path, metadata=_row())
     dl.fetch_genome(known_hash="md5:abc")
 
     call = fake_fetch.last

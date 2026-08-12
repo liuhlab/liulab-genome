@@ -110,11 +110,15 @@ class TestTableRow:
         assert payload["ncbi_taxid"] == 9606
         assert payload["sha256"] == _TINY_FA_SHA256
 
-    def test_a_checksum_mismatch_exits_nonzero_naming_both_values(self) -> None:
-        # sacCer3's row pins the real genome's digest; the fixture is a subsample of it.
+    def test_an_existing_pin_is_reported_rather_than_enforced(self) -> None:
+        # sacCer3's row already pins the real genome's digest, and the fixture is a
+        # subsample of it, so the two disagree. This is the command a maintainer runs
+        # precisely when an upstream file has changed and the pin must be regenerated,
+        # so it prints what actually arrived instead of refusing. Checking a FASTA
+        # against the official row is what verifying an assembly is for.
         result = runner.invoke(app, ["table-row", "sacCer3"])
 
-        assert result.exit_code == 1
-        combined = (result.stdout or "") + (result.stderr or "")
-        assert "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3" in combined
-        assert _TINY_FA_SHA256 in combined
+        assert result.exit_code == 0
+        row = result.stdout.strip().split("\t")
+        assert row[0] == "sacCer3"
+        assert row[-1] == _TINY_FA_SHA256

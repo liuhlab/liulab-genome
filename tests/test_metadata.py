@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
+import pandas as pd
+import pytest
+
+from genome import metadata
 from genome.metadata import (
     METADATA_FIELDS,
     AssemblyMetadata,
@@ -28,7 +32,7 @@ def test_lookup_returns_the_row_for_a_listed_assembly() -> None:
         ncbi_assembly_id="GCF_000001405.40",
         ncbi_taxid=9606,
         source_url="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz",
-        sha256=None,
+        sha256="5be01555d98347fdb3714dc84c6f77c9d8bc774adcf32c6f7a8fa06f5baf5e51",
     )
 
 
@@ -61,16 +65,18 @@ def test_every_declared_field_is_filled_from_the_table() -> None:
     assert all(getattr(record, field) is not None for field in identifiers)
 
 
-def test_every_shipped_row_pins_a_source_url() -> None:
-    # The checksum column fills in over time, but every officially supported assembly
-    # says where its FASTA comes from. The URL's file name is the source's business,
-    # not the assembly's — ce11 is pinned to WormBase, whose names carry the
-    # bioproject and release rather than the assembly.
+def test_every_shipped_row_pins_a_source_and_a_checksum() -> None:
+    # Every officially supported assembly says where its FASTA comes from and what
+    # that FASTA hashes to. The URL's file name is the source's business, not the
+    # assembly's — ce11 is pinned to WormBase, whose names carry the bioproject and
+    # release rather than the assembly.
     for assembly in ("hg38", "hg19", "mm39", "mm10", "sacCer3", "ce11"):
         record = lookup_assembly(assembly)
         assert record is not None
         assert record.source_url is not None
         assert record.source_url.endswith(".fa.gz")
+        assert record.sha256 is not None
+        assert len(record.sha256) == 64
 
 
 def test_a_pinned_checksum_is_read_back_as_text() -> None:
@@ -79,10 +85,36 @@ def test_a_pinned_checksum_is_read_back_as_text() -> None:
     assert record.sha256 == "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3"
 
 
-def test_a_blank_optional_cell_reads_back_as_none() -> None:
+def test_a_blank_optional_cell_reads_back_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
     # An unpinned checksum is unverified, not wrong — and never the string "nan".
-    record = lookup_assembly("hg19")
+    # Every shipped row pins both optional columns today, so the blank-cell path is
+    # exercised against a table stood up for it rather than by leaving a row unpinned.
+    table = pd.DataFrame(
+        [
+            {
+                "assembly_name": "unpinned",
+                "species": "Testus minimus",
+                "ucsc_name": "unpinned",
+                "ncbi_name": "TINY.1",
+                "ncbi_assembly_id": "GCF_0.0",
+                "ncbi_taxid": "1",
+                "source_url": "https://example.invalid/unpinned.fa.gz",
+                "sha256": None,
+            }
+        ],
+        dtype=str,
+    )
+    monkeypatch.setattr(metadata, "_metadata_table", lambda: table)
+    metadata.lookup_assembly.cache_clear()
+    try:
+        record = metadata.lookup_assembly("unpinned")
+    finally:
+        # The cache is module-global; leaving the stand-in's row in it would leak
+        # into every later test.
+        metadata.lookup_assembly.cache_clear()
+
     assert record is not None
+    assert record.source_url == "https://example.invalid/unpinned.fa.gz"
     assert record.sha256 is None
 
 

@@ -809,8 +809,15 @@ def assembly_table_row(
     ------
     ValueError
         If the URL had to be derived and the assembly is unknown to UCSC.
-    genome.io.utils.ChecksumMismatchError
-        If the row already pins a sha256 and the FASTA that arrived is not it.
+
+    Notes
+    -----
+    The digest is **reported, never enforced**. A row that already pins one is not
+    consulted, because this is the command to reach for when an upstream file has
+    legitimately changed and the pin has to be regenerated — refusing on a mismatch
+    would refuse exactly when the command is needed. Checking a FASTA you already
+    hold against the official row is
+    :meth:`UCSCGenomeDownloader.verify_fasta`'s job, not this one's.
 
     Examples
     --------
@@ -827,7 +834,11 @@ def assembly_table_row(
     if record is None:
         row["assembly_name"] = assembly
     row["source_url"] = downloader.fasta_url
-    row["sha256"] = downloader.verify_fasta(fasta)
+    # Reported, never enforced: this is the command a maintainer runs *because* the
+    # pinned digest needs regenerating, so comparing against the stale one would
+    # refuse exactly when it is needed. Checking a FASTA against the official row is
+    # what verifying an assembly is for.
+    row["sha256"] = sha256_file(fasta)
     return row
 
 
