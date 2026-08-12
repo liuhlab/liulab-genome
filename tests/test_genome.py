@@ -143,6 +143,8 @@ _OVERRIDE = AssemblyMetadata(
     ncbi_name="TINY.1",
     ncbi_assembly_id="GCF_000000000.0",
     ncbi_taxid=1,
+    source_url="https://mirror.example.org/references/tiny.fa.gz",
+    sha256="00ff" * 16,
 )
 
 
@@ -157,6 +159,8 @@ def test_metadata_record_replaces_the_curated_row(prepared_dir: Path) -> None:
             "TINY.1",
             "GCF_000000000.0",
             1,
+            "https://mirror.example.org/references/tiny.fa.gz",
+            "00ff" * 16,
         ]
 
 
@@ -168,6 +172,10 @@ def test_metadata_falls_back_to_the_curated_table(prepared_dir: Path) -> None:
         assert g.ncbi_name == "R64-1-1"
         assert g.ncbi_assembly_id == "GCF_000146045.2"
         assert g.ncbi_taxid == 559292
+        assert g.source_url == (
+            "https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz"
+        )
+        assert g.sha256 == "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3"
 
 
 def test_assembly_absent_from_the_table_still_constructs(prepared_dir: Path) -> None:

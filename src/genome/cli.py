@@ -13,6 +13,8 @@ import typer
 from genome import __version__ as _package_version
 from genome.external import ToolNotFoundError
 from genome.external import doctor as _doctor
+from genome.io.download import assembly_table_row as _assembly_table_row
+from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
 
 app = typer.Typer(help="Tools for handling genomic files.", no_args_is_help=True)
@@ -70,3 +72,30 @@ def doctor(
     else:
         for name, ver in versions.items():
             typer.echo(f"{name}: {ver}")
+
+
+# --- assembly commands -------------------------------------------------------
+
+
+@app.command("table-row")
+def table_row(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'sacCer3'."),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of the TSV line."),
+) -> None:
+    """Download an assembly and print its finished metadata table row.
+
+    Fetches the FASTA — from the pinned source when the table has one for this
+    assembly, otherwise from the UCSC golden path — unpacks it, and computes the sha256
+    of the unpacked file. Prints one tab-separated line to paste into the shipped
+    metadata table, or the same row as a JSON object.
+
+    Exits with code 1 if the download fails or the FASTA does not match a checksum the
+    table already pins.
+    """
+    try:
+        row = _assembly_table_row(assembly, progressbar=not json)
+    except (ValueError, OSError, RuntimeError) as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    typer.echo(_json.dumps(row) if json else _format_table_row(row))

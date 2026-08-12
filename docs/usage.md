@@ -42,10 +42,21 @@ $ genome version
 $ genome revcomp ATCG
 $ genome revcomp aTcG --json
 $ genome doctor [--json]
+$ genome table-row sacCer3 [--json]
 ```
 
 `--json` toggles machine-readable output. Errors go to stderr and use non-zero
-exit codes (`2` for invalid input, `1` for missing native tools).
+exit codes (`2` for invalid input, `1` for missing native tools, a failed download
+or a checksum that does not match).
+
+`genome table-row` downloads an assembly, unpacks it, hashes the unpacked FASTA and
+prints the line to paste into the shipped metadata table — how the checksum column
+gets filled in without hashing anything by hand:
+
+```bash
+$ genome table-row sacCer3
+sacCer3	Saccharomyces cerevisiae	sacCer3	R64-1-1	GCF_000146045.2	559292	https://…/sacCer3.fa.gz	6ff72f07…
+```
 
 ## Python API quickstart
 

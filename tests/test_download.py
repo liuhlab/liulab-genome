@@ -5,6 +5,9 @@ offline by replacing that one function with the shared ``fake_fetch`` fixture (s
 tests/conftest.py) and asserting the arguments each caller wires through. ``fetch_url``
 itself is exercised for real against an already-present file, which pooch serves without
 touching the network. Nothing here monkeypatches pooch's own retrieve function.
+
+Metadata is injected as an in-memory :class:`AssemblyMetadata` record, so no test here
+reads or fakes the shipped TSV; the table itself is tested in test_metadata.
 """
 
 from __future__ import annotations
@@ -22,12 +25,21 @@ from genome.io.download import (
     Downloader,
     UCSCGenomeDownloader,
     assembly_data_dir,
+    assembly_table_row,
     fetch_url,
     liulab_data_dir,
 )
 from genome.io.fasta import GenomeFiles
+from genome.io.utils import ChecksumMismatchError, sha256_file
+from genome.metadata import AssemblyMetadata
 
 from .conftest import FakeFetch
+
+#: sha256 of the committed ``tiny.fa`` — the *unpacked* bytes ``tiny.fa.gz`` yields.
+_TINY_FA_SHA256 = "9316629bab14f9298a043f8b92e1e04a573b12d6a367ccc07c8f8040e5a13981"
+
+#: A URL that is nothing like the golden path, so using it can only come from a row.
+_PINNED_URL = "https://mirror.example.org/references/tiny.fa.gz"
 
 
 @dataclass
@@ -69,6 +81,31 @@ def head_recorder(monkeypatch: pytest.MonkeyPatch) -> _HeadRecorder:
 def _sha256(path: Path) -> str:
     """Return the sha256 of ``path`` in the ``algorithm:hexdigest`` form pooch accepts."""
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _row(*, source_url: str | None = None, sha256: str | None = None) -> AssemblyMetadata:
+    """An in-memory metadata record for the ``tiny`` assembly."""
+    return AssemblyMetadata(
+        assembly_name="tiny",
+        species="Testus minimus",
+        ucsc_name="tiny",
+        ncbi_name="TINY.1",
+        ncbi_assembly_id="GCF_000000000.0",
+        ncbi_taxid=1,
+        source_url=source_url,
+        sha256=sha256,
+    )
+
+
+@pytest.fixture
+def no_native_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub the FASTA preparation step so registration runs without native binaries."""
+
+    def fake_prepare_fasta(fasta_path: Path, *, overwrite: bool = False) -> GenomeFiles:
+        fasta = Path(fasta_path)
+        return GenomeFiles(fasta=fasta, fai=fasta, twobit=fasta, chrom_sizes=fasta)
+
+    monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
 
 
 def test_liulab_data_dir_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -200,11 +237,12 @@ def test_validate_assembly_other_status_raises_http_error(head_recorder: _HeadRe
         UCSCGenomeDownloader("hg38").validate_assembly()
 
 
-def test_fetch_fasta_validates_by_default(
+def test_fetch_fasta_validates_a_derived_url(
     fake_fetch: FakeFetch, tmp_path: Path, head_recorder: _HeadRecorder
 ) -> None:
+    # "tiny" is in no table, so the URL is derived and the name is checked against UCSC.
     fake_fetch.serve("tiny.fa.gz")
-    UCSCGenomeDownloader("hg38", cache_dir=tmp_path).fetch_fasta()
+    UCSCGenomeDownloader("tiny", cache_dir=tmp_path).fetch_fasta()
     assert len(head_recorder.calls) == 1
 
 
@@ -320,6 +358,152 @@ def test_fetch_genome_forwards_known_hash_and_decompresses(
     assert call.known_hash == "md5:abc"
     # the pipeline always decompresses, so a Decompress processor is selected.
     assert isinstance(call.processor, pooch.Decompress)
+
+
+# --- a row's pinned source and checksum -------------------------------------
+
+
+def test_a_row_that_pins_a_source_is_the_url_fetched(fake_fetch: FakeFetch, tmp_path: Path) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL))
+
+    dl.fetch_fasta()
+
+    assert dl.fasta_url == _PINNED_URL
+    assert fake_fetch.last.url == _PINNED_URL
+
+
+def test_a_record_passed_in_beats_the_shipped_table(fake_fetch: FakeFetch, tmp_path: Path) -> None:
+    # hg38 has a row of its own; an explicit record replaces it wholesale.
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("hg38", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL))
+
+    dl.fetch_fasta()
+
+    assert fake_fetch.last.url == _PINNED_URL
+
+
+def test_a_pinned_source_skips_the_ucsc_name_check(
+    fake_fetch: FakeFetch, tmp_path: Path, head_recorder: _HeadRecorder
+) -> None:
+    # Validation is a property of the source, and a pinned URL *is* the source, so
+    # there is nothing left to guess about the name (ADR-0003).
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL))
+
+    dl.fetch_fasta()
+
+    assert head_recorder.calls == []
+
+
+def test_an_assembly_with_no_row_still_uses_the_golden_path(
+    fake_fetch: FakeFetch, tmp_path: Path, head_recorder: _HeadRecorder, no_native_prepare: None
+) -> None:
+    # The table is a cross-reference, not an allow-list: no row takes nothing away.
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
+    assert dl.metadata is None
+
+    files = dl.fetch_genome()
+
+    assert dl.fasta_url == "https://hgdownload.soe.ucsc.edu/goldenPath/tiny/bigZips/tiny.fa.gz"
+    assert fake_fetch.last.url == dl.fasta_url
+    assert head_recorder.calls[0]["url"] == dl.assembly_url  # still validated
+    assert files.fasta == tmp_path / "tiny.fa"
+
+
+def test_registering_accepts_a_fasta_matching_the_pinned_checksum(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader(
+        "tiny",
+        cache_dir=tmp_path,
+        metadata=_row(source_url=_PINNED_URL, sha256=_TINY_FA_SHA256),
+    )
+
+    files = dl.fetch_genome()
+
+    assert files.fasta == tmp_path / "tiny.fa"
+    assert files.fasta.is_file()
+
+
+def test_registering_rejects_a_fasta_that_is_not_the_pinned_one(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    wrong = "0" * 64
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader(
+        "tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL, sha256=wrong)
+    )
+
+    with pytest.raises(ChecksumMismatchError) as excinfo:
+        dl.fetch_genome()
+
+    message = str(excinfo.value)
+    assert wrong in message  # what the row expected...
+    assert _TINY_FA_SHA256 in message  # ...and what actually arrived
+
+
+def test_the_archives_own_digest_is_not_what_is_checked(
+    fake_fetch: FakeFetch, tmp_path: Path, data_dir: Path, no_native_prepare: None
+) -> None:
+    # The whole point of hashing unpacked content: pinning the .fa.gz's digest — which
+    # is what pooch's known_hash would check — fails against the FASTA inside it.
+    archive_digest = sha256_file(data_dir / "tiny.fa.gz")
+    assert archive_digest != _TINY_FA_SHA256
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader(
+        "tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL, sha256=archive_digest)
+    )
+
+    with pytest.raises(ChecksumMismatchError):
+        dl.fetch_genome()
+
+
+def test_a_blank_checksum_registers_and_reports_the_computed_value(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL))
+
+    files = dl.fetch_genome()
+
+    assert files.fasta.is_file()  # nothing to compare against, so nothing to fail
+    assert dl.verify_fasta(files.fasta) == _TINY_FA_SHA256
+
+
+def test_verify_fasta_defaults_to_the_assemblys_own_fasta(
+    fake_fetch: FakeFetch, tmp_path: Path
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+    dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path, metadata=_row(source_url=_PINNED_URL))
+    dl.fetch_fasta()
+
+    assert dl.verify_fasta() == _TINY_FA_SHA256
+
+
+def test_table_row_fills_in_the_computed_checksum(fake_fetch: FakeFetch, tmp_path: Path) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+
+    row = assembly_table_row("hg38", cache_dir=tmp_path, progressbar=False)
+
+    assert row["sha256"] == _TINY_FA_SHA256
+    assert row["source_url"] == "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz"
+    assert row["ncbi_name"] == "GRCh38"  # the curated identifiers are carried through
+
+
+def test_table_row_leaves_a_new_assemblys_identifiers_blank(
+    fake_fetch: FakeFetch, tmp_path: Path
+) -> None:
+    fake_fetch.serve("tiny.fa.gz")
+
+    row = assembly_table_row("newAsm", cache_dir=tmp_path, progressbar=False)
+
+    assert row["assembly_name"] == "newAsm"
+    assert row["species"] is None  # only a person can supply this
+    assert str(row["source_url"]).endswith("/newAsm/bigZips/newAsm.fa.gz")
+    assert row["sha256"] == _TINY_FA_SHA256
 
 
 # --- seeding from a user-provided FASTA (path_or_url) -----------------------

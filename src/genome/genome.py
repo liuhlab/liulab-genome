@@ -126,7 +126,7 @@ class Genome(AlignerMixin):
         self.metadata: AssemblyMetadata | None = (
             metadata if metadata is not None else lookup_assembly(assembly)
         )
-        self._downloader = UCSCGenomeDownloader(assembly, cache_dir)
+        self._downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=self.metadata)
         self._assembly_dir: Path = self._downloader.cache_dir
         self.files: GenomeFiles = (
             self._downloader.fetch_genome_from(path_or_url, progressbar=progressbar)
@@ -166,6 +166,21 @@ class Genome(AlignerMixin):
     def ncbi_taxid(self) -> int | None:
         """NCBI taxonomy id of the species, or ``None`` when unknown."""
         return self.metadata.ncbi_taxid if self.metadata else None
+
+    @property
+    def source_url(self) -> str | None:
+        """URL this assembly's FASTA is pinned to, or ``None`` when nothing is pinned."""
+        return self.metadata.source_url if self.metadata else None
+
+    @property
+    def sha256(self) -> str | None:
+        """Pinned sha256 of the *unpacked* FASTA, or ``None`` when nothing is pinned.
+
+        The value the metadata records and the download is checked against — not a
+        digest of the files on disk, which :meth:`verify_fasta
+        <genome.io.download.UCSCGenomeDownloader.verify_fasta>` computes.
+        """
+        return self.metadata.sha256 if self.metadata else None
 
     def _set_default_gtf(self, default_gtf: str | None) -> None:
         """Discover registered annotations and pick the default GTF."""

@@ -14,9 +14,12 @@ the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
 
 **Assembly metadata**:
 The curated TSV row cross-referencing one **Assembly** across three naming authorities:
-`assembly_name`, `species`, `ucsc_name`, `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid`. A
-cross-reference and never an allow-list — an assembly absent from the table is perfectly legal, and
-a complete record handed to `Genome(...)` replaces the row wholesale, every field or none.
+`assembly_name`, `species`, `ucsc_name`, `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid` — and, where
+the lab has pinned them, the **Source** that assembly's **FASTA** is fetched from and the sha256 of
+the *unpacked* FASTA that source yields, checked after decompression rather than over the archive.
+Both may be blank: an unpinned checksum is unverified rather than wrong. A cross-reference and never
+an allow-list — an assembly absent from the table is perfectly legal, and a complete record handed to
+`Genome(...)` replaces the row wholesale, every field or none.
 _Avoid_: registry, catalog, database, manifest — each implies the table decides what exists
 
 **Assembly dir**:
@@ -29,18 +32,19 @@ genome dir, download dir
 ### Getting the bytes
 
 **Downloader**:
-What puts a FASTA in the **Assembly dir** from the UCSC golden path, deriving the URL from the
-assembly name alone. Only this path checks the name against UCSC first, so a typo fails on a `HEAD`
-request rather than three minutes into a download.
+What puts a FASTA in the **Assembly dir**, from the **Source** the assembly's **Assembly metadata**
+pins or, failing that, from a UCSC golden-path URL derived from the assembly name. Only the derived
+URL is checked against UCSC first, so a typo fails on a `HEAD` request rather than three minutes
+into a download.
 _Avoid_: fetcher, client, mirror, provider
 
 **Source**:
-A local FASTA path or an http(s)/ftp/sftp URL an assembly is seeded from *instead of* the golden
-path.
-Giving a source means UCSC is never contacted and never consulted — the assembly name degrades to a
-label for the directory and the files inside it.
-_Avoid_: input, custom genome, reference; and never for UCSC's own FASTA, which a **Downloader**
-locates without being told
+Where an assembly's **FASTA** comes from when no golden-path URL is derived: the URL its **Assembly
+metadata** row pins, or the local path or URL handed to `Genome(path_or_url=...)`. Naming a source
+means UCSC is never consulted about the assembly name — validation is a property of the source — and
+only a pinned source is checked against a recorded checksum; a hand-supplied one is trusted as given
+and degrades the assembly name to a label for the directory.
+_Avoid_: input, custom genome, reference
 
 **Genome files**:
 The complete prepared set for an assembly: the FASTA plus its three derived files. Prepared as a

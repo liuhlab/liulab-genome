@@ -6,11 +6,17 @@ single fetch step — every download goes through it and it is the only call sit
 :class:`UCSCGenomeDownloader` specializes it for reference-genome FASTA files from the
 UCSC golden path. See each for caching, storage layout, and hashing.
 
+An assembly listed in the curated metadata table brings its own source URL and, where
+the lab has pinned one, the sha256 of its **unpacked** FASTA. That digest is checked
+after decompression rather than by pooch: pooch hashes the bytes it downloaded, which
+are the ``.fa.gz``, and gzip bytes change under recompression while the FASTA inside
+does not (ADR-0006).
+
 Examples
 --------
 >>> from genome.io.download import UCSCGenomeDownloader
 >>> dl = UCSCGenomeDownloader("hg38")            # doctest: +SKIP
->>> files = dl.fetch_genome()                    # download + decompress + prepare
+>>> files = dl.fetch_genome()                    # download + decompress + verify + prepare
 >>> files.chrom_sizes.name                       # doctest: +SKIP
 'hg38.chrom.sizes'
 """
@@ -27,7 +33,8 @@ import pooch
 import requests
 
 from genome.io.fasta import GenomeFiles, prepare_fasta
-from genome.io.utils import _gunzip
+from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
+from genome.metadata import METADATA_FIELDS, AssemblyMetadata, lookup_assembly
 
 # A pooch post-processor: called with (fname, action, pooch_instance) and
 # returns the path (or paths) to use as the result of the download.
@@ -259,6 +266,11 @@ class UCSCGenomeDownloader(Downloader):
     (``<assembly>.fa.gz``) and, by default, decompresses it to
     ``<assembly>.fa``.
 
+    The assembly's metadata row is consulted first: when it pins a source URL that URL
+    is fetched instead of the derived golden-path one, and when it pins a sha256 the
+    unpacked FASTA is checked against it. An assembly the table does not list keeps
+    working exactly as before — the table is a cross-reference, not an allow-list.
+
     Unless ``cache_dir`` is given, files are stored under the per-assembly
     reference directory ``<LIULAB_DATA>/genome/<assembly>/`` (see
     :func:`assembly_data_dir`), keeping all reference files for an assembly
@@ -271,11 +283,18 @@ class UCSCGenomeDownloader(Downloader):
     cache_dir : str or pathlib.Path, optional
         Override the storage directory. Defaults to
         :func:`assembly_data_dir(assembly) <assembly_data_dir>`.
+    metadata : genome.metadata.AssemblyMetadata, optional
+        A complete metadata record to use *instead of* the curated table's row for
+        ``assembly``. Omit it and the row is looked up here, so a downloader used on
+        its own still gets the pinned source and checksum.
 
     Attributes
     ----------
     assembly : str
         The assembly name passed at construction.
+    metadata : genome.metadata.AssemblyMetadata or None
+        The record this downloader works from — the one passed in, else the curated
+        table's row, else ``None`` for an assembly the table does not list.
 
     Examples
     --------
@@ -287,11 +306,20 @@ class UCSCGenomeDownloader(Downloader):
 
     BASE_URL: str = "https://hgdownload.soe.ucsc.edu/goldenPath"
 
-    def __init__(self, assembly: str, cache_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        assembly: str,
+        cache_dir: str | Path | None = None,
+        *,
+        metadata: AssemblyMetadata | None = None,
+    ) -> None:
         if cache_dir is None:
             cache_dir = assembly_data_dir(assembly)
         super().__init__(cache_dir)
         self.assembly = assembly
+        self.metadata: AssemblyMetadata | None = (
+            metadata if metadata is not None else lookup_assembly(assembly)
+        )
 
     @property
     def assembly_url(self) -> str:
@@ -299,8 +327,26 @@ class UCSCGenomeDownloader(Downloader):
         return f"{self.BASE_URL}/{self.assembly}/"
 
     @property
+    def _pinned_source_url(self) -> str | None:
+        """The source URL this assembly's metadata pins, or ``None`` when it pins none."""
+        return self.metadata.source_url if self.metadata else None
+
+    @property
+    def _expected_sha256(self) -> str | None:
+        """The sha256 this assembly's metadata pins for the unpacked FASTA, or ``None``."""
+        return self.metadata.sha256 if self.metadata else None
+
+    @property
     def fasta_url(self) -> str:
-        """URL of the gzipped whole-genome FASTA for this assembly."""
+        """URL of the gzipped whole-genome FASTA — the pinned source, else the golden path.
+
+        A metadata row that pins a source URL answers this outright; otherwise the URL
+        is derived from the assembly name and UCSC's golden-path layout, as it always
+        was.
+        """
+        pinned = self._pinned_source_url
+        if pinned:
+            return pinned
         return f"{self.BASE_URL}/{self.assembly}/bigZips/{self.assembly}.fa.gz"
 
     @property
@@ -386,6 +432,49 @@ class UCSCGenomeDownloader(Downloader):
             )
         response.raise_for_status()
 
+    def verify_fasta(self, fasta: Path | None = None) -> str:
+        """Return the sha256 of the unpacked FASTA, raising when it is not the pinned one.
+
+        The digest is taken over the **unpacked** ``<assembly>.fa``, never over the
+        ``.fa.gz`` it arrived in, which is why pooch's own ``known_hash`` cannot do this
+        job: pooch hashes what it downloaded. Gzip bytes change under recompression
+        while the FASTA inside does not, so a content digest also matches a copy taken
+        from a mirror or handed over by hand (ADR-0006). The file is streamed, so a
+        whole-genome FASTA is never held in memory.
+
+        Parameters
+        ----------
+        fasta : pathlib.Path, optional
+            The file to check. Defaults to this assembly's ``<assembly>.fa`` in
+            :attr:`cache_dir`.
+
+        Returns
+        -------
+        str
+            The computed hex digest. An assembly whose metadata pins no sha256 — or
+            that the table does not list — has nothing to disagree with, so the value
+            is simply reported back for recording or for pinning later.
+
+        Raises
+        ------
+        genome.io.utils.ChecksumMismatchError
+            If the metadata pins a sha256 and the file's digest is a different one;
+            the message names both values.
+        FileNotFoundError
+            If the file does not exist.
+
+        Examples
+        --------
+        >>> UCSCGenomeDownloader("sacCer3").verify_fasta()      # doctest: +SKIP
+        '6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3'
+        """
+        target = self._expected_genome_files().fasta if fasta is None else fasta
+        actual = sha256_file(target)
+        expected = self._expected_sha256
+        if expected is not None and actual != expected:
+            raise ChecksumMismatchError(target, expected, actual)
+        return actual
+
     def fetch_fasta(
         self,
         *,
@@ -395,15 +484,19 @@ class UCSCGenomeDownloader(Downloader):
     ) -> Path:
         """Download (and optionally decompress) the genome FASTA.
 
-        The assembly is always confirmed to exist at UCSC via
-        :meth:`validate_assembly` before any download is attempted, so a bad
-        name fails fast with a clear message.
+        When the URL had to be derived from the assembly name, the assembly is first
+        confirmed to exist at UCSC via :meth:`validate_assembly`, so a typo fails fast
+        with a clear message. When the metadata row pins a source URL that check is
+        skipped: validation is a property of the source (ADR-0003), and a pinned URL
+        *is* the source, so there is nothing left to guess.
 
         Parameters
         ----------
         known_hash : str, optional
-            Expected hash of the **downloaded ``.fa.gz``** (computed before
-            decompression); see :meth:`Downloader.fetch`.
+            Expected hash of the **downloaded ``.fa.gz``** (checked by pooch, before
+            decompression); see :meth:`Downloader.fetch`. Unrelated to the metadata
+            row's ``sha256``, which covers the unpacked FASTA — see
+            :meth:`verify_fasta`.
         decompress : bool, default True
             If ``True``, gunzip the download to ``<assembly>.fa`` and return
             that path. If ``False``, keep and return the ``.fa.gz``.
@@ -419,9 +512,10 @@ class UCSCGenomeDownloader(Downloader):
         Raises
         ------
         ValueError
-            If the assembly is unknown to UCSC.
+            If the URL was derived and the assembly is unknown to UCSC.
         """
-        self.validate_assembly()
+        if self._pinned_source_url is None:
+            self.validate_assembly()
         processor: _Processor | None = (
             pooch.Decompress(method="gzip", name=f"{self.assembly}.fa") if decompress else None
         )
@@ -441,18 +535,22 @@ class UCSCGenomeDownloader(Downloader):
     ) -> GenomeFiles:
         r"""Download and fully prepare the reference genome in one call.
 
-        Chains :meth:`fetch_fasta` and :func:`genome.io.fasta.prepare_fasta`:
-        download ``<assembly>.fa.gz`` from the UCSC golden path, decompress it, then
-        build the ``.fai`` index, ``.2bit`` encoding, and ``.chrom.sizes``. All
-        outputs land in :attr:`cache_dir` (``<LIULAB_DATA>/genome/<assembly>/`` by
-        default), co-located with the kept ``.fa.gz`` download. Every step is cached;
-        pass ``overwrite=True`` to force the preparation steps to rerun.
+        Chains :meth:`fetch_fasta`, :meth:`verify_fasta` and
+        :func:`genome.io.fasta.prepare_fasta`: download ``<assembly>.fa.gz`` from the
+        assembly's source, decompress it, check the unpacked FASTA against the sha256
+        its metadata pins, then build the ``.fai`` index, ``.2bit`` encoding, and
+        ``.chrom.sizes``. All outputs land in :attr:`cache_dir`
+        (``<LIULAB_DATA>/genome/<assembly>/`` by default), co-located with the kept
+        ``.fa.gz`` download. Every step is cached; pass ``overwrite=True`` to force the
+        preparation steps to rerun.
 
         Parameters
         ----------
         known_hash : str, optional
             Expected hash of the **downloaded ``.fa.gz``** (before decompression);
-            see :meth:`Downloader.fetch`. When ``None``, verification is skipped.
+            see :meth:`Downloader.fetch`. When ``None``, pooch verifies nothing — which
+            is independent of the metadata row's ``sha256`` over the unpacked FASTA,
+            always checked here.
         progressbar : bool, default True
             Show a download progress bar (requires ``tqdm``).
         overwrite : bool, default False
@@ -472,6 +570,8 @@ class UCSCGenomeDownloader(Downloader):
         ValueError
             If the assembly is unknown to UCSC, or if ``known_hash`` is given
             and the download does not match.
+        genome.io.utils.ChecksumMismatchError
+            If the metadata pins a sha256 and the unpacked FASTA is not it.
         genome.external.ToolNotFoundError
             If ``samtools``, ``faToTwoBit``, or ``twoBitInfo`` are not on ``PATH``.
         RuntimeError
@@ -492,6 +592,7 @@ class UCSCGenomeDownloader(Downloader):
             decompress=True,
             progressbar=progressbar,
         )
+        self.verify_fasta(fasta)
         files = prepare_fasta(fasta, overwrite=overwrite)
         self._mark_prepared()
         return files
@@ -512,7 +613,9 @@ class UCSCGenomeDownloader(Downloader):
         :func:`fetch_url`, so http(s), ftp and sftp all work). Gzipped sources
         (``.gz``) are decompressed. The resulting ``<assembly>.fa`` is then
         indexed/2bit/chrom.sizes-prepared exactly as :meth:`fetch_genome` does.
-        UCSC is never contacted.
+        UCSC is never contacted. Neither is the metadata row's pinned source or
+        checksum: a seeded FASTA is whatever the caller handed over, and the assembly
+        name is only a label for the directory it lands in.
 
         Parameters
         ----------
@@ -597,6 +700,68 @@ class UCSCGenomeDownloader(Downloader):
         if gzipped:
             _gunzip(downloaded, fasta)
         return fasta
+
+
+def assembly_table_row(
+    assembly: str,
+    *,
+    cache_dir: str | Path | None = None,
+    progressbar: bool = True,
+) -> dict[str, object]:
+    r"""Fetch ``assembly``'s FASTA and return the metadata table row describing it.
+
+    What makes filling in the table's checksum column a copy-paste rather than a manual
+    hashing chore: the FASTA is downloaded and unpacked, its sha256 is computed over the
+    **unpacked** file, and the assembly's row comes back with ``source_url`` set to the
+    URL that was actually fetched and ``sha256`` to that digest. Every other field is
+    the curated table's own — or blank for an assembly the table does not list, since
+    those identifiers are ones only a person can supply.
+
+    Only the FASTA is fetched: no ``.fai``, ``.2bit`` or ``chrom.sizes`` is built, so
+    this needs no native tools.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to fetch, e.g. ``"sacCer3"``.
+    cache_dir : str or pathlib.Path, optional
+        Override where the FASTA is stored. Defaults to
+        :func:`assembly_data_dir(assembly) <assembly_data_dir>`.
+    progressbar : bool, default True
+        Show a download progress bar (requires ``tqdm``).
+
+    Returns
+    -------
+    dict
+        Field name to value over :data:`~genome.metadata.METADATA_FIELDS`, with
+        ``None`` for anything still unknown. Hand it to
+        :func:`~genome.metadata.format_table_row` for the line to paste into
+        ``data/assembly_metadata.tsv``.
+
+    Raises
+    ------
+    ValueError
+        If the URL had to be derived and the assembly is unknown to UCSC.
+    genome.io.utils.ChecksumMismatchError
+        If the row already pins a sha256 and the FASTA that arrived is not it.
+
+    Examples
+    --------
+    >>> from genome.metadata import format_table_row
+    >>> format_table_row(assembly_table_row("sacCer3"))       # doctest: +SKIP
+    'sacCer3\tSaccharomyces cerevisiae\t...\t6ff72f07...'
+    """
+    downloader = UCSCGenomeDownloader(assembly, cache_dir)
+    fasta = downloader.fetch_fasta(progressbar=progressbar)
+    record = downloader.metadata
+    # Every column the record knows; all blank when the table lists no row at all, in
+    # which case the name is the only thing that does not need a person to supply it.
+    row: dict[str, object] = {name: getattr(record, name, None) for name in METADATA_FIELDS}
+    if record is None:
+        row["assembly_name"] = assembly
+    row["source_url"] = downloader.fasta_url
+    row["sha256"] = downloader.verify_fasta(fasta)
+    return row
 
 
 if __name__ == "__main__":

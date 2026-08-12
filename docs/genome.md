@@ -35,16 +35,35 @@ Genome("mm39", cache_dir="/data/ref")    # override where files are stored
 
 On construction `Genome`:
 
-1. validates the assembly name against UCSC (a typo fails fast),
-2. downloads `<assembly>.fa.gz` from the UCSC golden path if not already cached,
-3. prepares the `.fai` index, `.2bit` encoding, and `chrom.sizes`,
-4. opens the `.2bit` for reading.
+1. looks the assembly up in the curated metadata table,
+2. downloads `<assembly>.fa.gz` — from the URL that row pins, or, for an assembly
+   the table does not list, from the UCSC golden path after validating the name
+   against UCSC (a typo fails fast),
+3. checks the unpacked FASTA against the row's checksum, when it pins one,
+4. prepares the `.fai` index, `.2bit` encoding, and `chrom.sizes`,
+5. opens the `.2bit` for reading.
 
 All of this is cached under `<LIULAB_DATA>/genome/<assembly>/` (configurable via
 the `LIULAB_DATA` environment variable; default `~/liulab_data`), so the second
 construction is cheap and works offline. The underlying machinery is documented
 in [Downloading and preparing genomes](genome-files.md); `Genome` is the
 high-level front door to it.
+
+### Where the bytes came from
+
+An assembly the lab officially supports carries its source and, once someone has
+pinned it, the sha256 of its **unpacked** FASTA. Both are readable off the genome:
+
+```python
+sacCer3.source_url   # 'https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz'
+sacCer3.sha256       # '6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3'
+```
+
+A FASTA that does not match a pinned checksum raises `ChecksumMismatchError` naming
+both values, rather than being prepared and quietly used. `None` on either property
+means the table pins nothing for this assembly — which is legal, and takes nothing
+away: preparation proceeds exactly as it does for an assembly with no row at all.
+See [Pinned sources and checksums](genome-files.md#pinned-sources-and-checksums).
 
 ### Seeding from your own FASTA (offline, mirrors, custom references)
 
@@ -61,7 +80,8 @@ Genome("ce11", path_or_url="https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11
 ```
 
 In this mode **UCSC is never contacted** — there is no assembly-name validation,
-so the name only labels the cache directory and the prepared files. A gzipped
+so the name only labels the cache directory and the prepared files, and no pinned
+source or checksum from the metadata table is consulted. A gzipped
 (`.gz`) source is decompressed automatically. Everything else is identical to the
 UCSC path: the `.fai`, `.2bit`, and `chrom.sizes` are prepared and cached under
 `<LIULAB_DATA>/genome/<assembly>/`, so later plain `Genome("ce11")` calls reuse

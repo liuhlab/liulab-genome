@@ -31,14 +31,21 @@ path = dl.fetch("https://example.org/annotation.bed.gz")
 ```
 
 Pass `cache_dir=` to redirect the cache (e.g. shared lab scratch). Supply
-`known_hash="md5:…"` to verify the download; when omitted, pooch logs the computed hash
-so you can pin it next time.
+`known_hash="md5:…"` to verify the **downloaded bytes**; when omitted, pooch logs the
+computed hash so you can pin it next time.
+
+!!! warning "`known_hash` hashes the archive, not the genome"
+    `known_hash` is checked by pooch against exactly what it downloaded — for a genome
+    that is the `.fa.gz`. Gzip bytes change whenever a file is recompressed, while the
+    FASTA inside does not, so an assembly's *pinned* checksum is a different thing: it
+    covers the **unpacked** `<assembly>.fa` and is checked after decompression. See
+    [Pinned sources and checksums](#pinned-sources-and-checksums).
 
 ### Genome FASTA from UCSC
 
-`UCSCGenomeDownloader` knows the golden-path layout. Give it an assembly name and it
-builds the URL, downloads `<assembly>.fa.gz`, and (by default) decompresses it to
-`<assembly>.fa`:
+`UCSCGenomeDownloader` fetches an assembly's FASTA: from the URL its metadata row pins,
+or — for an assembly no row lists — from a URL built from the golden-path layout. Either
+way it downloads `<assembly>.fa.gz` and (by default) decompresses it to `<assembly>.fa`:
 
 ```python
 from genome.io.download import UCSCGenomeDownloader
@@ -51,7 +58,40 @@ fasta = dl.fetch_fasta()               # -> Path to hg38.fa (cached, multi-GB)
 ```
 
 Use `decompress=False` to keep the `.fa.gz`, or `progressbar=False` to silence the bar.
-A mistyped assembly fails fast with a clear error naming the unknown name.
+When the URL had to be derived, a mistyped assembly fails fast on a `HEAD` request with a
+clear error naming the unknown name; when a row pins the URL there is nothing to guess,
+so that check is skipped.
+
+#### Pinned sources and checksums
+
+The curated metadata table that ships in the package (`genome/data/assembly_metadata.tsv`)
+carries two columns beyond an assembly's identifiers: `source_url`, the URL its FASTA is
+fetched from, and `sha256`, the digest of the **unpacked** FASTA that URL yields. Both may
+be blank — the table is a cross-reference, not an allow-list, and an assembly with no row
+at all keeps working exactly as before.
+
+```python
+from genome.metadata import lookup_assembly
+
+lookup_assembly("sacCer3").source_url
+# 'https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz'
+lookup_assembly("sacCer3").sha256
+# '6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3'
+```
+
+`fetch_genome` checks the unpacked FASTA against that digest and raises
+`ChecksumMismatchError` — naming the file, the expected value and the actual one — when
+they disagree. A row with a blank `sha256` has nothing to compare against, so it prepares
+normally; `verify_fasta()` returns the computed digest either way.
+
+The digest deliberately covers the decompressed file rather than the download, so a FASTA
+recompressed at another level, or copied from a mirror or by hand, still matches the
+official row. Filling the column in is a copy-paste:
+
+```bash
+$ genome table-row sacCer3          # downloads, unpacks, hashes, prints the row
+$ genome table-row sacCer3 --json   # the same row as a JSON object
+```
 
 #### One-step pipeline: `fetch_genome`
 
@@ -74,7 +114,9 @@ files.chrom_sizes  # hg38.chrom.sizes
 
 Everything lands under the assembly's reference directory
 (`<LIULAB_DATA>/genome/hg38/`), and the gzipped download is kept alongside the outputs.
-Pass `known_hash="md5:…"` to verify the download.
+The unpacked FASTA is checked against the assembly's pinned checksum before anything is
+derived from it (see [Pinned sources and checksums](#pinned-sources-and-checksums)); pass
+`known_hash="md5:…"` to additionally have pooch verify the compressed download.
 
 !!! note "Indexing the 2bit"
     The 2bit format is **self-indexed** — it carries an internal per-sequence index,
@@ -89,7 +131,8 @@ reference, `fetch_genome_from` prepares the genome from a FASTA **you** provide
 instead of downloading from UCSC. The source is either a local path (copied into
 the cache) or an `http(s)`/`ftp`/`sftp` URL (fetched with pooch); a gzipped (`.gz`)
 source is decompressed. UCSC is never contacted — there is no assembly-name
-validation.
+validation — and neither the pinned source nor the pinned checksum of any table row
+is consulted: what you hand over is what you get.
 
 ```python
 from genome.io.download import UCSCGenomeDownloader

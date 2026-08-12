@@ -10,6 +10,7 @@ from genome.io.download import (
     Downloader,
     UCSCGenomeDownloader,
     assembly_data_dir,
+    assembly_table_row,
     liulab_data_dir,
 )
 from genome.io.fasta import (
@@ -27,8 +28,10 @@ from genome.io.gtf import (
     register_gtf,
 )
 from genome.io.twobit import TwoBit
+from genome.io.utils import ChecksumMismatchError, sha256_file
 
 __all__ = [
+    "ChecksumMismatchError",
     "Downloader",
     "GenomeFiles",
     "GtfAnnotation",
@@ -36,6 +39,7 @@ __all__ = [
     "UCSCGenomeDownloader",
     "annotation_dir",
     "assembly_data_dir",
+    "assembly_table_row",
     "faidx",
     "fasta_to_2bit",
     "list_annotations",
@@ -43,5 +47,6 @@ __all__ = [
     "prepare_fasta",
     "read_chrom_sizes",
     "register_gtf",
+    "sha256_file",
     "twobit_to_chrom_sizes",
 ]
