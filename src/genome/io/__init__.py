@@ -6,6 +6,13 @@ that process them (:mod:`genome.io.fasta`). Keep real, side-effect-free logic
 in ``core``/``features``; this layer only moves bytes.
 """
 
+from genome.io.completion import (
+    CompletionRecord,
+    FileDisagreement,
+    disagreements,
+    read_record,
+    write_record,
+)
 from genome.io.download import (
     Downloader,
     UCSCGenomeDownloader,
@@ -32,7 +39,9 @@ from genome.io.utils import ChecksumMismatchError, sha256_file
 
 __all__ = [
     "ChecksumMismatchError",
+    "CompletionRecord",
     "Downloader",
+    "FileDisagreement",
     "GenomeFiles",
     "GtfAnnotation",
     "TwoBit",
@@ -40,13 +49,16 @@ __all__ = [
     "annotation_dir",
     "assembly_data_dir",
     "assembly_table_row",
+    "disagreements",
     "faidx",
     "fasta_to_2bit",
     "list_annotations",
     "liulab_data_dir",
     "prepare_fasta",
     "read_chrom_sizes",
+    "read_record",
     "register_gtf",
     "sha256_file",
     "twobit_to_chrom_sizes",
+    "write_record",
 ]

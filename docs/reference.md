@@ -39,6 +39,10 @@
 
 ::: genome.external
 
+## `genome.io.completion`
+
+::: genome.io.completion
+
 ## `genome.io.download`
 
 ::: genome.io.download
