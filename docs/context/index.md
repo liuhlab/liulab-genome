@@ -12,8 +12,9 @@ the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
 
 **Index**:
 An **Aligner**'s precomputed search structure over one **Assembly**, built from that assembly's FASTA
-and read-only ever after. It exists only once its **Completion marker** is present; a directory
-without one is rubble to be rebuilt, not a partial index.
+and read-only ever after. It exists only once its **Completion marker** is present; a directory of
+index files without one is an interrupted build, so rebuilding it is a deliberate act — `overwrite`
+— and never something that happens quietly.
 _Avoid_: never for `.fai` or `.2bit` — those are the Assembly context's own derived artifacts and are
 named by extension, never "index" and never "FASTA index". Also: genomeDir, reference, database
 
@@ -33,18 +34,12 @@ chromap one for the whole assembly (`index/chromap/`).
 _Avoid_: output dir, genomeDir, cache; and never a caller-supplied path — the location is derived from
 the assembly, not configured
 
-**Index metadata**:
-The JSON sidecar `<name>.index.json` written beside a finished index, recording the exact command,
-the parameters, the aligner version and the FASTA consumed. It is there so a build can be explained
-and reproduced months later without reverse-engineering the directory.
-_Avoid_: config, manifest, params file, log — it is a record of what was run, never an input that
-drives a run
-
 **Artifact**:
 The single path the **Aligner** itself consumes at mapping time — the directory for STAR, one file for
 chromap — as distinct from everything else in the **Index dir**. Asking for it asserts the build
-finished: with no **Completion marker** it raises here, rather than yielding a path that fails deep
-inside someone else's command line.
+finished: with no **Completion marker**, or one the **Index dir** no longer bears out, it raises here
+and names the call that builds the index, rather than yielding a path that fails deep inside someone
+else's command line.
 _Avoid_: output, result, index files (most of them are not it), genomeDir
 
 **Install instructions**:

@@ -68,8 +68,9 @@ class AlignerMixin:
 
         Locates the index a prior ``build_<aligner>_index`` produced and returns
         the file or prefix to hand to the aligner's own command line (e.g. STAR's
-        ``--genomeDir``). Nothing is built here; if no successful index exists yet
-        this raises, directing you to build it first.
+        ``--genomeDir``). Nothing is built here: the index's completion record is
+        read, and anything short of a finished index that agrees with what is on
+        disk raises, naming the call that puts it right.
 
         The aligner-specific selectors that identify *which* index are passed as
         keyword arguments, mirroring the matching ``build_*`` method — for STAR,
@@ -92,9 +93,12 @@ class AlignerMixin:
         ------
         ValueError
             If ``aligner`` is not a known aligner.
-        RuntimeError
-            If no successful index exists yet — build it first with the
+        genome.aligner.aligner.IndexNotBuiltError
+            If no index has been built yet — build it first with the
             corresponding ``build_<aligner>_index`` method.
+        genome.io.completion.RegistrationError
+            If the index directory holds files without a completion record, or a
+            record that disagrees with them; rebuild it with ``overwrite=True``.
         """
         aligner_cls = _resolve_aligner(aligner)
         return aligner_cls(cast("Genome", self), **kwargs).index_path
@@ -118,9 +122,11 @@ class AlignerMixin:
 
         Raises
         ------
-        RuntimeError
-            If no successful STAR index exists yet for ``gtf`` — build it first
-            with :meth:`build_star_index`.
+        genome.aligner.aligner.IndexNotBuiltError
+            If no STAR index has been built yet for ``gtf`` — build it first with
+            :meth:`build_star_index`.
+        genome.io.completion.RegistrationError
+            If that index directory cannot be trusted; see :meth:`get_index`.
         """
         return self.get_index("star", gtf=gtf)
 
@@ -138,9 +144,11 @@ class AlignerMixin:
 
         Raises
         ------
-        RuntimeError
-            If no successful chromap index exists yet for this assembly — build it
+        genome.aligner.aligner.IndexNotBuiltError
+            If no chromap index has been built yet for this assembly — build it
             first with :meth:`build_chromap_index`.
+        genome.io.completion.RegistrationError
+            If that index directory cannot be trusted; see :meth:`get_index`.
         """
         return self.get_index("chromap")
 

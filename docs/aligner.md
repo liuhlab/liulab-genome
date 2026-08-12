@@ -109,7 +109,8 @@ g.build_star_index(
   splice-junction sensitivity.
 - **`threads`** (default `1`) — build threads.
 - **`overwrite`** (default `False`) — a finished index is **cached and reused**;
-  pass `overwrite=True` to force a rebuild.
+  pass `overwrite=True` to force a rebuild, and to rebuild over a directory that
+  cannot be trusted (see below).
 - **arbitrary STAR flags** — pass any `genomeGenerate` option by its STAR name
   without the leading `--` (e.g. `genomeSAindexNbases=11`). For small genomes the
   suffix-array index size (`genomeSAindexNbases`) is auto-reduced unless you set
@@ -124,14 +125,30 @@ index_dir = g.build_star_index(gtf="ensembl")
 
 ### What a finished index looks like
 
-After a successful build the directory holds STAR's binary files plus two
-bookkeeping artifacts:
+After a successful build the directory holds STAR's binary files plus one piece of
+bookkeeping: `.completion.json`, the same completion record every prepared genome
+and registered annotation writes. It is written **last**, once STAR has finished,
+so its absence means *unfinished* and never *missing*, and it is the only thing
+that is ever asked whether the index is usable — never the presence of `SA` or
+`Genome`.
 
-- `.success` — a marker written only when the build completes. A half-built
-  index (interrupted run) has no marker and is rebuilt rather than trusted.
-- `star.index.json` — a sidecar recording the STAR version, the assembly, the
-  resolved parameters (including the `gtf` key and the GTF path), and the exact
-  command that was run, so an index is self-describing.
+It records what the build claimed and how it ran:
+
+- every file the build left in the directory, with its size, so a file deleted or
+  truncated afterwards is caught rather than surfacing as a crash inside STAR;
+- the exact command, the resolved parameters (including the `gtf` key and the GTF
+  path), the STAR version, and the FASTA consumed — so an index is self-describing
+  and can be explained months later;
+- the package version and the time it finished.
+
+```python
+import json
+index_dir = g.get_star_index("ensembl")
+record = json.loads((index_dir / ".completion.json").read_text())
+record["details"]["command"]        # ['STAR', '--runMode', 'genomeGenerate', ...]
+record["details"]["parameters"]     # {'threads': 8, 'gtf': 'ensembl', ...}
+record["tool_versions"]             # {'STAR': '2.7.11b'}
+```
 
 ## Building a chromap index
 
@@ -171,16 +188,17 @@ g.build_chromap_index(
   entirely unless you set them, so chromap's own defaults (17 and 7) apply rather
   than a copy of them frozen here that could drift out of date.
 - **`overwrite`** (default `False`) — as with STAR, a finished index is **cached
-  and reused**; pass `overwrite=True` to force a rebuild.
+  and reused**; pass `overwrite=True` to force a rebuild, and to rebuild over a
+  directory that cannot be trusted.
 - **arbitrary chromap flags** — a keyword maps to chromap's long option with
   underscores turned into hyphens (`min_frag_length=30` → `--min-frag-length 30`);
   a list or tuple expands to several arguments after the flag.
 - **there is no `threads` option**, unlike STAR. chromap's `-t/--num-threads` is a
   *mapping* parameter; building the index is single-threaded.
 
-The bookkeeping matches STAR's: a `.success` marker gates the index, and
-`chromap.index.json` records the chromap version, the assembly, the resolved
-parameters, and the exact command.
+The bookkeeping matches STAR's: the same `.completion.json` gates the index and
+records the chromap version, the assembly, the resolved parameters, the exact
+command and the one index file it claims.
 
 ## Retrieving a built index
 
@@ -203,15 +221,32 @@ g.get_index("chromap")
 ```
 
 The name is case-insensitive; an unknown aligner raises `ValueError` listing the
-ones that are known. If the index was never built — or a build was interrupted
-and so left no `.success` marker — you get a `RuntimeError` naming the directory
-and the method to call:
+ones that are known. Otherwise the index's completion record is read, and each way
+it can fail to vouch for the directory gets its own error — every one of them a
+`RuntimeError`, and every one naming the call that puts it right:
+
+**Nothing was ever built there** — `IndexNotBuiltError`:
 
 ```python
 Genome("sacCer3").get_chromap_index()
-# RuntimeError: No successful chromap index for 'sacCer3' at
-# .../index/chromap (missing success flag '.success'). Build it first, ...
+# IndexNotBuiltError: no chromap index for 'sacCer3' at .../index/chromap:
+# nothing has been built there yet. Build it with `Genome.build_chromap_index()`.
 ```
+
+**A build was interrupted**, leaving index files nothing vouches for —
+`UnfinishedRegistrationError`. This is *not* rebuilt silently: the files may be a
+complete index whose record was never written, or the wreckage of one killed
+half-way, and nothing on disk tells them apart. Rebuild it deliberately with
+`Genome.build_chromap_index(overwrite=True)`.
+
+**A file changed after the build** — deleted, truncated, or replaced —
+`RegistrationMismatchError`, naming every file that differs and by how much. Same
+repair: rebuild with `overwrite=True`.
+
+The last two are the strict-failure trade-off, and it is worth stating plainly:
+during a build the directory briefly holds files with no record, so interrupting
+one leaves a state that raises next time and needs a forced rebuild. That is
+chosen over silently resuming.
 
 One thing to know: looking a path up still constructs the aligner object, and
 that constructor checks the binary. Retrieving an index path therefore requires
@@ -237,7 +272,7 @@ cryptic error deep in the run.
 
 Mirroring the assembly rule, the annotation an index is built against is never
 implicit. `build_star_index` requires a named `gtf`, the index directory encodes
-that name, and the metadata sidecar records it — so you can never silently align
+that name, and the completion record records it — so you can never silently align
 against the wrong annotation or overwrite one index with another. A chromap index
 has no annotation to get wrong, and its layout says so: one `index/chromap/` per
-assembly, with the sidecar still recording exactly how it was built.
+assembly, with the record still saying exactly how it was built.

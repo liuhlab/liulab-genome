@@ -61,6 +61,11 @@ class Chromap(Aligner):
         """The single index file chromap loads via ``-x/--index``."""
         return self.index_dir / f"{self.name}.index"
 
+    @property
+    def _build_arguments(self) -> str:
+        """None — one chromap index serves the whole assembly, so nothing selects it."""
+        return ""
+
     def index(
         self,
         *,
@@ -72,9 +77,10 @@ class Chromap(Aligner):
         """Build the chromap index for the bound assembly and return :attr:`index_path`.
 
         Output goes to ``<LIULAB_DATA>/genome/<assembly>/index/chromap/chromap.index``.
-        When a successful index already exists it is reused unless ``overwrite=True``.
-        chromap needs only the reference FASTA — no gene annotation — so one index
-        serves every use of the assembly.
+        An index whose completion record says it finished is reused unless
+        ``overwrite=True``; a directory holding index files that no record vouches for
+        raises rather than being silently rebuilt. chromap needs only the reference
+        FASTA — no gene annotation — so one index serves every use of the assembly.
 
         Only the two minimizer knobs are named below. Any other ``--build-index``
         option may be passed as a keyword argument using chromap's flag name with
@@ -90,7 +96,8 @@ class Chromap(Aligner):
             ``-w/--window``: minimizer window size. chromap's own default is used
             when omitted.
         overwrite : bool, default False
-            Rebuild even if a successful index already exists.
+            Rebuild even if a finished index already exists, and rebuild over a
+            directory that cannot be trusted rather than raising on it.
         **kwargs : Any
             Extra ``--build-index`` options forwarded verbatim as chromap flags.
 
@@ -98,12 +105,19 @@ class Chromap(Aligner):
         -------
         pathlib.Path
             The built index file (also available as :attr:`index_path`).
+
+        Raises
+        ------
+        genome.io.completion.RegistrationError
+            If the index directory holds files without a record, or a record that
+            disagrees with them. Pass ``overwrite=True`` to rebuild.
+        RuntimeError
+            If chromap exits non-zero.
         """
-        if self._flag_path.is_file() and not overwrite:
+        if not overwrite and self._registration() is not None:
             return self.index_path
 
-        self.index_dir.mkdir(parents=True, exist_ok=True)
-        self._flag_path.unlink(missing_ok=True)  # invalidate any stale marker
+        self._begin_build()
 
         fasta = self._genome.files.fasta
 
@@ -124,8 +138,7 @@ class Chromap(Aligner):
         args += _kwargs_to_flags(parameters)
 
         self._run(args)
-        self._write_metadata(command=[self.binary, *args], parameters=parameters)
-        self._mark_success()
+        self._record_completion(command=[self.binary, *args], parameters=parameters)
         return self.index_path
 
 
