@@ -467,16 +467,38 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#registering-a-gtf-annotation" class="md-nav__link">
+  <a href="#registering-an-annotation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Registering a GTF annotation
+        Registering an annotation
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Registering a GTF annotation">
+    <nav class="md-nav" aria-label="Registering an annotation">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-chromosome-names-have-to-match" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The chromosome names have to match
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-table-offers-and-what-is-registered-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the table offers, and what is registered here
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#the-default-annotation" class="md-nav__link">
@@ -656,16 +678,38 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#registering-a-gtf-annotation" class="md-nav__link">
+  <a href="#registering-an-annotation" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Registering a GTF annotation
+        Registering an annotation
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Registering a GTF annotation">
+    <nav class="md-nav" aria-label="Registering an annotation">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-chromosome-names-have-to-match" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The chromosome names have to match
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-the-table-offers-and-what-is-registered-here" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What the table offers, and what is registered here
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#the-default-annotation" class="md-nav__link">
@@ -846,148 +890,274 @@ all:</p>
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>            <span class="c1"># STAR index for that annotation</span>
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="n">g</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>                                 <span class="c1"># chromap needs no annotation</span>
 </code></pre></div>
-<h2 id="registering-a-gtf-annotation">Registering a GTF annotation<a class="headerlink" href="#registering-a-gtf-annotation" title="Permanent link">&para;</a></h2>
+<h2 id="registering-an-annotation">Registering an annotation<a class="headerlink" href="#registering-an-annotation" title="Permanent link">&para;</a></h2>
 <p>A genome can carry several annotations (GENCODE, Ensembl, RefSeq, …), each under
-a unique <code>name</code>. <code>register_gtf</code> copies the GTF into the assembly's data
-directory and builds a <a href="https://gffutils.readthedocs.io/">gffutils</a> database
-beside it:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">g</span><span class="o">.</span><span class="n">register_gtf</span><span class="p">(</span><span class="s2">&quot;path/to/annotation.gtf&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">g</span><span class="o">.</span><span class="n">annotations</span>                      <span class="c1"># [&#39;ensembl&#39;] — registered names</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">g</span><span class="o">.</span><span class="n">get_gtf_path</span><span class="p">(</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>          <span class="c1"># Path to the placed .gtf</span>
+a unique <code>name</code>. The shipped annotation table lists which ones the lab supports
+for each assembly, so naming one is enough: it is fetched from the URL that table
+pins, its unpacked GTF is checked against the pinned sha256 and against the
+assembly's chromosome names, and a
+<a href="https://gffutils.readthedocs.io/">gffutils</a> database is built beside it.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">g</span><span class="o">.</span><span class="n">register_annotation</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">)</span>   <span class="c1"># fetch + verify + build + record</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">g</span><span class="o">.</span><span class="n">annotations</span>                           <span class="c1"># [&#39;ensgene_v101&#39;] — registered names</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">g</span><span class="o">.</span><span class="n">get_gtf_path</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">)</span>          <span class="c1"># Path to the placed .gtf</span>
+</code></pre></div>
+<p><code>register_gtf</code> is the escape hatch for a GTF no row lists — you say where the
+file is, and it is placed, built and recorded the same way:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">g</span><span class="o">.</span><span class="n">register_gtf</span><span class="p">(</span><span class="s2">&quot;path/to/annotation.gtf&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;custom&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>Each annotation lives in its own directory next to the sequence files:</p>
-<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/gtf/&lt;name&gt;/
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    &lt;name&gt;.gtf      # the annotation, stored uncompressed (a .gz source is decompressed)
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    &lt;name&gt;.db       # the gffutils SQLite database built from it
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/gtf/&lt;name&gt;/
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    &lt;name&gt;.gtf          # the annotation, stored uncompressed (a .gz source is decompressed)
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    &lt;name&gt;.db           # the gffutils SQLite database built from it
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    .completion.json    # the record saying all of that finished
 </code></pre></div>
 <p>A few things to know:</p>
 <ul>
+<li><strong>The record is what "registered" means.</strong> A database file's existence proves
+  nothing — a build killed half-way leaves one that answers queries with most of
+  the genes missing. <code>g.annotations</code> lists what has a record that agrees with
+  disk; anything else is not registered, however many files are lying there.</li>
+<li><strong>Re-registering a valid annotation is a silent no-op.</strong> Nothing is fetched,
+  nothing is rebuilt, no warning is emitted. A directory that cannot be trusted
+  raises instead and names <code>genome register-annotation &lt;assembly&gt; &lt;name&gt; --force</code>,
+  which is also the repair: it keeps a GTF whose checksum still matches and only
+  rebuilds the database.</li>
 <li><strong>Gene/transcript inference is off by default</strong> (<code>disable_infer_genes</code> /
   <code>disable_infer_transcripts</code> are <code>True</code>). Standard annotation GTFs already
   declare <code>gene</code>/<code>transcript</code> features, and inferring them is the classic
   gffutils slow path. Enable it (<code>disable_infer_genes=False</code>) only for a bare
   exon-level GTF that lacks those records.</li>
 </ul>
-<h3 id="the-default-annotation">The default annotation<a class="headerlink" href="#the-default-annotation" title="Permanent link">&para;</a></h3>
-<p>When exactly one annotation is registered it becomes the default; with several,
-set it explicitly at construction:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">g</span><span class="o">.</span><span class="n">default_gtf</span>                      <span class="c1"># &#39;ensembl&#39; when it is the only one, else None</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">g</span><span class="o">.</span><span class="n">default_gtf_path</span>                 <span class="c1"># its GTF path, or None</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">,</span> <span class="n">default_gtf</span><span class="o">=</span><span class="s2">&quot;gencode&quot;</span><span class="p">)</span>   <span class="c1"># pick the default up front</span>
+<h3 id="the-chromosome-names-have-to-match">The chromosome names have to match<a class="headerlink" href="#the-chromosome-names-have-to-match" title="Permanent link">&para;</a></h3>
+<p>An annotation and its assembly are one unit or they are nothing, so every
+sequence the GTF names must be one the assembly's <code>chrom.sizes</code> carries.
+Registering an Ensembl-spelled GTF (<code>1</code>, <code>2</code>, <code>MT</code>) against a UCSC-spelled
+assembly (<code>chr1</code>, <code>chr2</code>, <code>chrM</code>) would otherwise build an annotation where every
+feature sits on a sequence the assembly has never heard of — nothing lines up,
+nothing complains, and every query answers nothing while looking healthy.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">g</span><span class="o">.</span><span class="n">register_annotation</span><span class="p">(</span><span class="s2">&quot;gencode_v44&quot;</span><span class="p">)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># ChromosomeMismatchError: the GTF for &#39;gencode_v44&#39; names 25 chromosomes the</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># assembly does not carry: 1, 10, 11, 12, 13, 14, 15, 16, 17, 18 (and 15 more).</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># An annotation and its assembly must spell chromosomes the same way, and the</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># usual cause is a UCSC-versus-Ensembl mismatch (&#39;chr1&#39; against &#39;1&#39;, &#39;chrM&#39;</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="c1"># against &#39;MtDNA&#39;). The assembly carries: chr1, chr10, ... Register the</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># annotation built for this assembly, or pass check_chromosomes=False to</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1"># register this one anyway.</span>
 </code></pre></div>
-<p><code>default_gtf</code> is the annotation other features fall back to when you don't name
-one; it does <strong>not</strong> change what <code>build_star_index(gtf=...)</code> requires — that
+<p>Three things about it are deliberate:</p>
+<ul>
+<li><strong>It is strict in one direction only.</strong> The GTF's names must be among the
+  assembly's; the reverse is not required. An assembly carrying scaffolds,
+  patches or alt contigs the annotation never mentions is completely normal and
+  is not an error.</li>
+<li><strong>It runs before the database build</strong>, and on a GTF that has not been placed
+  yet — still in the working area when it was fetched, still where you pointed at
+  it when it was not. A mismatch therefore costs one streaming pass over the file
+  rather than the many minutes the gffutils build takes, and leaves the annotation
+  directory exactly as it found it, so the next call reports the same problem
+  rather than an interrupted registration. The GTF is streamed, never loaded: a
+  GENCODE GTF is well over a gigabyte unpacked.</li>
+<li><strong>The override is <code>check_chromosomes=False</code></strong>, on <code>register_annotation</code>,
+  <code>register_gtf</code> and their module-level forms. It is for the case where you have
+  looked at the mismatch and accept it — one unusual contig should not block a
+  legitimate annotation:</li>
+</ul>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">g</span><span class="o">.</span><span class="n">register_annotation</span><span class="p">(</span><span class="s2">&quot;gencode_v44&quot;</span><span class="p">,</span> <span class="n">check_chromosomes</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</code></pre></div>
+<p>Whether the names were actually checked is recorded, so you can tell months
+later:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">record</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">((</span><span class="n">g</span><span class="o">.</span><span class="n">get_gtf_path</span><span class="p">(</span><span class="s2">&quot;gencode_v44&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;.completion.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;chromosomes_checked&quot;</span><span class="p">]</span>      <span class="c1"># True when they were checked</span>
+</code></pre></div>
+<p>That flag is <code>False</code> for the override, and also when there was nothing to check
+against — registering an annotation for an assembly that has not been prepared
+yet means no <code>chrom.sizes</code> exists to compare with. <code>register_gtf</code> at module level
+is given no assembly name and so cannot find that file on its own: pass
+<code>chrom_sizes=&lt;path&gt;</code> to have the names checked, which is what <code>Genome.register_gtf</code>
+does for you.</p>
+<h3 id="what-the-table-offers-and-what-is-registered-here">What the table offers, and what is registered here<a class="headerlink" href="#what-the-table-offers-and-what-is-registered-here" title="Permanent link">&para;</a></h3>
+<p>These are two questions, and a genome answers them separately — "the lab supports
+it" is not "this machine has it":</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">g</span><span class="o">.</span><span class="n">offered_annotations</span>   <span class="c1"># [AnnotationMetadata(name=&#39;ensgene_v101&#39;, provider=&#39;UCSC&#39;, ...)]</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">g</span><span class="o">.</span><span class="n">annotations</span>           <span class="c1"># [] — nothing registered on this machine yet</span>
+</code></pre></div>
+<p><code>offered_annotations</code> is this assembly's rows from the shipped table, in table
+order, whether or not anyone has registered them; <code>annotations</code> is what has a
+valid record on this disk. The same pair from a shell, for an assembly you have
+not prepared at all:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>genome<span class="w"> </span>annotations<span class="w"> </span>hg38
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">annotations for hg38 in /data/liulab_data/genome/hg38</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">  gencode_v50  offered, not registered  GENCODE v50</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="go">  mine         registered, not offered</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="go">default: gencode_v50 — not registered here; register it with `genome register-annotation hg38 gencode_v50`</span>
+</code></pre></div>
+<h3 id="the-default-annotation">The default annotation<a class="headerlink" href="#the-default-annotation" title="Permanent link">&para;</a></h3>
+<p>The annotation everything falls back to when you name none. Four rules, in order:</p>
+<ol>
+<li>an explicit <code>default_gtf=</code> at construction;</li>
+<li>the annotation the table flags for this assembly — which is how everyone in
+   the lab reaches for the same release without discussing it;</li>
+<li>the sole registered annotation, when exactly one is registered;</li>
+<li>otherwise none, because a caller who did not choose between several is asked
+   rather than guessed at.</li>
+</ol>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">g</span><span class="o">.</span><span class="n">default_gtf</span>                            <span class="c1"># &#39;gencode_v50&#39; — the table&#39;s flag</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">,</span> <span class="n">default_gtf</span><span class="o">=</span><span class="s2">&quot;refseq_2023&quot;</span><span class="p">)</span>  <span class="c1"># …unless you say otherwise</span>
+</code></pre></div>
+<p><strong><code>default_gtf</code> names an annotation; it does not locate one.</strong> On a fresh machine
+the table's default is exactly the thing nobody has fetched yet, and opening a
+genome must never start a gigabyte download and a database build running many
+minutes — so construction succeeds, and asking for the <em>path</em> is what says the
+gap is there:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">g</span><span class="o">.</span><span class="n">default_gtf_path</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="c1"># AnnotationNotRegisteredError: no annotation &#39;gencode_v50&#39; is registered for &#39;hg38&#39;.</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># Registered here: (none). The annotation table offers it for &#39;hg38&#39;, so register it</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># with `genome register-annotation hg38 gencode_v50`.</span>
+</code></pre></div>
+<p>An explicit <code>default_gtf=</code> behaves the same way, deliberately: one rule for both,
+so naming a default up front and registering it on the next line works. <code>None</code>
+from <code>default_gtf_path</code> means no default was decided at all, which is a different
+answer from one that is not registered.</p>
+<p><code>default_gtf</code> does <strong>not</strong> change what <code>build_star_index(gtf=...)</code> requires — that
 argument is always explicit (see below).</p>
 <h2 id="building-a-star-index">Building a STAR index<a class="headerlink" href="#building-a-star-index" title="Permanent link">&para;</a></h2>
 <p><a href="https://github.com/alexdobin/STAR">STAR</a> is a splice-aware RNA-seq aligner. Its
 index (the <em>genomeDir</em>) is built from the genome FASTA <strong>plus</strong> a gene
 annotation, so an index is always tied to one registered GTF:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>              <span class="c1"># required: which annotation</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>   <span class="c1"># parallelize the build</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>              <span class="c1"># required: which annotation</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>   <span class="c1"># parallelize the build</span>
 </code></pre></div>
 <p>The <code>gtf</code> key is <strong>required</strong>: STAR resolves its path via <code>get_gtf_path</code> and
 passes it as <code>--sjdbGTFfile</code> for splice-junction-aware indexing. Because the
 index depends on the annotation, each annotation gets its <strong>own</strong> index
 directory, so different GTFs never collide:</p>
-<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/index/star_&lt;gtf&gt;/
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/index/star_&lt;gtf&gt;/
 </code></pre></div>
 <p>For example <code>gtf="ensembl"</code> builds under <code>index/star_ensembl/</code> and
 <code>gtf="refseq"</code> under <code>index/star_refseq/</code> — both reusable, independent indexes.</p>
 <h3 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h3>
 <p><code>build_star_index</code> is a thin pass-through to STAR's <code>index()</code>. The commonly
 tuned options are named; everything else is forwarded as a raw STAR flag:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">sjdb_overhang</span><span class="o">=</span><span class="mi">99</span><span class="p">,</span>          <span class="c1"># --sjdbOverhang; ideally read_length - 1</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>                 <span class="c1"># --runThreadN</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>            <span class="c1"># rebuild even if a finished index exists</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">genomeSAindexNbases</span><span class="o">=</span><span class="mi">11</span><span class="p">,</span>    <span class="c1"># any other genomeGenerate flag, sans the leading --</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">,</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">sjdb_overhang</span><span class="o">=</span><span class="mi">99</span><span class="p">,</span>          <span class="c1"># --sjdbOverhang; ideally read_length - 1</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>                 <span class="c1"># --runThreadN</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>            <span class="c1"># rebuild even if a finished index exists</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    <span class="n">genomeSAindexNbases</span><span class="o">=</span><span class="mi">11</span><span class="p">,</span>    <span class="c1"># any other genomeGenerate flag, sans the leading --</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="p">)</span>
 </code></pre></div>
 <ul>
 <li><strong><code>sjdb_overhang</code></strong> (default <code>100</code>) — set to <code>read_length - 1</code> for best
   splice-junction sensitivity.</li>
 <li><strong><code>threads</code></strong> (default <code>1</code>) — build threads.</li>
 <li><strong><code>overwrite</code></strong> (default <code>False</code>) — a finished index is <strong>cached and reused</strong>;
-  pass <code>overwrite=True</code> to force a rebuild.</li>
+  pass <code>overwrite=True</code> to force a rebuild, and to rebuild over a directory that
+  cannot be trusted (see below).</li>
 <li><strong>arbitrary STAR flags</strong> — pass any <code>genomeGenerate</code> option by its STAR name
   without the leading <code>--</code> (e.g. <code>genomeSAindexNbases=11</code>). For small genomes the
   suffix-array index size (<code>genomeSAindexNbases</code>) is auto-reduced unless you set
   it yourself.</li>
 </ul>
 <p>The call returns the path to the built genome directory:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">index_dir</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># .../genome/sacCer3/index/star_ensembl</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">index_dir</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="c1"># .../genome/sacCer3/index/star_ensembl</span>
 </code></pre></div>
 <h3 id="what-a-finished-index-looks-like">What a finished index looks like<a class="headerlink" href="#what-a-finished-index-looks-like" title="Permanent link">&para;</a></h3>
-<p>After a successful build the directory holds STAR's binary files plus two
-bookkeeping artifacts:</p>
+<p>After a successful build the directory holds STAR's binary files plus one piece of
+bookkeeping: <code>.completion.json</code>, the same completion record every prepared genome
+and registered annotation writes. It is written <strong>last</strong>, once STAR has finished,
+so its absence means <em>unfinished</em> and never <em>missing</em>, and it is the only thing
+that is ever asked whether the index is usable — never the presence of <code>SA</code> or
+<code>Genome</code>.</p>
+<p>It records what the build claimed and how it ran:</p>
 <ul>
-<li><code>.success</code> — a marker written only when the build completes. A half-built
-  index (interrupted run) has no marker and is rebuilt rather than trusted.</li>
-<li><code>star.index.json</code> — a sidecar recording the STAR version, the assembly, the
-  resolved parameters (including the <code>gtf</code> key and the GTF path), and the exact
-  command that was run, so an index is self-describing.</li>
+<li>every file the build left in the directory, with its size, so a file deleted or
+  truncated afterwards is caught rather than surfacing as a crash inside STAR;</li>
+<li>the exact command, the resolved parameters (including the <code>gtf</code> key and the GTF
+  path), the STAR version, and the FASTA consumed — so an index is self-describing
+  and can be explained months later;</li>
+<li>the package version and the time it finished.</li>
 </ul>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">index_dir</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">get_star_index</span><span class="p">(</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">record</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">((</span><span class="n">index_dir</span> <span class="o">/</span> <span class="s2">&quot;.completion.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;command&quot;</span><span class="p">]</span>        <span class="c1"># [&#39;STAR&#39;, &#39;--runMode&#39;, &#39;genomeGenerate&#39;, ...]</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;parameters&quot;</span><span class="p">]</span>     <span class="c1"># {&#39;threads&#39;: 8, &#39;gtf&#39;: &#39;ensembl&#39;, ...}</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;tool_versions&quot;</span><span class="p">]</span>             <span class="c1"># {&#39;STAR&#39;: &#39;2.7.11b&#39;}</span>
+</code></pre></div>
 <h2 id="building-a-chromap-index">Building a chromap index<a class="headerlink" href="#building-a-chromap-index" title="Permanent link">&para;</a></h2>
 <p><a href="https://github.com/haowenz/chromap">chromap</a> is a fast aligner and preprocessor
 for chromatin profiles (ATAC-seq/scATAC-seq, ChIP-seq, Hi-C). Its index is built
 from the genome FASTA <strong>alone</strong> — no gene annotation — so there is no <code>gtf</code>
 argument, and one index serves every use of the assembly:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>
 </code></pre></div>
 <p>Unlike STAR's <em>genomeDir</em>, the result is a single file:</p>
-<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/index/chromap/chromap.index
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/index/chromap/chromap.index
 </code></pre></div>
 <p>That file is what chromap's <code>-x/--index</code> expects at mapping time.</p>
 <h3 id="options_1">Options<a class="headerlink" href="#options_1" title="Permanent link">&para;</a></h3>
 <p><code>build_chromap_index</code> is a thin pass-through to chromap's <code>index()</code>. Only the two
 minimizer knobs are named; everything else is forwarded as a raw <code>--build-index</code>
 flag:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">(</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">kmer</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>               <span class="c1"># -k/--kmer</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">window</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>             <span class="c1"># -w/--window</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>        <span class="c1"># rebuild even if a finished index exists</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">min_frag_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>    <span class="c1"># any other --build-index flag; underscores become hyphens</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">g</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">(</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>    <span class="n">kmer</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>               <span class="c1"># -k/--kmer</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>    <span class="n">window</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>             <span class="c1"># -w/--window</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>    <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>        <span class="c1"># rebuild even if a finished index exists</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>    <span class="n">min_frag_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>    <span class="c1"># any other --build-index flag; underscores become hyphens</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="p">)</span>
 </code></pre></div>
 <ul>
 <li><strong><code>kmer</code></strong> and <strong><code>window</code></strong> (both default <code>None</code>) — left off the command line
   entirely unless you set them, so chromap's own defaults (17 and 7) apply rather
   than a copy of them frozen here that could drift out of date.</li>
 <li><strong><code>overwrite</code></strong> (default <code>False</code>) — as with STAR, a finished index is <strong>cached
-  and reused</strong>; pass <code>overwrite=True</code> to force a rebuild.</li>
+  and reused</strong>; pass <code>overwrite=True</code> to force a rebuild, and to rebuild over a
+  directory that cannot be trusted.</li>
 <li><strong>arbitrary chromap flags</strong> — a keyword maps to chromap's long option with
   underscores turned into hyphens (<code>min_frag_length=30</code> → <code>--min-frag-length 30</code>);
   a list or tuple expands to several arguments after the flag.</li>
 <li><strong>there is no <code>threads</code> option</strong>, unlike STAR. chromap's <code>-t/--num-threads</code> is a
   <em>mapping</em> parameter; building the index is single-threaded.</li>
 </ul>
-<p>The bookkeeping matches STAR's: a <code>.success</code> marker gates the index, and
-<code>chromap.index.json</code> records the chromap version, the assembly, the resolved
-parameters, and the exact command.</p>
+<p>The bookkeeping matches STAR's: the same <code>.completion.json</code> gates the index and
+records the chromap version, the assembly, the resolved parameters, the exact
+command and the one index file it claims.</p>
 <h2 id="retrieving-a-built-index">Retrieving a built index<a class="headerlink" href="#retrieving-a-built-index" title="Permanent link">&para;</a></h2>
 <p>Building an index and <em>using</em> it are separate jobs — a mapping pipeline needs the
 path of an index that was built earlier, possibly by someone else. The <code>get_*</code>
 methods return that path and build nothing:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">g</span><span class="o">.</span><span class="n">get_star_index</span><span class="p">(</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>   <span class="c1"># .../index/star_ensembl           -&gt; STAR --genomeDir</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">g</span><span class="o">.</span><span class="n">get_chromap_index</span><span class="p">()</span>         <span class="c1"># .../index/chromap/chromap.index  -&gt; chromap -x</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">g</span><span class="o">.</span><span class="n">get_star_index</span><span class="p">(</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>   <span class="c1"># .../index/star_ensembl           -&gt; STAR --genomeDir</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">g</span><span class="o">.</span><span class="n">get_chromap_index</span><span class="p">()</span>         <span class="c1"># .../index/chromap/chromap.index  -&gt; chromap -x</span>
 </code></pre></div>
 <p>Both are convenience wrappers over a generic form that takes the aligner name
 plus whatever selectors identify the index — the annotation for STAR, nothing for
 chromap:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">g</span><span class="o">.</span><span class="n">get_index</span><span class="p">(</span><span class="s2">&quot;star&quot;</span><span class="p">,</span> <span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">g</span><span class="o">.</span><span class="n">get_index</span><span class="p">(</span><span class="s2">&quot;chromap&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="n">g</span><span class="o">.</span><span class="n">get_index</span><span class="p">(</span><span class="s2">&quot;star&quot;</span><span class="p">,</span> <span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">g</span><span class="o">.</span><span class="n">get_index</span><span class="p">(</span><span class="s2">&quot;chromap&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>The name is case-insensitive; an unknown aligner raises <code>ValueError</code> listing the
-ones that are known. If the index was never built — or a build was interrupted
-and so left no <code>.success</code> marker — you get a <code>RuntimeError</code> naming the directory
-and the method to call:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">get_chromap_index</span><span class="p">()</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="c1"># RuntimeError: No successful chromap index for &#39;sacCer3&#39; at</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="c1"># .../index/chromap (missing success flag &#39;.success&#39;). Build it first, ...</span>
+ones that are known. Otherwise the index's completion record is read, and each way
+it can fail to vouch for the directory gets its own error — every one of them a
+<code>RuntimeError</code>, and every one naming the call that puts it right:</p>
+<p><strong>Nothing was ever built there</strong> — <code>IndexNotBuiltError</code>:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">get_chromap_index</span><span class="p">()</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="c1"># IndexNotBuiltError: no chromap index for &#39;sacCer3&#39; at .../index/chromap:</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="c1"># nothing has been built there yet. Build it with `Genome.build_chromap_index()`.</span>
 </code></pre></div>
+<p><strong>A build was interrupted</strong>, leaving index files nothing vouches for —
+<code>UnfinishedRegistrationError</code>. This is <em>not</em> rebuilt silently: the files may be a
+complete index whose record was never written, or the wreckage of one killed
+half-way, and nothing on disk tells them apart. Rebuild it deliberately with
+<code>Genome.build_chromap_index(overwrite=True)</code>.</p>
+<p><strong>A file changed after the build</strong> — deleted, truncated, or replaced —
+<code>RegistrationMismatchError</code>, naming every file that differs and by how much. Same
+repair: rebuild with <code>overwrite=True</code>.</p>
+<p>The last two are the strict-failure trade-off, and it is worth stating plainly:
+during a build the directory briefly holds files with no record, so interrupting
+one leaves a state that raises next time and needs a forced rebuild. That is
+chosen over silently resuming.</p>
 <p>One thing to know: looking a path up still constructs the aligner object, and
 that constructor checks the binary. Retrieving an index path therefore requires
 the aligner to be installed, even though nothing is built.</p>
@@ -995,8 +1165,8 @@ the aligner to be installed, even though nothing is built.</p>
 <p>Neither STAR nor chromap is in the default environment — an aligner is only
 needed when you actually build or look up an index, and each checks for itself at
 that moment. Install whichever you need:</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>pixi<span class="w"> </span>add<span class="w"> </span>star<span class="w">            </span><span class="c1"># from bioconda</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>pixi<span class="w"> </span>add<span class="w"> </span>chromap<span class="w">         </span><span class="c1"># from bioconda</span>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>pixi<span class="w"> </span>add<span class="w"> </span>star<span class="w">            </span><span class="c1"># from bioconda</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>pixi<span class="w"> </span>add<span class="w"> </span>chromap<span class="w">         </span><span class="c1"># from bioconda</span>
 </code></pre></div>
 <p>Both are already provisioned together in the project's <code>aligners</code> environment
 (<code>pixi run -e aligners ...</code>). If the binary is missing, the call fails fast with
@@ -1005,10 +1175,10 @@ cryptic error deep in the run.</p>
 <h2 id="domain-invariant-the-annotation-is-always-explicit">Domain invariant: the annotation is always explicit<a class="headerlink" href="#domain-invariant-the-annotation-is-always-explicit" title="Permanent link">&para;</a></h2>
 <p>Mirroring the assembly rule, the annotation an index is built against is never
 implicit. <code>build_star_index</code> requires a named <code>gtf</code>, the index directory encodes
-that name, and the metadata sidecar records it — so you can never silently align
+that name, and the completion record records it — so you can never silently align
 against the wrong annotation or overwrite one index with another. A chromap index
 has no annotation to get wrong, and its layout says so: one <code>index/chromap/</code> per
-assembly, with the sidecar still recording exactly how it was built.</p>
+assembly, with the record still saying exactly how it was built.</p>
 
 
 

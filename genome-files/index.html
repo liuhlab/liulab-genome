@@ -464,10 +464,65 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#pinned-sources-and-checksums" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pinned sources and checksums
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#one-step-pipeline-fetch_genome" class="md-nav__link">
     <span class="md-ellipsis">
       
         One-step pipeline: fetch_genome
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-registration-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The registration record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-a-registration-cannot-be-trusted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When a registration cannot be trusted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#by-name-register_assembly-and-verify_assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        By name: register_assembly and verify_assembly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-working-area" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The working area
       
     </span>
   </a>
@@ -647,10 +702,65 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#pinned-sources-and-checksums" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pinned sources and checksums
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#one-step-pipeline-fetch_genome" class="md-nav__link">
     <span class="md-ellipsis">
       
         One-step pipeline: fetch_genome
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-registration-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The registration record
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-a-registration-cannot-be-trusted" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        When a registration cannot be trusted
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#by-name-register_assembly-and-verify_assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        By name: register_assembly and verify_assembly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-working-area" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The working area
       
     </span>
   </a>
@@ -743,13 +853,15 @@
 
 
 <h1 id="downloading-and-preparing-genomes">Downloading and preparing genomes<a class="headerlink" href="#downloading-and-preparing-genomes" title="Permanent link">&para;</a></h1>
-<p>Two modules in <code>genome.io</code> cover getting a reference genome onto disk and turning it
+<p>Three modules in <code>genome.io</code> cover getting a reference genome onto disk and turning it
 into the index/companion files most tools expect:</p>
 <ul>
-<li><a href="#downloading"><code>genome.io.download</code></a> — cache large files from the network with
+<li><a href="#downloading"><code>genome.io.download</code></a> — fetch large files from the network with
   <a href="https://www.fatiando.org/pooch/">pooch</a>, with a UCSC-aware subclass.</li>
 <li><a href="#preparing-a-fasta"><code>genome.io.fasta</code></a> — shell out to <code>samtools</code>, <code>faToTwoBit</code>, and
   <code>twoBitInfo</code> to index a FASTA and derive its <code>.2bit</code> and <code>chrom.sizes</code>.</li>
+<li><a href="#the-registration-record"><code>genome.io.completion</code></a> — the record a finished
+  registration writes, which is the only thing that says it finished.</li>
 </ul>
 <p>Both live at the <strong>I/O boundary</strong>: they touch the network and the filesystem and invoke
 native binaries (managed by pixi). They never reimplement what those binaries do.</p>
@@ -761,48 +873,206 @@ when you need a specific file on disk, a custom cache location, or one preparati
 on its own.</p>
 </div>
 <h2 id="downloading">Downloading<a class="headerlink" href="#downloading" title="Permanent link">&para;</a></h2>
-<p><code>Downloader</code> is a thin wrapper over <code>pooch.retrieve</code>. It downloads a URL once and caches
-it, so asking for the same file again is served from disk.</p>
+<p>Every download in the package goes through one fetch step, <code>fetch_url</code>, which is the only
+place pooch is called. <code>Downloader</code> binds that step to a cache directory: it downloads a
+URL once and caches it, so asking for the same file again is served from disk.</p>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">Downloader</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">dl</span> <span class="o">=</span> <span class="n">Downloader</span><span class="p">()</span>                      <span class="c1"># caches under pooch.os_cache(&quot;genome&quot;)</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">path</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch</span><span class="p">(</span><span class="s2">&quot;https://example.org/annotation.bed.gz&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>Pass <code>cache_dir=</code> to redirect the cache (e.g. shared lab scratch). Supply
-<code>known_hash="md5:…"</code> to verify the download; when omitted, pooch logs the computed hash
-so you can pin it next time.</p>
+<code>known_hash="md5:…"</code> to verify the <strong>downloaded bytes</strong>; when omitted, pooch logs the
+computed hash so you can pin it next time.</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>known_hash</code> hashes the archive, not the genome</p>
+<p><code>known_hash</code> is checked by pooch against exactly what it downloaded — for a genome
+that is the <code>.fa.gz</code>. Gzip bytes change whenever a file is recompressed, while the
+FASTA inside does not, so an assembly's <em>pinned</em> checksum is a different thing: it
+covers the <strong>unpacked</strong> <code>&lt;assembly&gt;.fa</code> and is checked after decompression. See
+<a href="#pinned-sources-and-checksums">Pinned sources and checksums</a>.</p>
+</div>
 <h3 id="genome-fasta-from-ucsc">Genome FASTA from UCSC<a class="headerlink" href="#genome-fasta-from-ucsc" title="Permanent link">&para;</a></h3>
-<p><code>UCSCGenomeDownloader</code> knows the golden-path layout. Give it an assembly name and it
-builds the URL, downloads <code>&lt;assembly&gt;.fa.gz</code>, and (by default) decompresses it to
-<code>&lt;assembly&gt;.fa</code>:</p>
+<p><code>UCSCGenomeDownloader</code> fetches an assembly's FASTA: from the URL its metadata row pins,
+or — for an assembly no row lists — from a URL built from the golden-path layout. Either
+way it downloads <code>&lt;assembly&gt;.fa.gz</code> and (by default) decompresses it to <code>&lt;assembly&gt;.fa</code>:</p>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">UCSCGenomeDownloader</span>
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">dl</span> <span class="o">=</span> <span class="n">UCSCGenomeDownloader</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">)</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">dl</span><span class="o">.</span><span class="n">fasta_url</span>
 <a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># &#39;https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz&#39;</span>
 <a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">fasta</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch_fasta</span><span class="p">()</span>               <span class="c1"># -&gt; Path to hg38.fa (cached, multi-GB)</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">fasta</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch_fasta</span><span class="p">()</span>               <span class="c1"># -&gt; Path to .work/hg38.fa (multi-GB)</span>
 </code></pre></div>
-<p>Use <code>decompress=False</code> to keep the <code>.fa.gz</code>, or <code>progressbar=False</code> to silence the bar.
-A mistyped assembly fails fast with a clear error naming the unknown name.</p>
+<p>Both the download and its unpacked form land in the assembly's <strong>working area</strong>, not
+beside its prepared files — see <a href="#the-working-area">The working area</a>. Use
+<code>decompress=False</code> to get the <code>.fa.gz</code> back instead, or <code>progressbar=False</code> to silence
+the bar. When the URL had to be derived, a mistyped assembly fails fast on a <code>HEAD</code>
+request with a clear error naming the unknown name; when a row pins the URL there is
+nothing to guess, so that check is skipped.</p>
+<h4 id="pinned-sources-and-checksums">Pinned sources and checksums<a class="headerlink" href="#pinned-sources-and-checksums" title="Permanent link">&para;</a></h4>
+<p>The curated metadata table that ships in the package (<code>genome/data/assembly_metadata.tsv</code>)
+carries two columns beyond an assembly's identifiers: <code>source_url</code>, the URL its FASTA is
+fetched from, and <code>sha256</code>, the digest of the <strong>unpacked</strong> FASTA that URL yields. Both may
+be blank — the table is a cross-reference, not an allow-list, and an assembly with no row
+at all keeps working exactly as before.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.metadata</span><span class="w"> </span><span class="kn">import</span> <span class="n">lookup_assembly</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">lookup_assembly</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">source_url</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># &#39;https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz&#39;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">lookup_assembly</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">sha256</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># &#39;6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3&#39;</span>
+</code></pre></div>
+<p><code>fetch_genome</code> checks the unpacked FASTA against that digest and raises
+<code>ChecksumMismatchError</code> — naming the file, the expected value and the actual one — when
+they disagree. A row with a blank <code>sha256</code> has nothing to compare against, so it prepares
+normally; <code>verify_fasta()</code> returns the computed digest either way.</p>
+<p>The digest deliberately covers the decompressed file rather than the download, so a FASTA
+recompressed at another level, or copied from a mirror or by hand, still matches the
+official row. Filling the column in is a copy-paste:</p>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$<span class="w"> </span>genome<span class="w"> </span>table-row<span class="w"> </span>sacCer3<span class="w">          </span><span class="c1"># downloads, unpacks, hashes, prints the row</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>$<span class="w"> </span>genome<span class="w"> </span>table-row<span class="w"> </span>sacCer3<span class="w"> </span>--json<span class="w">   </span><span class="c1"># the same row as a JSON object</span>
+</code></pre></div>
 <h4 id="one-step-pipeline-fetch_genome">One-step pipeline: <code>fetch_genome</code><a class="headerlink" href="#one-step-pipeline-fetch_genome" title="Permanent link">&para;</a></h4>
 <p><code>fetch_fasta</code> only gets the FASTA onto disk. <code>fetch_genome</code> runs the <strong>whole</strong>
 download-and-prepare pipeline in a single call — download, decompress, index, and derive
 the companion files — and returns the same <code>GenomeFiles</code> record as
 <a href="#preparing-a-fasta"><code>prepare_fasta</code></a>:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">UCSCGenomeDownloader</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">dl</span> <span class="o">=</span> <span class="n">UCSCGenomeDownloader</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">)</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">files</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch_genome</span><span class="p">()</span>      <span class="c1"># download -&gt; decompress -&gt; faidx -&gt; 2bit -&gt; chrom.sizes</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">files</span><span class="o">.</span><span class="n">fasta</span>        <span class="c1"># hg38.fa</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">files</span><span class="o">.</span><span class="n">fai</span>          <span class="c1"># hg38.fa.fai</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">files</span><span class="o">.</span><span class="n">twobit</span>       <span class="c1"># hg38.2bit</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">files</span><span class="o">.</span><span class="n">chrom_sizes</span>  <span class="c1"># hg38.chrom.sizes</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">UCSCGenomeDownloader</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">dl</span> <span class="o">=</span> <span class="n">UCSCGenomeDownloader</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">)</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">files</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch_genome</span><span class="p">()</span>      <span class="c1"># download -&gt; decompress -&gt; faidx -&gt; 2bit -&gt; chrom.sizes</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">files</span><span class="o">.</span><span class="n">fasta</span>        <span class="c1"># hg38.fa</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="n">files</span><span class="o">.</span><span class="n">fai</span>          <span class="c1"># hg38.fa.fai</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">files</span><span class="o">.</span><span class="n">twobit</span>       <span class="c1"># hg38.2bit</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">files</span><span class="o">.</span><span class="n">chrom_sizes</span>  <span class="c1"># hg38.chrom.sizes</span>
 </code></pre></div>
 <p>Everything lands under the assembly's reference directory
-(<code>&lt;LIULAB_DATA&gt;/genome/hg38/</code>), and the gzipped download is kept alongside the outputs.
-Pass <code>known_hash="md5:…"</code> to verify the download.</p>
+(<code>&lt;LIULAB_DATA&gt;/genome/hg38/</code>). The unpacked FASTA is checked against the assembly's
+pinned checksum before it is moved there, so a FASTA that is not the pinned one never
+arrives (see <a href="#pinned-sources-and-checksums">Pinned sources and checksums</a>); pass
+<code>known_hash="md5:…"</code> to additionally have pooch verify the compressed download.</p>
+<h4 id="the-registration-record">The registration record<a class="headerlink" href="#the-registration-record" title="Permanent link">&para;</a></h4>
+<p><code>fetch_genome</code> finishes by writing one <strong>completion record</strong>, <code>.completion.json</code>, in the
+assembly directory. It holds the URL that was fetched, the sha256 of the unpacked FASTA,
+every file it claims with that file's size, the versions of the native tools that
+prepared them, the package version, and when it finished:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.completion</span><span class="w"> </span><span class="kn">import</span> <span class="n">read_record</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">assembly_data_dir</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">record</span> <span class="o">=</span> <span class="n">read_record</span><span class="p">(</span><span class="n">assembly_data_dir</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">))</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">record</span><span class="o">.</span><span class="n">source_url</span>     <span class="c1"># &#39;https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz&#39;</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="n">record</span><span class="o">.</span><span class="n">sha256</span>         <span class="c1"># digest of the unpacked hg38.fa</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">record</span><span class="o">.</span><span class="n">files</span>          <span class="c1"># {&#39;hg38.fa&#39;: 3099922541, &#39;hg38.fa.fai&#39;: 22262, ...}</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">record</span><span class="o">.</span><span class="n">tool_versions</span>  <span class="c1"># {&#39;samtools&#39;: &#39;samtools 1.21&#39;}</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="n">record</span><span class="o">.</span><span class="n">completed_at</span>   <span class="c1"># &#39;2026-08-12T09:14:03+00:00&#39;</span>
+</code></pre></div>
+<p>That record is the <strong>only</strong> thing that answers "is this registered?". It is written
+last, after every derived file exists, and atomically, so it is never seen half-written.
+Preparing the same assembly again reads it, confirms every file it claims is present and
+the right size — presence and size only, no file contents — and returns without
+fetching anything. Reopening a prepared human genome therefore costs four <code>stat</code> calls
+rather than a pass over three gigabytes.</p>
+<p>Paths in the record are relative to the assembly directory, so the whole directory can be
+moved without invalidating it.</p>
+<h4 id="when-a-registration-cannot-be-trusted">When a registration cannot be trusted<a class="headerlink" href="#when-a-registration-cannot-be-trusted" title="Permanent link">&para;</a></h4>
+<p>A directory that contradicts its record is an error rather than something to rebuild
+quietly or trust quietly (ADR-0007). There are four answers, and only one of them raises
+in two flavours:</p>
+<table>
+<thead>
+<tr>
+<th>What is on disk</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nothing, or only <code>.work/</code></td>
+<td>A fresh registration — it proceeds normally</td>
+</tr>
+<tr>
+<td>A record whose every claim holds</td>
+<td>Registered — returned without fetching anything</td>
+</tr>
+<tr>
+<td>Files, but no <code>.completion.json</code></td>
+<td><code>UnfinishedRegistrationError</code> — an interrupted or preempted run</td>
+</tr>
+<tr>
+<td>A record disagreeing with disk</td>
+<td><code>RegistrationMismatchError</code>, naming every file that differs and how</td>
+</tr>
+</tbody>
+</table>
+<p>Both errors quote the command that repairs them:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register<span class="w"> </span>hg38
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">error: /data/genome/hg38 disagrees with its .completion.json: hg38.2bit: recorded</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">841756144 bytes, found 0. Something changed these files after they were registered.</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">Re-register it with `genome register hg38 --force`.</span>
+</code></pre></div>
+<p>A forced re-registration keeps whatever is provably good: if the unpacked <code>&lt;assembly&gt;.fa</code>
+is present and its sha256 is still the one the row pins, it is kept and only the <code>.fai</code>,
+<code>.2bit</code> and <code>chrom.sizes</code> are rebuilt, so a preempted cluster job costs seconds rather
+than a gigabyte. If that FASTA is missing, if its digest is a different one, or if the row
+pins no digest at all — leaving nothing to prove it against — the source is fetched again.</p>
+<div class="admonition warning">
+<p class="admonition-title">Interrupting a first registration leaves a state that raises</p>
+<p>While a first registration is running, the directory holds files that no record claims
+yet. A run killed in that window therefore leaves exactly the first error above: the
+next call raises and needs <code>genome register &lt;assembly&gt; --force</code>. That is the accepted
+trade-off, chosen over silently resuming — a complete build whose record never landed
+and the wreckage of one killed half-way are indistinguishable on disk, and guessing
+between them risks answering sequence queries from a partial genome. The archive stays
+in <code>.work/</code>, so repairing usually downloads nothing.</p>
+</div>
+<p>Deleting <code>.completion.json</code> by hand does not reset an assembly, then — it produces the
+first of the two errors. <code>--force</code> (<code>register_assembly(..., force=True)</code> in Python) is the
+supported way to register again from scratch.</p>
+<div class="admonition note">
+<p class="admonition-title">pooch is a downloader; its cache is deliberately not relied on</p>
+<p>pooch is used here to move bytes — for its retries, progress reporting and
+ftp/sftp support — and for nothing else. Its own cache is not what decides whether
+a file is already here and usable: the completion record owns that judgment, because
+it knows about the unpacked FASTA and the three derived files, and pooch only ever
+knew about the archive it downloaded.</p>
+</div>
+<h4 id="by-name-register_assembly-and-verify_assembly">By name: <code>register_assembly</code> and <code>verify_assembly</code><a class="headerlink" href="#by-name-register_assembly-and-verify_assembly" title="Permanent link">&para;</a></h4>
+<p>Two module functions wrap all of the above so that naming an assembly is enough. They are
+what <code>genome register</code> and <code>genome verify</code> call, so a script and the CLI hit one code path:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">register_assembly</span><span class="p">,</span> <span class="n">verify_assembly</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">register_assembly</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span>                            <span class="c1"># fetch, verify, prepare, record</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">register_assembly</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">,</span> <span class="n">force</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>                <span class="c1"># repair a directory that raises</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">register_assembly</span><span class="p">(</span><span class="s2">&quot;ce11&quot;</span><span class="p">,</span> <span class="n">source</span><span class="o">=</span><span class="s2">&quot;/data/ce11.fa.gz&quot;</span><span class="p">)</span>    <span class="c1"># seed from your own FASTA</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">verify_assembly</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span>                              <span class="c1"># re-read and re-hash what is registered</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">verify_assembly</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">,</span> <span class="n">fasta</span><span class="o">=</span><span class="s2">&quot;/tmp/from-a-colleague.fa&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p><code>register_assembly</code> returns the completion record's own fields plus the <code>directory</code> they
+live in, ready to serialize — that is exactly what <code>--json</code> prints.</p>
+<p>Verifying is the one operation that reads bytes rather than sizes. Registering and
+reopening go by presence and size, which is what makes them instant; this is the
+deliberate re-check for when integrity is actually in doubt, and it costs a full pass over
+the file. Because the pinned digest covers unpacked content, a FASTA you were handed or
+copied from a mirror is checkable against the official row before anything is built on it
+— that is what <code>fasta=</code> is for, and it needs nothing registered.</p>
+<h4 id="the-working-area">The working area<a class="headerlink" href="#the-working-area" title="Permanent link">&para;</a></h4>
+<p>Downloads go to <code>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/.work/</code>, a hidden, disposable directory
+inside the assembly's own directory:</p>
+<ul>
+<li>it is on the same filesystem as the outputs, so placing the unpacked FASTA is a rename
+  rather than a second multi-gigabyte copy;</li>
+<li>nothing in it is ever claimed by the completion record, so it holds working state and
+  never a result;</li>
+<li>it survives an interrupted run — the archive stays put, so a preempted cluster job
+  repairs from it instead of downloading a genome again;</li>
+<li>the whole thing, archive included, is deleted as soon as the record is written.</li>
+</ul>
+<p>Prepared assemblies used to keep their <code>.fa.gz</code> beside the FASTA forever. It is plain
+gzip rather than bgzip, so no external tool can read it in place; on one developer
+machine holding three modest genomes that was 770 MB of pure duplication.</p>
 <div class="admonition note">
 <p class="admonition-title">Indexing the 2bit</p>
 <p>The 2bit format is <strong>self-indexed</strong> — it carries an internal per-sequence index,
@@ -814,56 +1084,69 @@ index for it the way <code>.fai</code> is for the FASTA, so the pipeline indexes
 <p>When the UCSC golden path is unreachable (firewall/proxy) or you have a custom
 reference, <code>fetch_genome_from</code> prepares the genome from a FASTA <strong>you</strong> provide
 instead of downloading from UCSC. The source is either a local path (copied into
-the cache) or an <code>http(s)</code>/<code>ftp</code> URL (downloaded with <code>curl</code>); a gzipped (<code>.gz</code>)
-source is decompressed. UCSC is never contacted — there is no assembly-name
-validation.</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">UCSCGenomeDownloader</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">dl</span> <span class="o">=</span> <span class="n">UCSCGenomeDownloader</span><span class="p">(</span><span class="s2">&quot;ce11&quot;</span><span class="p">)</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># from a local file</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="n">files</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch_genome_from</span><span class="p">(</span><span class="s2">&quot;/data/ce11.fa.gz&quot;</span><span class="p">)</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="c1"># or from a non-UCSC URL, e.g. a mirror</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">files</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch_genome_from</span><span class="p">(</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="s2">&quot;https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11/bigZips/ce11.fa.gz&quot;</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="p">)</span>
+the working area) or an <code>http(s)</code>/<code>ftp</code>/<code>sftp</code> URL (fetched with pooch); a gzipped
+(<code>.gz</code>) source is decompressed. UCSC is never contacted — there is no assembly-name
+validation — and neither the pinned source nor the pinned checksum of any table row
+is consulted: what you hand over is what you get.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">UCSCGenomeDownloader</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">dl</span> <span class="o">=</span> <span class="n">UCSCGenomeDownloader</span><span class="p">(</span><span class="s2">&quot;ce11&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># from a local file</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">files</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch_genome_from</span><span class="p">(</span><span class="s2">&quot;/data/ce11.fa.gz&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># or from a non-UCSC URL, e.g. a mirror</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">files</span> <span class="o">=</span> <span class="n">dl</span><span class="o">.</span><span class="n">fetch_genome_from</span><span class="p">(</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="s2">&quot;https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11/bigZips/ce11.fa.gz&quot;</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="p">)</span>
 </code></pre></div>
-<p>The source is normalized to <code>&lt;assembly&gt;.fa</code> in the cache and then run through the
-same <code>prepare_fasta</code> pipeline as <code>fetch_genome</code>, so it returns the identical
-<code>GenomeFiles</code> record and the outputs land in the same per-assembly directory. A
-fresh <code>&lt;assembly&gt;.fa</code> is reused on later calls unless you pass <code>overwrite=True</code>.
-The <a href="../genome/#seeding-from-your-own-fasta-offline-mirrors-custom-references"><code>Genome</code></a>
+<p>The source is normalized to <code>&lt;assembly&gt;.fa</code> in the assembly directory and then run
+through the same <code>prepare_fasta</code> pipeline as <code>fetch_genome</code>, so it returns the identical
+<code>GenomeFiles</code> record and the outputs land in the same per-assembly directory. It also
+writes the same completion record, with the path or URL you gave as its source and the
+digest of what actually arrived — recorded, not compared, since a seeded FASTA is
+whatever you handed over. A registered assembly is reused on later calls unless you pass
+<code>overwrite=True</code>, and a seeded one that needs repairing carries its source into the
+message: <code>genome register ce11 --force --source /data/ce11.fa.gz</code>, since the plain
+command would fetch from a golden path this assembly never came from. The
+<a href="../genome/#seeding-from-your-own-fasta-offline-mirrors-custom-references"><code>Genome</code></a>
 constructor's <code>path_or_url=</code> argument is the high-level front door to this.</p>
 <div class="admonition note">
-<p class="admonition-title"><code>curl</code> is required for URLs</p>
-<p>Downloading a URL shells out to <code>curl</code>; a local-file source does not need it.
-If <code>curl</code> is missing the call raises <code>ToolNotFoundError</code> with a <code>pixi add</code> hint.</p>
+<p class="admonition-title"><code>sftp://</code> sources need <code>paramiko</code></p>
+<p>pooch handles <code>http(s)</code> and <code>ftp</code> out of the box. An <code>sftp://</code> source additionally
+needs <code>paramiko</code>, which is not a dependency of this package — install it yourself if
+you need that scheme.</p>
 </div>
 <h4 id="where-files-are-stored">Where files are stored<a class="headerlink" href="#where-files-are-stored" title="Permanent link">&para;</a></h4>
 <p>Unlike <code>Downloader</code> (which uses pooch's per-user cache), <code>UCSCGenomeDownloader</code> stores
 each assembly under a <strong>per-assembly reference directory</strong> so the FASTA, its indexes,
 and any other reference files for that build live together:</p>
-<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/
+<div class="language-text highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>&lt;LIULAB_DATA&gt;/genome/&lt;assembly&gt;/
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>├── &lt;assembly&gt;.fa               # the unpacked FASTA
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>├── &lt;assembly&gt;.fa.fai           # samtools faidx index
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>├── &lt;assembly&gt;.2bit             # faToTwoBit
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>├── &lt;assembly&gt;.chrom.sizes      # twoBitInfo
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>├── .completion.json            # the record: written last, read first
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>└── .work/                      # downloads in progress; gone once the record lands
 </code></pre></div>
 <p>The lab data root comes from the <code>LIULAB_DATA</code> environment variable and falls back to
 <code>~/liulab_data</code> when it is unset:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">liulab_data_dir</span><span class="p">,</span> <span class="n">assembly_data_dir</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">liulab_data_dir</span><span class="p">()</span>            <span class="c1"># $LIULAB_DATA, or ~/liulab_data</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">assembly_data_dir</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">)</span>    <span class="c1"># &lt;LIULAB_DATA&gt;/genome/hg38</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.download</span><span class="w"> </span><span class="kn">import</span> <span class="n">liulab_data_dir</span><span class="p">,</span> <span class="n">assembly_data_dir</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">liulab_data_dir</span><span class="p">()</span>            <span class="c1"># $LIULAB_DATA, or ~/liulab_data</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">assembly_data_dir</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">)</span>    <span class="c1"># &lt;LIULAB_DATA&gt;/genome/hg38</span>
 </code></pre></div>
 <p>Pass <code>cache_dir=</code> to <code>UCSCGenomeDownloader</code> to override this default for a single
 downloader.</p>
 <h2 id="preparing-a-fasta">Preparing a FASTA<a class="headerlink" href="#preparing-a-fasta" title="Permanent link">&para;</a></h2>
 <p><code>prepare_fasta</code> runs the three standard preparation steps and returns a <code>GenomeFiles</code>
 record of every path it wrote:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.fasta</span><span class="w"> </span><span class="kn">import</span> <span class="n">prepare_fasta</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">files</span> <span class="o">=</span> <span class="n">prepare_fasta</span><span class="p">(</span><span class="s2">&quot;hg38.fa&quot;</span><span class="p">)</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">files</span><span class="o">.</span><span class="n">fai</span>          <span class="c1"># hg38.fa.fai      (samtools faidx index)</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">files</span><span class="o">.</span><span class="n">twobit</span>       <span class="c1"># hg38.2bit        (faToTwoBit)</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">files</span><span class="o">.</span><span class="n">chrom_sizes</span>  <span class="c1"># hg38.chrom.sizes (twoBitInfo: name&lt;TAB&gt;length per sequence)</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.fasta</span><span class="w"> </span><span class="kn">import</span> <span class="n">prepare_fasta</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">files</span> <span class="o">=</span> <span class="n">prepare_fasta</span><span class="p">(</span><span class="s2">&quot;hg38.fa&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">files</span><span class="o">.</span><span class="n">fai</span>          <span class="c1"># hg38.fa.fai      (samtools faidx index)</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">files</span><span class="o">.</span><span class="n">twobit</span>       <span class="c1"># hg38.2bit        (faToTwoBit)</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">files</span><span class="o">.</span><span class="n">chrom_sizes</span>  <span class="c1"># hg38.chrom.sizes (twoBitInfo: name&lt;TAB&gt;length per sequence)</span>
 </code></pre></div>
 <table>
 <thead>
@@ -901,14 +1184,15 @@ checks whether its output already exists and is <strong>newer than its input</st
 freshness rule <code>make</code> uses); if so, the tool is skipped and the existing file reused.
 This makes re-running <code>prepare_fasta</code> (or <code>fetch_genome</code>) cheap and idempotent, while a
 regenerated input correctly invalidates downstream outputs.</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">prepare_fasta</span><span class="p">(</span><span class="s2">&quot;hg38.fa&quot;</span><span class="p">)</span>                  <span class="c1"># first call: runs all three tools</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">prepare_fasta</span><span class="p">(</span><span class="s2">&quot;hg38.fa&quot;</span><span class="p">)</span>                  <span class="c1"># again: every step served from cache</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">prepare_fasta</span><span class="p">(</span><span class="s2">&quot;hg38.fa&quot;</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># force regeneration</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">prepare_fasta</span><span class="p">(</span><span class="s2">&quot;hg38.fa&quot;</span><span class="p">)</span>                  <span class="c1"># first call: runs all three tools</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">prepare_fasta</span><span class="p">(</span><span class="s2">&quot;hg38.fa&quot;</span><span class="p">)</span>                  <span class="c1"># again: every step served from cache</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="n">prepare_fasta</span><span class="p">(</span><span class="s2">&quot;hg38.fa&quot;</span><span class="p">,</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># force regeneration</span>
 </code></pre></div>
 <p>Pass <code>overwrite=True</code> to any of <code>faidx</code>, <code>fasta_to_2bit</code>, <code>twobit_to_chrom_sizes</code>,
-<code>prepare_fasta</code>, or <code>UCSCGenomeDownloader.fetch_genome</code> to rebuild unconditionally. The
-download and decompression are cached independently by pooch and are unaffected by
-<code>overwrite</code>.</p>
+<code>prepare_fasta</code>, or <code>UCSCGenomeDownloader.fetch_genome</code> to rebuild unconditionally. For
+<code>fetch_genome</code> that also means ignoring the assembly's
+<a href="#the-registration-record">completion record</a> and registering from scratch; an archive
+still sitting in the working area is reused rather than downloaded again.</p>
 <div class="admonition note">
 <p class="admonition-title">Binaries come from pixi</p>
 <p><code>samtools</code>, <code>faToTwoBit</code>, and <code>twoBitInfo</code> are conda/bioconda runtime dependencies.

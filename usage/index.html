@@ -378,6 +378,67 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Command-line interface">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#registering-an-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registering an assembly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#registering-an-annotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registering an annotation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#listing-what-an-assembly-offers-against-what-is-registered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listing what an assembly offers against what is registered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verifying-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filling-in-the-metadata-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filling in the metadata table
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -591,6 +652,67 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Command-line interface">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#registering-an-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registering an assembly
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#registering-an-annotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registering an annotation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#listing-what-an-assembly-offers-against-what-is-registered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listing what an assembly offers against what is registered
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verifying-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verifying one
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filling-in-the-metadata-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filling in the metadata table
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -669,41 +791,122 @@ can call the same code paths without shelling out.</p>
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>$<span class="w"> </span>genome<span class="w"> </span>revcomp<span class="w"> </span>ATCG
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>$<span class="w"> </span>genome<span class="w"> </span>revcomp<span class="w"> </span>aTcG<span class="w"> </span>--json
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>$<span class="w"> </span>genome<span class="w"> </span>doctor<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>$<span class="w"> </span>genome<span class="w"> </span>register<span class="w"> </span>hg38<span class="w"> </span><span class="o">[</span>--source<span class="w"> </span>PATH_OR_URL<span class="o">]</span><span class="w"> </span><span class="o">[</span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>$<span class="w"> </span>genome<span class="w"> </span>register-annotation<span class="w"> </span>hg38<span class="w"> </span>gencode_v50<span class="w"> </span><span class="o">[</span>--force<span class="o">]</span><span class="w"> </span><span class="o">[</span>--no-check-chromosomes<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>$<span class="w"> </span>genome<span class="w"> </span>annotations<span class="w"> </span>hg38<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>$<span class="w"> </span>genome<span class="w"> </span>verify<span class="w"> </span>hg38<span class="w"> </span><span class="o">[</span>--fasta<span class="w"> </span>PATH<span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>$<span class="w"> </span>genome<span class="w"> </span>table-row<span class="w"> </span>sacCer3<span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
 </code></pre></div>
 <p><code>--json</code> toggles machine-readable output. Errors go to stderr and use non-zero
-exit codes (<code>2</code> for invalid input, <code>1</code> for missing native tools).</p>
+exit codes (<code>2</code> for invalid input, <code>1</code> for missing native tools, a failed download,
+a checksum that does not match, or a registration that cannot be trusted).</p>
+<h3 id="registering-an-assembly">Registering an assembly<a class="headerlink" href="#registering-an-assembly" title="Permanent link">&para;</a></h3>
+<p><code>genome register</code> prepares an assembly on disk — fetch, verify, index, and write the
+record that says it finished — and prints where everything landed:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register<span class="w"> </span>sacCer3
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">registered sacCer3 in /data/liulab_data/genome/sacCer3</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">  source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">  sha256  6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="go">  files   sacCer3.2bit, sacCer3.chrom.sizes, sacCer3.fa, sacCer3.fa.fai</span>
+</code></pre></div>
+<p>Running it again on a registered assembly reads the record and downloads nothing. A
+directory that cannot be trusted — files with no record, or a record that disagrees with
+what is on disk — exits <code>1</code> naming the file and the repair, which is this same command
+with <code>--force</code>:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register<span class="w"> </span>sacCer3
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">error: /data/liulab_data/genome/sacCer3 disagrees with its .completion.json:</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">sacCer3.2bit: recorded 3145728 bytes, found 0. Something changed these files after</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">they were registered. Re-register it with `genome register sacCer3 --force`.</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="gp">$ </span>genome<span class="w"> </span>register<span class="w"> </span>sacCer3<span class="w"> </span>--force
+</code></pre></div>
+<p><code>--force</code> keeps an unpacked FASTA whose checksum still matches and rebuilds only the
+derived files; it fetches the source again when it cannot prove that. Interrupting a
+<strong>first</strong> registration leaves a directory that raises next time and needs exactly this —
+see <a href="../genome-files/#when-a-registration-cannot-be-trusted">When a registration cannot be trusted</a>.</p>
+<h3 id="registering-an-annotation">Registering an annotation<a class="headerlink" href="#registering-an-annotation" title="Permanent link">&para;</a></h3>
+<p><code>genome register-annotation</code> does the same job one level down. The shipped annotation
+table lists what each assembly officially supports, so naming one is enough — it is
+fetched, the unpacked GTF is checked against the pinned checksum, the gffutils database
+is built, and the record that says all of it finished is written last:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register-annotation<span class="w"> </span>sacCer3<span class="w"> </span>ensgene_v101
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">registered ensgene_v101 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/ensgene_v101</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">  source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">  sha256  d3f33fbf97deef26e2495f709f1c5bb2e2e1bf1ce71fb80758c2c9de42ad7026</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="go">  files   ensgene_v101.db, ensgene_v101.gtf</span>
+</code></pre></div>
+<p>Running it again on a registered annotation reads the record and downloads nothing. It
+exits <code>1</code> when the table lists no such annotation for that assembly (the message says
+what it does list), when the GTF names chromosomes the assembly does not carry, when the
+GTF is not the checksum pinned for it, or when the directory cannot be trusted — a
+half-built database from an interrupted run, say, which <code>--force</code> repairs. A GTF the
+table does not list is registered by path from Python instead, with
+<code>Genome.register_gtf</code>.</p>
+<p><code>--no-check-chromosomes</code> registers one whose chromosome-name mismatch you have looked at
+and accept; the record says the names went unchecked, so you can tell months later. See
+<a href="../aligner/#the-chromosome-names-have-to-match">The chromosome names have to match</a>.</p>
+<h3 id="listing-what-an-assembly-offers-against-what-is-registered">Listing what an assembly offers against what is registered<a class="headerlink" href="#listing-what-an-assembly-offers-against-what-is-registered" title="Permanent link">&para;</a></h3>
+<p><code>genome annotations</code> answers two questions side by side — which annotations the lab
+supports for an assembly, and which are registered on this machine. It downloads and
+prepares nothing, so it works for an assembly you have never registered, which is the
+case it most needs to serve:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>genome<span class="w"> </span>annotations<span class="w"> </span>hg38
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">annotations for hg38 in /data/liulab_data/genome/hg38</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">  gencode_v50  offered, not registered  GENCODE v50</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="go">  mine         registered, not offered</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="go">default: gencode_v50 — not registered here; register it with `genome register-annotation hg38 gencode_v50`</span>
+</code></pre></div>
+<p>The last line names the assembly's <a href="../aligner/#the-default-annotation">default annotation</a>
+— the one the table flags, else the sole registered one — and, when it is not registered
+here, the command that closes the gap.</p>
+<h3 id="verifying-one">Verifying one<a class="headerlink" href="#verifying-one" title="Permanent link">&para;</a></h3>
+<p><code>genome verify</code> re-reads a FASTA and checks its sha256 against the assembly's pinned
+digest, exiting <code>1</code> when they differ. Point <code>--fasta</code> at any file to check a copy you
+were handed against the official row before building anything on it:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>genome<span class="w"> </span>verify<span class="w"> </span>sacCer3
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">/data/liulab_data/genome/sacCer3/sacCer3.fa: sha256 6ff72f07… matches the digest pinned for it</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="gp">$ </span>genome<span class="w"> </span>verify<span class="w"> </span>sacCer3<span class="w"> </span>--fasta<span class="w"> </span>/tmp/from-a-colleague.fa
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="go">error: sha256 mismatch for /tmp/from-a-colleague.fa: expected 6ff72f07…, got 9316629b….</span>
+</code></pre></div>
+<h3 id="filling-in-the-metadata-table">Filling in the metadata table<a class="headerlink" href="#filling-in-the-metadata-table" title="Permanent link">&para;</a></h3>
+<p><code>genome table-row</code> downloads an assembly, unpacks it, hashes the unpacked FASTA and
+prints the line to paste into the shipped metadata table — how the checksum column
+gets filled in without hashing anything by hand:</p>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>$<span class="w"> </span>genome<span class="w"> </span>table-row<span class="w"> </span>sacCer3
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sacCer3<span class="w"> </span>Saccharomyces<span class="w"> </span>cerevisiae<span class="w">    </span>sacCer3<span class="w"> </span>R64-1-1<span class="w"> </span>GCF_000146045.2<span class="w"> </span><span class="m">559292</span><span class="w">  </span>https://…/sacCer3.fa.gz<span class="w"> </span>6ff72f07…
+</code></pre></div>
 <h2 id="python-api-quickstart">Python API quickstart<a class="headerlink" href="#python-api-quickstart" title="Permanent link">&para;</a></h2>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">DNA</span><span class="p">,</span> <span class="n">RNA</span><span class="p">,</span> <span class="n">Protein</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># Construction preserves the value verbatim (including case). The alphabet is</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># NOT enforced — scanning every char is too costly on large sequences.</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">seq</span> <span class="o">=</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcGN&quot;</span><span class="p">)</span>  <span class="c1"># accepted and stored as-is; no validation</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="n">seq</span> <span class="o">=</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcG&quot;</span><span class="p">)</span>   <span class="c1"># OK</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1"># Biological transforms return the right typed result.</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">seq</span><span class="o">.</span><span class="n">complement</span><span class="p">()</span>                <span class="c1"># DNA(&#39;tAgC&#39;)</span>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="n">seq</span><span class="o">.</span><span class="n">reverse_complement</span><span class="p">()</span>        <span class="c1"># DNA(&#39;CgAt&#39;)</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">seq</span><span class="o">.</span><span class="n">transcribe</span><span class="p">()</span>                <span class="c1"># RNA(&#39;aUcG&#39;)</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">seq</span><span class="o">.</span><span class="n">gc_content</span>                  <span class="c1"># 0.5</span>
-<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
-<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="c1"># Slicing stays typed.</span>
-<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a><span class="n">seq</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="mi">3</span><span class="p">]</span>                        <span class="c1"># DNA(&#39;Tc&#39;)</span>
-<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>
-<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="c1"># Other str methods (upper, lower, replace, +) return plain str by design;</span>
-<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a><span class="c1"># wrap explicitly if you want a typed result back.</span>
-<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a><span class="n">DNA</span><span class="p">(</span><span class="n">seq</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>                <span class="c1"># DNA(&#39;ATCG&#39;)</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">DNA</span><span class="p">,</span> <span class="n">RNA</span><span class="p">,</span> <span class="n">Protein</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># Construction preserves the value verbatim (including case). The alphabet is</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># NOT enforced — scanning every char is too costly on large sequences.</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">seq</span> <span class="o">=</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcGN&quot;</span><span class="p">)</span>  <span class="c1"># accepted and stored as-is; no validation</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">seq</span> <span class="o">=</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcG&quot;</span><span class="p">)</span>   <span class="c1"># OK</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="c1"># Biological transforms return the right typed result.</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">seq</span><span class="o">.</span><span class="n">complement</span><span class="p">()</span>                <span class="c1"># DNA(&#39;tAgC&#39;)</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="n">seq</span><span class="o">.</span><span class="n">reverse_complement</span><span class="p">()</span>        <span class="c1"># DNA(&#39;CgAt&#39;)</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="n">seq</span><span class="o">.</span><span class="n">transcribe</span><span class="p">()</span>                <span class="c1"># RNA(&#39;aUcG&#39;)</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="n">seq</span><span class="o">.</span><span class="n">gc_content</span>                  <span class="c1"># 0.5</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="c1"># Slicing stays typed.</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="n">seq</span><span class="p">[</span><span class="mi">1</span><span class="p">:</span><span class="mi">3</span><span class="p">]</span>                        <span class="c1"># DNA(&#39;Tc&#39;)</span>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="c1"># Other str methods (upper, lower, replace, +) return plain str by design;</span>
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="c1"># wrap explicitly if you want a typed result back.</span>
+<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="n">DNA</span><span class="p">(</span><span class="n">seq</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>                <span class="c1"># DNA(&#39;ATCG&#39;)</span>
 </code></pre></div>
 <p>See <a href="../sequences/">Sequences</a> for the full contract, including what happens
 on invalid input and which <code>str</code> methods do or do not preserve the type.</p>
 <h2 id="running-the-gates-locally">Running the gates locally<a class="headerlink" href="#running-the-gates-locally" title="Permanent link">&para;</a></h2>
 <p>The repository ships with a single <code>pixi run check</code> that runs lint, format
 check, type check, and the full test suite — the same commands CI runs:</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pixi<span class="w"> </span>run<span class="w"> </span>check
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>pixi<span class="w"> </span>run<span class="w"> </span>test-cov<span class="w">              </span><span class="c1"># tests + coverage report</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>pixi<span class="w"> </span>run<span class="w"> </span>docs<span class="w">                  </span><span class="c1"># live MkDocs server at http://127.0.0.1:8000</span>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>pixi<span class="w"> </span>run<span class="w"> </span>check
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>pixi<span class="w"> </span>run<span class="w"> </span>test-cov<span class="w">              </span><span class="c1"># tests + coverage report</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>pixi<span class="w"> </span>run<span class="w"> </span>docs<span class="w">                  </span><span class="c1"># live MkDocs server at http://127.0.0.1:8000</span>
 </code></pre></div>
 <p>To enable the pre-commit hooks in your local clone (one-off):</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pixi<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>pre-commit<span class="w"> </span>install
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>pixi<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>pre-commit<span class="w"> </span>install
 </code></pre></div>
 
 
