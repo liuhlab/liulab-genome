@@ -330,3 +330,25 @@ def test_clearing_the_working_area_removes_everything_in_it(tmp_path: Path) -> N
 
 def test_clearing_a_working_area_that_was_never_made_is_fine(tmp_path: Path) -> None:
     clear_work_dir(tmp_path)  # no raise
+
+
+def test_an_annotation_registered_first_does_not_make_its_assembly_look_broken(
+    tmp_path: Path,
+) -> None:
+    # An Assembly dir hosts the gtf/ and index/ subtrees other contexts own, and each
+    # carries its own record. Registering an annotation before its assembly is a
+    # documented flow, so the assembly must still read as a fresh registration rather
+    # than as a run that was interrupted.
+    (tmp_path / "gtf" / "gencode_v50").mkdir(parents=True)
+    (tmp_path / "index" / "star_gencode_v50").mkdir(parents=True)
+
+    assert check_registration(tmp_path, repair="...", ignore={"gtf", "index"}) is None
+
+
+def test_a_foreign_subtree_does_not_hide_a_real_interrupted_run(tmp_path: Path) -> None:
+    # Ignoring those subtrees must not ignore the assembly's own leftovers beside them.
+    (tmp_path / "gtf" / "gencode_v50").mkdir(parents=True)
+    (tmp_path / "hg38.fa").write_text(">chr1\nACGT\n")
+
+    with pytest.raises(UnfinishedRegistrationError, match=r"hg38\.fa"):
+        check_registration(tmp_path, repair="genome register hg38 --force", ignore={"gtf", "index"})

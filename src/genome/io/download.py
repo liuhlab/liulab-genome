@@ -77,6 +77,18 @@ DEFAULT_LIULAB_DATA_PATHS = [
 #: else is a local path (or an error, if it carries a scheme we cannot fetch).
 _URL_SCHEMES = frozenset({"http", "https", "ftp", "sftp"})
 
+#: Subdirectory of an **Assembly dir** holding its annotations. The Assembly context
+#: owns the layout, so the name lives here and the Annotation context reads it.
+ANNOTATIONS_SUBDIR = "gtf"
+
+#: Subdirectory of an **Assembly dir** holding its aligner indexes, likewise.
+INDEXES_SUBDIR = "index"
+
+#: The subtrees inside an **Assembly dir** that other contexts own. Each carries its own
+#: completion record, so an assembly must not count them as files it failed to claim —
+#: an annotation registered before its assembly is not an interrupted assembly.
+_FOREIGN_SUBDIRS = frozenset({ANNOTATIONS_SUBDIR, INDEXES_SUBDIR})
+
 
 def liulab_data_dir() -> Path:
     """Return the root directory for lab reference data.
@@ -417,7 +429,7 @@ class UCSCGenomeDownloader(Downloader):
         """
         if overwrite:
             return None
-        if check_registration(self.cache_dir, repair=repair) is None:
+        if check_registration(self.cache_dir, repair=repair, ignore=_FOREIGN_SUBDIRS) is None:
             return None
         return self._expected_genome_files()
 
@@ -971,7 +983,11 @@ def verify_assembly(
             )
     else:
         target = downloader._expected_genome_files().fasta
-        registered = check_registration(downloader.cache_dir, repair=downloader._repair_command())
+        registered = check_registration(
+            downloader.cache_dir,
+            repair=downloader._repair_command(),
+            ignore=_FOREIGN_SUBDIRS,
+        )
         if registered is None or not target.is_file():
             raise FileNotFoundError(
                 f"{assembly} is not registered in {downloader.cache_dir}, so there is "

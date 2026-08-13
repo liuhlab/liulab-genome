@@ -56,12 +56,16 @@ class Genome(AlignerMixin):
     """A reference genome and the operations over it.
 
     Constructing a ``Genome`` ensures the assembly's reference files exist
-    locally: the FASTA is downloaded from the UCSC golden path (if not already
-    cached) and its ``.fai`` index, ``.2bit`` encoding, and ``chrom.sizes`` are
-    prepared. All of this is cached under
+    locally: the FASTA is fetched from the **Source** its metadata row pins —
+    UCSC for most assemblies, WormBase or NCBI for others — or, for an assembly
+    no row lists, from a URL derived from the UCSC golden path. Its ``.fai``
+    index, ``.2bit`` encoding and ``chrom.sizes`` are then prepared, and a
+    completion record is written recording what was done. Everything lands under
     ``<LIULAB_DATA>/genome/<assembly>/`` (see
-    :func:`~genome.io.download.assembly_data_dir`), so repeat constructions are
-    cheap and offline.
+    :func:`~genome.io.download.assembly_data_dir`). A later construction reads
+    that record, confirms every file it claims is present at the size it claims,
+    and opens the ``.2bit`` — so it is instant and works offline. Nothing is
+    downloaded twice.
 
     Sequence is read from the ``.2bit`` file via ``py2bit``; coordinates are
     **0-based, half-open** throughout.
@@ -69,9 +73,12 @@ class Genome(AlignerMixin):
     Parameters
     ----------
     assembly : str
-        UCSC assembly name, e.g. ``"sacCer3"``, ``"hg38"``, ``"mm39"``. When
-        ``path_or_url`` is omitted, the FASTA is downloaded from UCSC and the name
-        is validated against UCSC first, so a typo fails fast. When
+        Assembly name, e.g. ``"sacCer3"``, ``"hg38"``, ``"mm39"``. A free-form
+        local key (ADR-0003), not necessarily a UCSC one — ``"ecHT115"`` is a
+        reference UCSC has never carried. When ``path_or_url`` is omitted and no
+        row pins a source, the FASTA is downloaded from UCSC and the name is
+        validated against UCSC first, so a typo fails fast; a pinned source *is*
+        the source, so there is nothing to guess and that check is skipped. When
         ``path_or_url`` is given, the name only labels the cache directory and
         files; UCSC is not contacted.
     path_or_url : str or pathlib.Path, optional

@@ -499,7 +499,9 @@ def _claimed_files(
     return claimed
 
 
-def check_registration(directory: Path, *, repair: str) -> CompletionRecord | None:
+def check_registration(
+    directory: Path, *, repair: str, ignore: Iterable[str] = ()
+) -> CompletionRecord | None:
     """Return ``directory``'s record when it is finished, ``None`` when it is fresh.
 
     The one question every kind of build asks before deciding whether to do any work,
@@ -524,6 +526,11 @@ def check_registration(directory: Path, *, repair: str) -> CompletionRecord | No
         The command that fixes a broken state, quoted verbatim in the error message —
         e.g. ``"genome register hg38 --force"``. An error a caller cannot act on is a
         bug, not an error message.
+    ignore : iterable of str, optional
+        Names in ``directory`` that are not this build's to account for. An
+        **Assembly dir** hosts the ``gtf/`` and ``index/`` subtrees other contexts own,
+        and each of those carries its own record, so an annotation registered before its
+        assembly must not make the assembly look like an interrupted run.
 
     Returns
     -------
@@ -546,7 +553,7 @@ def check_registration(directory: Path, *, repair: str) -> CompletionRecord | No
     """
     record = read_record(directory)
     if record is None:
-        leftovers = _unclaimed_contents(directory)
+        leftovers = _unclaimed_contents(directory, ignore)
         if not leftovers:
             return None
         listed = ", ".join(leftovers[:5]) + (", ..." if len(leftovers) > 5 else "")
@@ -566,12 +573,15 @@ def check_registration(directory: Path, *, repair: str) -> CompletionRecord | No
     return record
 
 
-def _unclaimed_contents(directory: Path) -> list[str]:
+def _unclaimed_contents(directory: Path, ignore: Iterable[str] = ()) -> list[str]:
     """Return the names in ``directory`` that a record would be expected to claim.
 
-    The working area is excluded — it is working state, not a claimed output — so a
-    directory holding only an interrupted download still counts as fresh.
+    The working area is always excluded — it is working state, not a claimed output —
+    so a directory holding only an interrupted download still counts as fresh. So is
+    anything the caller names in ``ignore``, which is how a directory that hosts another
+    context's subtree says those entries are not its to account for.
     """
     if not directory.is_dir():
         return []
-    return sorted(entry.name for entry in directory.iterdir() if entry.name != WORK_DIR_NAME)
+    skip = {WORK_DIR_NAME, *ignore}
+    return sorted(entry.name for entry in directory.iterdir() if entry.name not in skip)

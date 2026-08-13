@@ -77,7 +77,8 @@ from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import AnnotationMetadata, list_annotation_metadata, lookup_annotation
 
 #: Subdirectory under an assembly's data dir holding all its GTF annotations.
-_GTF_SUBDIR = "gtf"
+#: The Assembly context owns the layout, so the name is read from there.
+_GTF_SUBDIR = download.ANNOTATIONS_SUBDIR
 
 #: How many names an error lists before saying how many it left out. A whole-genome
 #: mismatch offends in the thousands, and a message that long is one nobody reads.

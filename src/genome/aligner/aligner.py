@@ -37,7 +37,7 @@ from genome.io.completion import (
     record_path,
     write_record,
 )
-from genome.io.download import assembly_data_dir
+from genome.io.download import INDEXES_SUBDIR, assembly_data_dir
 
 if TYPE_CHECKING:
     from genome.genome import Genome
@@ -105,7 +105,7 @@ class Aligner(ABC):
 
         ``<LIULAB_DATA>/genome/<assembly>/index/<name>/``.
         """
-        return assembly_data_dir(self.assembly) / "index" / self.name
+        return assembly_data_dir(self.assembly) / INDEXES_SUBDIR / self.name
 
     @property
     def index_path(self) -> Path:

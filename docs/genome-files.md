@@ -131,6 +131,7 @@ prepared them, the package version, and when it finished:
 
 ```python
 from genome.io.completion import read_record
+from genome.io.download import assembly_data_dir
 
 record = read_record(assembly_data_dir("hg38"))
 record.source_url     # 'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz'
@@ -188,8 +189,8 @@ pins no digest at all — leaving nothing to prove it against — the source is 
     in `.work/`, so repairing usually downloads nothing.
 
 Deleting `.completion.json` by hand does not reset an assembly, then — it produces the
-first of the two errors. `--force` (`overwrite=True` in Python) is the supported way to
-register again from scratch.
+first of the two errors. `--force` (`register_assembly(..., force=True)` in Python) is the
+supported way to register again from scratch.
 
 !!! note "pooch is a downloader; its cache is deliberately not relied on"
     pooch is used here to move bytes — for its retries, progress reporting and

@@ -36,8 +36,12 @@ from genome.io.fasta import (
     twobit_to_chrom_sizes,
 )
 from genome.io.gtf import (
+    AnnotationNotRegisteredError,
+    ChromosomeMismatchError,
     GtfAnnotation,
     annotation_dir,
+    annotation_status,
+    default_annotation,
     fetch_annotation,
     list_annotations,
     register_annotation,
@@ -47,7 +51,9 @@ from genome.io.twobit import TwoBit
 from genome.io.utils import ChecksumMismatchError, sha256_file
 
 __all__ = [
+    "AnnotationNotRegisteredError",
     "ChecksumMismatchError",
+    "ChromosomeMismatchError",
     "CompletionRecord",
     "Downloader",
     "FileDisagreement",
@@ -59,10 +65,12 @@ __all__ = [
     "UCSCGenomeDownloader",
     "UnfinishedRegistrationError",
     "annotation_dir",
+    "annotation_status",
     "assembly_data_dir",
     "assembly_table_row",
     "build_record",
     "check_registration",
+    "default_annotation",
     "disagreements",
     "faidx",
     "fasta_to_2bit",

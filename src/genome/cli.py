@@ -160,6 +160,11 @@ def register_annotation(
     says all of it finished. An annotation that is already registered is reported from
     its record without fetching anything.
 
+    The chromosome check needs the assembly's ``chrom.sizes``, so it can only run once
+    the assembly itself is registered. Registering an annotation first is allowed and
+    reports ``chromosomes not checked``; register the assembly first to have the names
+    verified.
+
     Exits with code 1 when the table lists no such annotation, when the GTF is not the
     digest pinned for it, when it names chromosomes the assembly does not carry, or when
     the directory holds a registration that cannot be trusted — files with no record, or
@@ -186,6 +191,12 @@ def register_annotation(
     typer.echo(f"  source  {payload['source_url']}")
     typer.echo(f"  sha256  {payload['sha256']}")
     typer.echo(f"  files   {', '.join(names)}")
+    # Whether the names were actually verified is not something to leave implicit: the
+    # check cannot run before the assembly is registered, and silence would read as a pass.
+    details = payload.get("details")
+    checked = details.get("chromosomes_checked") if isinstance(details, dict) else None
+    if checked is not True:
+        typer.echo("  chromosomes not checked — register the assembly first to verify them")
 
 
 # Named for what it does rather than for the command it serves: ``from __future__ import
@@ -298,8 +309,12 @@ def table_row(
     of the unpacked file. Prints one tab-separated line to paste into the shipped
     metadata table, or the same row as a JSON object.
 
-    Exits with code 1 if the download fails or the FASTA does not match a checksum the
-    table already pins.
+    A checksum the table already pins is **reported, never enforced** — this is the
+    command to reach for when an upstream file has legitimately changed and the pin has
+    to be regenerated, so refusing on a mismatch would refuse exactly when it is needed.
+    Use ``genome verify`` to check a FASTA you already hold against the official row.
+
+    Exits with code 1 if the download fails.
     """
     try:
         row = _assembly_table_row(assembly, progressbar=not json)
