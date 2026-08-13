@@ -33,6 +33,10 @@ import pandas as pd
 
 from genome.io.utils import _run_to
 
+#: The **External tools** :func:`prepare_fasta` runs, in pipeline order. Named here so
+#: that whatever records a finished preparation records the versions of these three.
+PREPARATION_TOOLS: tuple[str, ...] = ("samtools", "faToTwoBit", "twoBitInfo")
+
 # FASTA suffixes we know how to strip when deriving sibling output names.
 _FASTA_SUFFIXES: tuple[str, ...] = (
     ".fa.gz",

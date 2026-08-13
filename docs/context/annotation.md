@@ -24,10 +24,22 @@ The short key an annotation is addressed by everywhere — `"gencode_v44"` — u
 names, never paths; a path in an argument means the annotation was never registered.
 _Avoid_: id, key, label, alias; and never "the GTF" as a way of naming one
 
+**Annotation metadata**:
+The curated TSV row keyed by **Assembly** plus **Registered name**, saying who publishes that
+annotation, which release it is, where its **GTF** is fetched from and the sha256 of the *unpacked*
+GTF that source yields, plus whether it is the assembly's **Default annotation**. Naming an
+annotation is enough to register it because the row knows the rest. A cross-reference and never an
+allow-list — an annotation with no row is registered by path instead.
+_Avoid_: registry, catalog, manifest; and "the GTF table", which names one of the files rather than
+the annotation
+
 **Default annotation**:
-The annotation used when a caller names none — set explicitly, or adopted on its own when the
-assembly has exactly one. Two annotations and no explicit choice leaves no default at all, because a
-caller who did not choose should be asked rather than guessed at.
+The annotation used when a caller names none: an explicit choice, else the one the **Annotation
+metadata** table flags for that **Assembly** — which is how everyone in the lab reaches for the same
+release without discussing it — else the sole registered annotation, and otherwise none, because a
+caller who did not choose between several should be asked rather than guessed at. It names an
+annotation without locating one, so a default nobody has registered on this machine is the ordinary
+state of a fresh install and only asking for its path is an error.
 _Avoid_: primary, main, active, current
 
 ### Files
@@ -40,8 +52,9 @@ _Avoid_: GFF (a different format, not a different spelling), annotation file, ge
 
 **Annotation database**:
 The gffutils SQLite file built from the **GTF** and kept beside it as `<name>.db` — what makes an
-annotation queryable rather than merely stored. Its presence is what *registered* means: a directory
-holding a GTF and no database is a failed registration, not an annotation.
+annotation queryable rather than merely stored. Its presence proves nothing: a build killed half-way
+leaves one that answers queries with most of the genes missing, so what *registered* means is a
+**Completion marker** that agrees with what is on disk, and that record is the only thing ever asked.
 _Avoid_: index, cache, store; and never "the gffutils db" in the API surface
 
 **Feature inference**:

@@ -39,6 +39,10 @@
 
 ::: genome.external
 
+## `genome.io.completion`
+
+::: genome.io.completion
+
 ## `genome.io.download`
 
 ::: genome.io.download
@@ -46,6 +50,14 @@
 ## `genome.io.fasta`
 
 ::: genome.io.fasta
+
+## `genome.io.gtf`
+
+::: genome.io.gtf
+
+## `genome.metadata`
+
+::: genome.metadata
 
 ## `genome.io.twobit`
 

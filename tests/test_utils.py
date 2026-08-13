@@ -1,4 +1,4 @@
-"""Tests for genome.io.utils — running native tools and output-freshness caching.
+"""Tests for genome.io.utils — native tools, checksums, and output-freshness caching.
 
 None of these need the native binaries: ``_run``'s success path is exercised by
 the end-to-end tests in test_fasta, and here ``_run`` is either stubbed (for the
@@ -9,15 +9,77 @@ drive its error handling.
 from __future__ import annotations
 
 import gzip
+import hashlib
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from genome.external import ToolNotFoundError
 from genome.io import utils as utils_mod
-from genome.io.utils import _gunzip, _is_fresh, _run, _run_to
+from genome.io.utils import (
+    ChecksumMismatchError,
+    _gunzip,
+    _is_fresh,
+    _run,
+    _run_to,
+    sha256_file,
+)
+
+
+def test_sha256_file_digests_a_real_fixture(data_dir: Path) -> None:
+    # The committed sacCer3 subsample, hashed independently with `shasum -a 256`.
+    assert (
+        sha256_file(data_dir / "tiny.fa")
+        == "9316629bab14f9298a043f8b92e1e04a573b12d6a367ccc07c8f8040e5a13981"
+    )
+
+
+def test_sha256_of_a_gzipped_file_differs_from_its_contents(data_dir: Path) -> None:
+    # Why the metadata table records the unpacked digest: the archive's is a different
+    # number entirely, and changes whenever the file is recompressed.
+    assert sha256_file(data_dir / "tiny.fa.gz") != sha256_file(data_dir / "tiny.fa")
+
+
+def test_sha256_file_spans_many_read_buffers(tmp_path: Path) -> None:
+    # Several megabytes, so the digest is assembled from many chunks rather than one.
+    payload = b"ACGTN" * 1_000_000
+    path = tmp_path / "big.fa"
+    path.write_bytes(payload)
+
+    assert sha256_file(path) == hashlib.sha256(payload).hexdigest()
+
+
+def test_sha256_file_missing_file_raises(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        sha256_file(tmp_path / "nope.fa")
+
+
+@pytest.fixture(scope="session")
+def digest_scratch(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A reusable file path for the property test (session-scoped: hypothesis-safe)."""
+    return tmp_path_factory.mktemp("digest") / "payload.bin"
+
+
+@given(payload=st.binary(max_size=1 << 16))
+def test_chunking_is_invisible(digest_scratch: Path, payload: bytes) -> None:
+    # Streaming the file must give the digest of its bytes, whatever they are.
+    digest_scratch.write_bytes(payload)
+    assert sha256_file(digest_scratch) == hashlib.sha256(payload).hexdigest()
+
+
+def test_checksum_mismatch_names_the_file_and_both_values() -> None:
+    err = ChecksumMismatchError(Path("/data/hg38.fa"), "1a2b3c", "9f8e7d")
+
+    assert isinstance(err, ValueError)
+    message = str(err)
+    assert "/data/hg38.fa" in message
+    assert "1a2b3c" in message  # expected
+    assert "9f8e7d" in message  # actual
+    assert (err.expected, err.actual) == ("1a2b3c", "9f8e7d")
 
 
 def test_gunzip_round_trips(tmp_path: Path) -> None:

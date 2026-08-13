@@ -35,16 +35,59 @@ Genome("mm39", cache_dir="/data/ref")    # override where files are stored
 
 On construction `Genome`:
 
-1. validates the assembly name against UCSC (a typo fails fast),
-2. downloads `<assembly>.fa.gz` from the UCSC golden path if not already cached,
-3. prepares the `.fai` index, `.2bit` encoding, and `chrom.sizes`,
-4. opens the `.2bit` for reading.
+1. looks the assembly up in the curated metadata table,
+2. downloads `<assembly>.fa.gz` — from the URL that row pins, or, for an assembly
+   the table does not list, from the UCSC golden path after validating the name
+   against UCSC (a typo fails fast),
+3. checks the unpacked FASTA against the row's checksum, when it pins one,
+4. prepares the `.fai` index, `.2bit` encoding, and `chrom.sizes`,
+5. writes the registration record that says all of that finished,
+6. opens the `.2bit` for reading.
 
-All of this is cached under `<LIULAB_DATA>/genome/<assembly>/` (configurable via
-the `LIULAB_DATA` environment variable; default `~/liulab_data`), so the second
-construction is cheap and works offline. The underlying machinery is documented
-in [Downloading and preparing genomes](genome-files.md); `Genome` is the
-high-level front door to it.
+Everything lands under `<LIULAB_DATA>/genome/<assembly>/` (configurable via the
+`LIULAB_DATA` environment variable; default `~/liulab_data`). A second construction
+reads that assembly's [registration record](genome-files.md#the-registration-record),
+confirms every file it claims is present and the right size — no file contents are read
+— and opens the `.2bit`, so it is instant and works offline. Nothing is downloaded
+twice, and the compressed download is deleted once the record is written. The underlying
+machinery is documented in [Downloading and preparing genomes](genome-files.md);
+`Genome` is the high-level front door to it.
+
+### A registration that cannot be trusted stops you
+
+If that directory holds files but no record (an interrupted preparation), or a record
+that disagrees with what is on disk (a file deleted or truncated afterwards), construction
+raises a `RegistrationError` naming the file and the command that fixes it — rather than
+rebuilding quietly, or handing back a genome that answers queries from a partial file:
+
+```python
+Genome("hg38")
+# RegistrationMismatchError: /data/genome/hg38 disagrees with its .completion.json:
+# hg38.2bit: recorded 841756144 bytes, found 0. Something changed these files after they
+# were registered. Re-register it with `genome register hg38 --force`.
+```
+
+An absent or empty directory is not this — that is a fresh registration and proceeds
+normally. `genome verify <assembly>` re-reads and re-checksums on demand when you suspect
+a problem but nothing has raised. See
+[When a registration cannot be trusted](genome-files.md#when-a-registration-cannot-be-trusted)
+for the repair and the one trade-off it carries.
+
+### Where the bytes came from
+
+An assembly the lab officially supports carries its source and, once someone has
+pinned it, the sha256 of its **unpacked** FASTA. Both are readable off the genome:
+
+```python
+sacCer3.source_url   # 'https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz'
+sacCer3.sha256       # '6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3'
+```
+
+A FASTA that does not match a pinned checksum raises `ChecksumMismatchError` naming
+both values, rather than being prepared and quietly used. `None` on either property
+means the table pins nothing for this assembly — which is legal, and takes nothing
+away: preparation proceeds exactly as it does for an assembly with no row at all.
+See [Pinned sources and checksums](genome-files.md#pinned-sources-and-checksums).
 
 ### Seeding from your own FASTA (offline, mirrors, custom references)
 
@@ -53,19 +96,21 @@ you have a custom reference that isn't on the golden path, pass `path_or_url=`
 to seed the assembly from a FASTA you provide instead of downloading from UCSC:
 
 ```python
-# a local file — copied into the assembly's cache, then prepared
+# a local file — copied into the assembly's directory, then prepared
 Genome("ce11", path_or_url="/data/ce11.fa.gz")
 
-# a non-UCSC URL (e.g. a UCSC mirror) — downloaded with curl
+# a non-UCSC URL (e.g. a UCSC mirror)
 Genome("ce11", path_or_url="https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11/bigZips/ce11.fa.gz")
 ```
 
 In this mode **UCSC is never contacted** — there is no assembly-name validation,
-so the name only labels the cache directory and the prepared files. A gzipped
+so the name only labels the directory and the prepared files, and no pinned
+source or checksum from the metadata table is consulted. A gzipped
 (`.gz`) source is decompressed automatically. Everything else is identical to the
-UCSC path: the `.fai`, `.2bit`, and `chrom.sizes` are prepared and cached under
-`<LIULAB_DATA>/genome/<assembly>/`, so later plain `Genome("ce11")` calls reuse
-them. See
+UCSC path: the `.fai`, `.2bit`, and `chrom.sizes` are prepared under
+`<LIULAB_DATA>/genome/<assembly>/` and the same registration record is written — with
+the path you gave as its source and the digest of what arrived — so later plain
+`Genome("ce11")` calls reuse them. See
 [Seeding from a local file or URL](genome-files.md#seeding-from-a-local-file-or-url)
 for the underlying `fetch_genome_from`.
 
@@ -137,21 +182,43 @@ genome's own view.
 
 ## Gene annotations (GTF)
 
-Beyond sequence, a `Genome` can carry one or more gene annotations. Register a
-GTF under a name and it is placed alongside the assembly's files with a gffutils
-database built from it:
+Beyond sequence, a `Genome` can carry one or more gene annotations. Name one the
+annotation table lists for this assembly and it is fetched, checked against the
+checksum that table pins, placed alongside the assembly's files and built into a
+gffutils database:
 
 ```python
-sacCer3.register_gtf("sacCer3.ensGene.gtf", name="ensembl")
-sacCer3.register_gtf("sacCer3.ensGene.gtf.gz", name="ensembl")  # .gz is decompressed for you
-sacCer3.annotations              # ['ensembl'] — registered names
-sacCer3.get_gtf_path("ensembl")  # Path to the placed .gtf
-sacCer3.default_gtf              # 'ensembl' when it is the only one
+sacCer3.register_annotation("ensgene_v101")   # fetch + verify + build + record
+sacCer3.annotations                  # ['ensgene_v101'] — registered on this machine
+sacCer3.offered_annotations          # what the table offers for this assembly
+sacCer3.get_gtf_path("ensgene_v101") # Path to the placed .gtf
+sacCer3.default_gtf                  # 'ensgene_v101' — the annotation the table flags
 ```
 
-A gzipped GTF is accepted and decompressed automatically. Re-registering a name
-that already exists is a no-op that emits a warning (pass `force=True` to
-rebuild).
+Those first two are different questions on purpose: `annotations` is what this
+machine has, `offered_annotations` is what the lab supports for this assembly,
+registered or not. `genome annotations <assembly>` prints one against the other.
+
+For a GTF the table does not list, hand over the path instead:
+
+```python
+sacCer3.register_gtf("custom.gtf", name="custom")
+sacCer3.register_gtf("custom.gtf.gz", name="custom")  # .gz is decompressed for you
+```
+
+Either way the registration ends with the same record the assembly writes, and
+that record is the only thing that ever says the annotation is finished — never
+the database file's existence, which is equally true of a build killed half-way.
+Re-registering a name whose record is valid returns it silently: nothing is
+fetched and nothing is rebuilt. A directory holding files without a valid record
+raises instead, naming `genome register-annotation <assembly> <name> --force`,
+which is also what repairs it.
+
+Opening a genome never registers anything, whatever the table flags — that would
+be a gigabyte download and a database build inside a constructor someone called to
+fetch one sequence. So `default_gtf` may name an annotation this machine does not
+have, and `default_gtf_path` is where that is reported, naming the command that
+registers it.
 
 Annotations are the basis for building aligner indexes (a STAR index is built
 against a specific GTF). Registration, the default-annotation rules, and

@@ -1,15 +1,21 @@
-"""Tests for genome.aligner — the Aligner abstraction, STAR, and the mixin.
+"""Tests for genome.aligner — the Aligner abstraction, STAR, chromap, and the mixin.
 
-The pure-logic tests stub out the STAR binary (its resolution, version, and the
-subprocess call), so they run anywhere. A couple of integration tests build a
-real index from a toy FASTA + GTF and are skipped when STAR is not on ``PATH``.
+The pure-logic tests stub out the aligner binary (its resolution, version, and the
+subprocess call), so they run anywhere. A couple of integration tests build a real
+index from a toy FASTA + GTF and are skipped when the binary is not on ``PATH``.
+
+What a finished index is, is asked of its completion record and of nothing else, so
+most of what is worth asserting here — that an unbuilt index raises, that an
+interrupted one raises differently, that a damaged one names the file that changed,
+and what the record says about the build — needs no aligner installed at all.
 """
 
 from __future__ import annotations
 
-import json
+import re
 import shutil
 import types
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -17,11 +23,19 @@ import pandas as pd
 import pytest
 
 import genome.aligner.aligner as aligner_mod
+from genome.aligner.aligner import IndexNotBuiltError
 from genome.aligner.chromap import Chromap
 from genome.aligner.chromap import _kwargs_to_flags as _chromap_kwargs_to_flags
 from genome.aligner.mixin import AlignerMixin, _resolve_aligner
 from genome.aligner.star import STAR, _kwargs_to_flags
 from genome.external import ToolNotFoundError
+from genome.io.completion import (
+    RECORD_NAME,
+    CompletionRecord,
+    RegistrationMismatchError,
+    UnfinishedRegistrationError,
+    read_record,
+)
 
 if TYPE_CHECKING:
     from genome.genome import Genome
@@ -39,6 +53,10 @@ _TOY_GTF = (
     'chr1\ttoy\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n'
     'chr1\ttoy\texon\t601\t800\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n'
 )
+
+#: Old bookkeeping this build no longer writes: a bare success flag and a parameter
+#: sidecar beside it, both absorbed into the one completion record.
+_RETIRED_FILES = (".success", "star.index.json", "chromap.index.json")
 
 
 def _make_genome(tmp_path: Path, gtfs: dict[str, str] | None = None) -> Genome:
@@ -66,6 +84,13 @@ def _make_genome(tmp_path: Path, gtfs: dict[str, str] | None = None) -> Genome:
     return cast("Genome", stub)
 
 
+def _record_of(aligner: aligner_mod.Aligner) -> CompletionRecord:
+    """Return the completion record written into ``aligner``'s index directory."""
+    record = read_record(aligner.index_dir)
+    assert record is not None, f"no {RECORD_NAME} in {aligner.index_dir}"
+    return record
+
+
 @pytest.fixture
 def stub_star(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> STAR:
     """A STAR (bound to the ``toy`` annotation) with faked binary + version."""
@@ -89,6 +114,30 @@ def captured_run(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Record (and suppress) every ``Aligner._run`` invocation's argument list."""
     calls: list[list[str]] = []
     monkeypatch.setattr(aligner_mod.Aligner, "_run", lambda self, args: calls.append(list(args)))
+    return calls
+
+
+@pytest.fixture
+def building_run(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """As ``captured_run``, but leaves plausible output files behind.
+
+    A build that writes nothing leaves a record claiming nothing, which cannot
+    disagree with anything. Tests about a *damaged* index need a build whose
+    record has real files to hold the directory to, so this stand-in writes the
+    aligner's artifact plus the log the tool drops in its working directory.
+    """
+    calls: list[list[str]] = []
+
+    def _fake(self: aligner_mod.Aligner, args: Sequence[str]) -> None:
+        calls.append(list(args))
+        (self.index_dir / "Log.out").write_text("tool log\n")
+        artifact = self._artifact
+        if artifact == self.index_dir:
+            (artifact / "SA").write_text("suffix array bytes\n")
+        else:
+            artifact.write_text("index bytes\n")
+
+    monkeypatch.setattr(aligner_mod.Aligner, "_run", _fake)
     return calls
 
 
@@ -135,44 +184,201 @@ def test_distinct_gtf_keys_use_distinct_index_dirs(
     assert star_b.index_dir.name == "star_b"
 
 
-def test_index_path_raises_before_build(stub_star: STAR) -> None:
-    with pytest.raises(RuntimeError, match="No successful star index"):
+# -- asking for an index that is not there ----------------------------------
+
+
+def test_index_path_raises_when_nothing_was_ever_built(stub_star: STAR) -> None:
+    with pytest.raises(IndexNotBuiltError) as raised:
         _ = stub_star.index_path
 
+    message = str(raised.value)
+    assert "nothing has been built" in message
+    assert str(stub_star.index_dir) in message
+    assert "Genome.build_star_index(gtf='toy')" in message
 
-def test_index_writes_metadata_flag_and_returns_dir(
+
+def test_index_path_raises_differently_when_a_build_was_interrupted(stub_star: STAR) -> None:
+    # Index files with no record: a run that died between writing them and vouching
+    # for them. Not the same as never built, and not silently rebuilt either.
+    stub_star.index_dir.mkdir(parents=True)
+    (stub_star.index_dir / "SA").write_text("half a suffix array\n")
+
+    with pytest.raises(UnfinishedRegistrationError) as raised:
+        _ = stub_star.index_path
+
+    message = str(raised.value)
+    assert "SA" in message
+    assert "Genome.build_star_index(gtf='toy', overwrite=True)" in message
+
+
+def test_index_path_raises_when_a_claimed_file_changed(
+    stub_star: STAR, building_run: list[list[str]]
+) -> None:
+    stub_star.index()
+    (stub_star.index_dir / "SA").write_text("truncated\n")
+
+    with pytest.raises(RegistrationMismatchError) as raised:
+        _ = stub_star.index_path
+
+    message = str(raised.value)
+    assert "SA" in message
+    assert "Genome.build_star_index(gtf='toy', overwrite=True)" in message
+
+
+def test_index_path_raises_when_a_claimed_file_is_deleted(
+    stub_chromap: Chromap, building_run: list[list[str]]
+) -> None:
+    built = stub_chromap.index()
+    built.unlink()
+
+    with pytest.raises(RegistrationMismatchError, match=re.escape("chromap.index")):
+        _ = stub_chromap.index_path
+
+
+# -- what a finished build writes -------------------------------------------
+
+
+def test_index_writes_a_completion_record_and_returns_the_dir(
     stub_star: STAR, captured_run: list[list[str]]
 ) -> None:
     out = stub_star.index(threads=3)
 
     assert out == stub_star.index_dir == stub_star.index_path
-    assert (out / ".success").is_file()
     assert len(captured_run) == 1
 
-    meta = json.loads((out / "star.index.json").read_text())
-    assert meta["aligner"] == "star"
-    assert meta["version"] == "0.0-test"
-    assert meta["assembly"] == "tiny"
-    assert meta["parameters"]["threads"] == 3
-    assert meta["parameters"]["gtf"] == "toy"
-    # Small genome -> a reduced suffix-array size is auto-added.
-    assert "genomeSAindexNbases" in meta["parameters"]
-
-    cmd = meta["command"]
-    assert cmd[0] == "STAR"
-    assert "genomeGenerate" in cmd
-    assert "--genomeFastaFiles" in cmd
+    record = _record_of(stub_star)
+    assert record.kind == "index"
+    assert record.name == "star_toy"
+    assert record.package_version
+    assert record.completed_at
 
 
-def test_index_is_cached_and_overwrite_rebuilds(
-    stub_star: STAR, captured_run: list[list[str]]
+def test_the_record_carries_the_aligner_version_and_the_fasta_consumed(
+    stub_star: STAR, captured_run: list[list[str]], tmp_path: Path
 ) -> None:
     stub_star.index()
-    stub_star.index()  # success flag present -> reused, no rebuild
-    assert len(captured_run) == 1
 
-    stub_star.index(overwrite=True)  # forced
-    assert len(captured_run) == 2
+    record = _record_of(stub_star)
+    assert record.tool_versions == {"STAR": "0.0-test"}
+    assert record.details["fasta"] == str(tmp_path / "tiny.fa")
+    assert record.details["assembly"] == "tiny"
+    assert record.details["aligner"] == "star"
+
+
+def test_the_record_carries_the_exact_command_and_the_parameters(
+    stub_star: STAR, captured_run: list[list[str]]
+) -> None:
+    stub_star.index(threads=3)
+
+    record = _record_of(stub_star)
+    command = record.details["command"]
+    assert command[0] == "STAR"
+    assert command[1:] == captured_run[0]
+    assert "genomeGenerate" in command
+    assert "--genomeFastaFiles" in command
+
+    parameters = record.details["parameters"]
+    assert parameters["threads"] == 3
+    assert parameters["gtf"] == "toy"
+    # Small genome -> a reduced suffix-array size is auto-added.
+    assert "genomeSAindexNbases" in parameters
+
+
+def test_the_record_claims_every_file_the_build_left(
+    stub_star: STAR, building_run: list[list[str]]
+) -> None:
+    # An index is claimed whole — the log the tool dropped in its working directory
+    # included — so a file going missing later is caught, not just the artifact.
+    stub_star.index()
+
+    record = _record_of(stub_star)
+    assert set(record.files) == {"SA", "Log.out"}
+    assert record.files["SA"] == (stub_star.index_dir / "SA").stat().st_size
+    # The record never claims itself.
+    assert RECORD_NAME not in record.files
+
+
+@pytest.mark.parametrize("retired", _RETIRED_FILES)
+def test_the_build_writes_none_of_the_retired_bookkeeping_files(
+    stub_star: STAR, building_run: list[list[str]], retired: str
+) -> None:
+    stub_star.index()
+
+    assert not (stub_star.index_dir / retired).exists()
+
+
+def test_a_retired_success_flag_no_longer_makes_an_index_readable(stub_star: STAR) -> None:
+    # A directory prepared by an older version raises and is registered once more;
+    # the flag is not read, so it cannot vouch for anything.
+    stub_star.index_dir.mkdir(parents=True)
+    (stub_star.index_dir / ".success").touch()
+
+    with pytest.raises(UnfinishedRegistrationError):
+        _ = stub_star.index_path
+
+
+# -- reuse, repair and rebuild ----------------------------------------------
+
+
+def test_index_is_reused_when_the_record_says_it_finished(
+    stub_star: STAR, building_run: list[list[str]]
+) -> None:
+    stub_star.index()
+    stub_star.index()  # a valid record -> reused, no rebuild
+
+    assert len(building_run) == 1
+
+
+def test_overwrite_rebuilds_a_finished_index(
+    stub_star: STAR, building_run: list[list[str]]
+) -> None:
+    stub_star.index()
+
+    stub_star.index(overwrite=True)
+
+    assert len(building_run) == 2
+
+
+def test_index_refuses_to_rebuild_over_an_interrupted_build(
+    stub_star: STAR, building_run: list[list[str]]
+) -> None:
+    stub_star.index_dir.mkdir(parents=True)
+    (stub_star.index_dir / "SA").write_text("half a suffix array\n")
+
+    with pytest.raises(UnfinishedRegistrationError, match=re.escape("overwrite=True")):
+        stub_star.index()
+
+    assert building_run == []
+
+
+def test_overwrite_rebuilds_over_an_interrupted_build(
+    stub_star: STAR, building_run: list[list[str]]
+) -> None:
+    stub_star.index_dir.mkdir(parents=True)
+    (stub_star.index_dir / "SA").write_text("half a suffix array\n")
+
+    out = stub_star.index(overwrite=True)
+
+    assert len(building_run) == 1
+    assert out == stub_star.index_path
+
+
+def test_a_rebuild_that_dies_leaves_nothing_vouching_for_the_directory(
+    stub_star: STAR, monkeypatch: pytest.MonkeyPatch, building_run: list[list[str]]
+) -> None:
+    stub_star.index()
+
+    def _die(self: aligner_mod.Aligner, args: Sequence[str]) -> None:
+        raise RuntimeError("STAR failed (exit 1)")
+
+    monkeypatch.setattr(aligner_mod.Aligner, "_run", _die)
+    with pytest.raises(RuntimeError, match="STAR failed"):
+        stub_star.index(overwrite=True)
+
+    # The earlier record was dropped before the tool ran, so what is left reads as
+    # interrupted rather than as a finished index whose sizes happen to still match.
+    with pytest.raises(UnfinishedRegistrationError):
+        _ = stub_star.index_path
 
 
 def test_index_emits_sjdb_flags_from_bound_gtf(
@@ -187,10 +393,10 @@ def test_index_emits_sjdb_flags_from_bound_gtf(
     assert "--sjdbOverhang" in args
     assert "49" in args
 
-    meta = json.loads((stub_star.index_dir / "star.index.json").read_text())
-    assert meta["parameters"]["gtf"] == "toy"
-    assert meta["parameters"]["sjdb_gtf_file"] == gtf_path
-    assert meta["parameters"]["sjdb_overhang"] == 49
+    parameters = _record_of(stub_star).details["parameters"]
+    assert parameters["gtf"] == "toy"
+    assert parameters["sjdb_gtf_file"] == gtf_path
+    assert parameters["sjdb_overhang"] == 49
 
 
 # -- mixin: build/get index entry points ------------------------------------
@@ -240,7 +446,7 @@ def test_get_star_index_matches_generic_get_index(
 
 
 def test_get_index_raises_before_build(mixin_genome: Genome) -> None:
-    with pytest.raises(RuntimeError, match="No successful star index"):
+    with pytest.raises(IndexNotBuiltError, match=re.escape("Genome.build_star_index(gtf='toy')")):
         mixin_genome.get_index("star", gtf="toy")
 
 
@@ -259,11 +465,17 @@ def test_real_star_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
     out = star.index(threads=2)
 
-    assert out == star.index_path
+    assert out == star.index_path  # reopening a fresh index does not raise
     assert out.name == "star_toy"
     names = {p.name for p in out.iterdir()}
     assert {"SA", "SAindex", "Genome", "genomeParameters.txt"} <= names
-    assert (out / ".success").is_file()
+    assert RECORD_NAME in names
+    assert not names & set(_RETIRED_FILES)
+
+    # Every binary file STAR emitted is claimed, so losing one is caught.
+    record = _record_of(star)
+    assert {"SA", "SAindex", "Genome"} <= set(record.files)
+    assert record.tool_versions["STAR"] == star.version
 
 
 @pytest.mark.skipif(not _STAR_PRESENT, reason="STAR not on PATH")
@@ -280,9 +492,9 @@ def test_real_star_index_with_gtf(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert "301" in sjdb
     assert "600" in sjdb
 
-    meta = json.loads((out / "star.index.json").read_text())
-    assert meta["parameters"]["gtf"] == "toy"
-    assert meta["parameters"]["sjdb_gtf_file"] == str((tmp_path / "toy.gtf").resolve())
+    parameters = _record_of(star).details["parameters"]
+    assert parameters["gtf"] == "toy"
+    assert parameters["sjdb_gtf_file"] == str((tmp_path / "toy.gtf").resolve())
 
 
 # ===========================================================================
@@ -319,12 +531,15 @@ def test_chromap_index_dir_is_per_assembly(stub_chromap: Chromap) -> None:
     assert stub_chromap.index_dir.parts[-3:] == ("tiny", "index", "chromap")
 
 
-def test_chromap_index_path_raises_before_build(stub_chromap: Chromap) -> None:
-    with pytest.raises(RuntimeError, match="No successful chromap index"):
+def test_chromap_index_path_raises_when_nothing_was_ever_built(stub_chromap: Chromap) -> None:
+    with pytest.raises(IndexNotBuiltError) as raised:
         _ = stub_chromap.index_path
 
+    # No annotation selects a chromap index, so the build call takes no arguments.
+    assert "Genome.build_chromap_index()" in str(raised.value)
 
-def test_chromap_index_writes_metadata_flag_and_returns_file(
+
+def test_chromap_index_writes_a_completion_record_and_returns_the_file(
     stub_chromap: Chromap, captured_run: list[list[str]]
 ) -> None:
     out = stub_chromap.index()
@@ -333,19 +548,37 @@ def test_chromap_index_writes_metadata_flag_and_returns_file(
     assert out == stub_chromap.index_path
     assert out.name == "chromap.index"
     assert out.parent == stub_chromap.index_dir
-    assert (stub_chromap.index_dir / ".success").is_file()
     assert len(captured_run) == 1
 
-    meta = json.loads((stub_chromap.index_dir / "chromap.index.json").read_text())
-    assert meta["aligner"] == "chromap"
-    assert meta["version"] == "0.0-test"
-    assert meta["assembly"] == "tiny"
+    record = _record_of(stub_chromap)
+    assert record.kind == "index"
+    assert record.name == "chromap"
+    assert record.tool_versions == {"chromap": "0.0-test"}
+    assert record.details["assembly"] == "tiny"
 
-    cmd = meta["command"]
-    assert cmd[0] == "chromap"
-    assert "--build-index" in cmd
-    assert "--ref" in cmd
-    assert "--output" in cmd
+    command = record.details["command"]
+    assert command[0] == "chromap"
+    assert "--build-index" in command
+    assert "--ref" in command
+    assert "--output" in command
+
+
+def test_chromap_record_claims_the_single_index_file(
+    stub_chromap: Chromap, building_run: list[list[str]]
+) -> None:
+    built = stub_chromap.index()
+
+    record = _record_of(stub_chromap)
+    assert record.files["chromap.index"] == built.stat().st_size
+
+
+@pytest.mark.parametrize("retired", _RETIRED_FILES)
+def test_chromap_writes_none_of_the_retired_bookkeeping_files(
+    stub_chromap: Chromap, building_run: list[list[str]], retired: str
+) -> None:
+    stub_chromap.index()
+
+    assert not (stub_chromap.index_dir / retired).exists()
 
 
 def test_chromap_default_index_command_is_minimal(
@@ -358,15 +591,15 @@ def test_chromap_default_index_command_is_minimal(
     assert captured_run[0] == ["--build-index", "--ref", fasta, "--output", artifact]
 
 
-def test_chromap_index_is_cached_and_overwrite_rebuilds(
-    stub_chromap: Chromap, captured_run: list[list[str]]
+def test_chromap_index_is_reused_and_overwrite_rebuilds(
+    stub_chromap: Chromap, building_run: list[list[str]]
 ) -> None:
     stub_chromap.index()
-    stub_chromap.index()  # success flag present -> reused, no rebuild
-    assert len(captured_run) == 1
+    stub_chromap.index()  # a valid record -> reused, no rebuild
+    assert len(building_run) == 1
 
     stub_chromap.index(overwrite=True)  # forced
-    assert len(captured_run) == 2
+    assert len(building_run) == 2
 
 
 def test_chromap_index_emits_kmer_window_flags(
@@ -379,10 +612,10 @@ def test_chromap_index_emits_kmer_window_flags(
     assert args[args.index("--window") + 1] == "10"
     assert args[args.index("--min-frag-length") + 1] == "25"
 
-    meta = json.loads((stub_chromap.index_dir / "chromap.index.json").read_text())
-    assert meta["parameters"]["kmer"] == 20
-    assert meta["parameters"]["window"] == 10
-    assert meta["parameters"]["min_frag_length"] == 25
+    parameters = _record_of(stub_chromap).details["parameters"]
+    assert parameters["kmer"] == 20
+    assert parameters["window"] == 10
+    assert parameters["min_frag_length"] == 25
 
 
 # -- mixin: build/get index entry points ------------------------------------
@@ -407,7 +640,7 @@ def test_get_chromap_index_matches_generic_get_index(
 
 
 def test_get_chromap_index_raises_before_build(mixin_genome: Genome) -> None:
-    with pytest.raises(RuntimeError, match="No successful chromap index"):
+    with pytest.raises(IndexNotBuiltError, match=re.escape("Genome.build_chromap_index()")):
         mixin_genome.get_chromap_index()
 
 
@@ -421,12 +654,15 @@ def test_real_chromap_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
     out = chromap.index()
 
-    assert out == chromap.index_path
+    assert out == chromap.index_path  # reopening a fresh index does not raise
     assert out.name == "chromap.index"
     assert out.is_file()  # chromap's index is a single file, not a directory
     assert out.stat().st_size > 0
-    assert (chromap.index_dir / ".success").is_file()
 
-    meta = json.loads((chromap.index_dir / "chromap.index.json").read_text())
-    assert meta["aligner"] == "chromap"
-    assert meta["version"]  # a real version string was detected
+    names = {p.name for p in chromap.index_dir.iterdir()}
+    assert RECORD_NAME in names
+    assert not names & set(_RETIRED_FILES)
+
+    record = _record_of(chromap)
+    assert record.files["chromap.index"] == out.stat().st_size
+    assert record.tool_versions["chromap"] == chromap.version

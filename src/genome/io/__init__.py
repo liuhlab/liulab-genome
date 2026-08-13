@@ -6,11 +6,26 @@ that process them (:mod:`genome.io.fasta`). Keep real, side-effect-free logic
 in ``core``/``features``; this layer only moves bytes.
 """
 
+from genome.io.completion import (
+    CompletionRecord,
+    FileDisagreement,
+    RegistrationError,
+    RegistrationMismatchError,
+    UnfinishedRegistrationError,
+    build_record,
+    check_registration,
+    disagreements,
+    read_record,
+    write_record,
+)
 from genome.io.download import (
     Downloader,
     UCSCGenomeDownloader,
     assembly_data_dir,
+    assembly_table_row,
     liulab_data_dir,
+    register_assembly,
+    verify_assembly,
 )
 from genome.io.fasta import (
     GenomeFiles,
@@ -21,27 +36,55 @@ from genome.io.fasta import (
     twobit_to_chrom_sizes,
 )
 from genome.io.gtf import (
+    AnnotationNotRegisteredError,
+    ChromosomeMismatchError,
     GtfAnnotation,
     annotation_dir,
+    annotation_status,
+    default_annotation,
+    fetch_annotation,
     list_annotations,
+    register_annotation,
     register_gtf,
 )
 from genome.io.twobit import TwoBit
+from genome.io.utils import ChecksumMismatchError, sha256_file
 
 __all__ = [
+    "AnnotationNotRegisteredError",
+    "ChecksumMismatchError",
+    "ChromosomeMismatchError",
+    "CompletionRecord",
     "Downloader",
+    "FileDisagreement",
     "GenomeFiles",
     "GtfAnnotation",
+    "RegistrationError",
+    "RegistrationMismatchError",
     "TwoBit",
     "UCSCGenomeDownloader",
+    "UnfinishedRegistrationError",
     "annotation_dir",
+    "annotation_status",
     "assembly_data_dir",
+    "assembly_table_row",
+    "build_record",
+    "check_registration",
+    "default_annotation",
+    "disagreements",
     "faidx",
     "fasta_to_2bit",
+    "fetch_annotation",
     "list_annotations",
     "liulab_data_dir",
     "prepare_fasta",
     "read_chrom_sizes",
+    "read_record",
+    "register_annotation",
+    "register_assembly",
     "register_gtf",
+    "sha256_file",
     "twobit_to_chrom_sizes",
+    "verify_assembly",
+    "write_record",
 ]

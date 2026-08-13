@@ -76,6 +76,11 @@ class STAR(Aligner):
         """STAR loads the genome directory directly."""
         return self.index_dir
 
+    @property
+    def _build_arguments(self) -> str:
+        """The annotation key, which is what picks one STAR index out of several."""
+        return f"gtf={self._gtf_key!r}"
+
     def index(
         self,
         *,
@@ -87,9 +92,11 @@ class STAR(Aligner):
         """Build the STAR genome index for the bound assembly and annotation.
 
         Output goes to ``<LIULAB_DATA>/genome/<assembly>/index/star_<gtf_key>/``.
-        When a successful index already exists it is reused unless
-        ``overwrite=True``. The annotation GTF is resolved from the bound ``gtf``
-        key via :meth:`~genome.genome.Genome.get_gtf_path` and passed to STAR as
+        An index whose completion record says it finished is reused unless
+        ``overwrite=True``; a directory holding index files that no record
+        vouches for raises rather than being silently rebuilt. The annotation GTF
+        is resolved from the bound ``gtf`` key via
+        :meth:`~genome.genome.Genome.get_gtf_path` and passed to STAR as
         ``--sjdbGTFfile`` for splice-junction-aware indexing.
 
         Only the most commonly tuned options are named below. Any other STAR
@@ -104,7 +111,8 @@ class STAR(Aligner):
         threads : int, default 1
             ``--runThreadN``: number of threads to build with.
         overwrite : bool, default False
-            Rebuild even if a successful index already exists.
+            Rebuild even if a finished index already exists, and rebuild over a
+            directory that cannot be trusted rather than raising on it.
         **kwargs : Any
             Extra ``genomeGenerate`` options forwarded verbatim as STAR flags.
 
@@ -112,12 +120,19 @@ class STAR(Aligner):
         -------
         pathlib.Path
             The genome directory (also available as :attr:`index_path`).
+
+        Raises
+        ------
+        genome.io.completion.RegistrationError
+            If the index directory holds files without a record, or a record
+            that disagrees with them. Pass ``overwrite=True`` to rebuild.
+        RuntimeError
+            If STAR exits non-zero.
         """
-        if self._flag_path.is_file() and not overwrite:
+        if not overwrite and self._registration() is not None:
             return self.index_path
 
-        self.index_dir.mkdir(parents=True, exist_ok=True)
-        self._flag_path.unlink(missing_ok=True)  # invalidate any stale marker
+        self._begin_build()
 
         fasta = self._genome.files.fasta
         # STAR runs with the index dir as CWD, so resolve the annotation path.
@@ -154,8 +169,7 @@ class STAR(Aligner):
         args += _kwargs_to_flags(kwargs)
 
         self._run(args)
-        self._write_metadata(command=[self.binary, *args], parameters=parameters)
-        self._mark_success()
+        self._record_completion(command=[self.binary, *args], parameters=parameters)
         return self.index_path
 
 
