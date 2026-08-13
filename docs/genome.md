@@ -189,10 +189,15 @@ gffutils database:
 
 ```python
 sacCer3.register_annotation("ensgene_v101")   # fetch + verify + build + record
-sacCer3.annotations                  # ['ensgene_v101'] — registered names
+sacCer3.annotations                  # ['ensgene_v101'] — registered on this machine
+sacCer3.offered_annotations          # what the table offers for this assembly
 sacCer3.get_gtf_path("ensgene_v101") # Path to the placed .gtf
-sacCer3.default_gtf                  # 'ensgene_v101' when it is the only one
+sacCer3.default_gtf                  # 'ensgene_v101' — the annotation the table flags
 ```
+
+Those first two are different questions on purpose: `annotations` is what this
+machine has, `offered_annotations` is what the lab supports for this assembly,
+registered or not. `genome annotations <assembly>` prints one against the other.
 
 For a GTF the table does not list, hand over the path instead:
 
@@ -208,6 +213,12 @@ Re-registering a name whose record is valid returns it silently: nothing is
 fetched and nothing is rebuilt. A directory holding files without a valid record
 raises instead, naming `genome register-annotation <assembly> <name> --force`,
 which is also what repairs it.
+
+Opening a genome never registers anything, whatever the table flags — that would
+be a gigabyte download and a database build inside a constructor someone called to
+fetch one sequence. So `default_gtf` may name an annotation this machine does not
+have, and `default_gtf_path` is where that is reported, naming the command that
+registers it.
 
 Annotations are the basis for building aligner indexes (a STAR index is built
 against a specific GTF). Registration, the default-annotation rules, and

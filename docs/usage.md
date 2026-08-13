@@ -43,7 +43,8 @@ $ genome revcomp ATCG
 $ genome revcomp aTcG --json
 $ genome doctor [--json]
 $ genome register hg38 [--source PATH_OR_URL] [--force] [--json]
-$ genome register-annotation hg38 gencode_v50 [--force] [--json]
+$ genome register-annotation hg38 gencode_v50 [--force] [--no-check-chromosomes] [--json]
+$ genome annotations hg38 [--json]
 $ genome verify hg38 [--fasta PATH] [--json]
 $ genome table-row sacCer3 [--json]
 ```
@@ -100,10 +101,34 @@ registered ensgene_v101 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/ensg
 
 Running it again on a registered annotation reads the record and downloads nothing. It
 exits `1` when the table lists no such annotation for that assembly (the message says
-what it does list), when the GTF is not the checksum pinned for it, or when the
-directory cannot be trusted — a half-built database from an interrupted run, say, which
-`--force` repairs. A GTF the table does not list is registered by path from Python
-instead, with `Genome.register_gtf`.
+what it does list), when the GTF names chromosomes the assembly does not carry, when the
+GTF is not the checksum pinned for it, or when the directory cannot be trusted — a
+half-built database from an interrupted run, say, which `--force` repairs. A GTF the
+table does not list is registered by path from Python instead, with
+`Genome.register_gtf`.
+
+`--no-check-chromosomes` registers one whose chromosome-name mismatch you have looked at
+and accept; the record says the names went unchecked, so you can tell months later. See
+[The chromosome names have to match](aligner.md#the-chromosome-names-have-to-match).
+
+### Listing what an assembly offers against what is registered
+
+`genome annotations` answers two questions side by side — which annotations the lab
+supports for an assembly, and which are registered on this machine. It downloads and
+prepares nothing, so it works for an assembly you have never registered, which is the
+case it most needs to serve:
+
+```console
+$ genome annotations hg38
+annotations for hg38 in /data/liulab_data/genome/hg38
+  gencode_v50  offered, not registered  GENCODE v50
+  mine         registered, not offered
+default: gencode_v50 — not registered here; register it with `genome register-annotation hg38 gencode_v50`
+```
+
+The last line names the assembly's [default annotation](aligner.md#the-default-annotation)
+— the one the table flags, else the sole registered one — and, when it is not registered
+here, the command that closes the gap.
 
 ### Verifying one
 

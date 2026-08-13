@@ -19,6 +19,7 @@ from genome import DNA, Genome, Region
 from genome.io.completion import RegistrationMismatchError, read_record
 from genome.io.download import register_assembly
 from genome.io.fasta import prepare_fasta
+from genome.io.gtf import AnnotationNotRegisteredError
 from genome.metadata import METADATA_FIELDS, AnnotationMetadata, AssemblyMetadata
 
 from .conftest import FakeFetch
@@ -34,22 +35,45 @@ _CHR_A = "ACGTACGTacgtACGTACGT"
 _CHR_B = "TTTTGGGG"
 
 
-@pytest.fixture
-def prepared_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Prepare a tiny assembly on disk and return the cache dir to construct against.
+def _prepare_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Prepare ``tmp_path/tiny.fa`` and hand its files to every ``Genome`` built here.
 
-    Skips the network/UCSC validation entirely: every ``Genome(...)`` built with
-    this cache dir is handed back the prebuilt files, whatever it is named.
+    Skips the network/UCSC validation entirely: every ``Genome(...)`` built with this
+    cache dir is handed back the prebuilt files, whatever it is named.
     """
-    fasta = tmp_path / "tiny.fa"
-    fasta.write_text(f">chrA\n{_CHR_A}\n>chrB\n{_CHR_B}\n")
-    files = prepare_fasta(fasta)
+    files = prepare_fasta(tmp_path / "tiny.fa")
     monkeypatch.setattr(
         genome_mod.UCSCGenomeDownloader,
         "fetch_genome",
         lambda self, **kwargs: files,
     )
     return tmp_path
+
+
+@pytest.fixture
+def prepared_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Prepare a two-chromosome assembly of known bases and return its cache dir.
+
+    Synthetic on purpose: chrA carries a soft-masked stretch at ``[8, 12)`` and a
+    non-palindromic prefix, so the sequence tests can assert exact bases. It is not an
+    organism, so nothing is registered against it — the annotation tests use
+    :func:`yeast_dir`.
+    """
+    (tmp_path / "tiny.fa").write_text(f">chrA\n{_CHR_A}\n>chrB\n{_CHR_B}\n")
+    return _prepare_cache_dir(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def yeast_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> Path:
+    """Prepare an assembly and return the cache dir an annotation actually fits.
+
+    The committed ``tiny.fa`` is real subsampled sacCer3 — ``chrI``, ``chrII``,
+    ``chrIII`` — which are the very chromosomes the committed ``tiny.gtf`` names, so a
+    GTF registered against this assembly passes the chromosome check on its merits
+    rather than needing it stood down.
+    """
+    shutil.copy2(data_dir / "tiny.fa", tmp_path / "tiny.fa")
+    return _prepare_cache_dir(tmp_path, monkeypatch)
 
 
 @pytest.fixture
@@ -243,24 +267,20 @@ _ANNOTATION = AnnotationMetadata(
 
 
 def test_registering_an_annotation_by_name_adopts_it_and_survives_reopening(
-    fake_fetch: FakeFetch, prepared_dir: Path
+    fake_fetch: FakeFetch, yeast_dir: Path
 ) -> None:
     fake_fetch.serve("tiny.gtf.gz")
 
-    with Genome("tiny", cache_dir=prepared_dir) as g:
+    with Genome("tiny", cache_dir=yeast_dir) as g:
         assert g.annotations == []
-        # The fixture assembly is chrA/chrB while the committed GTF is chrI to chrIII, so
-        # the chromosome check is stood down here; it has its own tests in test_gtf.
-        annotation = g.register_annotation(
-            "ensgene_v101", progressbar=False, metadata=_ANNOTATION, check_chromosomes=False
-        )
+        annotation = g.register_annotation("ensgene_v101", progressbar=False, metadata=_ANNOTATION)
         assert g.annotations == ["ensgene_v101"]
         assert g.default_gtf == "ensgene_v101"
         assert g.default_gtf_path == annotation.gtf
 
     # A record was written, so the annotation is registered for anyone who opens the
     # genome next — and opening it fetches nothing.
-    with Genome("tiny", cache_dir=prepared_dir) as again:
+    with Genome("tiny", cache_dir=yeast_dir) as again:
         assert again.annotations == ["ensgene_v101"]
     assert len(fake_fetch.calls) == 1
 
@@ -308,6 +328,114 @@ def test_a_forced_re_registration_repairs_what_the_error_named(
 
     with Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=_UNPINNED) as repaired:
         assert repaired.fetch_sequence("chrI:0-4") == DNA("CCAC")
+
+
+class TestOfferedAgainstRegistered:
+    """What the assembly offers, what is registered here, and which one is the default.
+
+    sacCer3 is the assembly for the offered half: the shipped table lists it exactly one
+    annotation and flags it as the default, so these assert what a lab member actually
+    gets rather than what a table stood up for the test would give. ``tiny`` is in
+    neither table, which is how the no-flag fallback is exercised.
+    """
+
+    def test_a_genome_reports_what_its_assembly_offers_apart_from_what_is_registered(
+        self, prepared_dir: Path
+    ) -> None:
+        with Genome("sacCer3", cache_dir=prepared_dir) as g:
+            offered = g.offered_annotations
+            assert [record.name for record in offered] == ["ensgene_v101"]
+            assert offered[0].provider == "UCSC"
+            assert g.annotations == []  # the lab supports it; this machine does not have it
+
+    def test_the_tables_flag_is_the_default_even_with_nothing_registered(
+        self, prepared_dir: Path
+    ) -> None:
+        with Genome("sacCer3", cache_dir=prepared_dir) as g:
+            assert g.default_gtf == "ensgene_v101"
+
+    def test_opening_a_genome_registers_no_annotation(
+        self, fake_fetch: FakeFetch, prepared_dir: Path
+    ) -> None:
+        # A GENCODE registration is a gigabyte download and a database build running
+        # many minutes. Naming the default must never start one.
+        with Genome("sacCer3", cache_dir=prepared_dir) as g:
+            assert g.default_gtf == "ensgene_v101"
+
+        assert fake_fetch.calls == []
+        assert not (prepared_dir / "gtf").exists()
+
+    def test_the_path_of_an_unregistered_default_names_the_command_that_registers_it(
+        self, prepared_dir: Path
+    ) -> None:
+        with (
+            Genome("sacCer3", cache_dir=prepared_dir) as g,
+            pytest.raises(AnnotationNotRegisteredError) as excinfo,
+        ):
+            _ = g.default_gtf_path
+
+        assert "genome register-annotation sacCer3 ensgene_v101" in str(excinfo.value)
+
+    def test_an_explicit_choice_beats_the_tables_flag(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        with Genome("sacCer3", cache_dir=yeast_dir, default_gtf="mine") as g:
+            g.register_gtf(data_dir / "tiny.gtf", "mine")
+
+            assert [record.name for record in g.offered_annotations] == ["ensgene_v101"]
+            assert g.default_gtf == "mine"
+            assert g.default_gtf_path == g.get_gtf_path("mine")
+
+    def test_an_explicit_choice_that_is_not_registered_still_opens_the_genome(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        # One rule for both sources: naming a default is an intention, and the path is
+        # where it has to exist. Registering it afterwards is all it takes.
+        with Genome("sacCer3", cache_dir=yeast_dir, default_gtf="mine") as g:
+            assert g.default_gtf == "mine"
+            with pytest.raises(AnnotationNotRegisteredError, match="register"):
+                _ = g.default_gtf_path
+
+            g.register_gtf(data_dir / "tiny.gtf", "mine")
+
+            assert g.default_gtf_path == g.get_gtf_path("mine")
+
+    def test_the_sole_registered_annotation_is_the_default_when_nothing_is_flagged(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        # "tiny" is in neither table, so no flag decides anything and the older rule
+        # stands — both as it is registered and on reopening.
+        with Genome("tiny", cache_dir=yeast_dir) as g:
+            assert g.offered_annotations == []
+            g.register_gtf(data_dir / "tiny.gtf", "mine")
+            assert g.default_gtf == "mine"
+
+        with Genome("tiny", cache_dir=yeast_dir) as again:
+            assert again.default_gtf == "mine"
+            assert again.default_gtf_path == again.get_gtf_path("mine")
+
+    def test_two_registered_and_nothing_flagged_leaves_no_default(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        with Genome("tiny", cache_dir=yeast_dir) as g:
+            g.register_gtf(data_dir / "tiny.gtf", "one")
+            g.register_gtf(data_dir / "tiny.gtf", "two")
+
+        with Genome("tiny", cache_dir=yeast_dir) as again:
+            assert sorted(again.annotations) == ["one", "two"]
+            assert again.default_gtf is None
+            assert again.default_gtf_path is None
+
+    def test_a_name_nothing_knows_says_what_is_registered_and_what_is_offered(
+        self, prepared_dir: Path
+    ) -> None:
+        with Genome("sacCer3", cache_dir=prepared_dir) as g, pytest.raises(KeyError) as excinfo:
+            g.get_gtf_path("no_such_annotation")
+
+        message = str(excinfo.value)
+        assert "no_such_annotation" in message
+        assert "ensgene_v101" in message  # what the table does offer
+        assert "register_gtf" in message  # and the way in for one it does not
 
 
 def test_path_or_url_seeds_from_local_fasta(

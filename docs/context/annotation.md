@@ -34,9 +34,12 @@ _Avoid_: registry, catalog, manifest; and "the GTF table", which names one of th
 the annotation
 
 **Default annotation**:
-The annotation used when a caller names none — set explicitly, or adopted on its own when the
-assembly has exactly one. Two annotations and no explicit choice leaves no default at all, because a
-caller who did not choose should be asked rather than guessed at.
+The annotation used when a caller names none: an explicit choice, else the one the **Annotation
+metadata** table flags for that **Assembly** — which is how everyone in the lab reaches for the same
+release without discussing it — else the sole registered annotation, and otherwise none, because a
+caller who did not choose between several should be asked rather than guessed at. It names an
+annotation without locating one, so a default nobody has registered on this machine is the ordinary
+state of a fresh install and only asking for its path is an error.
 _Avoid_: primary, main, active, current
 
 ### Files

@@ -16,6 +16,7 @@ from genome.cli import app
 from genome.external import REQUIRED_TOOLS
 from genome.io import download as download_mod
 from genome.io.fasta import GenomeFiles
+from genome.io.gtf import register_gtf
 
 from .conftest import FakeFetch
 
@@ -322,6 +323,106 @@ class TestRegisterAnnotation:
 
         assert result.exit_code == 0
         assert _json.loads(result.stdout)["sha256"] == _TINY_GTF_SHA256
+
+    def test_the_chromosome_check_is_stood_down_from_the_command_line(
+        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The committed Ensembl-spelled GTF (I, II, III) against a UCSC-spelled
+        # assembly (chrI, chrII, chrIII): refused by default, and registered anyway
+        # once the caller says they have looked at the mismatch and accept it.
+        fake_fetch.serve("ensembl_style.gtf")
+        assembly_dir = tmp_path / "genome" / "tiny"
+        assembly_dir.mkdir(parents=True)
+        (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
+        table = pd.DataFrame(
+            [
+                {
+                    "assembly": "tiny",
+                    "name": "ensgene_v101",
+                    "provider": "UCSC",
+                    "version": "ensGene.v101",
+                    "url": "https://mirror.example.invalid/annotations/ensembl_style.gtf",
+                    "sha256": None,
+                    "default": "yes",
+                }
+            ],
+            dtype=str,
+        )
+        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+
+        refused = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+
+        assert refused.exit_code == 1
+        assert "chromosome" in _output(refused)
+
+        result = runner.invoke(
+            app,
+            ["register-annotation", "tiny", "ensgene_v101", "--no-check-chromosomes", "--json"],
+        )
+
+        assert result.exit_code == 0
+        assert _json.loads(result.stdout)["details"]["chromosomes_checked"] is False
+
+
+class TestAnnotations:
+    """``genome annotations`` — what the tables offer, set against what is registered here.
+
+    The shipped table answers here rather than one stood up for the test: reporting it
+    is this command's whole job. hg38 is the assembly, whose row offers one annotation
+    and flags it as the default.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _offline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    def test_an_assembly_with_nothing_registered_is_the_case_it_serves(
+        self, tmp_path: Path
+    ) -> None:
+        result = runner.invoke(app, ["annotations", "hg38"])
+
+        assert result.exit_code == 0
+        assert "gencode_v50" in result.stdout
+        assert "offered, not registered" in result.stdout
+        assert "genome register-annotation hg38 gencode_v50" in result.stdout
+        # Nothing was prepared to answer the question — the assembly is not even there.
+        assert not (tmp_path / "genome" / "hg38").exists()
+
+    def test_json(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["annotations", "hg38", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["assembly"] == "hg38"
+        assert payload["directory"] == str(tmp_path / "genome" / "hg38")
+        assert payload["default_annotation"] == "gencode_v50"
+        assert [
+            (row["name"], row["offered"], row["registered"]) for row in payload["annotations"]
+        ] == [("gencode_v50", True, False)]
+
+    def test_it_sets_what_is_registered_here_against_what_is_offered(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        register_gtf(tmp_path / "genome" / "hg38", data_dir / "tiny.gtf", "mine")
+
+        result = runner.invoke(app, ["annotations", "hg38", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert [
+            (row["name"], row["offered"], row["registered"]) for row in payload["annotations"]
+        ] == [
+            ("gencode_v50", True, False),
+            ("mine", False, True),
+        ]
+        # The table's flag decides the default, whatever this machine happens to hold.
+        assert payload["default_annotation"] == "gencode_v50"
+
+    def test_an_assembly_no_row_lists_reports_an_empty_answer_rather_than_failing(self) -> None:
+        result = runner.invoke(app, ["annotations", "tiny"])
+
+        assert result.exit_code == 0
+        assert "tiny" in result.stdout
 
 
 class TestTableRow:

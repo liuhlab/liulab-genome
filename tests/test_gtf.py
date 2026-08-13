@@ -32,6 +32,8 @@ from genome.io.gtf import (
     ChromosomeMismatchError,
     _reject_unknown_chromosomes,
     annotation_dir,
+    annotation_status,
+    default_annotation,
     fetch_annotation,
     list_annotations,
     register_annotation,
@@ -65,16 +67,22 @@ _PINNED_URL = "https://mirror.example.invalid/annotations/tiny.gtf.gz"
 _NAME = "ensgene_v101"
 
 
-def _row(*, url: str = _PINNED_URL, sha256: str | None = None) -> AnnotationMetadata:
+def _row(
+    *,
+    name: str = _NAME,
+    url: str = _PINNED_URL,
+    sha256: str | None = None,
+    default: bool = True,
+) -> AnnotationMetadata:
     """An in-memory annotation row for the ``tiny`` assembly."""
     return AnnotationMetadata(
         assembly="tiny",
-        name=_NAME,
+        name=name,
         provider="UCSC",
         version="ensGene.v101",
         url=url,
         sha256=sha256,
-        default=True,
+        default=default,
     )
 
 
@@ -350,6 +358,93 @@ class TestListAnnotations:
         annotation.db.write_bytes(b"truncated")
 
         assert list_annotations(tmp_path) == {}
+
+
+class TestDefaultAnnotation:
+    """The one rule that decides a default, wherever the question is asked from."""
+
+    def test_the_flagged_row_decides_it(self) -> None:
+        assert default_annotation([_row()], []) == _NAME
+
+    def test_the_flag_wins_over_the_sole_registered_annotation(self) -> None:
+        # Everyone in the lab reaches for the same one, whatever this machine happens
+        # to hold.
+        assert default_annotation([_row()], ["something_else"]) == _NAME
+
+    def test_an_explicit_choice_wins_over_the_flag(self) -> None:
+        assert default_annotation([_row()], [_NAME], explicit="something_else") == "something_else"
+
+    def test_nothing_flagged_falls_back_to_the_sole_registered_annotation(self) -> None:
+        assert default_annotation([_row(default=False)], ["only_one"]) == "only_one"
+
+    def test_nothing_flagged_and_no_sole_annotation_leaves_no_default(self) -> None:
+        assert default_annotation([], []) is None
+        assert default_annotation([], ["one", "two"]) is None
+
+
+class TestAnnotationStatus:
+    """What an assembly's table offers, set against what is registered on this machine."""
+
+    def test_it_reports_what_is_offered_with_nothing_registered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The case it most needs to serve: a fresh machine, where the answer is
+        # entirely the shipped table's.
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+        payload = annotation_status("sacCer3")
+
+        assert payload["assembly"] == "sacCer3"
+        assert payload["directory"] == str(tmp_path / "genome" / "sacCer3")
+        assert payload["default_annotation"] == "ensgene_v101"
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["offered"], r["registered"]) for r in rows] == [
+            ("ensgene_v101", True, False)
+        ]
+        assert rows[0]["provider"] == "UCSC"
+        assert rows[0]["path"] is None
+
+    def test_it_creates_nothing_and_fetches_nothing(
+        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+        annotation_status("hg38")
+
+        assert fake_fetch.calls == []
+        assert not (tmp_path / "genome" / "hg38").exists()
+
+    def test_a_registered_annotation_the_table_offers_is_reported_as_both(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly_dir = tmp_path / "asm"
+        annotation = register_gtf(assembly_dir, src, "ensgene_v101")
+
+        payload = annotation_status("sacCer3", cache_dir=assembly_dir)
+
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["offered"], r["registered"]) for r in rows] == [
+            ("ensgene_v101", True, True)
+        ]
+        assert rows[0]["path"] == str(annotation.gtf)
+
+    def test_a_registered_annotation_no_row_lists_is_reported_too(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly_dir = tmp_path / "asm"
+        register_gtf(assembly_dir, src, "mine")
+
+        payload = annotation_status("tiny", cache_dir=assembly_dir)
+
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["offered"], r["registered"]) for r in rows] == [("mine", False, True)]
+        assert rows[0]["provider"] is None
+        assert payload["default_annotation"] == "mine"  # nothing flagged, and it is alone
 
 
 class TestChromosomeNames:

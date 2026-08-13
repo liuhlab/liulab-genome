@@ -34,6 +34,12 @@ record that agrees with disk, re-registering something that already has one retu
 silently, and a directory holding files but no record raises and names its repair
 (ADR-0007).
 
+**What the lab offers and what this machine holds are different questions.** The first is
+the annotation table's to answer (:func:`~genome.metadata.list_annotation_metadata`), the
+second this disk's (:func:`list_annotations`); :func:`annotation_status` sets one against
+the other, and :func:`default_annotation` is the one rule that picks the **Default
+annotation** out of both.
+
 Examples
 --------
 >>> from pathlib import Path
@@ -131,6 +137,72 @@ class ChromosomeMismatchError(ValueError):
         )
 
 
+class AnnotationNotRegisteredError(KeyError):
+    """No annotation of that name is registered here, so there is no path to hand back.
+
+    Routinely *not* a mistake. An assembly's **Default annotation** comes from the
+    curated table, and on a fresh machine the table's choice is exactly what nobody has
+    registered yet — so a :class:`~genome.genome.Genome` opens with that default named
+    and only asking for its path raises, naming the command that closes the gap. The
+    other way in is a name nothing knows, and the message then says what the table does
+    offer and how to register a GTF it does not list.
+
+    A :class:`KeyError`, because that is what asking a registry for a name it does not
+    hold has always been.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly the annotation was asked for.
+    name : str
+        The **Registered name** that is not registered.
+    registered : iterable of str
+        The names that are registered on this machine.
+    offered : iterable of str
+        The names the annotation table offers for this assembly.
+
+    Attributes
+    ----------
+    assembly : str
+        The assembly asked about.
+    name : str
+        The name that is not registered.
+    registered : tuple of str
+        The registered names, as they were passed in.
+    offered : tuple of str
+        The offered names, as they were passed in.
+
+    Examples
+    --------
+    >>> raise AnnotationNotRegisteredError("hg38", "gencode_v50", [], ["gencode_v50"])
+    Traceback (most recent call last):
+    genome.io.gtf.AnnotationNotRegisteredError: "no annotation 'gencode_v50' ...
+    """
+
+    def __init__(
+        self, assembly: str, name: str, registered: Iterable[str], offered: Iterable[str]
+    ) -> None:
+        self.assembly = assembly
+        self.name = name
+        self.registered: tuple[str, ...] = tuple(registered)
+        self.offered: tuple[str, ...] = tuple(offered)
+        if name in self.offered:
+            next_step = (
+                f"The annotation table offers it for {assembly!r}, so register it with "
+                f"`{_register_command(assembly, name)}`."
+            )
+        else:
+            next_step = (
+                f"The table does not offer {name!r} for {assembly!r} either — it offers: "
+                f"{_elide(self.offered) or '(none)'}. Register one of those by name, or a GTF "
+                f"no row lists by path with Genome.register_gtf(<path>, {name!r})."
+            )
+        super().__init__(
+            f"no annotation {name!r} is registered for {assembly!r}. Registered here: "
+            f"{_elide(self.registered) or '(none)'}. {next_step}"
+        )
+
+
 @dataclass(frozen=True)
 class GtfAnnotation:
     """A registered GTF annotation: its name and the on-disk GTF + database paths."""
@@ -156,13 +228,18 @@ def _annotation_files(assembly_dir: Path, name: str) -> GtfAnnotation:
     return GtfAnnotation(name=name, gtf=directory / f"{name}.gtf", db=directory / f"{name}.db")
 
 
+def _register_command(assembly: str, name: str) -> str:
+    """Return the command that registers ``name`` for ``assembly``."""
+    return f"genome register-annotation {assembly} {name}"
+
+
 def _repair_command(assembly: str, name: str) -> str:
     """Return the command that registers ``name`` again from scratch.
 
     Quoted verbatim into every error a broken annotation directory raises, so it has to
     be a command that exists and does the job.
     """
-    return f"genome register-annotation {assembly} {name} --force"
+    return f"{_register_command(assembly, name)} --force"
 
 
 def _path_repair_command(source: Path, name: str) -> str:
@@ -214,6 +291,151 @@ def list_annotations(assembly_dir: Path) -> dict[str, GtfAnnotation]:
         annotation = _annotation_files(assembly_dir, directory.name)
         found[annotation.name] = annotation
     return found
+
+
+def default_annotation(
+    offered: Iterable[AnnotationMetadata],
+    registered: Iterable[str],
+    *,
+    explicit: str | None = None,
+) -> str | None:
+    """Return the name of the **Default annotation**, or ``None`` when there is none.
+
+    The whole rule, in one place, because two callers ask it: a
+    :class:`~genome.genome.Genome` being opened, and :func:`annotation_status` reporting
+    on an assembly nobody has opened. In order:
+
+    1. an explicit choice, which is the caller overruling everything below it;
+    2. the row the annotation table flags for this assembly, so everyone in the lab
+       reaches for the same one without discussing it;
+    3. the sole registered annotation, when exactly one is registered;
+    4. otherwise none — a caller who did not choose between several is asked rather
+       than guessed at.
+
+    Only the first three lines of the table are consulted, never the disk: the name this
+    returns may be one nothing has registered yet, which is the normal state of a fresh
+    machine and is *not* an error. Where that name has to exist is
+    :attr:`Genome.default_gtf_path <genome.genome.Genome.default_gtf_path>`.
+
+    Parameters
+    ----------
+    offered : iterable of genome.metadata.AnnotationMetadata
+        What the table offers for the assembly, in table order. The first flagged row
+        wins, so a table that flags two names is read as naming the earlier one.
+    registered : iterable of str
+        The **Registered name**s on this machine.
+    explicit : str, optional
+        A name the caller chose, which wins over everything else. It is returned as
+        given and is not checked against either list.
+
+    Returns
+    -------
+    str or None
+        The default annotation's name, or ``None`` when nothing decides one.
+
+    Examples
+    --------
+    >>> from genome.metadata import AnnotationMetadata
+    >>> row = AnnotationMetadata(
+    ...     "hg38", "gencode_v50", "GENCODE", "v50", "https://example.org/g.gtf.gz", default=True
+    ... )
+    >>> default_annotation([row], [])                     # nothing registered yet
+    'gencode_v50'
+    >>> default_annotation([row], ["refseq_2023"], explicit="refseq_2023")
+    'refseq_2023'
+    >>> default_annotation([], ["refseq_2023"])           # no flag: the sole one stands
+    'refseq_2023'
+    >>> default_annotation([], ["refseq_2023", "mine"]) is None
+    True
+    """
+    if explicit is not None:
+        return explicit
+    flagged = next((record.name for record in offered if record.default), None)
+    if flagged is not None:
+        return flagged
+    names = list(registered)
+    return names[0] if len(names) == 1 else None
+
+
+def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> dict[str, object]:
+    """Report what ``assembly``'s table offers against what is registered on this machine.
+
+    Two questions with two answers, joined for one reader: the curated table's rows say
+    what the lab supports, :func:`list_annotations` says what is on this disk, and every
+    row carries which of the two it is. The command behind it is ``genome annotations``.
+
+    Nothing is prepared, fetched, built or created to answer it — an assembly with no
+    directory at all is the case it most needs to serve, and it answers from the shipped
+    table alone.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to report on, e.g. ``"hg38"``.
+    cache_dir : str or pathlib.Path, optional
+        Override which assembly directory is inspected. Defaults to
+        :func:`assembly_data_dir(assembly) <genome.io.download.assembly_data_dir>`.
+
+    Returns
+    -------
+    dict
+        ``assembly``, the ``directory`` inspected, the ``default_annotation`` name (or
+        ``None``), and ``annotations``: one row per name, the offered ones in table
+        order followed by anything registered that no row lists. Each row carries the
+        ``name``, whether it is ``offered`` and whether it is ``registered``, the
+        table's ``default`` flag, the row's ``provider``/``version``/``url``/``sha256``
+        (``None`` for an unlisted one), and the ``path`` of the registered GTF (``None``
+        when it is not registered here). Ready to serialize as it is.
+
+    Examples
+    --------
+    >>> payload = annotation_status("sacCer3")
+    >>> payload["default_annotation"]
+    'ensgene_v101'
+    """
+    assembly_dir = (
+        Path(cache_dir).expanduser()
+        if cache_dir is not None
+        else download.assembly_data_dir(assembly)
+    )
+    offered = list_annotation_metadata(assembly)
+    registered = list_annotations(assembly_dir)
+    rows: list[dict[str, object]] = [
+        {
+            "name": record.name,
+            "offered": True,
+            "registered": record.name in registered,
+            "default": record.default,
+            "provider": record.provider,
+            "version": record.version,
+            "url": record.url,
+            "sha256": record.sha256,
+            "path": str(registered[record.name].gtf) if record.name in registered else None,
+        }
+        for record in offered
+    ]
+    listed = {record.name for record in offered}
+    rows.extend(
+        {
+            "name": name,
+            "offered": False,
+            "registered": True,
+            "default": False,
+            "provider": None,
+            "version": None,
+            "url": None,
+            "sha256": None,
+            "path": str(annotation.gtf),
+        }
+        for name, annotation in registered.items()
+        if name not in listed
+    )
+    return {
+        "assembly": assembly,
+        "directory": str(assembly_dir),
+        "default_annotation": default_annotation(offered, registered),
+        "annotations": rows,
+    }
 
 
 def register_gtf(

@@ -33,9 +33,21 @@ import pandas as pd
 from genome.aligner.mixin import AlignerMixin
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
-from genome.io.gtf import GtfAnnotation, fetch_annotation, list_annotations, register_gtf
+from genome.io.gtf import (
+    AnnotationNotRegisteredError,
+    GtfAnnotation,
+    default_annotation,
+    fetch_annotation,
+    list_annotations,
+    register_gtf,
+)
 from genome.io.twobit import TwoBit
-from genome.metadata import AnnotationMetadata, AssemblyMetadata, lookup_assembly
+from genome.metadata import (
+    AnnotationMetadata,
+    AssemblyMetadata,
+    list_annotation_metadata,
+    lookup_assembly,
+)
 from genome.region import Region, parse_region
 from genome.seq import DNA
 
@@ -80,14 +92,20 @@ class Genome(AlignerMixin):
         ``None`` when the table does not list ``assembly``, which is legal, since
         the table is a cross-reference rather than an allow-list.
     default_gtf : str, optional
-        Name of the registered annotation to serve as :attr:`default_gtf`. Must
-        already be registered for this assembly. Defaults to the sole registered
-        annotation when there is exactly one, otherwise to no default.
+        Name of the annotation to serve as :attr:`default_gtf`, overruling the one the
+        annotation table flags. It need not be registered yet — see
+        :attr:`default_gtf_path`.
 
     Attributes
     ----------
     assembly : str
         The assembly name.
+    default_gtf : str or None
+        Name of this genome's **Default annotation**: the ``default_gtf`` argument if
+        one was given, else the annotation the table flags for this assembly, else the
+        sole registered annotation, else ``None``. It names an annotation that may not
+        be registered here, which on a fresh machine is the normal state and not an
+        error.
     files : genome.io.fasta.GenomeFiles
         Paths to the prepared FASTA and its derived index/companion files.
     metadata : genome.metadata.AssemblyMetadata or None
@@ -197,25 +215,49 @@ class Genome(AlignerMixin):
         return self.metadata.sha256 if self.metadata else None
 
     def _set_default_gtf(self, default_gtf: str | None) -> None:
-        """Discover registered annotations and pick the default GTF."""
+        """Read both annotation lists and settle which one is the default.
+
+        Both are read, neither is acted on: the table is looked up and the ``gtf/``
+        subtree is listed, and nothing is fetched, built or created. Opening a genome
+        must never start a registration — for a human annotation that is a gigabyte
+        download and a database build running many minutes.
+        """
         self._annotations: dict[str, GtfAnnotation] = list_annotations(self._assembly_dir)
-        if default_gtf is not None:
-            if default_gtf not in self._annotations:
-                known = ", ".join(self._annotations) or "(none registered)"
-                raise ValueError(
-                    f"default_gtf {default_gtf!r} is not registered for {self.assembly!r}; "
-                    f"registered annotations: {known}."
-                )
-            self.default_gtf: str | None = default_gtf
-        elif len(self._annotations) == 1:
-            self.default_gtf = next(iter(self._annotations))
-        else:
-            self.default_gtf = None
+        self._offered: list[AnnotationMetadata] = list_annotation_metadata(self.assembly)
+        self.default_gtf: str | None = default_annotation(
+            self._offered, self._annotations, explicit=default_gtf
+        )
 
     @property
     def annotations(self) -> list[str]:
-        """Names of the GTF annotations registered for this assembly."""
+        """Names of the GTF annotations registered for this assembly **on this machine**.
+
+        What is here, as against :attr:`offered_annotations`, which is what the lab
+        supports.
+        """
         return list(self._annotations)
+
+    @property
+    def offered_annotations(self) -> list[AnnotationMetadata]:
+        """The annotations the curated table offers for this assembly, in table order.
+
+        What the lab supports for this assembly — each row saying who publishes it,
+        which release it is, where it is fetched from and what it must hash to — as
+        against :attr:`annotations`, which is what is registered here. A row appears
+        whether or not anyone has registered it, and registering one is
+        :meth:`register_annotation`; nothing here reads the disk. Empty for an assembly
+        the table offers nothing for, which is legal: the table is a cross-reference
+        rather than an allow-list (ADR-0003).
+
+        A fresh list each call, so a caller may sort or filter it.
+
+        Examples
+        --------
+        >>> sacCer3 = Genome("sacCer3")                            # doctest: +SKIP
+        >>> [record.name for record in sacCer3.offered_annotations]  # doctest: +SKIP
+        ['ensgene_v101']
+        """
+        return list(self._offered)
 
     def register_annotation(
         self,
@@ -334,22 +376,76 @@ class Genome(AlignerMixin):
         )
 
     def _adopt(self, annotation: GtfAnnotation) -> GtfAnnotation:
-        """Add a freshly registered annotation to the registry, adopting it if it is alone."""
+        """Add a freshly registered annotation to the registry, adopting it if it is alone.
+
+        The sole-registered clause of the default rule, applied the moment it becomes
+        true. A default already decided — the caller's choice, or the table's flag —
+        is never displaced by one being registered.
+        """
         self._annotations[annotation.name] = annotation
         if self.default_gtf is None and len(self._annotations) == 1:
             self.default_gtf = annotation.name
         return annotation
 
     def get_gtf_path(self, name: str) -> Path:
-        """Return the GTF file path of the annotation registered as ``name``."""
+        """Return the GTF file path of the annotation registered as ``name``.
+
+        Parameters
+        ----------
+        name : str
+            The **Registered name** to resolve.
+
+        Returns
+        -------
+        pathlib.Path
+            Path to the placed ``<name>.gtf``.
+
+        Raises
+        ------
+        genome.io.gtf.AnnotationNotRegisteredError
+            If nothing of that name is registered here. The message says what is
+            registered, and names either the command that registers ``name`` — when the
+            table offers it — or the path-based way in when it does not. It is a
+            :class:`KeyError`.
+
+        Examples
+        --------
+        >>> sacCer3 = Genome("sacCer3")                     # doctest: +SKIP
+        >>> sacCer3.get_gtf_path("ensgene_v101")            # doctest: +SKIP
+        PosixPath('/data/genome/sacCer3/gtf/ensgene_v101/ensgene_v101.gtf')
+        """
         if name not in self._annotations:
-            known = ", ".join(self._annotations) or "(none registered)"
-            raise KeyError(f"no annotation {name!r} for {self.assembly!r}; registered: {known}.")
+            raise AnnotationNotRegisteredError(
+                self.assembly,
+                name,
+                self._annotations,
+                [record.name for record in self._offered],
+            )
         return self._annotations[name].gtf
 
     @property
     def default_gtf_path(self) -> Path | None:
-        """GTF file path of the default annotation, or ``None`` when no default is set."""
+        """GTF file path of the **Default annotation**, or ``None`` when there is no default.
+
+        Where the default stops being an intention and has to exist. :attr:`default_gtf`
+        may name an annotation nobody has registered on this machine — the table's
+        choice, on a machine that has not fetched it yet, or one a caller named at
+        construction ahead of registering it — and asking for its path is what says so,
+        naming ``genome register-annotation <assembly> <name>``. ``None`` means no
+        default was decided at all, which is a different answer from one that is not
+        registered.
+
+        Raises
+        ------
+        genome.io.gtf.AnnotationNotRegisteredError
+            If the default annotation is not registered here.
+
+        Examples
+        --------
+        >>> sacCer3 = Genome("sacCer3")                     # doctest: +SKIP
+        >>> sacCer3.default_gtf_path                        # doctest: +SKIP
+        PosixPath('/data/genome/sacCer3/gtf/ensgene_v101/ensgene_v101.gtf')
+        """
         if self.default_gtf is None:
             return None
         return self.get_gtf_path(self.default_gtf)

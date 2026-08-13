@@ -128,20 +128,64 @@ is given no assembly name and so cannot find that file on its own: pass
 `chrom_sizes=<path>` to have the names checked, which is what `Genome.register_gtf`
 does for you.
 
-### The default annotation
+### What the table offers, and what is registered here
 
-When exactly one annotation is registered it becomes the default; with several,
-set it explicitly at construction:
+These are two questions, and a genome answers them separately — "the lab supports
+it" is not "this machine has it":
 
 ```python
-g.default_gtf                      # 'ensembl' when it is the only one, else None
-g.default_gtf_path                 # its GTF path, or None
-
-Genome("hg38", default_gtf="gencode")   # pick the default up front
+g.offered_annotations   # [AnnotationMetadata(name='ensgene_v101', provider='UCSC', ...)]
+g.annotations           # [] — nothing registered on this machine yet
 ```
 
-`default_gtf` is the annotation other features fall back to when you don't name
-one; it does **not** change what `build_star_index(gtf=...)` requires — that
+`offered_annotations` is this assembly's rows from the shipped table, in table
+order, whether or not anyone has registered them; `annotations` is what has a
+valid record on this disk. The same pair from a shell, for an assembly you have
+not prepared at all:
+
+```console
+$ genome annotations hg38
+annotations for hg38 in /data/liulab_data/genome/hg38
+  gencode_v50  offered, not registered  GENCODE v50
+  mine         registered, not offered
+default: gencode_v50 — not registered here; register it with `genome register-annotation hg38 gencode_v50`
+```
+
+### The default annotation
+
+The annotation everything falls back to when you name none. Four rules, in order:
+
+1. an explicit `default_gtf=` at construction;
+2. the annotation the table flags for this assembly — which is how everyone in
+   the lab reaches for the same release without discussing it;
+3. the sole registered annotation, when exactly one is registered;
+4. otherwise none, because a caller who did not choose between several is asked
+   rather than guessed at.
+
+```python
+g.default_gtf                            # 'gencode_v50' — the table's flag
+Genome("hg38", default_gtf="refseq_2023")  # …unless you say otherwise
+```
+
+**`default_gtf` names an annotation; it does not locate one.** On a fresh machine
+the table's default is exactly the thing nobody has fetched yet, and opening a
+genome must never start a gigabyte download and a database build running many
+minutes — so construction succeeds, and asking for the *path* is what says the
+gap is there:
+
+```python
+g.default_gtf_path
+# AnnotationNotRegisteredError: no annotation 'gencode_v50' is registered for 'hg38'.
+# Registered here: (none). The annotation table offers it for 'hg38', so register it
+# with `genome register-annotation hg38 gencode_v50`.
+```
+
+An explicit `default_gtf=` behaves the same way, deliberately: one rule for both,
+so naming a default up front and registering it on the next line works. `None`
+from `default_gtf_path` means no default was decided at all, which is a different
+answer from one that is not registered.
+
+`default_gtf` does **not** change what `build_star_index(gtf=...)` requires — that
 argument is always explicit (see below).
 
 ## Building a STAR index
