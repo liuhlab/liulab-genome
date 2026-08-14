@@ -312,6 +312,43 @@ class AssemblyDir:
             chrom_sizes=self.path / f"{self.assembly}.chrom.sizes",
         )
 
+    def completed_files(self, *, repair: str) -> GenomeFiles | None:
+        """Return the prepared **Genome files** when the record vouches for them, else ``None``.
+
+        *Is this assembly finished here?*, asked of the directory itself so that a caller
+        holding one — a verification, say — needs no registration object to find out. The
+        completion record is the only thing consulted: it must be there, and every file it
+        claims must be present at the size it claims. That is one ``stat`` per file and no
+        file contents, so reopening a prepared genome is instant.
+
+        Parameters
+        ----------
+        repair : str
+            The command quoted into the refusal a directory that cannot be trusted raises.
+
+        Returns
+        -------
+        genome.io.fasta.GenomeFiles or None
+            The four files, or ``None`` for an absent or empty directory — a fresh
+            registration, which proceeds normally.
+
+        Raises
+        ------
+        genome.io.completion.RegistrationError
+            If the directory holds files with no record, or a record that disagrees with
+            what is on disk (see :func:`~genome.io.completion.check_registration`).
+
+        Examples
+        --------
+        >>> AssemblyDir.locate("hg38", "/tmp/definitely-not-a-build").completed_files(
+        ...     repair="genome register hg38 --force"
+        ... ) is None
+        True
+        """
+        if check_registration(self.path, repair=repair, ignore=_FOREIGN_SUBDIRS) is None:
+            return None
+        return self.genome_files
+
 
 class AssemblyRegistration:
     """One assembly's directory, and the steps that finish a registration in it.
@@ -385,19 +422,13 @@ class AssemblyRegistration:
     def _completed_genome(self, *, overwrite: bool, repair: str) -> GenomeFiles | None:
         """Return the prepared GenomeFiles when the record says so, else ``None``.
 
-        The completion record is the only thing consulted: it must be there, and every
-        file it claims must be present at the size it claims. That is one ``stat`` per
-        file and no file contents, so reopening a prepared genome is instant. An absent
-        or empty directory answers ``None`` — a fresh registration, which proceeds
-        normally — while a directory that cannot be trusted raises (see
-        :func:`~genome.io.completion.check_registration`). ``overwrite`` skips the
-        question entirely, which is what makes it the repair.
+        :meth:`AssemblyDir.completed_files` for this registration's own directory, plus the
+        one thing a *registration* adds to the question: ``overwrite`` skips it entirely,
+        which is what makes it the repair.
         """
         if overwrite:
             return None
-        if check_registration(self.cache_dir, repair=repair, ignore=_FOREIGN_SUBDIRS) is None:
-            return None
-        return self._expected_genome_files()
+        return self.dir.completed_files(repair=repair)
 
     def _place_fasta(self, unpacked: Path) -> Path:
         """Move ``unpacked`` out of the working area to ``<assembly>.fa`` and return it.

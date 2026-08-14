@@ -22,7 +22,6 @@ from pathlib import Path
 import pytest
 
 from genome import Genome
-from genome.io.chimera import COMPONENTS_UNKNOWN, components_status
 from genome.io.completion import (
     RegistrationMismatchError,
     read_record,
@@ -31,6 +30,7 @@ from genome.io.completion import (
 )
 from genome.io.download import register_assembly, verify_assembly
 from genome.io.fasta import PREPARATION_TOOLS
+from genome.io.source import COMPONENTS_UNKNOWN, components_status
 from genome.io.utils import sha256_file
 
 from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY, COMPONENT_ANNOTATION
