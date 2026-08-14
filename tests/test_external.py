@@ -27,6 +27,7 @@ from genome.external import (
     InstalledTool,
     RecordingTool,
     ToolNotFoundError,
+    clear_version_cache,
     doctor,
     is_fresh,
 )
@@ -162,6 +163,95 @@ def test_the_version_is_asked_for_once(on_path: Callable[[str, str], Path], tmp_
 
     assert tool.version == tool.version == "samtools 1.21"
     assert tally.read_text() == "x\n"
+
+
+def test_the_version_is_asked_for_once_per_binary_not_once_per_object(
+    on_path: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    # The waste the per-object cache above never reached: a build constructs a fresh tool
+    # for each step, so preparing one assembly asked samtools its version once per step
+    # for an answer that cannot change under a running process.
+    tally = tmp_path / "asked"
+    on_path("samtools", f"echo x >> {tally}; echo 'samtools 1.21'")
+
+    assert InstalledTool("samtools").version == "samtools 1.21"
+    assert InstalledTool("samtools").version == "samtools 1.21"
+
+    assert tally.read_text() == "x\n"
+
+
+def test_a_tool_that_declines_to_identify_itself_is_remembered_as_declining(
+    on_path: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    # "" is an answer rather than a missing one, and it costs the same subprocess to
+    # learn. Remembering on truthiness instead of on presence would re-probe exactly the
+    # two UCSC binaries every preparation runs, which is most of what there was to save.
+    tally = tmp_path / "asked"
+    on_path("faToTwoBit", f"echo x >> {tally}; echo 'nope' >&2; exit 255")
+
+    assert InstalledTool("faToTwoBit").version == ""
+    assert InstalledTool("faToTwoBit").version == ""
+
+    assert tally.read_text() == "x\n"
+
+
+def test_two_binaries_of_the_same_name_each_answer_for_themselves(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
+) -> None:
+    # Why the answer is remembered against the path and not against the name: a name is
+    # only as stable as PATH, and a caller that has just been pointed at another samtools
+    # must get that one's answer rather than the one asked earlier in this process.
+    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
+    old, new = tmp_path / "old", tmp_path / "new"
+    stub_binary(old, "samtools", "echo 'samtools 1.20'")
+    stub_binary(new, "samtools", "echo 'samtools 1.21'")
+
+    monkeypatch.setenv("PATH", str(old))
+    assert InstalledTool("samtools").version == "samtools 1.20"
+
+    monkeypatch.setenv("PATH", str(new))
+    assert InstalledTool("samtools").version == "samtools 1.21"
+
+
+def test_a_tool_that_was_missing_is_found_once_it_is_installed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
+) -> None:
+    # Absence is never remembered. Only an answer a binary actually gave is kept, so
+    # locating stays per object and a tool installed midway through a process is found.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
+
+    with pytest.raises(ToolNotFoundError):
+        _ = InstalledTool("faToTwoBit").version
+
+    stub_binary(bin_dir, "faToTwoBit", "echo 'faToTwoBit v456'")
+
+    assert InstalledTool("faToTwoBit").version == "faToTwoBit v456"
+
+
+def test_clearing_the_cache_sends_the_next_ask_back_to_the_binary(
+    on_path: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    # The documented way out, and what the suite's autouse fixture calls: without it a
+    # test that stubs a tool could be answered from what another test learned.
+    tally = tmp_path / "asked"
+    on_path("samtools", f"echo x >> {tally}; echo 'samtools 1.21'")
+    assert InstalledTool("samtools").version == "samtools 1.21"
+
+    clear_version_cache()
+
+    assert InstalledTool("samtools").version == "samtools 1.21"
+    assert tally.read_text() == "x\nx\n"
+
+
+def test_a_recording_tool_answers_for_itself_rather_than_from_the_shared_cache() -> None:
+    # The cache belongs to the installed adapter, where the subprocess is. Stand-ins of
+    # one name share a path and report the versions they were each told to all the same —
+    # which every aligner test in the suite is standing on.
+    assert RecordingTool("STAR", version="2.7.11b").version == "2.7.11b"
+    assert RecordingTool("STAR", version="2.7.10a").version == "2.7.10a"
 
 
 # -- running a tool ---------------------------------------------------------

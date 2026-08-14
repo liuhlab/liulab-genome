@@ -239,6 +239,9 @@ preparation is no longer indistinguishable from a finished one.
   constants, and re-exported from `genome.io` as before. The JSON is unchanged, key for key and in
   order; `AnnotationStatusRow.state` and `AnnotationStatus.default_summary` are new, being the two
   sentences the command line used to derive for itself.
+- **A binary is asked its version once per process, not once per build step**, remembered against
+  the path it was located at — so a build stops re-probing its tools for provenance that cannot
+  change. Recorded versions are unchanged; `genome.external.clear_version_cache()` forgets them.
 
 ### Removed
 

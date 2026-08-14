@@ -15,7 +15,7 @@ import pytest
 import requests
 
 from genome import Genome
-from genome.external import ExternalTool
+from genome.external import ExternalTool, clear_version_cache
 from genome.io import fetch as fetch_mod
 from genome.io.fasta import PREPARATION_TOOLS
 
@@ -492,3 +492,23 @@ def stub_binary(_stub_dispatcher: Path) -> StubBinary:
         return path
 
     return install
+
+
+@pytest.fixture(autouse=True)
+def _forget_tool_versions() -> Iterator[None]:
+    """Empty the process-wide version cache around every test — in every test, unasked.
+
+    ``genome.external`` remembers what each binary answered to ``--version`` for the life
+    of the process, keyed on the path it was located at. That is right for a build and
+    unsafe for a suite: many tests here put a stub tool on ``PATH``, and several point
+    ``PATH`` somewhere else entirely, so an answer that outlived its test could be handed
+    to the next one. Under ``--dist=load`` which test that is changes run to run, so the
+    failure would be an order-dependent one — hence autouse, and hence no opt-out.
+
+    Cleared on the way in as well as on the way out, so a test inherits nothing from
+    whatever ran before it, test or not. The saving this gives up is only the *cross*-test
+    one: within a test the four build steps of a chimera still ask each binary once.
+    """
+    clear_version_cache()
+    yield
+    clear_version_cache()
