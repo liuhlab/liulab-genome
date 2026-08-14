@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import subprocess
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -413,3 +414,81 @@ def chimera_component(tmp_path: Path) -> Iterator[ComponentFactory]:
     yield register
     for genome in opened:
         genome.close()
+
+
+# ---------------------------------------------------------------------------------------
+# Stub binaries
+# ---------------------------------------------------------------------------------------
+
+#: Every stub binary in the suite is a link to this one script, which sources the ``.sh``
+#: written beside the link — so the file that gets *executed* is the same file every time
+#: and only the behaviour beside it changes.
+#:
+#: The indirection buys speed, not style. macOS runs a security check the first time a
+#: newly created executable is exec'd, and it is not cheap: measured on this machine, the
+#: first exec of a freshly written ``#!/bin/sh`` stub costs 200-900ms and swings four-fold
+#: between runs, while a second exec of the same file costs ~6ms. Copying known content to
+#: a new path pays it again, so the check is keyed on the file rather than on what is in
+#: it. A link to a file that has already been through it is ~6ms. One scanned file per
+#: worker, therefore, and the stubs a test installs are free.
+#:
+#: ``$0`` is the path that was exec'd — the link, not its target, and under a shebang the
+#: kernel supplies it whether the caller ran the path directly or the shell found it on
+#: ``PATH`` — so a stub's behaviour is looked up under the tool name the test chose.
+#: Sourcing keeps the positional parameters, so a body reading ``"$@"`` sees the tool's
+#: own arguments.
+_STUB_DISPATCHER = '#!/bin/sh\n. "${0}.sh"\n'
+
+
+class StubBinary(Protocol):
+    """Installs one stub binary into a directory, under a name of the caller's choosing."""
+
+    def __call__(self, bin_dir: Path, name: str, body: str, *, executable: bool = True) -> Path:
+        """Write ``name`` into ``bin_dir`` running ``body``, and return the path to it."""
+        ...
+
+
+@pytest.fixture(scope="session")
+def _stub_dispatcher(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Return the one executable every stub binary links to, exec'd once to warm it."""
+    path = tmp_path_factory.mktemp("stub-dispatcher") / "stub"
+    path.write_text(_STUB_DISPATCHER)
+    path.chmod(0o755)
+    Path(f"{path}.sh").write_text("exit 0\n")
+    # Pay the platform's first-exec check here, once per worker, rather than in whichever
+    # test happened to install a stub first.
+    subprocess.run([str(path)], capture_output=True, check=True)
+    return path
+
+
+@pytest.fixture
+def stub_binary(_stub_dispatcher: Path) -> StubBinary:
+    """Return a helper that installs a stub binary — a shell body under a tool's name.
+
+    A stub is a real binary as far as the package and the lane's guard script are
+    concerned: it is found by ``shutil.which``, exec'd by ``PATH`` lookup, and its exit
+    status and streams are its own. That is what makes it usable for the cases a developed
+    machine cannot produce — a tool that runs and refuses to say what it is, one that
+    resolves but cannot be executed::
+
+        def test_something(tmp_path, stub_binary):
+            stub_binary(tmp_path / "bin", "samtools", "echo 'samtools 1.21'")
+
+    Pass ``executable=False`` for a file the shell can find but not run, which is a real
+    file rather than a link: the shell answers 126 for it and never reaches the body.
+    Installing the same name twice replaces it.
+    """
+
+    def install(bin_dir: Path, name: str, body: str, *, executable: bool = True) -> Path:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        path = bin_dir / name
+        path.unlink(missing_ok=True)
+        if not executable:
+            path.write_text(f"#!/bin/sh\n{body}\n")
+            path.chmod(0o644)
+            return path
+        path.symlink_to(_stub_dispatcher)
+        Path(f"{path}.sh").write_text(f"{body}\n")
+        return path
+
+    return install

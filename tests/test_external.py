@@ -1,9 +1,10 @@
 """Tests for genome.external — the one module that shells out to a native binary.
 
-Almost nothing here needs a tool installed: a shell script written into ``tmp_path`` is a
-real binary as far as this module is concerned, so resolution, the two run flavours, the
-failure message and the freshness cache are all driven against one. The handful that do
-need the pixi env's own binaries say so and skip cleanly outside it.
+Almost nothing here needs a tool installed: a stub on ``PATH`` is a real binary as far as
+this module is concerned, so resolution, the two run flavours, the failure message and the
+freshness cache are all driven against one — see the ``stub_binary`` fixture for what one
+is and why it is built the way it is. The handful that do need the pixi env's own binaries
+say so and skip cleanly outside it.
 
 ``RecordingTool`` is exercised as the adapter it is — the same base class, only the
 execution replaced — because every aligner test in the suite is standing on it.
@@ -31,21 +32,16 @@ from genome.external import (
 )
 from genome.io.fasta import PREPARATION_TOOLS
 
+from .conftest import StubBinary
+
 _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
 
 
-def _script(directory: Path, name: str, body: str) -> Path:
-    """Write an executable shell script into ``directory`` and return its path."""
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / name
-    path.write_text(f"#!/bin/sh\n{body}\n")
-    path.chmod(0o755)
-    return path
-
-
 @pytest.fixture
-def on_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[str, str], Path]:
-    """Return a helper that puts a script on ``PATH`` under a chosen tool name.
+def on_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
+) -> Callable[[str, str], Path]:
+    """Return a helper that puts a stub on ``PATH`` under a chosen tool name.
 
     ``PATH`` becomes exactly this directory, and the interpreter is pointed somewhere
     empty, so the tools the pixi env really has cannot answer for a test that never
@@ -56,7 +52,7 @@ def on_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[str, s
     monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
 
     def install(name: str, body: str) -> Path:
-        return _script(bin_dir, name, body)
+        return stub_binary(bin_dir, name, body)
 
     return install
 
@@ -71,13 +67,13 @@ def test_a_tool_on_path_resolves_to_it(on_path: Callable[[str, str], Path]) -> N
 
 
 def test_resolution_falls_back_to_the_interpreters_own_bin(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
 ) -> None:
     # Running the env's interpreter without PATH activated: the normal lookup misses,
     # but the tool sits beside sys.executable (the conda/pixi bin/), so resolution falls
     # back to that directory.
     bin_dir = tmp_path / "bin"
-    written = _script(bin_dir, "faToTwoBit", "exit 0")
+    written = stub_binary(bin_dir, "faToTwoBit", "exit 0")
 
     monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(external.sys, "executable", str(bin_dir / "python"))
