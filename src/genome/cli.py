@@ -94,26 +94,40 @@ app = typer.Typer(help="Tools for handling genomic files.", no_args_is_help=True
 
 
 @app.command()
-def version() -> None:
+def version(
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
     """Print the installed package version."""
+    if json:
+        typer.echo(_json.dumps({"version": _package_version}))
+        return
     typer.echo(_package_version)
 
 
 @app.command()
 def revcomp(
-    sequence: str = typer.Argument(..., help="A DNA sequence over A/C/G/T (case is preserved)."),
+    sequence: str = typer.Argument(
+        ...,
+        # The third place this alphabet used to be spelled by hand, and the one a reader
+        # meets first. Rendered from the type like the check and the error below it.
+        help=f"A DNA sequence over {'/'.join(sorted(DNA.ALPHABET))} (case is preserved).",
+    ),
     json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
 ) -> None:
     """Reverse-complement a DNA sequence.
 
     Exits with code 2 on invalid input.
     """
-    # The DNA constructor no longer validates (too costly on large sequences),
-    # so reject non-A/C/G/T characters here, at the I/O boundary.
-    invalid = sorted({c for c in sequence if c.upper() not in "ACGT"})
+    # The DNA constructor no longer validates (too costly on large sequences), so reject
+    # non-alphabet characters here, at the I/O boundary. Both halves of that ask the type —
+    # which characters offend, and what to call the alphabet they offended against — because
+    # an edge that spells `ACGT` itself is a second copy of `DNA.ALPHABET` that drifts from it
+    # silently.
+    invalid = DNA.outside_alphabet(sequence)
     if invalid:
+        alphabet = "".join(sorted(DNA.ALPHABET))
         typer.echo(
-            f"error: sequence contains characters outside alphabet {{ACGT}}: {invalid!r}",
+            f"error: sequence contains characters outside alphabet {{{alphabet}}}: {invalid!r}",
             err=True,
         )
         raise typer.Exit(code=2)

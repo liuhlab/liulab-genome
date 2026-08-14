@@ -51,6 +51,75 @@ class TestConstruction:
 
 
 # ---------------------------------------------------------------------------
+# The alphabet, and the check a caller at the I/O boundary asks for
+# ---------------------------------------------------------------------------
+
+
+class TestOutsideAlphabet:
+    def test_reports_the_offending_character(self) -> None:
+        assert DNA.outside_alphabet("ATCX") == ["X"]
+
+    def test_clean_sequence_reports_nothing(self) -> None:
+        assert DNA.outside_alphabet("ATCG") == []
+        assert DNA.outside_alphabet("") == []
+
+    def test_case_insensitive(self) -> None:
+        assert DNA.outside_alphabet("aTcG") == []
+
+    def test_offenders_come_back_in_their_own_case(self) -> None:
+        assert DNA.outside_alphabet("aTcx") == ["x"]
+
+    def test_distinct_and_sorted(self) -> None:
+        assert DNA.outside_alphabet("XBXB") == ["B", "X"]
+
+    def test_each_class_asks_its_own_alphabet(self) -> None:
+        # The classmethod lives on the shared base; the alphabet it compares against is
+        # the calling class's, so U offends DNA and T offends RNA.
+        assert DNA.outside_alphabet("AUCG") == ["U"]
+        assert RNA.outside_alphabet("ATCG") == ["T"]
+        assert RNA.outside_alphabet("AUCG") == []
+        assert Protein.outside_alphabet("MKTAY") == []
+        assert Protein.outside_alphabet("MBTOUZ") == ["B", "O", "U", "Z"]
+
+    def test_alphabet_is_the_class_s_own(self) -> None:
+        # Joined sorted, which is how a caller naming the alphabet in a message renders it.
+        assert "".join(sorted(DNA.ALPHABET)) == "ACGT"
+        assert "".join(sorted(RNA.ALPHABET)) == "ACGU"
+        assert "".join(sorted(Protein.ALPHABET)) == "ACDEFGHIKLMNPQRSTVWY"
+
+    def test_construction_still_validates_nothing(self) -> None:
+        # The check is offered, never imposed: reporting an offender does not stop the
+        # same string from constructing (see docs/adr/0005).
+        assert DNA.outside_alphabet("ATCX") == ["X"]
+        assert str(DNA("ATCX")) == "ATCX"
+
+
+class TestPropertiesOutsideAlphabet:
+    @given(dna_text)
+    def test_in_alphabet_text_reports_nothing(self, s: str) -> None:
+        assert DNA.outside_alphabet(s) == []
+
+    @given(st.text(max_size=32))
+    def test_offenders_are_a_sorted_distinct_subset_of_the_input(self, s: str) -> None:
+        offenders = DNA.outside_alphabet(s)
+        assert offenders == sorted(set(offenders))
+        assert set(offenders) <= set(s)
+
+    @given(st.text(max_size=32))
+    def test_empty_exactly_when_every_character_is_in_the_alphabet(self, s: str) -> None:
+        assert (DNA.outside_alphabet(s) == []) == all(c.upper() in DNA.ALPHABET for c in s)
+
+    @given(st.sampled_from([DNA, RNA, Protein]), st.text(max_size=32))
+    def test_every_subclass_answers_against_its_own_alphabet(self, cls: type[_Seq], s: str) -> None:
+        assert cls.outside_alphabet(s) == sorted({c for c in s if c.upper() not in cls.ALPHABET})
+
+    @given(st.text(max_size=32))
+    def test_reporting_an_offender_never_blocks_construction(self, s: str) -> None:
+        DNA.outside_alphabet(s)
+        assert str(DNA(s)) == s
+
+
+# ---------------------------------------------------------------------------
 # Typed slicing, repr, and interplay with str
 # ---------------------------------------------------------------------------
 

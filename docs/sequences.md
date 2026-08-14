@@ -25,9 +25,25 @@ DNA("")         # DNA('')      — empty is valid
 ```
 
 The alphabet in the table is documentation, not a runtime check: scanning every character
-costs too much on a whole chromosome, so any string is accepted. Reject bad input where it
-enters — the CLI does this for `genome revcomp`. IUPAC ambiguity codes (`N`, `R`, `Y`, …)
-are out of scope.
+costs too much on a whole chromosome, so any string is accepted. IUPAC ambiguity codes
+(`N`, `R`, `Y`, …) are out of scope.
+
+Reject bad input where it enters, and ask the class rather than spelling `ACGT` yourself —
+`outside_alphabet` names the offenders, distinct and sorted, and comes back empty when
+nothing offends. Case is not an offence: lower case is soft-masking.
+
+```python
+>>> DNA.outside_alphabet("ATCX")
+['X']
+>>> DNA.outside_alphabet("aTcG")
+[]
+>>> RNA.outside_alphabet("ATCG")     # each class asks its own alphabet
+['T']
+```
+
+It reports; it never refuses. `DNA("ATCX")` still constructs, and `DNA.ALPHABET` is the
+frozenset it was held to — which is what `genome revcomp` reads to reject a bad argument
+and to name the alphabet in the error.
 
 ## Transforms
 
