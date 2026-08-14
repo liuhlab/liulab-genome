@@ -34,6 +34,8 @@ from genome.io.completion import (
     write_record,
 )
 
+from .conftest import StubBinary
+
 # JSON-representable leaves, so a generated record survives a round trip through JSON.
 _LEAVES = st.none() | st.booleans() | st.integers() | st.text()
 
@@ -198,16 +200,13 @@ def test_tool_versions_reports_a_tool_that_answers() -> None:
 
 
 def test_a_tool_that_will_not_identify_itself_is_left_out_too(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
 ) -> None:
     # Installed, and rejecting `--version` the way several UCSC binaries do. An absent
     # key means *unknown*, and it must mean that for both reasons a version can be
     # unknown — otherwise a record would carry an empty string as if it were a fact.
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    declines = bin_dir / "faToTwoBit"
-    declines.write_text("#!/bin/sh\necho '--version is not a valid option' >&2\nexit 255\n")
-    declines.chmod(0o755)
+    stub_binary(bin_dir, "faToTwoBit", "echo '--version is not a valid option' >&2\nexit 255")
     monkeypatch.setenv("PATH", str(bin_dir))
 
     assert tool_versions(["faToTwoBit"]) == {}
