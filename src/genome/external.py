@@ -320,6 +320,14 @@ class ExternalTool(ABC):
         ``output`` is returned as it stands, so re-preparing an assembly costs a handful
         of ``stat`` calls rather than a second pass over a genome.
 
+        The **Freshness** rule lives here rather than in the callers: it is one rule, and
+        a caller that had to apply it would restate the branch at every step and could
+        drift from what ``overwrite`` means. Running goes back out through :meth:`run`
+        rather than around it to :meth:`_execute`, so a single
+        ``monkeypatch.setattr(ExternalTool, "run", ...)`` catches every invocation this
+        package makes, by either adapter — the property
+        :func:`genome.io.download.fetch_url` is spelled for, and for the same reason.
+
         Parameters
         ----------
         args : sequence of str

@@ -1,15 +1,14 @@
-"""Shared I/O helpers: naming native tools, checksumming files, caching by freshness.
+"""Shared I/O helpers: checksumming files, and decompressing them.
 
 Format-specific logic lives in its own module (e.g. :mod:`genome.io.fasta`); only
 format-agnostic plumbing belongs here — :func:`sha256_file` and
 :class:`ChecksumMismatchError` know about files and hashes and nothing about assemblies
 or annotations, so either kind of file is checked the same way.
 
-Running a native tool is :mod:`genome.external`'s job and not this module's. What is here
-is the *name-addressed* form of it: :mod:`genome.io.fasta` names a different tool at every
-step rather than holding one, so :func:`_run` and :func:`_run_to` are where a name becomes
-an **External tool**. Both are two lines over :class:`genome.external.ExternalTool`, and
-neither restates anything it decides.
+Running a native tool is :mod:`genome.external`'s job and not this module's, and there is
+no name-addressed form of it here. A caller that needs one holds an
+:class:`genome.external.ExternalTool` and asks it — which is what :mod:`genome.io.fasta`
+does at each preparation step.
 """
 
 from __future__ import annotations
@@ -17,10 +16,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import shutil
-from collections.abc import Sequence
 from pathlib import Path
-
-from genome.external import InstalledTool, is_fresh
 
 
 class ChecksumMismatchError(ValueError):
@@ -104,39 +100,3 @@ def _gunzip(src: Path, dest: Path) -> Path:
     with gzip.open(src, "rb") as fin, dest.open("wb") as fout:
         shutil.copyfileobj(fin, fout)
     return dest
-
-
-def _run(name: str, args: Sequence[str]) -> None:
-    """Run the **External tool** ``name`` with ``args``, capturing its output.
-
-    The name-addressed form of :meth:`genome.external.ExternalTool.run`, and the one
-    place the ``io`` layer shells out.
-
-    Raises
-    ------
-    genome.external.ToolNotFoundError
-        If ``name`` is not installed; the message names the command that installs it.
-    RuntimeError
-        If the tool exits non-zero; the message includes its stderr.
-    """
-    InstalledTool(name).run(args)
-
-
-def _run_to(
-    name: str,
-    args: Sequence[str],
-    output: Path,
-    inputs: Sequence[Path],
-    *,
-    overwrite: bool = False,
-) -> Path:
-    """Run ``name`` to build ``output``, skipping the call when ``output`` is fresh.
-
-    The name-addressed form of :meth:`genome.external.ExternalTool.run_to`, which owns
-    the freshness rule; running goes back out through :func:`_run` so that one name is
-    the whole of what this layer shells out through. ``args`` must be written so the tool
-    produces ``output``. Returns ``output``; raises as :func:`_run`.
-    """
-    if overwrite or not is_fresh(output, inputs):
-        _run(name, args)
-    return output

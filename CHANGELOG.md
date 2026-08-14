@@ -239,6 +239,9 @@ preparation is no longer indistinguishable from a finished one.
 - **The three old completion markers are gone**: the `.genome_prepared` sentinel, an index's
   `.success` flag, and the separate `<name>.index.json` sidecar, whose contents the shared record
   now carries.
+- **`genome.io.utils._run` and `_run_to`**, a name-addressed layer that restated
+  `ExternalTool.run`/`run_to` and kept a second copy of the freshness branch. Each FASTA
+  preparation step now holds its own tool and calls `run_to` on it.
 
 ### Fixed
 
