@@ -387,7 +387,11 @@ class TestRegisterAnnotation:
         )
 
         assert result.exit_code == 0
-        assert _json.loads(result.stdout)["details"]["chromosomes_checked"] is False
+        details = _json.loads(result.stdout)["details"]
+        assert details["chromosomes_checked"] is False
+        # The reason rides in `details` as the record holds it — no second spelling of it
+        # for the JSON surface to drift from.
+        assert details["chromosomes_unchecked_because"] == "caller-override"
 
     def test_feature_inference_is_reachable_for_a_listed_annotation_too(
         self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -532,7 +536,9 @@ class TestRegisterGtf:
         )
 
         assert result.exit_code == 0
-        assert _json.loads(result.stdout)["details"]["chromosomes_checked"] is False
+        details = _json.loads(result.stdout)["details"]
+        assert details["chromosomes_checked"] is False
+        assert details["chromosomes_unchecked_because"] == "caller-override"
 
     def test_a_bare_exon_level_gtf_is_registrable_with_feature_inference(
         self, tmp_path: Path
@@ -553,6 +559,119 @@ class TestRegisterGtf:
 
         assert result.exit_code == 0
         assert _feature_types(gtf_root / "genes" / "genes.db") == ["exon", "gene", "transcript"]
+
+
+class TestWhatARegistrationSaysAboutTheChromosomes:
+    """Both registration commands say which of four things happened to the name check.
+
+    ``--no-check-chromosomes`` used to be answered with "register the assembly first",
+    which the caller may well have done already: the record could not tell *nothing to
+    check against* from *the caller stood the check down*, so the surface picked one and
+    was wrong half the time. Each state now has its own sentence, and the one that had
+    advice to give is the only one that gives any.
+    """
+
+    #: The advice that belongs to exactly one of the four states.
+    _ADVICE = "register the assembly first"
+
+    @pytest.fixture(autouse=True)
+    def _offline(
+        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_fetch.serve("tiny.gtf.gz")
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+        table = pd.DataFrame(
+            [
+                {
+                    "assembly": "tiny",
+                    "name": "ensgene_v101",
+                    "provider": "UCSC",
+                    "version": "ensGene.v101",
+                    "url": _ANNOTATION_URL,
+                    "sha256": _TINY_GTF_SHA256,
+                    "default": "yes",
+                }
+            ],
+            dtype=str,
+        )
+        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+
+    @staticmethod
+    def _prepare_assembly(tmp_path: Path) -> None:
+        """Put the assembly's ``chrom.sizes`` where the check looks for it."""
+        assembly_dir = tmp_path / "genome" / "tiny"
+        assembly_dir.mkdir(parents=True, exist_ok=True)
+        (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
+
+    def test_a_check_that_ran_is_reported_by_both_commands(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # Reported rather than left to silence, which would read exactly the same as a
+        # surface that had nothing good to say.
+        self._prepare_assembly(tmp_path)
+
+        by_name = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+        by_path = runner.invoke(app, ["register-gtf", "tiny", str(data_dir / "tiny.gtf"), "mine"])
+
+        for result in (by_name, by_path):
+            assert result.exit_code == 0
+            assert "chromosomes checked" in result.stdout
+            assert self._ADVICE not in result.stdout
+
+    def test_nothing_to_check_against_is_the_state_that_advises(self) -> None:
+        # No chrom.sizes: the assembly is not registered here yet, and registering it is
+        # exactly what would let the names be verified.
+        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+
+        assert result.exit_code == 0
+        assert "chromosomes not checked" in result.stdout
+        assert self._ADVICE in result.stdout
+
+    def test_standing_the_check_down_is_advised_nothing_by_either_command(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # The bug this fixes: the assembly is registered, the caller turned the check off
+        # deliberately, and being told to register the assembly first is wrong.
+        self._prepare_assembly(tmp_path)
+
+        by_name = runner.invoke(
+            app, ["register-annotation", "tiny", "ensgene_v101", "--no-check-chromosomes"]
+        )
+        by_path = runner.invoke(
+            app,
+            [
+                "register-gtf",
+                "tiny",
+                str(data_dir / "ensembl_style.gtf"),
+                "mine",
+                "--no-check-chromosomes",
+            ],
+        )
+
+        for result in (by_name, by_path):
+            assert result.exit_code == 0
+            assert "stood down" in result.stdout
+            assert self._ADVICE not in result.stdout
+
+    def test_a_record_written_before_the_reason_existed_reports_it_as_unknown(
+        self, tmp_path: Path
+    ) -> None:
+        # An annotation registered by an older version, reported by re-running the
+        # command over it: the record returned is the one already on disk, whose bare
+        # `false` stands for either reason. Neither may be claimed, and neither raises.
+        self._prepare_assembly(tmp_path)
+        assert runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"]).exit_code == 0
+        path = record_path(annotation_dir(tmp_path / "genome" / "tiny", "ensgene_v101"))
+        written = _json.loads(path.read_text())
+        written["details"] = {"chromosomes_checked": False}
+        path.write_text(_json.dumps(written))
+
+        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+
+        assert result.exit_code == 0
+        assert "does not say why" in result.stdout
+        assert self._ADVICE not in result.stdout
+        assert "stood down" not in result.stdout
 
 
 class TestAnnotations:

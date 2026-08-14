@@ -121,21 +121,32 @@ g.register_annotation("gencode_v44", check_chromosomes=False)
 ```
 
 Whether the names were actually checked is recorded, so you can tell months
-later:
+later — and so is why not, since the two reasons are not the same news:
 
 ```python
 import json
 record = json.loads((g.get_gtf_path("gencode_v44").parent / ".completion.json").read_text())
-record["details"]["chromosomes_checked"]      # True when they were checked
+record["details"]["chromosomes_checked"]             # True when they were checked
+record["details"]["chromosomes_unchecked_because"]   # None when they were
 ```
 
 That flag is `False` for the override, and also when there was nothing to check
 against — registering an annotation for an assembly that has not been prepared
-yet means no `chrom.sizes` exists to compare with. `register_gtf` at module level
-is given a directory and no assembly name, so it cannot find that file on its own:
-pass `chrom_sizes=<path>` to have the names checked, which is what
-`Genome.register_gtf` and `genome register-gtf` — both of which are told the
-assembly — do for you.
+yet means no `chrom.sizes` exists to compare with. `chromosomes_unchecked_because`
+is what says which: `"caller-override"` for the first, `"no-chrom-sizes"` for the
+second. Only the second is worth acting on, and both registration commands print
+the difference rather than advising you to register an assembly you already have.
+
+A record written before that field existed carries the bare `False` and nothing
+else. It stood for either reason and nothing on disk says which, so
+`genome.io.chromosome_check_summary(record["details"])` — which is what those
+commands print — reads it as *unknown* rather than guessing, and never raises over
+it.
+
+`register_gtf` at module level is given a directory and no assembly name, so it
+cannot find that file on its own: pass `chrom_sizes=<path>` to have the names
+checked, which is what `Genome.register_gtf` and `genome register-gtf` — both of
+which are told the assembly — do for you.
 
 ### What the table offers, and what is registered here
 

@@ -98,6 +98,7 @@ registered ensgene_v101 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/ensg
   source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz
   sha256  d3f33fbf97deef26e2495f709f1c5bb2e2e1bf1ce71fb80758c2c9de42ad7026
   files   ensgene_v101.db, ensgene_v101.gtf
+  chromosomes checked — every name the GTF uses is one the assembly carries
 ```
 
 Running it again on a registered annotation reads the record and downloads nothing. It
@@ -107,7 +108,10 @@ GTF is not the checksum pinned for it, or when the directory cannot be trusted �
 half-built database from an interrupted run, say, which `--force` repairs.
 
 `--no-check-chromosomes` registers one whose chromosome-name mismatch you have looked at
-and accept; the record says the names went unchecked, so you can tell months later. See
+and accept; the record says the check was stood down, so you can tell months later — and
+tell it apart from an annotation registered before its assembly, which is the other way
+the names go unchecked and the only one there is anything to do about. The last line of
+the output says which happened either way. See
 [The chromosome names have to match](aligner.md#the-chromosome-names-have-to-match).
 
 ### Registering a GTF the table does not list
@@ -123,6 +127,7 @@ registered wormbase_ws298 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/wo
   source  /home/you/annotations/sacCer3.WS298.gtf
   sha256  9e1f0a5c6d2b8e4a1c7f3b0d5a8e2c4f6b9d1e3a7c5f8b2d4e6a0c9f1b3d5e7a
   files   wormbase_ws298.db, wormbase_ws298.gtf
+  chromosomes checked — every name the GTF uses is one the assembly carries
 ```
 
 A `.gz` source is decompressed on the way in. Naming the assembly is what lets the
