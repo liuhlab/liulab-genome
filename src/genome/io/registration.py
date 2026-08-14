@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import shlex
 from pathlib import Path
+from typing import Any
 
 from genome.io.completion import (
     build_record,
@@ -229,7 +230,12 @@ class AssemblyRegistration:
         return fasta
 
     def _record_completion(
-        self, files: GenomeFiles, *, source_url: str | None, sha256: str | None
+        self,
+        files: GenomeFiles,
+        *,
+        source_url: str | None,
+        sha256: str | None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         """Write this assembly's completion record, then discard the working area.
 
@@ -237,6 +243,10 @@ class AssemblyRegistration:
         the registration finished, and the archive is only disposable after that. An
         interrupted run therefore leaves its work in place and repairs without
         producing a whole genome again.
+
+        ``details`` is whatever is particular to how this FASTA was produced and cannot
+        be read off the files themselves — a chimera's separator and components. A
+        download has none: its source URL and digest are fields of their own.
         """
         record = build_record(
             self.cache_dir,
@@ -246,6 +256,7 @@ class AssemblyRegistration:
             source_url=source_url,
             sha256=sha256,
             tools=PREPARATION_TOOLS,
+            details=details,
         )
         write_record(self.cache_dir, record)
         clear_work_dir(self.cache_dir)

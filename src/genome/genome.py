@@ -31,6 +31,8 @@ from typing import Self
 import pandas as pd
 
 from genome.aligner.mixin import AlignerMixin
+from genome.chimera import split_suffixed
+from genome.io.chimera import ChimeraBuilder, ChimeraDetails, read_chimera_details
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import (
@@ -170,7 +172,80 @@ class Genome(AlignerMixin):
         )
         self._chrom_sizes: pd.Series = read_chrom_sizes(self.files.chrom_sizes)
         self._twobit = TwoBit(self.files.twobit)
+        # The record, never the metadata row, is what says an assembly is a chimera — and
+        # it is already on disk by now, since the registration above wrote or confirmed
+        # it. One small JSON read at open, and both accessors are then answered from
+        # memory.
+        self._chimera: ChimeraDetails | None = read_chimera_details(self._assembly_dir)
         self._set_default_gtf(default_gtf)
+
+    @classmethod
+    def chimera(
+        cls,
+        *components: Genome,
+        cache_dir: str | Path | None = None,
+        force: bool = False,
+    ) -> Self:
+        """Build a **Chimera** of ``components`` and return it open, like any other genome.
+
+        A second constructor rather than a second type (ADR-0008): the reference it
+        produces is an assembly, so everything an assembly can do — fetch sequence,
+        register an annotation, build an index — it can do, by one code path and not two.
+        Its FASTA is its components' bytes with every chromosome name suffixed by the
+        component it came from (ADR-0009); see :mod:`genome.io.chimera` for how it is
+        written.
+
+        The name is **derived**, never given — the component names sorted and joined by
+        ``_``, so ``ce11`` and ``ecHT115`` in either order build and reopen the one
+        ``ce11_ecHT115``. A chimera whose record says it finished is opened without
+        rewriting anything; a directory that cannot be trusted raises and names
+        ``genome register <name> --force``, which is what ``force`` is.
+
+        Nothing is fetched, and no annotation argument is needed or accepted: each
+        component carries its own :attr:`default_gtf`, so a caller's ``(assembly, gtf)``
+        pairs split at the door and the annotation half travels with the components.
+
+        Parameters
+        ----------
+        *components : Genome
+            Two or more prepared component assemblies, in any order, each given once.
+            None may itself be a chimera — a **Component** is always a canonical
+            assembly, so nesting is forbidden by the model rather than deferred.
+        cache_dir : str or pathlib.Path, optional
+            Override the directory the chimera is built and opened in, exactly as the
+            constructor's ``cache_dir`` does for an ordinary assembly. Defaults to the
+            shared per-assembly reference directory, under the derived name.
+        force : bool, default False
+            Build again from scratch — the repair for a directory that raises.
+
+        Returns
+        -------
+        Genome
+            The chimera, opened under its derived name.
+
+        Raises
+        ------
+        genome.chimera.ChimeraNamingError
+            If fewer than two components are given, a component repeats, a component's
+            name is not alphanumeric, or a component is itself a chimera.
+        genome.io.completion.RegistrationError
+            If the chimera's directory holds a build that cannot be trusted as finished,
+            or the FASTA just built does not carry the sequences its components predict.
+        genome.external.ToolNotFoundError
+            If ``samtools``, ``faToTwoBit`` or ``twoBitInfo`` are not on ``PATH``.
+
+        Examples
+        --------
+        >>> worm, food = Genome("ce11"), Genome("ecHT115")     # doctest: +SKIP
+        >>> chimera = Genome.chimera(worm, food)               # doctest: +SKIP
+        >>> chimera.assembly                                   # doctest: +SKIP
+        'ce11_ecHT115'
+        >>> chimera["I__ce11:0-10"]                            # doctest: +SKIP
+        DNA('GCCTAAGCCT')
+        """
+        builder = ChimeraBuilder(components, cache_dir)
+        builder.build_genome(overwrite=force)
+        return cls(builder.assembly, cache_dir=builder.cache_dir, progressbar=False)
 
     @property
     def assembly_name(self) -> str | None:
@@ -543,6 +618,64 @@ class Genome(AlignerMixin):
     def chromosomes(self) -> list[str]:
         """Chromosome names, in the order the reference declares them."""
         return list(self._chrom_sizes.index)
+
+    @property
+    def components(self) -> list[str] | None:
+        """The **Component** assembly names this is a **Chimera** of, or ``None``.
+
+        The single test of whether an assembly is a chimera, and the completion record
+        is what answers it — never the metadata table, which lists a chimera as a
+        cross-reference and would answer the same question differently on a machine
+        where the row is stale or absent (ADR-0008).
+
+        Sorted, which for a chimera is the order its own derived name spells them in.
+        ``None`` — not an empty list — for an ordinary assembly: it is not a chimera of
+        nothing, it is not a chimera.
+
+        Examples
+        --------
+        >>> chimera = Genome.chimera(Genome("ce11"), Genome("ecHT115"))  # doctest: +SKIP
+        >>> chimera.components                                           # doctest: +SKIP
+        ['ce11', 'ecHT115']
+        >>> Genome("ce11").components is None                            # doctest: +SKIP
+        True
+        """
+        return None if self._chimera is None else self._chimera.components
+
+    @property
+    def chrom_components(self) -> pd.Series:
+        """Which assembly each chromosome came from, as a Series mirroring :attr:`chrom_sizes`.
+
+        Attribution, and **total**: every chromosome this reference carries gets an
+        answer. For a chimera each name is split at its recorded separator, so the answer
+        is read out of the name itself and no mapping was ever stored (ADR-0009); for an
+        assembly that is not a chimera every chromosome maps to that assembly's own name,
+        which is true rather than merely convenient — and it is what leaves
+        :attr:`components` as the single is-chimera test, since no caller has to read
+        this one to find out.
+
+        Returns
+        -------
+        pandas.Series
+            Component assembly name per chromosome, indexed and ordered exactly as
+            :attr:`chrom_sizes` is.
+
+        Examples
+        --------
+        >>> chimera = Genome.chimera(Genome("ce11"), Genome("ecHT115"))  # doctest: +SKIP
+        >>> chimera.chrom_components["I__ce11"]                          # doctest: +SKIP
+        'ce11'
+        >>> Genome("ce11").chrom_components["I"]                         # doctest: +SKIP
+        'ce11'
+        """
+        if self._chimera is None:
+            components = [self.assembly] * len(self._chrom_sizes)
+        else:
+            components = [
+                split_suffixed(str(name), self._chimera.separator)[1]
+                for name in self._chrom_sizes.index
+            ]
+        return pd.Series(components, index=self._chrom_sizes.index, name="component")
 
     def fetch_sequence(self, region: str | Region) -> DNA:
         """Return the reference sequence for ``region`` as a :class:`~genome.seq.DNA`.
