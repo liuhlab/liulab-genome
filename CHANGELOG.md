@@ -234,6 +234,9 @@ preparation is no longer indistinguishable from a finished one.
   record read back as an ordinary assembly nothing ever checked against its components. Malformed
   now raises `RegistrationError` naming `genome register <assembly> --force` (ADR-0007); *not a
   chimera* is still `None`.
+- **A binary is asked its version once per process, not once per build step**, remembered against
+  the path it was located at — so a build stops re-probing its tools for provenance that cannot
+  change. Recorded versions are unchanged; `genome.external.clear_version_cache()` forgets them.
 
 ### Removed
 
