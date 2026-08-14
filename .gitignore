@@ -53,3 +53,6 @@ site/
 
 # playground contains manual test code
 playground/
+
+# Agent worktrees — transient, and each is a git repo of its own.
+.claude/worktrees/
