@@ -35,7 +35,9 @@ from genome.io.completion import (
     RegistrationMismatchError,
     UnfinishedRegistrationError,
     read_record,
+    write_record,
 )
+from genome.io.download import assembly_data_dir
 
 from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY
 
@@ -790,3 +792,175 @@ def test_real_chromap_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     record = _record_of(chromap)
     assert record.files["chromap.index"] == out.stat().st_size
     assert record.tool_versions["chromap"] == chromap.version
+
+
+# ===========================================================================
+# The reference an index was built from. The guard lives in the base class, so
+# every case below runs against both aligners: chromap is the one that cannot
+# notice a renamed chromosome any other way, its index storing no sequence
+# names at all, and STAR is the one that could have been special-cased.
+# ===========================================================================
+
+#: What the *assembly* pinned when the index was built, and what it pins after being
+#: registered again over different bytes. Shaped like real digests so a message
+#: quoting both reads the way it will on disk.
+_DIGEST_BUILT_FROM = "a1" * 32
+_DIGEST_AFTER_REBUILD = "b2" * 32
+
+#: The key an index's ``details`` pins the assembly's digest under. Asserted as a
+#: literal because it is an on-disk contract someone reads by eye months later.
+_DIGEST_KEY = "assembly_sha256"
+
+
+def _pin_assembly_digest(aligner: aligner_mod.Aligner, digest: str | None) -> Path:
+    """Write the *assembly*'s completion record, one directory up, pinning ``digest``.
+
+    Registering an assembly again over different bytes is exactly this: a record in
+    the assembly dir whose ``sha256`` is a different string. Nothing in the index
+    directory is touched, which is the whole failure — for chromap the index file
+    stays byte-identical while the names it will be used with change.
+    """
+    directory = assembly_data_dir(aligner.assembly)
+    write_record(
+        directory,
+        CompletionRecord(
+            kind="genome",
+            name=aligner.assembly,
+            files={},
+            source_url=None,
+            sha256=digest,
+            tool_versions={},
+            package_version="0.0-test",
+            completed_at="2026-01-01T00:00:00+00:00",
+            details={},
+        ),
+    )
+    return directory
+
+
+@pytest.fixture(params=["stub_star", "stub_chromap"])
+def stub_aligner(request: pytest.FixtureRequest) -> tuple[aligner_mod.Aligner, str]:
+    """Each concrete aligner in turn, with the forced-rebuild call it must name."""
+    repair = {
+        "stub_star": "Genome.build_star_index(gtf='toy', overwrite=True)",
+        "stub_chromap": "Genome.build_chromap_index(overwrite=True)",
+    }[request.param]
+    return cast("aligner_mod.Aligner", request.getfixturevalue(request.param)), repair
+
+
+def test_a_fresh_index_pins_the_digest_of_the_assembly_it_was_built_from(
+    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
+) -> None:
+    aligner, _ = stub_aligner
+    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
+
+    aligner.index()
+
+    details = _record_of(aligner).details
+    assert details[_DIGEST_KEY] == _DIGEST_BUILT_FROM
+    # The path stays beside the digest: it answers which file, not which bytes.
+    assert details["fasta"].endswith("tiny.fa")
+
+
+def test_reopening_an_index_whose_reference_is_unchanged_succeeds(
+    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
+) -> None:
+    aligner, _ = stub_aligner
+    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
+    built = aligner.index()
+
+    # Registered again over the same bytes — a repeat of `--force`, not a new reference.
+    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
+
+    assert aligner.index_path == built
+    aligner.index()
+    assert len(building_run) == 1  # still finished, so still reused
+
+
+def test_reopening_an_index_raises_when_the_reference_was_rebuilt(
+    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
+) -> None:
+    # The defect this closes: every file the index claims is present at the size it
+    # claims, and the reference underneath it is a different genome.
+    aligner, repair = stub_aligner
+    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
+    aligner.index()
+
+    _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
+
+    with pytest.raises(RegistrationMismatchError) as raised:
+        _ = aligner.index_path
+
+    message = str(raised.value)
+    assert _DIGEST_BUILT_FROM in message
+    assert _DIGEST_AFTER_REBUILD in message
+    assert repair in message
+
+
+def test_index_refuses_to_rebuild_silently_when_the_reference_was_rebuilt(
+    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
+) -> None:
+    aligner, _ = stub_aligner
+    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
+    aligner.index()
+    _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
+
+    with pytest.raises(RegistrationMismatchError, match=re.escape("overwrite=True")):
+        aligner.index()
+
+    assert len(building_run) == 1  # rebuilding is a deliberate act, as everywhere else
+
+
+def test_overwrite_rebuilds_a_stale_index_and_pins_the_new_digest(
+    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
+) -> None:
+    # The repair the message names must not be blocked by the mismatch it repairs.
+    aligner, _ = stub_aligner
+    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
+    aligner.index()
+    _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
+
+    out = aligner.index(overwrite=True)
+
+    assert len(building_run) == 2
+    assert out == aligner.index_path
+    assert _record_of(aligner).details[_DIGEST_KEY] == _DIGEST_AFTER_REBUILD
+
+
+def test_an_index_that_pins_no_digest_reads_as_unknown(
+    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
+) -> None:
+    # An index built before this was recorded: the price stated rather than hidden,
+    # so it stays unguarded until it is next rebuilt instead of raising on sight.
+    aligner, _ = stub_aligner
+    built = aligner.index()
+    assert _DIGEST_KEY not in _record_of(aligner).details
+
+    _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
+
+    assert aligner.index_path == built
+
+
+def test_an_assembly_that_pins_no_digest_does_not_raise(
+    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
+) -> None:
+    aligner, _ = stub_aligner
+    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
+    built = aligner.index()
+
+    _pin_assembly_digest(aligner, None)  # registered, and pinning nothing to compare
+
+    assert aligner.index_path == built
+
+
+def test_a_build_over_an_assembly_pinning_no_digest_records_none(
+    stub_aligner: tuple[aligner_mod.Aligner, str], captured_run: list[list[str]]
+) -> None:
+    # Absent, not null: a fact that could not be gathered is left out, exactly as
+    # tool_versions leaves out a tool that would not identify itself.
+    aligner, _ = stub_aligner
+    _pin_assembly_digest(aligner, None)
+
+    aligner.index()
+
+    assert _DIGEST_KEY not in _record_of(aligner).details

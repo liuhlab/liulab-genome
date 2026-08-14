@@ -273,16 +273,26 @@ It records what the build claimed and how it ran:
 - the exact command, the resolved parameters (including the `gtf` key and the GTF
   path), the STAR version, and the FASTA consumed — so an index is self-describing
   and can be explained months later;
+- the **digest of the assembly it was built from**, copied from the assembly's own
+  record, so re-registering the reference underneath an index is caught rather
+  than silently mapped against;
 - the package version and the time it finished.
 
 ```python
 import json
 index_dir = g.get_star_index("ensembl")
 record = json.loads((index_dir / ".completion.json").read_text())
-record["details"]["command"]        # ['STAR', '--runMode', 'genomeGenerate', ...]
-record["details"]["parameters"]     # {'threads': 8, 'gtf': 'ensembl', ...}
-record["tool_versions"]             # {'STAR': '2.7.11b'}
+record["details"]["command"]         # ['STAR', '--runMode', 'genomeGenerate', ...]
+record["details"]["parameters"]      # {'threads': 8, 'gtf': 'ensembl', ...}
+record["details"]["fasta"]           # which file was indexed
+record["details"]["assembly_sha256"] # which bytes it held at the time
+record["tool_versions"]              # {'STAR': '2.7.11b'}
 ```
+
+`fasta` and `assembly_sha256` answer different questions — *which file* and
+*which bytes* — and both are kept. An index built before this digest was recorded
+simply has no `assembly_sha256` key: an unknown fact is absent rather than an
+error, so such an index stays unguarded until it is next rebuilt.
 
 ## Building a chromap index
 
@@ -331,8 +341,8 @@ g.build_chromap_index(
   *mapping* parameter; building the index is single-threaded.
 
 The bookkeeping matches STAR's: the same `.completion.json` gates the index and
-records the chromap version, the assembly, the resolved parameters, the exact
-command and the one index file it claims.
+records the chromap version, the assembly and its digest, the resolved
+parameters, the exact command and the one index file it claims.
 
 ## Retrieving a built index
 
@@ -376,6 +386,15 @@ half-way, and nothing on disk tells them apart. Rebuild it deliberately with
 **A file changed after the build** — deleted, truncated, or replaced —
 `RegistrationMismatchError`, naming every file that differs and by how much. Same
 repair: rebuild with `overwrite=True`.
+
+**The reference was rebuilt underneath it** — the assembly was registered again
+over different bytes after the index was built — also
+`RegistrationMismatchError`, naming both digests. Not one index file has moved,
+which is why nothing else can catch it: a chromap index stores no sequence names
+at all, so it stays byte-identical while the names it will be mapped against
+change. The comparison is the index's record against the assembly's, so it reads
+no sequence and costs nothing. Same repair, and `overwrite=True` is never blocked
+by the mismatch it repairs.
 
 The last two are the strict-failure trade-off, and it is worth stating plainly:
 during a build the directory briefly holds files with no record, so interrupting
