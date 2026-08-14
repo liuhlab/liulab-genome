@@ -93,7 +93,7 @@ from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from genome.chimera import (
     ChimeraNamingError,
@@ -448,11 +448,16 @@ class ChimeraBuilder(AssemblyRegistration):
         which is a cold machine and raises with the command that fixes it.
         """
         if component.default_gtf is None:
-            if component.annotations:
+            # `.registered`, and never the registry itself: a registry object is always
+            # truthy, so asking it directly would take this branch for a component that
+            # has nothing registered at all — which contributes nothing and is not an
+            # ambiguity. The four-way state is named here rather than walked.
+            registered = component.annotations.registered
+            if registered:
                 raise AmbiguousDefaultAnnotationError(
-                    f"component {component.assembly!r} has {len(component.annotations)} "
+                    f"component {component.assembly!r} has {len(registered)} "
                     f"annotations registered and no default among them: "
-                    f"{', '.join(component.annotations)}. A component contributes its own "
+                    f"{', '.join(registered)}. A component contributes its own "
                     f"default annotation to a chimera's merged one, so this build cannot "
                     f"tell which set of gene models you meant. Open that component with "
                     f"Genome({component.assembly!r}, default_gtf=<name>) — naming one of "
@@ -461,8 +466,11 @@ class ChimeraBuilder(AssemblyRegistration):
             return None
         # Raises AnnotationNotRegisteredError, naming what registers it, when the default
         # is a name and not yet a file: the same refusal a cold machine gets for a
-        # component it has never prepared, one level down.
-        gtf = component.get_gtf_path(component.default_gtf)
+        # component it has never prepared, one level down. The composition under its own
+        # name; it answers `None` only for a component with no default at all, which the
+        # branch above has already returned on, so the cast states what that branch knows
+        # rather than re-checking it.
+        gtf = cast("Path", component.default_gtf_path)
         record = read_record(gtf.parent)
         return _Contribution(
             annotation=component.default_gtf,

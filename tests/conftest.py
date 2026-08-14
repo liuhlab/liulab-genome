@@ -408,7 +408,7 @@ def chimera_component(tmp_path: Path) -> Iterator[ComponentFactory]:
                     f"{name} ships no annotation; ask for one of "
                     f"{[c.name for c in CHIMERA_COMPONENTS.values() if c.has_gtf]} instead."
                 )
-            genome.register_gtf(component.gtf, COMPONENT_ANNOTATION)
+            genome.annotations.register_path(component.gtf, COMPONENT_ANNOTATION)
         return genome
 
     yield register

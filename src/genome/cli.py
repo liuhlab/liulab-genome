@@ -22,7 +22,7 @@ from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
 from genome.io.gtf import annotation_status as _annotation_status
 from genome.io.gtf import register_annotation as _register_annotation
-from genome.io.gtf import register_annotation_by_path as _register_annotation_by_path
+from genome.io.gtf import register_gtf as _register_gtf
 from genome.io.results import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
 from genome.io.results import RegisteredAnnotation as _RegisteredAnnotation
@@ -349,7 +349,7 @@ def register_gtf(
     Re-run with `--force` to repair it.
     """
     try:
-        registered = _register_annotation_by_path(
+        registered = _register_gtf(
             assembly,
             gtf,
             name,

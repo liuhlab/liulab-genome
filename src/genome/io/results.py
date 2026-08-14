@@ -332,9 +332,8 @@ class RegisteredAnnotation:
     """What registering one annotation produced: its record, and where that landed.
 
     :func:`~genome.io.gtf.register_annotation`'s answer and
-    :func:`~genome.io.gtf.register_annotation_by_path`'s — what ``genome
-    register-annotation`` and ``genome register-gtf`` print, and what their ``--json``
-    serializes. A :class:`~genome.io.gtf.GtfAnnotation` says where an annotation's two
+    :func:`~genome.io.gtf.register_gtf`'s — what ``genome register-annotation`` and
+    ``genome register-gtf`` print, and what their ``--json`` serializes. A :class:`~genome.io.gtf.GtfAnnotation` says where an annotation's two
     files are; this says what the run that wrote them did, which is the **Completion
     marker** itself, carried whole. Every question a surface then asks — the digest, the
     source, the files claimed, whether the chromosome names were actually checked — is

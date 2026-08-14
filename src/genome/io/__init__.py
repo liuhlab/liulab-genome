@@ -50,7 +50,6 @@ from genome.io.gtf import (
     annotation_dir,
     annotation_status,
     register_annotation,
-    register_annotation_by_path,
     register_gtf,
 )
 
@@ -103,7 +102,6 @@ __all__ = [
     "read_chrom_sizes",
     "read_record",
     "register_annotation",
-    "register_annotation_by_path",
     "register_assembly",
     "register_gtf",
     "sha256_file",

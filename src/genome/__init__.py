@@ -3,6 +3,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from genome.genome import Genome
+from genome.io.gtf import AnnotationRegistry
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.region import Region
 from genome.seq import DNA, RNA, Protein
@@ -16,6 +17,7 @@ __all__ = [
     "DNA",
     "RNA",
     "AnnotationMetadata",
+    "AnnotationRegistry",
     "AssemblyMetadata",
     "Genome",
     "Protein",

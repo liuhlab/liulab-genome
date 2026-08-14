@@ -19,7 +19,7 @@ from genome.external import doctor as doctor_api
 from genome.io import download as download_mod
 from genome.io.completion import read_record, record_path, write_record
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
-from genome.io.gtf import annotation_dir, register_gtf
+from genome.io.gtf import AnnotationRegistry, GtfAnnotation, annotation_dir
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.seq import DNA
 
@@ -66,6 +66,11 @@ _BARE_GTF = (
 def _output(result: object) -> str:
     """Return a result's stdout and stderr together, wherever the runner put them."""
     return (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
+
+
+def _register(assembly: str, assembly_dir: Path, gtf: Path, name: str) -> GtfAnnotation:
+    """Register ``gtf`` under ``assembly_dir``, so a command has something to report on."""
+    return AnnotationRegistry.locate(assembly, assembly_dir).register_path(gtf, name)
 
 
 def _feature_types(database_path: Path) -> list[str]:
@@ -904,7 +909,7 @@ class TestAnnotations:
     def test_it_sets_what_is_registered_here_against_what_is_offered(
         self, tmp_path: Path, data_dir: Path
     ) -> None:
-        register_gtf(tmp_path / "genome" / "hg38", data_dir / "tiny.gtf", "mine")
+        _register("hg38", tmp_path / "genome" / "hg38", data_dir / "tiny.gtf", "mine")
 
         result = runner.invoke(app, ["annotations", "hg38", "--json"])
 
@@ -932,7 +937,7 @@ class TestAnnotations:
         # had ever fetched — and the closing line sent the reader to a command that
         # would itself raise and demand --force.
         assembly_dir = tmp_path / "genome" / "hg38"
-        register_gtf(assembly_dir, data_dir / "tiny.gtf", "gencode_v50")
+        _register("hg38", assembly_dir, data_dir / "tiny.gtf", "gencode_v50")
         record_path(annotation_dir(assembly_dir, "gencode_v50")).unlink()
 
         result = runner.invoke(app, ["annotations", "hg38"])
@@ -950,7 +955,7 @@ class TestAnnotations:
         self, tmp_path: Path, data_dir: Path
     ) -> None:
         assembly_dir = tmp_path / "genome" / "hg38"
-        annotation = register_gtf(assembly_dir, data_dir / "tiny.gtf", "mine")
+        annotation = _register("hg38", assembly_dir, data_dir / "tiny.gtf", "mine")
         annotation.db.write_bytes(b"truncated")
 
         result = runner.invoke(app, ["annotations", "hg38"])
@@ -964,8 +969,8 @@ class TestAnnotations:
         self, tmp_path: Path, data_dir: Path
     ) -> None:
         assembly_dir = tmp_path / "genome" / "hg38"
-        register_gtf(assembly_dir, data_dir / "tiny.gtf", "healthy")
-        annotation = register_gtf(assembly_dir, data_dir / "tiny.gtf", "mine")
+        _register("hg38", assembly_dir, data_dir / "tiny.gtf", "healthy")
+        annotation = _register("hg38", assembly_dir, data_dir / "tiny.gtf", "mine")
         annotation.db.write_bytes(b"truncated")
 
         result = runner.invoke(app, ["annotations", "hg38", "--json"])

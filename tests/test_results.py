@@ -21,7 +21,7 @@ import pytest
 
 from genome.io import results as results_module
 from genome.io.completion import CompletionRecord, read_record, record_path
-from genome.io.gtf import annotation_dir, register_gtf
+from genome.io.gtf import AnnotationRegistry, annotation_dir
 from genome.io.results import (
     EXPECTED_FROM_RECORD,
     EXPECTED_FROM_TABLE,
@@ -365,7 +365,7 @@ class TestReadingBackWhatWasChecked:
         # The real back-compatibility case, on a record that is on disk: an older version
         # wrote the bare bool, and which of the two reasons it stood for is not knowable.
         # It must read as neither, and reading it must not raise.
-        register_gtf(tmp_path, data_dir / "tiny.gtf", _NAME)
+        AnnotationRegistry.locate("tiny", tmp_path).register_path(data_dir / "tiny.gtf", _NAME)
         path = record_path(annotation_dir(tmp_path, _NAME))
         written = json.loads(path.read_text())
         written["details"] = {"chromosomes_checked": False}

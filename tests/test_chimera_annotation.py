@@ -111,11 +111,11 @@ def test_the_everyday_chimera_arrives_with_its_merged_annotation_registered(
 ) -> None:
     chimera = build_chimera(*CHIMERA_EVERYDAY)
 
-    # No second surface: nobody called register_gtf, and the annotation is simply there.
+    # No second surface: nobody registered anything, and the annotation is simply there.
     directory = annotation_dir(chimera.fasta_path.parent, _EVERYDAY_MERGED)
-    assert chimera.annotations == [_EVERYDAY_MERGED]
+    assert chimera.annotations.registered == [_EVERYDAY_MERGED]
     assert chimera.default_gtf == _EVERYDAY_MERGED
-    assert chimera.get_gtf_path(_EVERYDAY_MERGED) == directory / f"{_EVERYDAY_MERGED}.gtf"
+    assert chimera.annotations.path(_EVERYDAY_MERGED) == directory / f"{_EVERYDAY_MERGED}.gtf"
     assert (directory / f"{_EVERYDAY_MERGED}.gtf").is_file()
     assert (directory / f"{_EVERYDAY_MERGED}.db").is_file()
 
@@ -133,11 +133,11 @@ def test_the_merged_name_is_the_plus_join_in_sorted_component_order(
         genome = chimera_component(component)
         gtf = CHIMERA_COMPONENTS[component].gtf
         assert gtf is not None
-        genome.register_gtf(gtf, annotation)
+        genome.annotations.register_path(gtf, annotation)
         components.append(genome)
 
     with Genome.chimera(*reversed(components)) as chimera:
-        assert chimera.annotations == ["worm+ecoli+yeast"]
+        assert chimera.annotations.registered == ["worm+ecoli+yeast"]
 
 
 def test_the_merged_gtf_carries_exactly_the_chimeras_own_chromosome_names(
@@ -147,7 +147,7 @@ def test_the_merged_gtf_carries_exactly_the_chimeras_own_chromosome_names(
     # dropped or misspelled one shows up as an inequality here — and a misspelling would
     # not even reach this assertion, check_chromosomes having refused it first.
     chimera = build_chimera(*CHIMERA_EVERYDAY)
-    merged = chimera.get_gtf_path(_EVERYDAY_MERGED)
+    merged = chimera.annotations.path(_EVERYDAY_MERGED)
 
     assert set(_seqnames(merged)) == set(chimera.chromosomes)
     assert sorted({split_suffixed(name)[1] for name in _seqnames(merged)}) == list(CHIMERA_EVERYDAY)
@@ -160,7 +160,7 @@ def test_the_merged_gtf_is_unsorted_and_in_component_order(
     # components in the order the chimera's name spells them.
     chimera = build_chimera(*CHIMERA_EVERYDAY)
     components = [
-        split_suffixed(name)[1] for name in _seqnames(chimera.get_gtf_path(_EVERYDAY_MERGED))
+        split_suffixed(name)[1] for name in _seqnames(chimera.annotations.path(_EVERYDAY_MERGED))
     ]
 
     first_seen = list(dict.fromkeys(components))
@@ -186,12 +186,12 @@ def test_every_data_line_survives_and_no_pragma_does(
             f"#!genome-build {name}\n##provider: fixture\n# a plain comment\n{body}"
         )
         genome = chimera_component(name)
-        genome.register_gtf(commented, COMPONENT_ANNOTATION)
+        genome.annotations.register_path(commented, COMPONENT_ANNOTATION)
         expected += len(_data_lines(source))
         components.append(genome)
 
     with Genome.chimera(*components) as chimera:
-        merged = chimera.get_gtf_path(_EVERYDAY_MERGED)
+        merged = chimera.annotations.path(_EVERYDAY_MERGED)
         lines = merged.read_text().splitlines()
 
     assert len(lines) == expected
@@ -224,8 +224,8 @@ def test_a_component_with_no_annotation_contributes_nothing(
     # check already blesses: an assembly may carry sequences an annotation never mentions.
     chimera = build_chimera("tinyCe", CHIMERA_ESCALATION)
 
-    assert chimera.annotations == [COMPONENT_ANNOTATION]
-    merged = chimera.get_gtf_path(COMPONENT_ANNOTATION)
+    assert chimera.annotations.registered == [COMPONENT_ANNOTATION]
+    merged = chimera.annotations.path(COMPONENT_ANNOTATION)
     assert {split_suffixed(name, "___")[1] for name in _seqnames(merged)} == {"tinyCe"}
     assert set(_seqnames(merged)) < set(chimera.chromosomes)
 
@@ -235,8 +235,11 @@ def test_no_contributors_at_all_registers_no_annotation(
 ) -> None:
     chimera = build_chimera(*CHIMERA_EVERYDAY, annotate=False)
 
-    assert chimera.annotations == []
-    assert chimera.broken_annotations == []
+    # `.registered`, and never the registry object: it is always truthy, and reading it
+    # as a collection is exactly what would have made this build raise rather than
+    # register nothing — see `ChimeraBuilder._contribution`.
+    assert chimera.annotations.registered == []
+    assert chimera.annotations.broken == []
     assert chimera.default_gtf is None
     # Not an empty annotation, and not an empty directory pretending to be one.
     assert not (chimera.fasta_path.parent / "gtf").exists()
@@ -262,7 +265,7 @@ def test_a_component_whose_default_annotation_is_not_registered_raises(
     ):
         Genome.chimera(named_only, yeast)
 
-    assert "register_gtf" in str(raised.value)
+    assert "register_path" in str(raised.value)
     # Nothing was built: the refusal comes before a byte is written.
     assert not (tmp_path / "data" / "genome" / "tinyCe_tinySc").exists()
 
@@ -274,7 +277,7 @@ def test_several_registered_and_none_flagged_raises_naming_default_gtf(
     worm = chimera_component("tinyCe", with_annotation=True)
     gtf = CHIMERA_COMPONENTS["tinyCe"].gtf
     assert gtf is not None
-    worm.register_gtf(gtf, "genes_again")
+    worm.annotations.register_path(gtf, "genes_again")
     yeast = chimera_component("tinySc", with_annotation=True)
     # Reopened, because a component that registered its second annotation in this very
     # session keeps the first as its default; a component opened over two of them, with no
@@ -301,7 +304,7 @@ def test_the_chimeras_record_carries_each_components_annotation_and_digest(
     chimera = build_chimera("tinyCe", CHIMERA_ESCALATION)
     details = read_chimera_details(chimera.fasta_path.parent)
     worm = chimera_component("tinyCe", with_annotation=True)
-    pinned = read_record(worm.get_gtf_path(COMPONENT_ANNOTATION).parent)
+    pinned = read_record(worm.annotations.path(COMPONENT_ANNOTATION).parent)
 
     assert details is not None
     assert details.components == ["tinyCe", CHIMERA_ESCALATION]
@@ -324,7 +327,7 @@ def test_the_merged_annotations_record_pins_no_source(build_chimera: ChimeraFact
     assert record is not None
     assert (record.kind, record.name) == ("annotation", _EVERYDAY_MERGED)
     assert record.source_url is None
-    assert record.sha256 == sha256_file(chimera.get_gtf_path(_EVERYDAY_MERGED))
+    assert record.sha256 == sha256_file(chimera.annotations.path(_EVERYDAY_MERGED))
     assert record.details["merged_from"] == [
         {"component": name, "annotation": COMPONENT_ANNOTATION} for name in CHIMERA_EVERYDAY
     ]
@@ -341,7 +344,7 @@ def test_rebuilding_a_finished_chimera_rebuilds_no_annotation(
 
     again = build_chimera(*CHIMERA_EVERYDAY)
 
-    assert again.annotations == [_EVERYDAY_MERGED]
+    assert again.annotations.registered == [_EVERYDAY_MERGED]
     assert database.stat().st_mtime_ns == built
 
 
@@ -356,7 +359,7 @@ def test_force_repairs_the_annotation_as_well_as_the_fasta(
     # One command repairs both halves, because one act built them.
     repaired = build_chimera(*CHIMERA_EVERYDAY, force=True)
 
-    assert repaired.annotations == [_EVERYDAY_MERGED]
+    assert repaired.annotations.registered == [_EVERYDAY_MERGED]
     assert (directory / f"{_EVERYDAY_MERGED}.db").is_file()
     assert repaired.fasta_path.stat().st_mtime_ns != written
 
@@ -378,7 +381,7 @@ def test_a_rebuild_whose_contributors_changed_leaves_only_the_annotation_it_wrot
 
     gtf = CHIMERA_COMPONENTS["tinyCe"].gtf
     assert gtf is not None
-    worm.register_gtf(gtf, "genes_again")
+    worm.annotations.register_path(gtf, "genes_again")
     with (
         Genome(
             "tinyCe",
@@ -388,7 +391,7 @@ def test_a_rebuild_whose_contributors_changed_leaves_only_the_annotation_it_wrot
         ) as renamed,
         Genome.chimera(renamed, yeast, force=True) as rebuilt,
     ):
-        assert rebuilt.annotations == ["genes_again+genes"]
+        assert rebuilt.annotations.registered == ["genes_again+genes"]
         assert rebuilt.default_gtf == "genes_again+genes"
 
     # Removed rather than left broken: nothing vouches for it and nothing points at it.
@@ -413,7 +416,7 @@ def test_a_rebuild_with_nothing_left_to_merge_leaves_no_annotation_at_all(
         Genome("tinyCe", cache_dir=worm.fasta_path.parent, progressbar=False) as bare,
         Genome.chimera(bare, yeast, force=True) as rebuilt,
     ):
-        assert rebuilt.annotations == []
+        assert rebuilt.annotations.registered == []
         assert rebuilt.default_gtf is None
 
     assert not (assembly_dir / "gtf").exists()
@@ -429,7 +432,7 @@ def test_a_broken_merged_annotation_names_the_command_that_rebuilds_the_chimera(
     (annotation_dir(assembly_dir, _EVERYDAY_MERGED) / f"{_EVERYDAY_MERGED}.db").unlink()
 
     with Genome(chimera.assembly, cache_dir=assembly_dir, progressbar=False) as reopened:
-        broken = reopened.broken_annotations
+        broken = reopened.annotations.broken
 
     assert [entry.name for entry in broken] == [_EVERYDAY_MERGED]
     assert broken[0].repair == f"genome register {chimera.assembly} --force"
@@ -463,4 +466,4 @@ def test_building_a_chimera_with_annotations_fetches_nothing(
 
     monkeypatch.setattr(fetch_mod, "fetch_url", refuse)
 
-    assert build_chimera(*CHIMERA_EVERYDAY).annotations == [_EVERYDAY_MERGED]
+    assert build_chimera(*CHIMERA_EVERYDAY).annotations.registered == [_EVERYDAY_MERGED]

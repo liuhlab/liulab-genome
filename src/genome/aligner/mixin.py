@@ -23,7 +23,7 @@ class AlignerMixin:
     """
 
     def build_star_index(
-        self, gtf: str, *, tool: ExternalTool | None = None, **kwargs: Any
+        self, gtf: str | None = None, *, tool: ExternalTool | None = None, **kwargs: Any
     ) -> Path:
         """Build a STAR genome index for this assembly against annotation ``gtf``.
 
@@ -33,12 +33,16 @@ class AlignerMixin:
 
         Parameters
         ----------
-        gtf : str
+        gtf : str, optional
             Name of a GTF annotation registered on this genome (see
-            :meth:`~genome.genome.Genome.register_gtf`). Its path is resolved via
-            :meth:`~genome.genome.Genome.get_gtf_path` and passed to STAR; the
-            index is written to a per-annotation directory ``index/star_<gtf>/``,
-            so different annotations build independent indexes.
+            :meth:`~genome.io.gtf.AnnotationRegistry.register_path`). Its path is
+            resolved via :meth:`~genome.io.gtf.AnnotationRegistry.path` and passed to
+            STAR; the index is written to a per-annotation directory
+            ``index/star_<gtf>/``, so different annotations build independent indexes.
+            Omitted, this genome's **Default annotation**
+            (:attr:`~genome.genome.Genome.default_gtf`) is what the index is built
+            against and what names its directory — which is the everyday call, since a
+            chimera and any assembly the table flags one for already carry a default.
         tool : genome.external.ExternalTool, optional
             The tool to drive, forwarded to the aligner — the same seam
             :class:`~genome.aligner.aligner.Aligner` offers, reachable from here so
@@ -50,10 +54,39 @@ class AlignerMixin:
         -------
         pathlib.Path
             The built STAR genome directory.
+
+        Raises
+        ------
+        ValueError
+            If ``gtf`` is omitted and this genome has no **Default annotation** to fall
+            back on. STAR's index is built against one annotation and cannot be built
+            against none, so the message names both ways to supply one.
+
+        Examples
+        --------
+        >>> from genome import Genome
+        >>> sacCer3 = Genome("sacCer3")                        # doctest: +SKIP
+        >>> sacCer3.default_gtf                                # doctest: +SKIP
+        'ensgene_v101'
+        >>> sacCer3.build_star_index(threads=8).name           # the default  # doctest: +SKIP
+        'star_ensgene_v101'
+        >>> sacCer3.build_star_index("refseq_2023").name       # ...or name one  # doctest: +SKIP
+        'star_refseq_2023'
         """
         from genome.aligner.star import STAR
 
-        return STAR(cast("Genome", self), gtf=gtf, tool=tool).index(**kwargs)
+        genome = cast("Genome", self)
+        if gtf is None:
+            gtf = genome.default_gtf
+            if gtf is None:
+                raise ValueError(
+                    f"a STAR index is built against one annotation, and {genome.assembly!r} "
+                    f"has no default one to fall back on. Name the annotation for this "
+                    f"build with build_star_index(gtf=<name>), or decide the assembly's "
+                    f"default once with Genome({genome.assembly!r}, default_gtf=<name>). "
+                    f"genome.annotations.registered says what is registered here."
+                )
+        return STAR(genome, gtf=gtf, tool=tool).index(**kwargs)
 
     def build_chromap_index(self, *, tool: ExternalTool | None = None, **kwargs: Any) -> Path:
         """Build a chromap genome index for this assembly.
@@ -61,9 +94,9 @@ class AlignerMixin:
         A thin entry point onto :meth:`genome.aligner.chromap.Chromap.index`; the
         keyword arguments are forwarded there (see its docstring for the exposed
         options and how to pass arbitrary chromap flags). Unlike
-        :meth:`build_star_index`, chromap needs no gene annotation, so there is no
-        ``gtf`` argument and one index serves the whole assembly. The index is
-        written to ``index/chromap/chromap.index``.
+        :meth:`build_star_index`, chromap needs no gene annotation at all — not even a
+        default one — so there is no ``gtf`` argument and one index serves the whole
+        assembly. The index is written to ``index/chromap/chromap.index``.
 
         Parameters
         ----------
