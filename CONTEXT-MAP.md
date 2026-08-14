@@ -27,8 +27,8 @@ substitute for *module*.
 - [Sequence](./docs/context/sequence.md) — covers `seq.py`: bases as a typed string, and the
   transforms that keep the type
 - [Assembly](./docs/context/assembly.md) — covers `genome.py`, `metadata.py`, `external.py`,
-  `io/{download,registration,fasta,twobit,utils}.py`: which reference this is, where its files live,
-  and how a locus becomes bases
+  `chimera.py`, `io/{source,chimera,download,registration,fasta,twobit,utils}.py`: which reference
+  this is, where its files live, and how a locus becomes bases
 - [Annotation](./docs/context/annotation.md) — covers `io/gtf.py` and the GTF registry on `Genome`:
   what a GTF declares over one assembly, and the name it is addressed by
 - [Index](./docs/context/index.md) — covers `aligner/*`: what one external mapper needs built before

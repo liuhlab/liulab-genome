@@ -142,12 +142,15 @@ class Genome(AlignerMixin):
     ) -> None:
         self.assembly = assembly
         # Total: an assembly the table does not list has a record whose fields are
-        # unknown, never no record. The downloader is handed the override alone, because
-        # it asks the other question — whether the table lists this name — and an unknown
-        # record standing in there would answer it wrongly for every name (ADR-0003).
+        # unknown, never no record. Whether the table *lists* a name is a separate
+        # question with a separate function, and it is what tells a chimera's derived
+        # name from a free-form local key (ADR-0003).
         self.metadata: AssemblyMetadata = (
             metadata if metadata is not None else assembly_metadata(assembly)
         )
+        # The override alone, and never the record above: given none the downloader
+        # derives the same record for itself, so passing this one back would only hide
+        # which of the two a caller supplied.
         self._downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=metadata)
         self._dir: AssemblyDir = self._downloader.dir
         self.files: GenomeFiles = (
