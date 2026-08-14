@@ -24,8 +24,8 @@ substitute for *module*.
 - [Sequence](./docs/context/sequence.md) — covers `seq.py`: bases as a typed string, and the
   transforms that keep the type
 - [Assembly](./docs/context/assembly.md) — covers `genome.py`, `metadata.py`, `external.py`,
-  `io/{download,fasta,twobit,utils}.py`: which reference this is, where its files live, and how a
-  locus becomes bases
+  `io/{download,registration,fasta,twobit,utils}.py`: which reference this is, where its files live,
+  and how a locus becomes bases
 - [Annotation](./docs/context/annotation.md) — covers `io/gtf.py` and the GTF registry on `Genome`:
   what a GTF declares over one assembly, and the name it is addressed by
 - [Index](./docs/context/index.md) — covers `aligner/*`: what one external mapper needs built before
@@ -101,7 +101,7 @@ _Avoid_: case, lowercase, formatting; bare "masking" — hard-masking writes `N`
 thing
 
 **Data dir**:
-The root of all lab reference data, read from `$LIULAB_DATA` (`src/genome/io/download.py`), under
+The root of all lab reference data, read from `$LIULAB_DATA` (`src/genome/io/registration.py`), under
 which each **Assembly** owns exactly one directory. That per-assembly directory is the layout every
 other context files into — annotations at `gtf/<name>/`, indexes at `index/<name>/`.
 _Avoid_: cache, cache dir (a cache may be evicted; this may not — though it is spelled `cache_dir` in

@@ -43,6 +43,10 @@
 
 ::: genome.io.completion
 
+## `genome.io.registration`
+
+::: genome.io.registration
+
 ## `genome.io.download`
 
 ::: genome.io.download
