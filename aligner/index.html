@@ -1087,15 +1087,24 @@ that is ever asked whether the index is usable — never the presence of <code>S
 <li>the exact command, the resolved parameters (including the <code>gtf</code> key and the GTF
   path), the STAR version, and the FASTA consumed — so an index is self-describing
   and can be explained months later;</li>
+<li>the <strong>digest of the assembly it was built from</strong>, copied from the assembly's own
+  record, so re-registering the reference underneath an index is caught rather
+  than silently mapped against;</li>
 <li>the package version and the time it finished.</li>
 </ul>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 <a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">index_dir</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">get_star_index</span><span class="p">(</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
 <a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">record</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">((</span><span class="n">index_dir</span> <span class="o">/</span> <span class="s2">&quot;.completion.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;command&quot;</span><span class="p">]</span>        <span class="c1"># [&#39;STAR&#39;, &#39;--runMode&#39;, &#39;genomeGenerate&#39;, ...]</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;parameters&quot;</span><span class="p">]</span>     <span class="c1"># {&#39;threads&#39;: 8, &#39;gtf&#39;: &#39;ensembl&#39;, ...}</span>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;tool_versions&quot;</span><span class="p">]</span>             <span class="c1"># {&#39;STAR&#39;: &#39;2.7.11b&#39;}</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;command&quot;</span><span class="p">]</span>         <span class="c1"># [&#39;STAR&#39;, &#39;--runMode&#39;, &#39;genomeGenerate&#39;, ...]</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;parameters&quot;</span><span class="p">]</span>      <span class="c1"># {&#39;threads&#39;: 8, &#39;gtf&#39;: &#39;ensembl&#39;, ...}</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;fasta&quot;</span><span class="p">]</span>           <span class="c1"># which file was indexed</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;assembly_sha256&quot;</span><span class="p">]</span> <span class="c1"># which bytes it held at the time</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;tool_versions&quot;</span><span class="p">]</span>              <span class="c1"># {&#39;STAR&#39;: &#39;2.7.11b&#39;}</span>
 </code></pre></div>
+<p><code>fasta</code> and <code>assembly_sha256</code> answer different questions — <em>which file</em> and
+<em>which bytes</em> — and both are kept. An index built before this digest was recorded
+simply has no <code>assembly_sha256</code> key: an unknown fact is absent rather than an
+error, so such an index stays unguarded until it is next rebuilt.</p>
 <h2 id="building-a-chromap-index">Building a chromap index<a class="headerlink" href="#building-a-chromap-index" title="Permanent link">&para;</a></h2>
 <p><a href="https://github.com/haowenz/chromap">chromap</a> is a fast aligner and preprocessor
 for chromatin profiles (ATAC-seq/scATAC-seq, ChIP-seq, Hi-C). Its index is built
@@ -1132,8 +1141,8 @@ flag:</p>
   <em>mapping</em> parameter; building the index is single-threaded.</li>
 </ul>
 <p>The bookkeeping matches STAR's: the same <code>.completion.json</code> gates the index and
-records the chromap version, the assembly, the resolved parameters, the exact
-command and the one index file it claims.</p>
+records the chromap version, the assembly and its digest, the resolved
+parameters, the exact command and the one index file it claims.</p>
 <h2 id="retrieving-a-built-index">Retrieving a built index<a class="headerlink" href="#retrieving-a-built-index" title="Permanent link">&para;</a></h2>
 <p>Building an index and <em>using</em> it are separate jobs — a mapping pipeline needs the
 path of an index that was built earlier, possibly by someone else. The <code>get_*</code>
@@ -1164,6 +1173,14 @@ half-way, and nothing on disk tells them apart. Rebuild it deliberately with
 <p><strong>A file changed after the build</strong> — deleted, truncated, or replaced —
 <code>RegistrationMismatchError</code>, naming every file that differs and by how much. Same
 repair: rebuild with <code>overwrite=True</code>.</p>
+<p><strong>The reference was rebuilt underneath it</strong> — the assembly was registered again
+over different bytes after the index was built — also
+<code>RegistrationMismatchError</code>, naming both digests. Not one index file has moved,
+which is why nothing else can catch it: a chromap index stores no sequence names
+at all, so it stays byte-identical while the names it will be mapped against
+change. The comparison is the index's record against the assembly's, so it reads
+no sequence and costs nothing. Same repair, and <code>overwrite=True</code> is never blocked
+by the mismatch it repairs.</p>
 <p>The last two are the strict-failure trade-off, and it is worth stating plainly:
 during a build the directory briefly holds files with no record, so interrupting
 one leaves a state that raises next time and needs a forced rebuild. That is
