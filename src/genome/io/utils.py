@@ -1,10 +1,15 @@
-"""Shared I/O helpers: running native tools, checksumming files, caching by freshness.
+"""Shared I/O helpers: naming native tools, checksumming files, caching by freshness.
 
-These back the ``io`` layer's shelling-out to pixi-managed binaries (``samtools``,
-``faToTwoBit``, …). Format-specific logic lives in its own module (e.g.
-:mod:`genome.io.fasta`); only format-agnostic plumbing belongs here — :func:`sha256_file`
-and :class:`ChecksumMismatchError` know about files and hashes and nothing about
-assemblies or annotations, so either kind of file is checked the same way.
+Format-specific logic lives in its own module (e.g. :mod:`genome.io.fasta`); only
+format-agnostic plumbing belongs here — :func:`sha256_file` and
+:class:`ChecksumMismatchError` know about files and hashes and nothing about assemblies
+or annotations, so either kind of file is checked the same way.
+
+Running a native tool is :mod:`genome.external`'s job and not this module's. What is here
+is the *name-addressed* form of it: :mod:`genome.io.fasta` names a different tool at every
+step rather than holding one, so :func:`_run` and :func:`_run_to` are where a name becomes
+an **External tool**. Both are two lines over :class:`genome.external.ExternalTool`, and
+neither restates anything it decides.
 """
 
 from __future__ import annotations
@@ -12,11 +17,10 @@ from __future__ import annotations
 import gzip
 import hashlib
 import shutil
-import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
-from genome.external import _resolve
+from genome.external import InstalledTool, is_fresh
 
 
 class ChecksumMismatchError(ValueError):
@@ -103,36 +107,19 @@ def _gunzip(src: Path, dest: Path) -> Path:
 
 
 def _run(name: str, args: Sequence[str]) -> None:
-    """Resolve ``name`` on ``PATH`` (via pixi) and run it with ``args``.
+    """Run the **External tool** ``name`` with ``args``, capturing its output.
+
+    The name-addressed form of :meth:`genome.external.ExternalTool.run`, and the one
+    place the ``io`` layer shells out.
 
     Raises
     ------
     genome.external.ToolNotFoundError
-        If ``name`` is not on ``PATH``.
+        If ``name`` is not installed; the message names the command that installs it.
     RuntimeError
         If the tool exits non-zero; the message includes its stderr.
     """
-    executable = _resolve(name)
-    try:
-        subprocess.run([executable, *args], check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as err:
-        detail = (err.stderr or err.stdout or "").strip()
-        raise RuntimeError(
-            f"{name} failed (exit {err.returncode}) for args {list(args)!r}: {detail}"
-        ) from err
-
-
-def _is_fresh(output: Path, inputs: Sequence[Path]) -> bool:
-    """Return whether ``output`` is an up-to-date cache built from ``inputs``.
-
-    Fresh means ``output`` exists, is non-empty, and is at least as new as every
-    input — the same staleness rule ``make`` uses. Missing inputs are ignored;
-    the caller validates that required inputs exist.
-    """
-    if not output.is_file() or output.stat().st_size == 0:
-        return False
-    out_mtime = output.stat().st_mtime
-    return all(out_mtime >= inp.stat().st_mtime for inp in inputs if inp.is_file())
+    InstalledTool(name).run(args)
 
 
 def _run_to(
@@ -145,13 +132,11 @@ def _run_to(
 ) -> Path:
     """Run ``name`` to build ``output``, skipping the call when ``output`` is fresh.
 
-    The cached command-running primitive shared by every preparation step. When
-    ``output`` is fresh relative to ``inputs`` (see :func:`_is_fresh`) the tool is
-    not invoked and ``output`` is returned as is; pass ``overwrite=True`` to
-    regenerate unconditionally. ``args`` must be written so the tool produces
-    ``output``. Returns ``output``; raises as :func:`_run`.
+    The name-addressed form of :meth:`genome.external.ExternalTool.run_to`, which owns
+    the freshness rule; running goes back out through :func:`_run` so that one name is
+    the whole of what this layer shells out through. ``args`` must be written so the tool
+    produces ``output``. Returns ``output``; raises as :func:`_run`.
     """
-    if not overwrite and _is_fresh(output, inputs):
-        return output
-    _run(name, args)
+    if overwrite or not is_fresh(output, inputs):
+        _run(name, args)
     return output

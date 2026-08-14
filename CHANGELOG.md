@@ -86,6 +86,40 @@ preparation is no longer indistinguishable from a finished one.
 
 ### Changed
 
+- **`Genome.default_gtf` is a read-only property.** It was a settable attribute the registration
+  path reassigned as it adopted a sole annotation; the registry now decides it, so a caller that
+  used to assign to it names the annotation at construction —
+  `Genome(assembly, default_gtf=<name>)` — instead.
+- **What an assembly name means is a value now, in a module named for it.** *Where do these bytes
+  come from* was answered inline by the downloader, which is why reading a chimera's record needed
+  four deferred imports to dodge an import cycle and why three module-level functions reached into
+  the downloader's privates to ask. `genome.io.source` resolves a name into one of the three
+  **Source** kinds — a URL pinned or derived, a path or URL the caller seeded, or a component set —
+  and the registration dispatches on which came back. The four ordered checks and their precedence
+  are unchanged (ADR-0008), and `genome register <name>` is still one command for all three kinds.
+- **The downloader is a registration and nothing else.** It used to inherit from `Downloader` as
+  well, whose constructor never ran because its answer to *which directory?* was the wrong one; the
+  plain `Downloader` is unchanged and still fetches into a cache directory of its own.
+- **An external tool is one module, not five.** Locating a binary, asking its version, running it,
+  running it only when its output is stale, and saying what installs it were spread across
+  `external.py`, `io/utils.py`, `io/completion.py` and every aligner, with two byte-identical version
+  detectors between STAR and chromap. They are now one `ExternalTool` — `path`, `version`, `run`,
+  `run_to`, `install_instructions` — with two adapters: the one that shells out, and a recording
+  stand-in that runs nothing. Errors, the freshness rule and the version cache are decided once, so
+  the two cannot drift.
+- **An aligner is given its tool instead of making one, and constructing one runs nothing.** The
+  binary was resolved and asked for its version *in the constructor*, which meant a `STAR(...)` could
+  not exist on a machine without STAR and every test had to patch two names to get one. Both are now
+  answered on first use, and a caller may pass the tool to drive.
+- **A missing aligner raises its install instructions rather than printing them to stderr.** The text
+  is the exception's message, so the caller that catches it has what to do; a library writing to a
+  console its caller may not have was never an error message.
+- **`genome doctor` checks the tools the package actually shells out to.** `samtools`, `faToTwoBit`
+  and `twoBitInfo` — the three that prepare an assembly — where it used to check `bedtools`, which
+  nothing here has ever run, and neither of the two UCSC binaries `prepare_fasta` cannot work
+  without. A tool that is installed but rejects `--version`, as those two do, is reported present
+  rather than left out or raised on. `pixi add` commands now name the conda package rather than the
+  binary, so the command in the error is one that works: `ucsc-fatotwobit`, not `faToTwoBit`.
 - **The suite is two lanes, and together they are a partition of it.** `-m aligner` selects the three
   tests that build a real STAR or chromap index; `-m 'not aligner'` selects everything else. The
   aligner lane used to be the *whole* suite re-run in an environment that also had the binaries,
@@ -131,9 +165,57 @@ preparation is no longer indistinguishable from a finished one.
   not built* marker naming the record, so the vocabulary can run ahead of the implementation without
   reading as an API that exists. No term carries one now: `Chimera`, `Component` and `Merged
   annotation` are all built.
+- **An assembly's annotations are one registry, bound once to that assembly.** Whether an annotation
+  is registered, broken, offered but not begun, or nothing at all used to be assembled from the same
+  three scans in three separate places — as a `Genome` opened, as `genome annotations` reported, and
+  as the error a name nobody registered earned. It is now settled once, and a `Genome` holds one and
+  delegates to it instead of keeping three dictionaries in step by hand. The registry carries the
+  assembly directory it was opened with, so it cannot file an annotation somewhere other than where
+  the caller looking for it is looking.
+- **`Genome.register_gtf` over a directory nothing vouches for now names a command a shell can run**
+  — `genome register-gtf <assembly> <gtf> <name> --force` — rather than the equivalent Python call.
+  A genome knows which assembly it is; only the by-directory `register_gtf`, which does not, still
+  names the call.
+- **`Genome.metadata` is always a record.** It was `AssemblyMetadata | None`, and an assembly the
+  curated table does not list got `None` — so every reader guarded a missing record before reading a
+  field off it, eight times on `Genome` alone. Unlisted is now a record whose fields are unknown,
+  carrying the assembly's own name and nothing else, which is what a blank cell already means
+  everywhere else in that table. Read `genome.metadata.species` and it is `None` when nobody knows,
+  as before; the guard has nowhere left to live. A record passed to `Genome(metadata=...)` still
+  replaces the row wholesale, and passing none is still optional.
+- **Two accessors on the metadata table, because there are two questions.** The new
+  `assembly_metadata(assembly)` is total and answers *what is known about this assembly*;
+  `lookup_assembly(assembly)` still returns `None` and answers *does the curated table list this
+  name*. Only the second question has a `None` answer — it is what tells a chimera's derived name
+  from a free-form local key on a machine holding neither, so making it total would read `my_ref` as
+  a chimera of `my` and `ref` (ADR-0003, ADR-0008). The downloader now works from the total one:
+  `UCSCGenomeDownloader.metadata` is an `AssemblyMetadata` rather than `AssemblyMetadata | None`,
+  so the three places that guarded it before reading a field no longer do. Which name the table
+  lists is asked elsewhere and is untouched.
+- **What a registration answers with has a type.** Nine API functions handed back
+  `dict[str, object]`, so the command line — a thin client — re-narrowed every value it read and
+  knew the completion record's key names by heart. They now return frozen records:
+  `RegisteredAssembly`, `VerifiedAssembly`, `RegisteredAnnotation`, `AnnotationStatus` and its
+  `AnnotationStatusRow`, each with an `as_json()` for the `--json` path; `assembly_table_row`
+  returns the `AssemblyMetadata` it was always describing. **The JSON is unchanged, key for key and
+  in the same order**, and so is every key written to `.completion.json` — the types wrap those
+  names and never rename them. A caller that indexed a returned dict reads an attribute instead, or
+  calls `as_json()` for the mapping it had before.
 
 ### Removed
 
+- **Four annotation steps leave the package surface** — `list_annotations`,
+  `list_broken_annotations`, `default_annotation` and `fetch_annotation` are no longer re-exported
+  from `genome.io`, so `from genome.io import fetch_annotation` breaks. Nothing in the package calls
+  any of them by name; what a caller wants from an assembly's annotations is `AnnotationRegistry`,
+  which takes their place in `genome.io`. They stay importable from `genome.io.gtf`.
+- **The eight metadata pass-throughs on `Genome`** — `assembly_name`, `species`, `ucsc_name`,
+  `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid`, `source_url` and `sha256`. Each was one line
+  guarding a record that is now always there. Read them off the record: `genome.metadata.species`.
+
+- **`genome.external.tool_version` and the loose `_resolve` beside it.** Both are `ExternalTool`
+  now — `InstalledTool(name).version` and `.path` — and an aligner's `_detect_version` and
+  `install_instructions` are gone with them, the tool answering both.
 - **Four tests that asserted nothing the rest of the suite did not.** The smoke test (every module
   imports the package, and the CLI's `version` command is tested on its merits); a `bedtools`
   version check strictly subsumed by `doctor`; and an assertion that `download` re-exports four

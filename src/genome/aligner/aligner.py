@@ -1,12 +1,13 @@
 """General aligner abstraction for building genome indexes.
 
-An :class:`Aligner` wraps one external read-mapper (STAR, chromap, …) and knows
-how to build that aligner's genome index for a :class:`~genome.genome.Genome`.
-The base class owns the cross-aligner plumbing — installation checking, the
-on-disk layout under ``<LIULAB_DATA>/genome/<assembly>/index/<name>/``, and the
-completion record that says a build finished — while each concrete subclass
-supplies the aligner-specific command and its exposed parameters via
-:meth:`Aligner.index`.
+An :class:`Aligner` binds one **External tool** (STAR, chromap, …) to a
+:class:`~genome.genome.Genome` and knows how to build that aligner's index for it.
+The base class owns the cross-aligner plumbing — the on-disk layout at
+``<assembly dir>/index/<name>/`` and the completion record that says a build
+finished — while each concrete subclass supplies the aligner-specific command and
+its exposed parameters via :meth:`Aligner.index`. Locating the binary, asking its
+version, running it and saying what installs it are none of this module's business:
+they belong to :mod:`genome.external`, which every tool in the package goes through.
 
 An index writes the same record as every other build in this package (see
 :mod:`genome.io.completion`), carrying the exact command, the parameters, the
@@ -17,22 +18,23 @@ finished?"; no caller consults an index file's mere existence.
 That record also pins the **digest of the assembly it was built from**, copied
 from the assembly's own record one directory up, so an assembly re-registered
 underneath an index stops reading as a finished index. The comparison is record
-against record and reads no sequence bytes.
+against record and reads no sequence bytes. Both the layout and that record are
+asked of the bound genome's :attr:`~genome.genome.Genome.assembly_dir`, never
+re-derived from the **Data dir**: an index belongs inside the assembly it
+indexes, and only the genome knows where it was opened.
 
 Only index construction is implemented here; mapping/alignment is out of scope.
 """
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from genome.external import ToolNotFoundError, _resolve
+from genome.external import ExternalTool, InstalledTool
 from genome.io.completion import (
     RECORD_NAME,
     WORK_DIR_NAME,
@@ -40,11 +42,9 @@ from genome.io.completion import (
     RegistrationMismatchError,
     build_record,
     check_registration,
-    read_record,
     record_path,
     write_record,
 )
-from genome.io.download import INDEXES_SUBDIR, assembly_data_dir
 
 if TYPE_CHECKING:
     from genome.genome import Genome
@@ -54,6 +54,16 @@ if TYPE_CHECKING:
 #: the record's own ``files`` sizes already hold it to — because ``details`` is
 #: free-form and is read by a human months later.
 _ASSEMBLY_DIGEST_KEY = "assembly_sha256"
+
+
+def _default_tool(binary: str) -> ExternalTool:
+    """Return the **External tool** an aligner drives when it is handed none.
+
+    A seam rather than a shortcut: an aligner takes its tool, and this is only what it
+    falls back to. Anyone holding one already — a test with a recording stand-in, a
+    caller pointing at a build of STAR that is not on ``PATH`` — passes it instead.
+    """
+    return InstalledTool(binary)
 
 
 class IndexNotBuiltError(RuntimeError):
@@ -70,35 +80,32 @@ class Aligner(ABC):
 
     Subclasses set the class attributes :attr:`name` (the lowercase identifier
     used in the index path) and :attr:`binary` (the executable on ``PATH``), and
-    implement :meth:`install_instructions`, :meth:`_detect_version`,
-    :meth:`index`, :attr:`_artifact` and :attr:`_build_arguments`.
+    implement :meth:`index`, :attr:`_artifact` and :attr:`_build_arguments`.
 
-    Constructing an aligner assumes the tool is already installed: it resolves
-    :attr:`binary` and queries its version, and on failure prints installation
-    instructions and raises :class:`~genome.external.ToolNotFoundError`.
+    An aligner is *given* its **External tool** rather than making one, and constructing
+    it runs nothing at all: the binary is located, and its version asked for, the first
+    time either is needed. A binary that is not installed raises
+    :class:`~genome.external.ToolNotFoundError` carrying the install instructions, at the
+    point the build would have started rather than at construction.
 
     Parameters
     ----------
     genome : genome.genome.Genome
         The genome whose reference FASTA will be indexed.
+    tool : genome.external.ExternalTool, optional
+        The tool to drive. Defaults to :attr:`binary` as installed on this machine; pass
+        one to bind the build to a particular executable, or to a recording stand-in.
     """
 
     #: Lowercase identifier used in the index directory path (e.g. ``"star"``).
     name: str
-    #: Executable name expected on ``PATH`` (e.g. ``"STAR"``).
+    #: Executable name expected on ``PATH`` (e.g. ``"STAR"``). What installs it, and
+    #: where its own documentation is, belong to :mod:`genome.external` and not here.
     binary: str
 
-    def __init__(self, genome: Genome) -> None:
+    def __init__(self, genome: Genome, *, tool: ExternalTool | None = None) -> None:
         self._genome = genome
-        try:
-            self._executable: str = _resolve(self.binary)
-            self._version: str = self._detect_version()
-        except (ToolNotFoundError, OSError, subprocess.SubprocessError) as err:
-            print(self.install_instructions(), file=sys.stderr)
-            raise ToolNotFoundError(
-                f"{self.binary!r} is required to build a {self.name} index but could not "
-                f"be run. See the installation instructions above."
-            ) from err
+        self._tool: ExternalTool = _default_tool(self.binary) if tool is None else tool
 
     # -- identity / layout ---------------------------------------------------
 
@@ -109,16 +116,42 @@ class Aligner(ABC):
 
     @property
     def version(self) -> str:
-        """The installed aligner version, detected at construction."""
-        return self._version
+        """The installed aligner version, asked of the binary on first use."""
+        return self._tool.version
+
+    def install_instructions(self) -> str:
+        """Return how to install this aligner — its tool's own text.
+
+        Every aligner owes one, and it is the same text the
+        :class:`~genome.external.ToolNotFoundError` carries, so a caller reading either
+        gets the command to run.
+
+        Returns
+        -------
+        str
+            What to run, naming the bioconda package.
+
+        Examples
+        --------
+        >>> from genome.aligner.star import STAR
+        >>> print(STAR(genome, gtf="gencode_v50").install_instructions())  # doctest: +SKIP
+        STAR is not installed. Add it to the project environment with:
+            pixi add star            # channels: conda-forge, bioconda
+        ...
+        """
+        return self._tool.install_instructions()
 
     @property
     def index_dir(self) -> Path:
         """Directory holding this aligner's index for the assembly.
 
-        ``<LIULAB_DATA>/genome/<assembly>/index/<name>/``.
+        ``<assembly dir>/index/<name>/`` — inside the **Assembly dir** the bound genome
+        was opened in, asked of that genome rather than re-derived from the **Data dir**.
+        The two agree under the ordinary layout and part company for a genome opened
+        somewhere of its own, where re-deriving would put the index beside a different
+        assembly's files and read a completion record that is not there.
         """
-        return assembly_data_dir(self.assembly) / INDEXES_SUBDIR / self.name
+        return self._genome.assembly_dir.index_dir(self.name)
 
     @property
     def index_path(self) -> Path:
@@ -169,14 +202,6 @@ class Aligner(ABC):
         Rendered into ``Genome.build_<name>_index(<here>)`` by
         :meth:`_build_command`; empty when an index needs no selector.
         """
-
-    @abstractmethod
-    def install_instructions(self) -> str:
-        """Human-readable instructions for installing this aligner."""
-
-    @abstractmethod
-    def _detect_version(self) -> str:
-        """Return the installed aligner version string."""
 
     @abstractmethod
     def index(self, *, overwrite: bool = False, **kwargs: Any) -> Path:
@@ -235,7 +260,7 @@ class Aligner(ABC):
             The assembly record's ``sha256``, or ``None`` when the assembly has no
             record, or has one that pins no digest. Both mean *unknown*.
         """
-        record = read_record(assembly_data_dir(self.assembly))
+        record = self._genome.assembly_dir.read_record()
         return None if record is None else record.sha256
 
     def _check_assembly_unchanged(self, record: CompletionRecord) -> None:
@@ -267,7 +292,7 @@ class Aligner(ABC):
         raise RegistrationMismatchError(
             f"the {self.name} index in {self.index_dir} was built from a different "
             f"{self.assembly} than the one registered now: the index pins {built_from}, "
-            f"while {record_path(assembly_data_dir(self.assembly))} now pins {current}. "
+            f"while {self._genome.assembly_dir.record_path} now pins {current}. "
             f"The reference was rebuilt after this index was, so the index no longer "
             f"matches the sequences — or the chromosome names — it would be mapped "
             f"against. Rebuild it with `{self._build_command(overwrite=True)}`."
@@ -290,25 +315,19 @@ class Aligner(ABC):
         The index directory is used as the working directory so any log files
         the tool drops in the CWD stay co-located with the index. The tool's
         stdout/stderr are inherited, so its progress and any error messages
-        stream live to the console rather than being captured.
+        stream live to the console rather than being captured — an index build
+        runs for an hour and a caller watching it wants to see it move.
 
         Raises
         ------
+        genome.external.ToolNotFoundError
+            If the binary is not installed. The message names the command that
+            installs it.
         RuntimeError
             If the tool exits non-zero. The tool's own output (already printed
             above) carries the diagnostic detail.
         """
-        try:
-            subprocess.run(
-                [self._executable, *args],
-                cwd=self.index_dir,
-                check=True,
-            )
-        except subprocess.CalledProcessError as err:
-            raise RuntimeError(
-                f"{self.binary} failed (exit {err.returncode}); see its output above "
-                f"for the error. Args: {list(args)!r}"
-            ) from err
+        self._tool.run(args, cwd=self.index_dir, capture=False)
 
     def _claimed_files(self) -> list[Path]:
         """Return every file in :attr:`index_dir` the finished build is answerable for.
@@ -365,7 +384,6 @@ class Aligner(ABC):
             files=self._claimed_files(),
             details=details,
         )
-        # The version was detected when this aligner was constructed, and the binary
-        # that just ran is that same one — asking it again would run it a second time
-        # for no new information.
+        # The tool remembers the version it reported, and the binary that just ran is
+        # that same one — asking again would run it a second time for no new information.
         write_record(self.index_dir, replace(record, tool_versions={self.binary: self.version}))

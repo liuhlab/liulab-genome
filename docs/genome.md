@@ -100,12 +100,18 @@ sacCer3.chromosomes              # ['chrI', 'chrII', ..., 'chrM'] in reference o
 sacCer3.chrom_sizes              # pandas Series of lengths, indexed by chromosome
 sacCer3.chrom_sizes["chrIV"]     # 1531933
 sacCer3.files                    # GenomeFiles: fasta / fai / twobit / chrom_sizes paths
-sacCer3.source_url               # where the FASTA came from
-sacCer3.sha256                   # digest of the unpacked FASTA (None if unpinned)
+sacCer3.metadata.species         # 'Saccharomyces cerevisiae'
+sacCer3.metadata.ncbi_name       # 'R64-1-1'
+sacCer3.metadata.source_url      # where the FASTA came from
+sacCer3.metadata.sha256          # digest of the unpacked FASTA (None if unpinned)
 ```
 
 `chrom_sizes` is returned as a copy, so mutating it never corrupts the genome's own view.
 `twobit_path`, `fasta_path` and `chrom_sizes_path` are there to hand to other tools.
+
+`metadata` is always a record, so you read a field off it without checking first. For an
+assembly the curated table does not list, every identifier is `None` and `assembly_name`
+is the name you opened — the table is a cross-reference, not an allow-list.
 
 ## Releasing the file handle
 

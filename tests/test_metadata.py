@@ -22,6 +22,7 @@ from genome.metadata import (
     METADATA_FIELDS,
     AnnotationMetadata,
     AssemblyMetadata,
+    assembly_metadata,
     format_table_row,
     list_annotation_metadata,
     lookup_annotation,
@@ -77,6 +78,60 @@ def test_lookup_returns_the_row_for_a_listed_assembly() -> None:
 def test_lookup_returns_none_for_an_unlisted_assembly() -> None:
     # The table is a cross-reference, not an allow-list: no row is not an error.
     assert lookup_assembly("no_such_assembly") is None
+
+
+# --- two questions, two functions --------------------------------------------
+
+
+#: A name a caller might ask for — mostly one nothing lists, sometimes one the shipped
+#: table does, so the total accessor is generated onto both of its answers.
+_ASSEMBLY_NAMES = st.sampled_from(_SHIPPED_ASSEMBLIES) | st.text(
+    alphabet=string.ascii_letters + string.digits + "._-", min_size=1
+)
+
+
+def test_an_unknown_record_carries_the_name_and_nothing_else() -> None:
+    assert AssemblyMetadata.unknown("my_ref") == AssemblyMetadata(
+        assembly_name="my_ref",
+        species=None,
+        ucsc_name=None,
+        ncbi_name=None,
+        ncbi_assembly_id=None,
+        ncbi_taxid=None,
+        source_url=None,
+        sha256=None,
+    )
+
+
+def test_the_total_accessor_hands_back_the_row_when_the_table_lists_one() -> None:
+    assert assembly_metadata("hg38") == lookup_assembly("hg38")
+
+
+def test_the_total_accessor_answers_an_unlisted_assembly_with_an_unknown_record() -> None:
+    # The whole point: *unknown* is a record whose fields are unknown, not the absence of
+    # one, so nothing downstream has to guard a missing row before reading a field.
+    record = assembly_metadata("no_such_assembly")
+    assert record == AssemblyMetadata.unknown("no_such_assembly")
+    assert record.assembly_name == "no_such_assembly"
+    assert all(getattr(record, field) is None for field in METADATA_FIELDS[1:])
+
+
+def test_only_the_lookup_answers_whether_the_table_lists_a_name() -> None:
+    # The two questions are different and stay in different functions. *Is this listed?*
+    # is what separates a chimera's derived name from a free-form local key on a machine
+    # holding neither (ADR-0003), so it keeps its ``None``; making it total would read
+    # every name as listed and resolve ``my_ref`` as a chimera of ``my`` and ``ref``.
+    assert lookup_assembly("my_ref") is None
+    assert assembly_metadata("my_ref") == AssemblyMetadata.unknown("my_ref")
+    assert lookup_assembly("ce11") is not None
+
+
+@given(name=_ASSEMBLY_NAMES)
+def test_the_total_accessor_answers_every_name(name: str) -> None:
+    listed = lookup_assembly(name)
+    assert assembly_metadata(name) == (
+        listed if listed is not None else AssemblyMetadata.unknown(name)
+    )
 
 
 def test_taxid_is_parsed_as_a_python_int() -> None:
@@ -280,6 +335,15 @@ def _parsed(table: pd.DataFrame) -> AssemblyMetadata:
 
 @given(record=_RECORDS)
 def test_a_row_survives_rendering_and_parsing_unchanged(record: AssemblyMetadata) -> None:
+    assert _parsed(_pasted(format_table_row(asdict(record)))) == record
+
+
+@given(name=_CELLS)
+def test_an_unknown_record_survives_rendering_and_parsing_unchanged(name: str) -> None:
+    # An unknown record is a row like any other, and this is the one that says so: it
+    # renders to the line `genome table-row` emits for an assembly nobody has curated —
+    # the name, and every other cell blank — and pasting that line back yields it again.
+    record = AssemblyMetadata.unknown(name)
     assert _parsed(_pasted(format_table_row(asdict(record)))) == record
 
 

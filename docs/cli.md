@@ -15,13 +15,18 @@ $ genome version
 ## `genome doctor`
 
 Report which native tools are on `PATH`, and at what versions. Exits `1` naming the
-install command if one is missing.
+install command if one is missing. A tool that is installed but rejects `--version` — the
+UCSC binaries do — is listed all the same, since presence is what this answers.
 
 ```console
 $ genome doctor
 samtools: samtools 1.21 ...
-bedtools: bedtools v2.31.1
+faToTwoBit: installed; reports no version
+twoBitInfo: installed; reports no version
 ```
+
+STAR and chromap are not checked here: they are optional, and each one checks for itself
+when you ask it to build an index.
 
 ## `genome register <assembly>`
 

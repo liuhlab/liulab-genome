@@ -1,12 +1,20 @@
 """Writing a chimera's FASTA and its merged annotation, from its components.
 
-I/O boundary module, and the third kind of **Source** an assembly can have — a recipe,
-*these components*, rather than a URL (ADR-0008). :class:`ChimeraBuilder` is an
+I/O boundary module, and what a **Source** of the third kind — a recipe, *these
+components*, rather than a URL (ADR-0008) — is turned into. :class:`ChimeraBuilder` is an
 :class:`~genome.io.registration.AssemblyRegistration` whose FASTA is concatenated from
 already-prepared component assemblies instead of fetched, so it shares every other step
 of a registration — the working area, placing the FASTA, deriving the companions, the
 completion record — with :class:`~genome.io.download.UCSCGenomeDownloader`, and reaches
-no network at any point. The way in is :meth:`genome.genome.Genome.chimera`.
+no network at any point. Two ways in: :meth:`genome.genome.Genome.chimera` for components
+a caller already holds open, and :func:`build_chimera` for a name that resolved to a
+component set, which opens them itself.
+
+What a chimera's **Source** *is* — the recipe read back off its completion record, and
+whether the components it names are still the ones it copied — is
+:mod:`genome.io.source`, which this module writes through and re-exports from. That split
+is what lets the downloader answer *is this name a chimera?* without importing anything
+that builds one.
 
 **Nothing here reimplements a tool.** The rule is to shell out, and the burden is
 discharged on evidence rather than waived: no installed tool renames a FASTA header.
@@ -80,7 +88,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -92,69 +101,28 @@ from genome.chimera import (
     derive_separator,
     suffixed,
 )
-from genome.io.completion import (
-    CompletionRecord,
-    RegistrationError,
-    RegistrationMismatchError,
-    read_record,
-    record_path,
-)
+from genome.io.completion import RegistrationError, read_record
 from genome.io.fasta import GenomeFiles, prepare_fasta, read_chrom_sizes
 from genome.io.gtf import (
     GtfAnnotation,
     MergeSource,
-    annotation_dir,
     discard_merged_annotation,
     register_merged_gtf,
 )
-from genome.io.registration import (
-    AssemblyRegistration,
-    assembly_data_dir,
-    assembly_repair_command,
-)
+from genome.io.registration import AssemblyDir, AssemblyRegistration, liulab_data_dir
+
+# The **Source** half, which is where these are written and read. They stay importable
+# from this module, which is where they used to live and where a caller reaching for
+# "what is this chimera made of" still looks first.
+from genome.io.source import COMPONENTS_UNCHANGED as COMPONENTS_UNCHANGED
+from genome.io.source import COMPONENTS_UNKNOWN as COMPONENTS_UNKNOWN
+from genome.io.source import ChimeraDetails as ChimeraDetails
+from genome.io.source import ComponentDetails as ComponentDetails
+from genome.io.source import components_status, is_prepared, merged_annotation_name
+from genome.io.source import read_chimera_details as read_chimera_details
 
 if TYPE_CHECKING:
     from genome.genome import Genome
-
-#: ``details`` key holding the run of underscores this chimera's chromosome names were
-#: written with. Recorded rather than assumed: a component carrying a doubled underscore
-#: of its own forces a longer run, and every later reader must split with the run the
-#: build actually used.
-_SEPARATOR_KEY = "separator"
-
-#: ``details`` key holding one entry per component, in the sorted order the chimera's own
-#: name spells them. A list of objects rather than a mapping, so an entry stays one
-#: self-describing record as later builds add to it.
-_COMPONENTS_KEY = "components"
-
-#: Keys of one entry under :data:`_COMPONENTS_KEY`: the component assembly name, and the
-#: sha256 that component's *own* completion record pinned when this chimera was built —
-#: a record-to-record fact, with no bytes rehashed.
-_COMPONENT_NAME_KEY = "name"
-_COMPONENT_DIGEST_KEY = "sha256"
-
-#: …and the two beside them that describe the **Merged annotation**: which of that
-#: component's annotations went into it, and what that annotation's own record pinned.
-#: ``null`` is a component that contributed nothing to a merge that did happen. A build
-#: that registered no merged annotation at all omits both keys instead, exactly as
-#: ``tool_versions`` omits a tool that never answered — an absent key is a fact nobody
-#: gathered, which is not the same as a fact whose answer is *none*.
-_COMPONENT_ANNOTATION_KEY = "annotation"
-_COMPONENT_ANNOTATION_DIGEST_KEY = "annotation_sha256"
-
-#: What joins the contributing annotations' names into the merged one's. Deliberately not
-#: the ``_`` that joins component names into a chimera's own: one name, read left to
-#: right, then says which level each join is at.
-_ANNOTATION_JOIN = "+"
-
-#: Every component of this chimera was compared against its own record and is still what
-#: it was. The strong answer :func:`components_status` can give.
-COMPONENTS_UNCHANGED = "unchanged"
-
-#: A comparison could not be made — a digest is absent on one side or the other — so this
-#: chimera is *unproven* rather than proven stale. Reported instead of left silent,
-#: because a caller who cannot tell the two apart reads the weaker one as the stronger.
-COMPONENTS_UNKNOWN = "unknown"
 
 #: A FASTA header split into the whitespace that follows ``>``, the sequence name after
 #: it, and everything after that. The leading run is its own group because ``samtools
@@ -190,320 +158,76 @@ class AmbiguousDefaultAnnotationError(ValueError):
     """
 
 
-@dataclass(frozen=True)
-class ComponentDetails:
-    """What a chimera's completion record says about one of its components.
+def build_chimera(
+    assembly_dir: AssemblyDir, components: Sequence[str], *, overwrite: bool = False
+) -> GenomeFiles:
+    """Concatenate ``components`` into the assembly at ``assembly_dir``, opening each to do it.
 
-    One entry of the ``details`` shape :class:`ChimeraBuilder` writes, read back. Every
-    field is a fact about the component *at the time this chimera was built*, taken from
-    that component's own records rather than by rehashing anything — which is what lets a
-    later pass notice a component re-registered underneath the chimera.
+    What a :class:`~genome.io.source.ComponentSource` is turned into: the registration
+    resolved a name to a component set and this is the only thing that can act on one, since
+    a component is read as a whole :class:`~genome.genome.Genome`.
 
-    Attributes
-    ----------
-    name : str
-        The **Component** assembly name.
-    sha256 : str or None
-        The digest that component's completion record pinned, or ``None`` when it pinned
-        none — *unknown*, rather than wrong.
-    annotation : str or None
-        The **Registered name** of the annotation it contributed to the **Merged
-        annotation**, or ``None`` when it contributed none.
-    annotation_sha256 : str or None
-        That annotation's own recorded digest, or ``None``.
+    The gate on a name that resolves to a chimera is here. Every component must already be
+    prepared under the shared data root: a machine that is missing one **raises**, naming it
+    and the command that prepares it, rather than turning one mistyped string into a
+    whole-genome download per part — which is the cost of guessing wrong, and the reason the
+    name alone never fetches anything.
 
-    Examples
-    --------
-    >>> ComponentDetails("ce11", "1a2b3c", "wormbase_ws298", "4d5e6f").annotation
-    'wormbase_ws298'
-    """
-
-    name: str
-    sha256: str | None
-    annotation: str | None
-    annotation_sha256: str | None
-
-
-@dataclass(frozen=True)
-class ChimeraDetails:
-    """What a chimera's completion record says about the build that produced it.
-
-    The reader of the ``details`` shape :class:`ChimeraBuilder` writes, so that nothing
-    else has to know its keys. It answers the only question that decides whether an
-    assembly is a **Chimera** at runtime — the record, never the metadata row — and
-    carries the facts a later pass needs: the separator its chromosome names were written
-    with, and what each component and each contributed annotation was at build time.
-
-    Attributes
-    ----------
-    separator : str
-        The run of underscores this chimera's chromosome names carry.
-    component_details : tuple of ComponentDetails
-        One entry per **Component**, in the sorted order the chimera's name spells them.
-
-    Examples
-    --------
-    >>> details = ChimeraDetails(
-    ...     "__",
-    ...     (
-    ...         ComponentDetails("ce11", "1a2b3c", "wormbase_ws298", "4d5e6f"),
-    ...         ComponentDetails("ecHT115", "7a8b9c", None, None),
-    ...     ),
-    ... )
-    >>> details.components
-    ['ce11', 'ecHT115']
-    """
-
-    separator: str
-    component_details: tuple[ComponentDetails, ...]
-
-    @property
-    def components(self) -> list[str]:
-        """The component assembly names, sorted — a fresh list each call."""
-        return [entry.name for entry in self.component_details]
-
-    @property
-    def merged_annotation(self) -> str | None:
-        """The **Registered name** of the **Merged annotation** this build wrote, or ``None``.
-
-        Read back rather than looked up: the name is the contributing annotations' names
-        joined by ``+`` in sorted-component order, which is what :func:`_merged_name` spelled
-        when the merge was registered. ``None`` when no component contributed one, which is
-        a build that registered no annotation at all rather than an empty one.
-
-        Examples
-        --------
-        >>> ChimeraDetails(
-        ...     "__",
-        ...     (
-        ...         ComponentDetails("ce11", "1a2b3c", "wormbase_ws298", "4d5e6f"),
-        ...         ComponentDetails("ecHT115", "7a8b9c", None, None),
-        ...     ),
-        ... ).merged_annotation
-        'wormbase_ws298'
-        """
-        contributed = [
-            entry.annotation for entry in self.component_details if entry.annotation is not None
-        ]
-        return _ANNOTATION_JOIN.join(contributed) if contributed else None
-
-    @classmethod
-    def from_record(cls, record: CompletionRecord | None) -> ChimeraDetails | None:
-        """Read a completion record's chimera details, or ``None`` when it has none.
-
-        :meth:`from_details` over the record's ``details``, and ``None`` for an absent
-        record — the shape a caller holding a record rather than a payload wants.
-
-        Parameters
-        ----------
-        record : genome.io.completion.CompletionRecord or None
-            The record to read, as :func:`~genome.io.completion.read_record` returns it.
-
-        Returns
-        -------
-        ChimeraDetails or None
-            The details, or ``None`` when the record is not a chimera's.
-
-        Examples
-        --------
-        >>> ChimeraDetails.from_record(None) is None
-        True
-        """
-        return None if record is None else cls.from_details(record.details)
-
-    @classmethod
-    def from_details(cls, details: Mapping[str, Any]) -> ChimeraDetails | None:
-        """Read a completion record's ``details``, or ``None`` when they are not a chimera's.
-
-        ``None`` means *this is not a chimera* — the details of an ordinary downloaded or
-        seeded assembly, or ones that do not carry the shape a chimera build writes. Those
-        read alike on purpose: nothing but a build of this package's own writing may make
-        an assembly answer as a chimera.
-
-        The two annotation fields are optional, and a build that registered no merged
-        annotation writes neither; both then read as ``None``.
-
-        Taking the mapping rather than the record is what lets a caller that already holds
-        one — the CLI, whose ``register`` payload *is* the record — answer from what it has
-        instead of reading the same file again.
-
-        Parameters
-        ----------
-        details : mapping of str to object
-            A registration record's ``details``. Anything else it holds is ignored, and an
-            empty mapping reads as *not a chimera*.
-
-        Returns
-        -------
-        ChimeraDetails or None
-            The details, or ``None`` when they are not a chimera build's.
-
-        Examples
-        --------
-        >>> ChimeraDetails.from_details({}) is None
-        True
-        """
-        separator = details.get(_SEPARATOR_KEY)
-        entries = details.get(_COMPONENTS_KEY)
-        if not isinstance(separator, str) or not isinstance(entries, list):
-            return None
-        components: list[ComponentDetails] = []
-        for entry in entries:
-            if not isinstance(entry, dict) or not isinstance(entry.get(_COMPONENT_NAME_KEY), str):
-                return None
-            components.append(
-                ComponentDetails(
-                    name=entry[_COMPONENT_NAME_KEY],
-                    sha256=_text(entry.get(_COMPONENT_DIGEST_KEY)),
-                    annotation=_text(entry.get(_COMPONENT_ANNOTATION_KEY)),
-                    annotation_sha256=_text(entry.get(_COMPONENT_ANNOTATION_DIGEST_KEY)),
-                )
-            )
-        return cls(separator=separator, component_details=tuple(components))
-
-
-def read_chimera_details(directory: Path) -> ChimeraDetails | None:
-    """Return the chimera details recorded in ``directory``, or ``None`` when it has none.
-
-    :meth:`ChimeraDetails.from_record` over :func:`~genome.io.completion.read_record` —
-    the one call that answers *is the assembly registered here a chimera?*, and the only
-    thing :attr:`genome.genome.Genome.components` consults.
+    Each component is opened and closed again around the build, so a build that raises
+    leaves no ``.2bit`` handle behind.
 
     Parameters
     ----------
-    directory : pathlib.Path
-        An **Assembly dir** — the directory a registration filled.
+    assembly_dir : genome.io.registration.AssemblyDir
+        Where the chimera is built. Its name must be the one ``components`` derive, which
+        is what resolving the name guaranteed.
+    components : sequence of str
+        The **Component** assembly names, in the sorted order the chimera's name spells
+        them.
+    overwrite : bool, default False
+        Build again from scratch — the repair for a directory that raises.
 
     Returns
     -------
-    ChimeraDetails or None
-        The details, or ``None`` for an assembly that is not a chimera (or is not
-        registered at all).
-
-    Examples
-    --------
-    >>> from pathlib import Path
-    >>> read_chimera_details(Path("/tmp/definitely-not-a-build")) is None
-    True
-    """
-    return ChimeraDetails.from_record(read_record(directory))
-
-
-def components_status(directory: Path, assembly: str) -> str | None:
-    """Check every component of the assembly in ``directory``, and report the answer.
-
-    The one failure a digest of a chimera's own bytes cannot show. Those bytes are a copy
-    of its components', so a component registered again underneath it leaves the chimera
-    intact, agreeing with its own record, and no longer a copy of anything that exists —
-    silently stale sequence, and stale gene models one level down. Both are caught here,
-    and both are **record against record**: the digests this chimera wrote down are
-    compared against the ones the components' own records pin now, so this reads a
-    handful of small JSON files and not one base of sequence.
-
-    One entry point for two needs, because they are one comparison. A component proved to
-    have changed **raises**, wherever the question was asked from — reopening a finished
-    chimera, rebuilding one, verifying one. What is *returned* is what nothing raised over,
-    and a caller that only wants the refusal ignores it: a comparison that could not be
-    made is :data:`COMPONENTS_UNKNOWN` and is not a pass, and a surface silent about it
-    would say exactly what it says when everything agreed.
-
-    An assembly with no components recorded has nothing to compare and returns at once,
-    which is what makes an ordinary assembly pay nothing rather than be asked about.
-    Likewise an absent digest on either side, which means *unknown* rather than wrong: a
-    component that pinned none, or an annotation registered before its digest was
-    recorded, leaves that component unguarded rather than refused.
-
-    Parameters
-    ----------
-    directory : pathlib.Path
-        The **Assembly dir** the chimera was built in.
-    assembly : str
-        Its assembly name, quoted in the error along with the command that repairs it.
-
-    Returns
-    -------
-    str or None
-        :data:`COMPONENTS_UNCHANGED` when every component was compared and agreed,
-        :data:`COMPONENTS_UNKNOWN` when any comparison could not be made, and ``None`` for
-        an assembly that is not a chimera — which has no components to be asked about.
+    genome.io.fasta.GenomeFiles
+        Paths to the written FASTA and its three derived files.
 
     Raises
     ------
-    genome.io.completion.RegistrationMismatchError
-        If a component's FASTA, or the annotation it contributed to the **Merged
-        annotation**, is not the one this chimera was built from. The message names both
-        digests and ``genome register <assembly> --force``, which rebuilds both halves.
+    FileNotFoundError
+        If any component is not registered on this machine; the message names each missing
+        one and the command that prepares it.
+
+    See Also
+    --------
+    ChimeraBuilder.build_genome : everything this then runs, and what else it raises.
 
     Examples
     --------
-    >>> from pathlib import Path
-    >>> components_status(Path("/tmp/definitely-not-a-build"), "notAChimera") is None
-    True
+    >>> from genome.io.registration import AssemblyDir
+    >>> build_chimera(AssemblyDir.locate("ce11_ecHT115"), ("ce11", "ecHT115"))  # doctest: +SKIP
+    GenomeFiles(fasta=PosixPath('.../ce11_ecHT115.fa'), ...)
     """
-    details = read_chimera_details(directory)
-    if details is None:
-        return None
-    compared = [
-        _component_was_compared(entry, assembly=assembly, directory=directory)
-        for entry in details.component_details
-    ]
-    return COMPONENTS_UNCHANGED if all(compared) else COMPONENTS_UNKNOWN
+    # Deferred, and not for a layering slip: a component is a whole prepared genome, so
+    # opening one is the top of the stack reaching back down — `genome.genome` imports this
+    # module to build a chimera from components a caller already holds.
+    from genome.genome import Genome
 
-
-def _component_was_compared(entry: ComponentDetails, *, assembly: str, directory: Path) -> bool:
-    """Return whether one component was compared at all — raising unless it is still itself.
-
-    Two digests are looked at, the component's FASTA and then the annotation it
-    contributed, and one absent on either side leaves nothing compared: the answer is
-    ``False``, which is how a caller reporting the outcome says *unknown* rather than
-    claiming a pass nobody checked. A comparison that was made and disagreed raises.
-
-    The component is found by name under the shared data root, exactly as an aligner index
-    finds the assembly it was built from: a chimera's record carries component names and
-    no paths, which is what keeps a registered directory movable.
-    """
-    component_dir = assembly_data_dir(entry.name)
-    record = read_record(component_dir)
-    current = None if record is None else record.sha256
-    if _disagree(entry.sha256, current):
-        raise RegistrationMismatchError(
-            f"the chimera {assembly} in {directory} was built from a different "
-            f"{entry.name} than the one registered now: it recorded {entry.sha256} for "
-            f"that component, and {record_path(component_dir)} now pins {current}. "
-            f"{entry.name} was registered again afterwards, so the sequences it "
-            f"contributed here are a copy of bytes that are no longer anywhere — which "
-            f"nothing about this chimera's own files can show, since they are unchanged. "
-            f"Build it again with `{assembly_repair_command(assembly)}`."
+    missing = [name for name in components if not is_prepared(name)]
+    if missing:
+        listed = ", ".join(missing)
+        commands = ", ".join(f"`genome register {name}`" for name in missing)
+        raise FileNotFoundError(
+            f"{assembly_dir.assembly} is a chimera of {', '.join(components)}, and a chimera "
+            f"copies the bytes of components that are already prepared: {listed} is not "
+            f"registered under {liulab_data_dir()}. Nothing was downloaded, because "
+            f"naming a chimera is not a way to ask for its parts. Prepare what is "
+            f"missing with {commands}, then run this again."
         )
-    known = _both_known(entry.sha256, current)
-    if entry.annotation is None:
-        return known
-    gtf_dir = annotation_dir(component_dir, entry.annotation)
-    annotation = read_record(gtf_dir)
-    current_annotation = None if annotation is None else annotation.sha256
-    if _disagree(entry.annotation_sha256, current_annotation):
-        raise RegistrationMismatchError(
-            f"the merged annotation of the chimera {assembly} in {directory} was merged "
-            f"from a different {entry.annotation} of {entry.name}: it recorded "
-            f"{entry.annotation_sha256} for that annotation, and {record_path(gtf_dir)} "
-            f"now pins {current_annotation}. That annotation was registered again after "
-            f"the merge, so the merged gene models are not the ones {entry.name} carries "
-            f"— the failure the sequence digests cannot show, since no base of this "
-            f"chimera's FASTA changed. Build it again with "
-            f"`{assembly_repair_command(assembly)}`, which rewrites the annotation and "
-            f"the FASTA together."
-        )
-    return known and _both_known(entry.annotation_sha256, current_annotation)
-
-
-def _disagree(recorded: str | None, current: str | None) -> bool:
-    """Whether two recorded digests are known to differ — unknown on either side is not."""
-    return recorded is not None and current is not None and recorded != current
-
-
-def _both_known(recorded: str | None, current: str | None) -> bool:
-    """Whether two recorded digests were both there to be compared."""
-    return recorded is not None and current is not None
+    with ExitStack() as opened:
+        genomes = [opened.enter_context(Genome(name, progressbar=False)) for name in components]
+        files = ChimeraBuilder(genomes, assembly_dir.path).build_genome(overwrite=overwrite)
+    return files
 
 
 @dataclass(frozen=True)
@@ -673,7 +397,7 @@ class ChimeraBuilder(AssemblyRegistration):
             # answer is asked here — before a stale chimera is handed back as finished.
             # Its refusal is what is wanted; the answer it returns is for a surface to
             # print, and there is none here.
-            components_status(self.cache_dir, self.assembly)
+            components_status(self.dir)
             return registered
         # Settled here rather than beside the merge, so that a component naming an
         # annotation this machine has not registered costs nothing: the two refusals below
@@ -873,74 +597,48 @@ class ChimeraBuilder(AssemblyRegistration):
     ) -> dict[str, Any]:
         """Return what this build records about itself beyond the files it wrote.
 
-        The separator its chromosome names carry, and one entry per component. Kept to
-        facts a later pass cannot re-derive from the name alone: which spelling was used,
-        what each component was when this chimera was built, and — when there is a merged
-        annotation — which of each component's annotations went into it.
+        The separator its chromosome names carry, and one entry per component, in the
+        shape :class:`~genome.io.source.ChimeraDetails` reads back — which is where the
+        keys are spelled, so the writing and the reading cannot drift.
         """
-        return {
-            _SEPARATOR_KEY: self.separator,
-            _COMPONENTS_KEY: [
-                self._component_details(component, contributions[component.assembly], merged=merged)
+        return ChimeraDetails(
+            separator=self.separator,
+            component_details=tuple(
+                self._component_details(component, contributions[component.assembly])
                 for component in self.components
-            ],
-        }
+            ),
+        ).as_details(merged=merged)
 
     def _component_details(
-        self, component: Genome, contribution: _Contribution | None, *, merged: bool
-    ) -> dict[str, Any]:
-        """Return one component's entry: what it was, and what it contributed.
+        self, component: Genome, contribution: _Contribution | None
+    ) -> ComponentDetails:
+        """Return one component's facts: what it was, and what it contributed.
 
         Record to record throughout — the component's completion record already holds the
         sha256 of its FASTA and its annotation's holds that annotation's, so nothing is
         rehashed here. ``None`` for a digest a record pinned none of, which reads as
-        unknown rather than as wrong. The two annotation keys are written only when a
-        merged annotation was registered; a build that registered none says nothing about
-        annotations at all rather than writing ``null`` beside every component.
+        unknown rather than as wrong.
         """
         # The component's own **Assembly dir**, which is where its FASTA sits. Asked of
         # the component rather than derived from its name, since a component may be
         # registered somewhere other than the shared data root.
         record = read_record(component.fasta_path.parent)
-        entry: dict[str, Any] = {
-            _COMPONENT_NAME_KEY: component.assembly,
-            _COMPONENT_DIGEST_KEY: None if record is None else record.sha256,
-        }
-        if merged:
-            entry[_COMPONENT_ANNOTATION_KEY] = (
-                None if contribution is None else contribution.annotation
-            )
-            entry[_COMPONENT_ANNOTATION_DIGEST_KEY] = (
-                None if contribution is None else contribution.sha256
-            )
-        return entry
+        return ComponentDetails(
+            name=component.assembly,
+            sha256=None if record is None else record.sha256,
+            annotation=None if contribution is None else contribution.annotation,
+            annotation_sha256=None if contribution is None else contribution.sha256,
+        )
 
 
 def _merged_name(sources: Sequence[MergeSource]) -> str:
     """Return the **Registered name** the merge of ``sources`` is filed under.
 
-    The contributing annotations' names joined by ``+``, in the sorted-component order the
-    chimera's own name spells — ``wormbase_ws298+refseq_rs_2025_06_26``. Derived, like
-    everything else about a chimera, so it changes the moment any component's default
-    annotation does and a database built from the old set can never be found under it.
-
-    It needs no parse-back: what a merged annotation is made of is recovered from the
-    components, and written down in its own record besides. And it is not asked to carry
-    *which* components contributed — a chimera with a component that contributes nothing
-    spells the same name a different subset would — which is why
-    :func:`~genome.io.gtf.register_merged_gtf` adopts nothing from disk and writes the
-    annotation every time it runs.
+    :func:`~genome.io.source.merged_annotation_name` over what contributed, in the
+    sorted-component order the chimera's own name spells. The join lives there because a
+    record read back has to recover the same name from the same parts.
     """
-    return _ANNOTATION_JOIN.join(source.annotation for source in sources)
-
-
-def _text(value: Any) -> str | None:
-    """Return ``value`` when it is a string, else ``None`` — a record field read loosely.
-
-    A record is JSON somebody else's version may have written, so a field that is absent,
-    null or the wrong type all read as *not known*, and none of them raises.
-    """
-    return value if isinstance(value, str) else None
+    return merged_annotation_name([source.annotation for source in sources])
 
 
 def _check_not_nested(components: Sequence[Genome]) -> None:

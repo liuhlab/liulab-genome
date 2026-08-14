@@ -13,7 +13,6 @@ through ``**kwargs``.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -33,28 +32,12 @@ class Chromap(Aligner):
     ----------
     genome : genome.genome.Genome
         The genome whose reference FASTA will be indexed.
+    tool : genome.external.ExternalTool, optional
+        As :class:`~genome.aligner.aligner.Aligner`.
     """
 
     name = "chromap"
     binary = "chromap"
-
-    def install_instructions(self) -> str:
-        """Return how to install chromap (bioconda)."""
-        return (
-            "chromap is not installed. Install it from bioconda, e.g.:\n"
-            "    pixi add chromap         # into the project environment\n"
-            "See https://github.com/haowenz/chromap for details."
-        )
-
-    def _detect_version(self) -> str:
-        """Return the version reported by ``chromap --version`` (e.g. ``0.3.2-r518``)."""
-        result = subprocess.run(
-            [self._executable, "--version"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return (result.stdout or result.stderr).strip()
 
     @property
     def _artifact(self) -> Path:

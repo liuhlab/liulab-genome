@@ -1,9 +1,10 @@
 # Assembly
 
 What an assembly is on disk, and what it costs to make it so. This context covers `genome.py`,
-`metadata.py`, `external.py` and `io/{download,registration,fasta,twobit,utils}.py`: a name becomes a
-directory of prepared files, everything in that directory is derivable from one FASTA, and nothing is
-derived twice.
+`metadata.py`, `external.py`, `chimera.py` and
+`io/{source,download,chimera,registration,fasta,twobit,utils}.py`: a
+name becomes a directory of prepared files, everything in that directory is derivable from one FASTA,
+and nothing is derived twice.
 
 Words every context shares — **Assembly**, **Genome**, **Chromosome**, **Region**, **Data dir** and
 the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
@@ -44,14 +45,16 @@ into a download.
 _Avoid_: fetcher, client, mirror, provider
 
 **Source**:
-Where an assembly's **FASTA** comes from when no golden-path URL is derived, in three kinds: the URL
-its **Assembly metadata** row pins, the local path or URL handed to `Genome(path_or_url=...)`, or a
-recipe — *these components* — which is what makes a **Chimera** an assembly rather than a type of
-its own (ADR-0008). Naming a source means UCSC is never consulted about the assembly name —
-validation is a property of the source — and only a pinned source is checked against a recorded
-checksum; a hand-supplied one is trusted as given and degrades the assembly name to a label for the
-directory. That last clause is about hand-supplied bytes alone: a chimera's name is derived from its
-component set, so it identifies the assembly rather than labelling its directory.
+Where an assembly's **FASTA** comes from, resolved from the name alone before anything is fetched
+(`src/genome/io/source.py`) into one of three kinds: a URL — the one its **Assembly metadata** row
+pins, else the golden path derived from the name — the local path or URL handed to
+`Genome(path_or_url=...)`, or a recipe, *these components*, which is what makes a **Chimera** an
+assembly rather than a type of its own (ADR-0008). *Pinning* or *naming* a source means UCSC is
+never consulted about the assembly name — validation is a property of the source, so only a derived
+URL is checked — and only a pinned source is checked against a recorded checksum; a hand-supplied
+one is trusted as given and degrades the assembly name to a label for the directory. That last
+clause is about hand-supplied bytes alone: a chimera's name is derived from its component set, so it
+identifies the assembly rather than labelling its directory.
 _Avoid_: input, custom genome, reference; and `source_url` as the column a recipe lands in — that
 field is typed and read as a URL, so a component list there is a lie the parser cannot catch
 

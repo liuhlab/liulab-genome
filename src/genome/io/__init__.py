@@ -20,7 +20,9 @@ from genome.io.completion import (
 )
 from genome.io.download import (
     Downloader,
+    RegisteredAssembly,
     UCSCGenomeDownloader,
+    VerifiedAssembly,
     assembly_data_dir,
     assembly_table_row,
     liulab_data_dir,
@@ -35,18 +37,25 @@ from genome.io.fasta import (
     read_chrom_sizes,
     twobit_to_chrom_sizes,
 )
+
+# Four names the registry absorbed are deliberately absent — `list_annotations`,
+# `list_broken_annotations`, `default_annotation` and `fetch_annotation`. Each is now
+# reached through `AnnotationRegistry`, nothing in the package calls them by name, and
+# what a caller wants from an assembly's annotations is the registry rather than the
+# four steps it takes internally. They stay importable from `genome.io.gtf` for the
+# tests that hold each rule on its own.
 from genome.io.gtf import (
     AnnotationNotRegisteredError,
+    AnnotationRegistry,
+    AnnotationStatus,
+    AnnotationStatusRow,
     BrokenAnnotation,
     ChromosomeMismatchError,
     GtfAnnotation,
+    RegisteredAnnotation,
     annotation_dir,
     annotation_status,
     chromosome_check_summary,
-    default_annotation,
-    fetch_annotation,
-    list_annotations,
-    list_broken_annotations,
     register_annotation,
     register_annotation_by_path,
     register_gtf,
@@ -56,6 +65,9 @@ from genome.io.utils import ChecksumMismatchError, sha256_file
 
 __all__ = [
     "AnnotationNotRegisteredError",
+    "AnnotationRegistry",
+    "AnnotationStatus",
+    "AnnotationStatusRow",
     "BrokenAnnotation",
     "ChecksumMismatchError",
     "ChromosomeMismatchError",
@@ -64,11 +76,14 @@ __all__ = [
     "FileDisagreement",
     "GenomeFiles",
     "GtfAnnotation",
+    "RegisteredAnnotation",
+    "RegisteredAssembly",
     "RegistrationError",
     "RegistrationMismatchError",
     "TwoBit",
     "UCSCGenomeDownloader",
     "UnfinishedRegistrationError",
+    "VerifiedAssembly",
     "annotation_dir",
     "annotation_status",
     "assembly_data_dir",
@@ -76,13 +91,9 @@ __all__ = [
     "build_record",
     "check_registration",
     "chromosome_check_summary",
-    "default_annotation",
     "disagreements",
     "faidx",
     "fasta_to_2bit",
-    "fetch_annotation",
-    "list_annotations",
-    "list_broken_annotations",
     "liulab_data_dir",
     "prepare_fasta",
     "read_chrom_sizes",

@@ -18,11 +18,21 @@ import pytest
 
 import genome.genome as genome_mod
 from genome import DNA, Genome, Region
-from genome.io.completion import RegistrationMismatchError, read_record, record_path
+from genome.io.completion import (
+    RegistrationMismatchError,
+    UnfinishedRegistrationError,
+    read_record,
+    record_path,
+)
 from genome.io.download import register_assembly
 from genome.io.fasta import prepare_fasta
 from genome.io.gtf import AnnotationNotRegisteredError, annotation_dir, register_gtf
-from genome.metadata import METADATA_FIELDS, AnnotationMetadata, AssemblyMetadata
+from genome.metadata import (
+    METADATA_FIELDS,
+    AnnotationMetadata,
+    AssemblyMetadata,
+    lookup_assembly,
+)
 
 from .conftest import FakeFetch
 
@@ -182,7 +192,7 @@ def test_metadata_record_replaces_the_curated_row(prepared_dir: Path) -> None:
     # sacCer3 is listed in the shipped table; a record given here wins over every field of it.
     with Genome("sacCer3", cache_dir=prepared_dir, metadata=_OVERRIDE) as g:
         assert g.metadata == _OVERRIDE
-        assert [getattr(g, field) for field in METADATA_FIELDS] == [
+        assert [getattr(g.metadata, field) for field in METADATA_FIELDS] == [
             "tinyAsm",
             "Testus minimus",
             "tinyUcsc",
@@ -196,24 +206,42 @@ def test_metadata_record_replaces_the_curated_row(prepared_dir: Path) -> None:
 
 def test_metadata_falls_back_to_the_curated_table(prepared_dir: Path) -> None:
     with Genome("sacCer3", cache_dir=prepared_dir) as g:
-        assert g.assembly_name == "sacCer3"
-        assert g.species == "Saccharomyces cerevisiae"
-        assert g.ucsc_name == "sacCer3"
-        assert g.ncbi_name == "R64-1-1"
-        assert g.ncbi_assembly_id == "GCF_000146045.2"
-        assert g.ncbi_taxid == 559292
-        assert g.source_url == (
+        assert g.metadata == lookup_assembly("sacCer3")
+        assert g.metadata.assembly_name == "sacCer3"
+        assert g.metadata.species == "Saccharomyces cerevisiae"
+        assert g.metadata.ucsc_name == "sacCer3"
+        assert g.metadata.ncbi_name == "R64-1-1"
+        assert g.metadata.ncbi_assembly_id == "GCF_000146045.2"
+        assert g.metadata.ncbi_taxid == 559292
+        assert g.metadata.source_url == (
             "https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz"
         )
-        assert g.sha256 == "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3"
+        assert (
+            g.metadata.sha256 == "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3"
+        )
 
 
 def test_assembly_absent_from_the_table_still_constructs(prepared_dir: Path) -> None:
-    # The table is a cross-reference, not an allow-list: every identifier is simply unknown.
+    # The table is a cross-reference, not an allow-list: every identifier is simply
+    # unknown — and unknown is a record whose fields are unknown, never a missing record,
+    # so reading one off the genome needs no guard.
     with Genome("tiny", cache_dir=prepared_dir) as g:
-        assert g.metadata is None
-        assert all(getattr(g, field) is None for field in METADATA_FIELDS)
+        assert g.metadata == AssemblyMetadata.unknown("tiny")
+        assert g.metadata.assembly_name == "tiny"
+        assert all(getattr(g.metadata, field) is None for field in METADATA_FIELDS[1:])
         assert g.chromosomes == ["chrA", "chrB"]
+
+
+def test_an_unknown_record_never_makes_an_unlisted_name_read_as_listed(
+    prepared_dir: Path,
+) -> None:
+    # The genome's metadata is total; *does the curated table list this name?* is not, and
+    # it is a different question — the one that separates a chimera's derived name from a
+    # free-form local key on a machine holding neither (ADR-0003). An unknown record
+    # answering the second would make every name a listed one.
+    with Genome("tiny", cache_dir=prepared_dir) as g:
+        assert g.metadata == AssemblyMetadata.unknown("tiny")
+        assert lookup_assembly(g.assembly) is None
 
 
 #: A record injected instead of the shipped table's row: it pins a URL, so nothing
@@ -240,7 +268,7 @@ def test_registering_an_assembly_records_it_and_reopening_costs_no_fetch(
 
     with Genome("hg38", cache_dir=tmp_path, progressbar=False, metadata=unpinned) as first:
         assert first.chromosomes == ["chrI", "chrII", "chrIII"]
-        source_url, opening = first.source_url, first.fetch_sequence("chrI:0-4")
+        source_url, opening = first.metadata.source_url, first.fetch_sequence("chrI:0-4")
 
     record = read_record(tmp_path)
     assert record is not None
@@ -472,6 +500,25 @@ class TestOfferedAgainstRegistered:
             assert g.broken_annotations == []
             assert g.annotations == ["mine"]
             assert g.get_gtf_path("mine").is_file()
+
+    def test_registering_a_gtf_over_a_broken_directory_names_a_command_not_a_call(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        # A genome knows which assembly it is, so the repair it names is a command a
+        # shell can run — the by-directory form, which knows no assembly name, is the
+        # only one that has to fall back on naming the Python call.
+        directory = annotation_dir(yeast_dir, "mine")
+        directory.mkdir(parents=True)
+        (directory / "mine.db").write_bytes(b"half a database")
+        source = data_dir / "tiny.gtf"
+
+        with (
+            Genome("tiny", cache_dir=yeast_dir) as g,
+            pytest.raises(UnfinishedRegistrationError) as excinfo,
+        ):
+            g.register_gtf(source, "mine")
+
+        assert f"genome register-gtf tiny {source} mine --force" in str(excinfo.value)
 
     def test_a_name_nothing_knows_says_what_is_registered_and_what_is_offered(
         self, prepared_dir: Path
