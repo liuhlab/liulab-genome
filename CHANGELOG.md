@@ -127,6 +127,14 @@ preparation is no longer indistinguishable from a finished one.
   test-aligner` now refuses to select until both binaries answer `--version`, so that lane cannot
   report green having built nothing. `_needs` in `tests/test_aligner.py` applies the marker and the
   skip under one name, so they cannot come apart.
+- **The other lane refuses to run without its tools too.** `pixi run check` and `pixi run test` now
+  front `scripts/require_tools.sh`, which proves `samtools`, `faToTwoBit` and `twoBitInfo` answer
+  before either selects a test. With those three off `PATH` the unit lane reported 136 skipped, 694
+  passed and exit 0 — every test that writes a real FASTA, `.2bit`, chrom.sizes or annotation
+  database skipping itself green, so "check is green" covered 694 of 830 tests. The per-test skips
+  stay and are still right; what ends is a lane that passes having built nothing. The two UCSC
+  binaries reject `--version`, so the probe runs each bare and reads who answered: the shell's 127
+  and 126 mean absent and unrunnable, and any other status came from the binary itself.
 - **The suite runs on eight workers and the gate runs its steps concurrently.** `pytest -n auto
   --maxprocesses 8`: 2.8 s against 5.9 s serial, `auto` finding fewer cores on a small CI runner
   where the cap does not bind. `pixi run check` moved off a sequential `depends-on` onto
