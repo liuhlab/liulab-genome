@@ -8,8 +8,10 @@ Notes
 -----
 - Construction does **not** validate the alphabet: scanning every character is
   prohibitively expensive on large sequences (whole chromosomes), so the
-  subclass alphabet is documentation, not a runtime check. Validate at the I/O
-  boundary if you need to reject non-alphabet input.
+  subclass alphabet is documentation, not a runtime check. Reject non-alphabet
+  input at the I/O boundary, where the scan is paid for once, and ask the class
+  itself what offends it — :meth:`_Seq.outside_alphabet` is that question, so no
+  caller has to spell the alphabet a second time.
 - The stored value is **preserved verbatim**, including case (lowercase carries
   meaning — soft-masking).
 - Slicing and indexing return the **same subclass**, not a plain :class:`str`.
@@ -30,6 +32,8 @@ DNA('CgAt')
 RNA('AUCG')
 >>> DNA("GGCC").gc_content
 1.0
+>>> DNA.outside_alphabet("ATCX")
+['X']
 """
 
 from __future__ import annotations
@@ -47,14 +51,20 @@ class _Seq(str):
     """Private base for typed sequence strings.
 
     Subclasses declare their expected alphabet via the class variable
-    :attr:`_ALPHABET` (uppercase characters only) for documentation; it is
-    **not enforced** at construction (see :meth:`__new__`). The original value
-    and case are preserved verbatim.
+    :attr:`ALPHABET` (uppercase characters only) for documentation; it is
+    **not enforced** at construction (see :meth:`__new__`), and
+    :meth:`outside_alphabet` is how a caller at the I/O boundary asks for the
+    check instead of spelling the alphabet again. The original value and case
+    are preserved verbatim.
 
     This class is abstract — instantiating it directly raises :class:`TypeError`.
     """
 
-    _ALPHABET: ClassVar[frozenset[str]] = frozenset()
+    #: What this class's characters may be, uppercase — public because a caller
+    #: rejecting input at the I/O boundary needs to name the alphabet it held the
+    #: input to, and reading it here is what keeps that message from becoming a
+    #: second, drifting copy of this line.
+    ALPHABET: ClassVar[frozenset[str]] = frozenset()
 
     def __new__(cls, value: str) -> Self:
         """Wrap ``value`` (stored verbatim, case preserved) as the calling subclass.
@@ -66,6 +76,44 @@ class _Seq(str):
         if cls is _Seq:
             raise TypeError("_Seq is abstract; instantiate DNA, RNA, or Protein instead.")
         return str.__new__(cls, value)
+
+    @classmethod
+    def outside_alphabet(cls, value: str) -> list[str]:
+        """Return the characters of ``value`` that this class's :attr:`ALPHABET` excludes.
+
+        The check construction deliberately does not do, offered rather than imposed:
+        scanning a whole chromosome costs too much to do on every wrapped string, so a
+        caller who needs the guarantee asks for it where the data enters — and asks the
+        class, so what a sequence may contain is stated in exactly one place. Comparison
+        is case-insensitive, since lower case is soft-masking and not an offence.
+
+        Parameters
+        ----------
+        value : str
+            The text to weigh against the alphabet. Not required to be a sequence
+            instance — this is meant for input that has not been wrapped yet.
+
+        Returns
+        -------
+        list of str
+            The offending characters, distinct, sorted, and in the case they arrived
+            in — what an error message naming them needs. Empty when nothing offends,
+            which is the whole of what a caller must test.
+
+        Examples
+        --------
+        >>> DNA.outside_alphabet("ATCX")
+        ['X']
+        >>> DNA.outside_alphabet("aTcG")            # case is not an offence
+        []
+        >>> RNA.outside_alphabet("ATCG")            # each class asks its own alphabet
+        ['T']
+        >>> Protein.outside_alphabet("MKTAY")
+        []
+        >>> DNA("ATCX")                             # reporting it never blocks construction
+        DNA('ATCX')
+        """
+        return sorted({character for character in value if character.upper() not in cls.ALPHABET})
 
     @classmethod
     def _unchecked(cls, value: str) -> Self:
@@ -106,7 +154,7 @@ class DNA(_Seq):
     1.0
     """
 
-    _ALPHABET: ClassVar[frozenset[str]] = frozenset("ACGT")
+    ALPHABET: ClassVar[frozenset[str]] = frozenset("ACGT")
 
     def complement(self) -> DNA:
         """Return the Watson-Crick complement (``A↔T``, ``C↔G``), case preserved.
@@ -178,7 +226,7 @@ class RNA(_Seq):
     DNA('ATCG')
     """
 
-    _ALPHABET: ClassVar[frozenset[str]] = frozenset("ACGU")
+    ALPHABET: ClassVar[frozenset[str]] = frozenset("ACGU")
 
     def complement(self) -> RNA:
         """Return the complement, case preserved (``A↔U``, ``C↔G``).
@@ -240,7 +288,7 @@ class Protein(_Seq):
     Protein('KT')
     """
 
-    _ALPHABET: ClassVar[frozenset[str]] = frozenset("ACDEFGHIKLMNPQRSTVWY")
+    ALPHABET: ClassVar[frozenset[str]] = frozenset("ACDEFGHIKLMNPQRSTVWY")
 
 
 def _gc_fraction(seq: str) -> float:

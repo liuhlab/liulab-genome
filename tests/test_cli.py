@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
+from genome import __version__ as genome_version
 from genome import metadata
 from genome.cli import app
 from genome.external import REQUIRED_TOOLS
@@ -20,6 +21,7 @@ from genome.io import download as download_mod
 from genome.io.completion import read_record, record_path, write_record
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.io.gtf import annotation_dir, register_gtf
+from genome.seq import DNA
 
 from .conftest import CHIMERA_COMPONENTS, COMPONENT_ANNOTATION, FakeFetch
 
@@ -103,6 +105,16 @@ class TestVersion:
         assert result.exit_code == 0
         assert result.stdout.strip() != ""
 
+    def test_version_json(self) -> None:
+        result = runner.invoke(app, ["version", "--json"])
+        assert result.exit_code == 0
+        assert _json.loads(result.stdout) == {"version": genome_version}
+
+    def test_json_and_text_report_the_same_version(self) -> None:
+        text = runner.invoke(app, ["version"]).stdout.strip()
+        payload = _json.loads(runner.invoke(app, ["version", "--json"]).stdout)
+        assert payload["version"] == text
+
 
 class TestRevcomp:
     def test_basic(self) -> None:
@@ -126,6 +138,22 @@ class TestRevcomp:
         assert result.exit_code == 2
         assert "error" in _output(result).lower()
         assert "X" in _output(result)  # the base it could not complement
+
+    def test_error_names_the_alphabet_it_was_held_to(self) -> None:
+        result = runner.invoke(app, ["revcomp", "ATCX"])
+        assert "{ACGT}" in _output(result)
+
+    def test_alphabet_comes_from_the_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The defect this pins: the edge used to spell A/C/G/T itself, so changing what a
+        # DNA may contain reached the CLI not at all. Widen the type's alphabet and the
+        # command follows — both the check and the message naming it.
+        monkeypatch.setattr(DNA, "ALPHABET", frozenset("ACGTN"))
+        accepted = runner.invoke(app, ["revcomp", "ATCN"])
+        assert accepted.exit_code == 0
+        assert accepted.stdout.strip() == "NGAT"
+        refused = runner.invoke(app, ["revcomp", "ATCX"])
+        assert refused.exit_code == 2
+        assert "{ACGNT}" in _output(refused)  # rendered sorted, a set having no order
 
 
 @pytest.mark.skipif(not _BINARIES_PRESENT, reason="samtools/bedtools not on PATH")

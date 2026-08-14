@@ -83,6 +83,11 @@ preparation is no longer indistinguishable from a finished one.
   assemblies cut from those same bytes, between them carrying what no shipped assembly can
   demonstrate: a chromosome-name collision, a name that is a strict prefix of another, names already
   holding an underscore, and one holding a doubled underscore.
+- **`DNA.outside_alphabet(text)` and the public `DNA.ALPHABET`** — the alphabet check `genome
+  revcomp` applies, now askable from `import genome` and inherited correctly by `RNA` and
+  `Protein`. It reports the offending characters and refuses nothing; construction still validates
+  nothing.
+- **`genome version --json`**, the one command that lacked the flag: `{"version": "..."}`.
 
 ### Changed
 
