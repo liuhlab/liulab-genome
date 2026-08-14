@@ -43,8 +43,9 @@ else's command line.
 _Avoid_: output, result, index files (most of them are not it), genomeDir
 
 **Install instructions**:
-The text an **Aligner** prints when its binary is absent from `PATH`, naming the bioconda package to
-add. Every aligner owes one, and it must name the next command — "STAR not found" on its own is a bug,
-not an error message.
+The text carried by the error an **External tool** raises when its binary is absent from `PATH`,
+naming the conda package to add — which is the package's name and not the binary's, so the command
+runs as it stands. Every tool owes one, and it must name the next command — "STAR not found" on its
+own is a bug, not an error message.
 _Avoid_: error message, help text, usage; and never an auto-install or a silent fallback — the package
 tells you what to run, it does not run it

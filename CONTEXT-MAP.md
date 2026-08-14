@@ -123,7 +123,9 @@ which is what this word exists to distrust
 
 **External tool**:
 A binary the package shells out to instead of reimplementing — resolved on `PATH`, version-detected
-before use, and failing with the exact command that installs it. samtools/bedtools in `external.py`
-and STAR/chromap in `aligner/` are one concept implemented twice.
+before use, and failing with the exact command that installs it. One module, `external.py`, serves
+every one of them: samtools and the two 2bit tools an assembly is prepared with, and the STAR and
+chromap an **Index** is built with. Whether a tool's output is captured or streamed is an argument,
+not a second implementation.
 _Avoid_: dependency, native dependency (that is the packaging view), subprocess, backend, wrapper,
 bare "binary"

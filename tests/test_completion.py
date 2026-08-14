@@ -197,6 +197,22 @@ def test_tool_versions_reports_a_tool_that_answers() -> None:
     assert versions["python"].startswith("Python")
 
 
+def test_a_tool_that_will_not_identify_itself_is_left_out_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Installed, and rejecting `--version` the way several UCSC binaries do. An absent
+    # key means *unknown*, and it must mean that for both reasons a version can be
+    # unknown — otherwise a record would carry an empty string as if it were a fact.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    declines = bin_dir / "faToTwoBit"
+    declines.write_text("#!/bin/sh\necho '--version is not a valid option' >&2\nexit 255\n")
+    declines.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+    assert tool_versions(["faToTwoBit"]) == {}
+
+
 # --- holding a directory to its record ---------------------------------------
 
 

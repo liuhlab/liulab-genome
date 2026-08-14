@@ -33,7 +33,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
 import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
@@ -41,7 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from genome.external import ToolNotFoundError, tool_version
+from genome.external import InstalledTool, ToolNotFoundError
 
 #: File name of the record a finished build writes — one spelling, everywhere.
 RECORD_NAME = ".completion.json"
@@ -266,9 +265,11 @@ def tool_versions(names: Iterable[str]) -> dict[str, str]:
     versions: dict[str, str] = {}
     for name in names:
         try:
-            versions[name] = tool_version(name)
-        except (ToolNotFoundError, OSError, subprocess.SubprocessError):
+            version = InstalledTool(name).version
+        except ToolNotFoundError:
             continue
+        if version:
+            versions[name] = version
     return versions
 
 

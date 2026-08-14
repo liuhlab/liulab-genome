@@ -1,10 +1,11 @@
 """Tests for genome.aligner — the Aligner abstraction, STAR, chromap, and the mixin.
 
-The pure-logic tests stub out the aligner binary (its resolution, version, and the
-subprocess call), so they run anywhere. A handful of integration tests build a real
-index — from a toy FASTA + GTF, and from a chimera assembled out of the tiny
-components — and those are the only tests in this suite needing a binary the package
-does not ship: :func:`_needs` is how one says so.
+An aligner is *given* its **External tool**, so the pure-logic tests hand it a
+:class:`~genome.external.RecordingTool` and construct nothing else — no resolution to
+patch out, no version call to intercept, and no binary anywhere. A handful of integration
+tests build a real index — from a toy FASTA + GTF, and from a chimera assembled out of
+the tiny components — and those are the only tests in this suite needing a binary the
+package does not ship: :func:`_needs` is how one says so.
 
 What a finished index is, is asked of its completion record and of nothing else, so
 most of what is worth asserting here — that an unbuilt index raises, that an
@@ -25,13 +26,14 @@ import pandas as pd
 import pytest
 
 import genome.aligner.aligner as aligner_mod
+import genome.external as external_mod
 from genome import Genome
 from genome.aligner.aligner import IndexNotBuiltError
 from genome.aligner.chromap import Chromap
 from genome.aligner.chromap import _kwargs_to_flags as _chromap_kwargs_to_flags
 from genome.aligner.mixin import AlignerMixin, _resolve_aligner
 from genome.aligner.star import STAR, _kwargs_to_flags
-from genome.external import ToolNotFoundError
+from genome.external import RecordingTool, ToolCall, ToolNotFoundError
 from genome.io.completion import (
     RECORD_NAME,
     CompletionRecord,
@@ -124,12 +126,72 @@ def _make_genome(
     return cast("Genome", stub)
 
 
-def _star_over(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, chrom_sizes: pd.Series) -> STAR:
+class _Tools:
+    """The recording stand-ins this module's stubbed aligners are built with.
+
+    One object owns every call any of them made, in order, because a test asserts on
+    *the* command that ran and does not care which tool object carried it. Building an
+    aligner is then a constructor call and nothing else — the fifteen ``monkeypatch``
+    calls that used to stand in for a binary's resolution and its version are what an
+    aligner taking its tool removes.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+        self.leaves_output = False
+        self.exit_code = 0
+
+    def __call__(self, binary: str) -> RecordingTool:
+        """Return a recording tool for ``binary`` that reports to this collection."""
+        tool = RecordingTool(binary, version="0.0-test", on_run=self._record)
+        tool.exit_code = self.exit_code
+        return tool
+
+    def fail(self) -> None:
+        """Make every tool handed out from now on exit non-zero, as a real one can."""
+        self.exit_code = 1
+
+    def _record(self, call: ToolCall) -> None:
+        self.calls.append(list(call.args))
+        if self.leaves_output:
+            _leave_plausible_output(call)
+
+
+def _leave_plausible_output(call: ToolCall) -> None:
+    """Write what a real index build would have left in the directory it ran in.
+
+    A build that writes nothing leaves a record claiming nothing, which cannot disagree
+    with anything. Tests about a *damaged* index need a build whose record has real files
+    to hold the directory to, so this writes the artifact the command line asks for plus
+    the log the tool drops in its working directory — read off the call itself, exactly
+    as the real tool reads it.
+    """
+    assert call.cwd is not None, "an aligner runs in its index dir"
+    (call.cwd / "Log.out").write_text("tool log\n")
+    args = list(call.args)
+    if "--output" in args:  # chromap: one file, named on the command line
+        Path(args[args.index("--output") + 1]).write_text("index bytes\n")
+    else:  # STAR: the genomeDir it ran in is the artifact
+        (call.cwd / "SA").write_text("suffix array bytes\n")
+
+
+@pytest.fixture
+def tools() -> _Tools:
+    """The recording tools this test's aligners are built with, and every call they made."""
+    return _Tools()
+
+
+@pytest.fixture
+def data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point ``LIULAB_DATA`` at this test's own root, so an index dir lands under it."""
+    root = tmp_path / "data"
+    monkeypatch.setenv("LIULAB_DATA", str(root))
+    return root
+
+
+def _star_over(tools: _Tools, tmp_path: Path, chrom_sizes: pd.Series) -> STAR:
     """A stubbed STAR bound to ``toy`` over a genome of exactly ``chrom_sizes``."""
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
-    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
-    monkeypatch.setattr(STAR, "_detect_version", lambda _self: "0.0-test")
-    return STAR(_make_genome(tmp_path, chrom_sizes=chrom_sizes), gtf="toy")
+    return STAR(_make_genome(tmp_path, chrom_sizes=chrom_sizes), gtf="toy", tool=tools("STAR"))
 
 
 def _shape_of(*components: str) -> pd.Series:
@@ -161,53 +223,28 @@ def _record_of(aligner: aligner_mod.Aligner) -> CompletionRecord:
 
 
 @pytest.fixture
-def stub_star(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> STAR:
-    """A STAR (bound to the ``toy`` annotation) with faked binary + version."""
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
-    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
-    monkeypatch.setattr(STAR, "_detect_version", lambda _self: "0.0-test")
-    return STAR(_make_genome(tmp_path), gtf="toy")
+def stub_star(tools: _Tools, data_root: Path, tmp_path: Path) -> STAR:
+    """A STAR (bound to the ``toy`` annotation) driving a recording tool."""
+    return STAR(_make_genome(tmp_path), gtf="toy", tool=tools("STAR"))
 
 
 @pytest.fixture
-def stub_chromap(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Chromap:
-    """A Chromap with faked binary + version (no annotation — chromap needs none)."""
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
-    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
-    monkeypatch.setattr(Chromap, "_detect_version", lambda _self: "0.0-test")
-    return Chromap(_make_genome(tmp_path))
+def stub_chromap(tools: _Tools, data_root: Path, tmp_path: Path) -> Chromap:
+    """A Chromap driving a recording tool (no annotation — chromap needs none)."""
+    return Chromap(_make_genome(tmp_path), tool=tools("chromap"))
 
 
 @pytest.fixture
-def captured_run(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """Record (and suppress) every ``Aligner._run`` invocation's argument list."""
-    calls: list[list[str]] = []
-    monkeypatch.setattr(aligner_mod.Aligner, "_run", lambda self, args: calls.append(list(args)))
-    return calls
+def captured_run(tools: _Tools) -> list[list[str]]:
+    """Every argument list the stubbed aligners' tools were run with, in order."""
+    return tools.calls
 
 
 @pytest.fixture
-def building_run(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
-    """As ``captured_run``, but leaves plausible output files behind.
-
-    A build that writes nothing leaves a record claiming nothing, which cannot
-    disagree with anything. Tests about a *damaged* index need a build whose
-    record has real files to hold the directory to, so this stand-in writes the
-    aligner's artifact plus the log the tool drops in its working directory.
-    """
-    calls: list[list[str]] = []
-
-    def _fake(self: aligner_mod.Aligner, args: Sequence[str]) -> None:
-        calls.append(list(args))
-        (self.index_dir / "Log.out").write_text("tool log\n")
-        artifact = self._artifact
-        if artifact == self.index_dir:
-            (artifact / "SA").write_text("suffix array bytes\n")
-        else:
-            artifact.write_text("index bytes\n")
-
-    monkeypatch.setattr(aligner_mod.Aligner, "_run", _fake)
-    return calls
+def building_run(tools: _Tools) -> list[list[str]]:
+    """As ``captured_run``, but each run leaves plausible output files behind."""
+    tools.leaves_output = True
+    return tools.calls
 
 
 # -- pure logic -------------------------------------------------------------
@@ -218,18 +255,51 @@ def test_kwargs_to_flags_scalar_and_list() -> None:
     assert flags == ["--genomeSAindexNbases", "11", "--genomeFastaFiles", "a.fa", "b.fa"]
 
 
-def test_missing_tool_prints_instructions_and_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_constructing_an_aligner_runs_nothing(
+    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
 ) -> None:
-    def _missing(name: str) -> str:
-        raise ToolNotFoundError("nope")
+    # Nothing on PATH and no interpreter bin/ either: an aligner that resolved its binary
+    # in its constructor could not be built here at all, which is what made every test
+    # above patch resolution out.
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr(external_mod.sys, "executable", str(tmp_path / "bin" / "python"))
 
-    monkeypatch.setattr(aligner_mod, "_resolve", _missing)
-    with pytest.raises(ToolNotFoundError, match="required to build a star index"):
-        STAR(_make_genome(tmp_path), gtf="toy")
-    err = capsys.readouterr().err
-    assert "STAR is not installed" in err
-    assert "bioconda" in err
+    star = STAR(_make_genome(tmp_path), gtf="toy")
+
+    assert star.index_dir.name == "star_toy"
+
+
+def test_a_missing_binary_raises_naming_what_installs_it(
+    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
+) -> None:
+    # The instructions travel in the error rather than being printed to stderr on the way
+    # past: a library that writes to a console its caller may not have is not an error
+    # message, and the caller cannot catch what it cannot see.
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr(external_mod.sys, "executable", str(tmp_path / "bin" / "python"))
+    star = STAR(_make_genome(tmp_path), gtf="toy")
+
+    with pytest.raises(ToolNotFoundError) as raised:
+        star.index()
+
+    message = str(raised.value)
+    assert "STAR is not installed" in message
+    assert "pixi add star" in message
+    assert "bioconda" in message
+    assert message == star.install_instructions()
+
+
+def test_a_missing_chromap_raises_naming_what_installs_it(
+    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr(external_mod.sys, "executable", str(tmp_path / "bin" / "python"))
+    chromap = Chromap(_make_genome(tmp_path))
+
+    with pytest.raises(ToolNotFoundError, match="pixi add chromap"):
+        chromap.index()
+
+    assert "chromap is not installed" in chromap.install_instructions()
 
 
 def test_index_dir_is_per_annotation(stub_star: STAR) -> None:
@@ -238,15 +308,11 @@ def test_index_dir_is_per_annotation(stub_star: STAR) -> None:
 
 
 def test_distinct_gtf_keys_use_distinct_index_dirs(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tools: _Tools, data_root: Path, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
-    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
-    monkeypatch.setattr(STAR, "_detect_version", lambda _self: "0.0-test")
-
     genome = _make_genome(tmp_path, {"a": _TOY_GTF, "b": _TOY_GTF})
-    star_a = STAR(genome, gtf="a")
-    star_b = STAR(genome, gtf="b")
+    star_a = STAR(genome, gtf="a", tool=tools("STAR"))
+    star_b = STAR(genome, gtf="b", tool=tools("STAR"))
 
     assert star_a.index_dir != star_b.index_dir
     assert star_a.index_dir.name == "star_a"
@@ -254,25 +320,26 @@ def test_distinct_gtf_keys_use_distinct_index_dirs(
 
 
 def test_the_index_dir_is_the_one_inside_the_genomes_own_assembly_dir(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory,
+    tools: _Tools,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     # An **Index dir** is `<assembly dir>/index/<name>/`, and the assembly dir is the one
     # this genome was opened in — never one re-derived from the shared data root. A genome
     # opened somewhere else is the case that tells the two apart, and it is an ordinary
     # one: every fixture in this suite that registers a component uses it.
     monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
-    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
-    monkeypatch.setattr(Chromap, "_detect_version", lambda _self: "0.0-test")
     genome = chimera_component("tinyCe")
 
-    chromap = Chromap(genome)
+    chromap = Chromap(genome, tool=tools("chromap"))
 
     assert chromap.index_dir == genome.fasta_path.parent / "index" / "chromap"
 
 
 def test_an_index_pins_the_digest_of_the_assembly_it_was_opened_from(
     chimera_component: ComponentFactory,
-    captured_run: list[list[str]],
+    tools: _Tools,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -282,14 +349,12 @@ def test_an_index_pins_the_digest_of_the_assembly_it_was_opened_from(
     # key is omitted, and a reference rebuilt underneath the index stops being noticed —
     # a guard that passes without having been exercised.
     monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
-    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
-    monkeypatch.setattr(Chromap, "_detect_version", lambda _self: "0.0-test")
     genome = chimera_component("tinyCe")
     assembly = read_record(genome.fasta_path.parent)
     assert assembly is not None
     assert assembly.sha256 is not None
 
-    chromap = Chromap(genome)
+    chromap = Chromap(genome, tool=tools("chromap"))
     chromap.index()
 
     assert _record_of(chromap).details[_DIGEST_KEY] == assembly.sha256
@@ -475,16 +540,16 @@ def test_overwrite_rebuilds_over_an_interrupted_build(
 
 
 def test_a_rebuild_that_dies_leaves_nothing_vouching_for_the_directory(
-    stub_star: STAR, monkeypatch: pytest.MonkeyPatch, building_run: list[list[str]]
+    stub_star: STAR, tools: _Tools, data_root: Path, tmp_path: Path, building_run: list[list[str]]
 ) -> None:
     stub_star.index()
 
-    def _die(self: aligner_mod.Aligner, args: Sequence[str]) -> None:
-        raise RuntimeError("STAR failed (exit 1)")
-
-    monkeypatch.setattr(aligner_mod.Aligner, "_run", _die)
+    # A second STAR over the same assembly, this one exiting non-zero — the failure comes
+    # out of the tool's own error path rather than a raise patched over the call.
+    tools.fail()
+    dying = STAR(_make_genome(tmp_path), gtf="toy", tool=tools("STAR"))
     with pytest.raises(RuntimeError, match="STAR failed"):
-        stub_star.index(overwrite=True)
+        dying.index(overwrite=True)
 
     # The earlier record was dropped before the tool ran, so what is left reads as
     # interrupted rather than as a finished index whose sizes happen to still match.
@@ -522,7 +587,8 @@ def test_index_emits_sjdb_flags_from_bound_gtf(
     ids=["everyday-chimera", "one-component"],
 )
 def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
-    monkeypatch: pytest.MonkeyPatch,
+    tools: _Tools,
+    data_root: Path,
     tmp_path: Path,
     captured_run: list[list[str]],
     components: tuple[str, ...],
@@ -534,7 +600,7 @@ def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
     sizes = _shape_of(*components)
     assert (len(sizes), int(sizes.sum())) == (sequences, total)
 
-    star = _star_over(monkeypatch, tmp_path, sizes)
+    star = _star_over(tools, tmp_path, sizes)
     star.index()
 
     assert _flag_value(captured_run[0], "--genomeChrBinNbits") == str(expected)
@@ -542,11 +608,11 @@ def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
 
 
 def test_chr_bin_nbits_is_passed_even_when_it_lands_on_stars_own_default(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, captured_run: list[list[str]]
+    tools: _Tools, data_root: Path, tmp_path: Path, captured_run: list[list[str]]
 ) -> None:
     # Two 1 Gb sequences: the recommendation is ~29.9, and the clause is a min, so 18
     # stands. It is still passed, so a record's parameters mean one thing either way.
-    star = _star_over(monkeypatch, tmp_path, pd.Series({"chr1": 10**9, "chr2": 10**9}))
+    star = _star_over(tools, tmp_path, pd.Series({"chr1": 10**9, "chr2": 10**9}))
     star.index()
 
     assert _flag_value(captured_run[0], "--genomeChrBinNbits") == "18"
@@ -555,7 +621,8 @@ def test_chr_bin_nbits_is_passed_even_when_it_lands_on_stars_own_default(
 
 @pytest.mark.parametrize(("sjdb_overhang", "expected"), [(100, 6), (149, 7)])
 def test_chr_bin_nbits_never_drops_below_one_read(
-    monkeypatch: pytest.MonkeyPatch,
+    tools: _Tools,
+    data_root: Path,
     tmp_path: Path,
     captured_run: list[list[str]],
     sjdb_overhang: int,
@@ -564,7 +631,7 @@ def test_chr_bin_nbits_never_drops_below_one_read(
     # 40 scaffolds of 50 bp: the average sequence is far shorter than a read, so the
     # read length is what the bin is sized from. log2(101) -> 6 and log2(150) -> 7,
     # never the 5 that log2(50) would give — the read length being sjdb_overhang + 1.
-    star = _star_over(monkeypatch, tmp_path, pd.Series({f"scaffold{i}": 50 for i in range(40)}))
+    star = _star_over(tools, tmp_path, pd.Series({f"scaffold{i}": 50 for i in range(40)}))
     star.index(sjdb_overhang=sjdb_overhang)
 
     assert _flag_value(captured_run[0], "--genomeChrBinNbits") == str(expected)
@@ -585,12 +652,17 @@ def test_an_explicit_chr_bin_nbits_wins_over_the_computed_one(
 
 
 @pytest.fixture
-def mixin_genome(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Genome:
-    """A Genome-like object carrying :class:`AlignerMixin`, with STAR stubbed."""
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
-    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
-    monkeypatch.setattr(STAR, "_detect_version", lambda _self: "0.0-test")
-    monkeypatch.setattr(Chromap, "_detect_version", lambda _self: "0.0-test")
+def mixin_genome(
+    monkeypatch: pytest.MonkeyPatch, tools: _Tools, data_root: Path, tmp_path: Path
+) -> Genome:
+    """A Genome-like object carrying :class:`AlignerMixin`, with the binaries stood in for.
+
+    The one place a patch is still needed: the mixin builds the aligner itself, so there
+    is nowhere to hand it a tool. What is replaced is the fallback an aligner uses when
+    it is given none — one name, for both aligners, rather than a resolution and a
+    version per class.
+    """
+    monkeypatch.setattr(aligner_mod, "_default_tool", tools)
 
     stub = _make_genome(tmp_path)
 
@@ -704,20 +776,6 @@ def test_chromap_kwargs_to_flags_hyphenates_and_expands_lists() -> None:
     # chromap's long options are hyphenated, so underscores become hyphens.
     flags = _chromap_kwargs_to_flags({"min_frag_length": 30, "read_format": ["r1", "bc"]})
     assert flags == ["--min-frag-length", "30", "--read-format", "r1", "bc"]
-
-
-def test_missing_chromap_prints_instructions_and_raises(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    def _missing(name: str) -> str:
-        raise ToolNotFoundError("nope")
-
-    monkeypatch.setattr(aligner_mod, "_resolve", _missing)
-    with pytest.raises(ToolNotFoundError, match="required to build a chromap index"):
-        Chromap(_make_genome(tmp_path))
-    err = capsys.readouterr().err
-    assert "chromap is not installed" in err
-    assert "bioconda" in err
 
 
 def test_chromap_index_dir_is_per_assembly(stub_chromap: Chromap) -> None:
@@ -1098,11 +1156,9 @@ def everyday_chimera(
 
 
 @pytest.fixture
-def stub_star_over_chimera(everyday_chimera: Genome, monkeypatch: pytest.MonkeyPatch) -> STAR:
-    """A STAR over the everyday chimera, bound to its merged annotation, binary faked."""
-    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
-    monkeypatch.setattr(STAR, "_detect_version", lambda _self: "0.0-test")
-    return STAR(everyday_chimera, gtf=_MERGED_ANNOTATION)
+def stub_star_over_chimera(everyday_chimera: Genome, tools: _Tools) -> STAR:
+    """A STAR over the everyday chimera, bound to its merged annotation, binary stood in for."""
+    return STAR(everyday_chimera, gtf=_MERGED_ANNOTATION, tool=tools("STAR"))
 
 
 # -- the command a chimera is indexed with ----------------------------------
