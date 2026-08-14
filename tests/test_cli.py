@@ -7,6 +7,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+import gffutils
 import pandas as pd
 import pytest
 from typer.testing import CliRunner
@@ -32,10 +33,31 @@ _TINY_GTF_SHA256 = "255f43bd9abef76424d1c2d89a40cccc1a36215409bbc8f32dcead49ca3b
 #: The URL the stood-in annotation row pins, served from ``tests/data``.
 _ANNOTATION_URL = "https://mirror.example.invalid/annotations/tiny.gtf.gz"
 
+# A bare exon-level GTF — exon lines and nothing else, which is what gene/transcript
+# inference exists for. Built with inference off, its database holds exons alone.
+_BARE_GTF = (
+    "\n".join(
+        [
+            'chrI\ttest\texon\t1\t50\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
+            'chrI\ttest\texon\t60\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
+        ]
+    )
+    + "\n"
+)
+
 
 def _output(result: object) -> str:
     """Return a result's stdout and stderr together, wherever the runner put them."""
     return (getattr(result, "stdout", "") or "") + (getattr(result, "stderr", "") or "")
+
+
+def _feature_types(database_path: Path) -> list[str]:
+    """The kinds of feature a built database holds, with the connection closed behind us."""
+    database = gffutils.FeatureDB(str(database_path))
+    try:
+        return sorted(database.featuretypes())
+    finally:
+        database.conn.close()
 
 
 @dataclass
@@ -301,6 +323,9 @@ class TestRegisterAnnotation:
 
         assert result.exit_code == 1
         assert "ensgene_v101" in _output(result)
+        # …and the command that registers a GTF the table does not list, since that is
+        # what a caller who named an unlisted annotation is most likely reaching for.
+        assert "genome register-gtf tiny" in _output(result)
 
     def test_a_broken_directory_exits_non_zero_naming_the_repair(self, tmp_path: Path) -> None:
         directory = tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101"
@@ -362,6 +387,171 @@ class TestRegisterAnnotation:
 
         assert result.exit_code == 0
         assert _json.loads(result.stdout)["details"]["chromosomes_checked"] is False
+
+    def test_feature_inference_is_reachable_for_a_listed_annotation_too(
+        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Nothing says a listed annotation declares genes and transcripts, so the
+        # inference the API exposes has to be reachable on this command as well.
+        bare = tmp_path / "bare.gtf"
+        bare.write_text(_BARE_GTF)
+        fake_fetch.serve(bare)
+        table = pd.DataFrame(
+            [
+                {
+                    "assembly": "tiny",
+                    "name": "bare",
+                    "provider": "somebody",
+                    "version": "1",
+                    "url": "https://mirror.example.invalid/annotations/bare.gtf",
+                    "sha256": None,
+                    "default": "yes",
+                }
+            ],
+            dtype=str,
+        )
+        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+
+        result = runner.invoke(
+            app, ["register-annotation", "tiny", "bare", "--infer-genes", "--infer-transcripts"]
+        )
+
+        assert result.exit_code == 0
+        database = tmp_path / "genome" / "tiny" / "gtf" / "bare" / "bare.db"
+        assert _feature_types(database) == ["exon", "gene", "transcript"]
+
+
+class TestRegisterGtf:
+    """``genome register-gtf`` — register a GTF the annotation table does not list.
+
+    The by-path way in, from a shell: no table row, no download, no checksum to compare
+    against — the caller says where the file is. Offline by construction, since the GTF
+    is a local one; ``LIULAB_DATA`` points the assembly directory at a temp dir.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _offline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    def test_registers_a_gtf_no_row_lists_and_reports_where_it_landed(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        source = data_dir / "tiny.gtf"
+
+        result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine"])
+
+        directory = tmp_path / "genome" / "tiny" / "gtf" / "mine"
+        assert result.exit_code == 0
+        assert str(directory) in result.stdout
+        assert str(source) in result.stdout
+        assert (directory / "mine.gtf").is_file()
+        assert (directory / "mine.db").is_file()
+
+    def test_json(self, tmp_path: Path, data_dir: Path) -> None:
+        source = data_dir / "tiny.gtf"
+
+        result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["assembly"] == "tiny"
+        assert payload["name"] == "mine"
+        assert payload["directory"] == str(tmp_path / "genome" / "tiny" / "gtf" / "mine")
+        assert payload["source_url"] == str(source)
+        assert payload["sha256"] == _TINY_GTF_SHA256
+        assert sorted(payload["files"]) == ["mine.db", "mine.gtf"]
+
+    def test_it_is_then_listed_as_registered_but_not_offered(self, data_dir: Path) -> None:
+        assert (
+            runner.invoke(
+                app, ["register-gtf", "tiny", str(data_dir / "tiny.gtf"), "mine"]
+            ).exit_code
+            == 0
+        )
+
+        result = runner.invoke(app, ["annotations", "tiny", "--json"])
+
+        assert result.exit_code == 0
+        rows = _json.loads(result.stdout)["annotations"]
+        assert [(row["name"], row["offered"], row["registered"]) for row in rows] == [
+            ("mine", False, True)
+        ]
+
+    def test_a_gtf_that_is_not_there_exits_non_zero_saying_what_to_pass(
+        self, tmp_path: Path
+    ) -> None:
+        result = runner.invoke(app, ["register-gtf", "tiny", str(tmp_path / "nope.gtf"), "mine"])
+
+        assert result.exit_code == 1
+        assert "GTF file not found" in _output(result)
+
+    def test_a_broken_directory_exits_non_zero_naming_the_repair(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        source = data_dir / "tiny.gtf"
+        directory = tmp_path / "genome" / "tiny" / "gtf" / "mine"
+        directory.mkdir(parents=True)
+        (directory / "mine.db").write_bytes(b"half a database")
+
+        result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine"])
+
+        assert result.exit_code == 1
+        assert f"genome register-gtf tiny {source} mine --force" in _output(result)
+
+    def test_force_repairs_what_the_error_named(self, tmp_path: Path, data_dir: Path) -> None:
+        directory = tmp_path / "genome" / "tiny" / "gtf" / "mine"
+        directory.mkdir(parents=True)
+        (directory / "mine.db").write_bytes(b"half a database")
+
+        result = runner.invoke(
+            app, ["register-gtf", "tiny", str(data_dir / "tiny.gtf"), "mine", "--force", "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert _json.loads(result.stdout)["sha256"] == _TINY_GTF_SHA256
+
+    def test_the_chromosome_check_is_stood_down_from_the_command_line(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # The committed Ensembl-spelled GTF (I, II, III) against a UCSC-spelled assembly
+        # (chrI, chrII, chrIII): the assembly's chrom.sizes is found from its name, so
+        # this way in checks the names too — and stands the check down when asked.
+        source = data_dir / "ensembl_style.gtf"
+        assembly_dir = tmp_path / "genome" / "tiny"
+        assembly_dir.mkdir(parents=True)
+        (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
+
+        refused = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine"])
+
+        assert refused.exit_code == 1
+        assert "chromosome" in _output(refused)
+
+        result = runner.invoke(
+            app, ["register-gtf", "tiny", str(source), "mine", "--no-check-chromosomes", "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert _json.loads(result.stdout)["details"]["chromosomes_checked"] is False
+
+    def test_a_bare_exon_level_gtf_is_registrable_with_feature_inference(
+        self, tmp_path: Path
+    ) -> None:
+        # Without the flags the database holds exons and nothing else — genes and
+        # transcripts are what a caller registers an annotation for.
+        source = tmp_path / "bare.gtf"
+        source.write_text(_BARE_GTF)
+        gtf_root = tmp_path / "genome" / "tiny" / "gtf"
+
+        assert runner.invoke(app, ["register-gtf", "tiny", str(source), "exons"]).exit_code == 0
+        assert _feature_types(gtf_root / "exons" / "exons.db") == ["exon"]
+
+        result = runner.invoke(
+            app,
+            ["register-gtf", "tiny", str(source), "genes", "--infer-genes", "--infer-transcripts"],
+        )
+
+        assert result.exit_code == 0
+        assert _feature_types(gtf_root / "genes" / "genes.db") == ["exon", "gene", "transcript"]
 
 
 class TestAnnotations:

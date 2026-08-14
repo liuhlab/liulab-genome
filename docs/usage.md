@@ -43,7 +43,8 @@ $ genome revcomp ATCG
 $ genome revcomp aTcG --json
 $ genome doctor [--json]
 $ genome register hg38 [--source PATH_OR_URL] [--force] [--json]
-$ genome register-annotation hg38 gencode_v50 [--force] [--no-check-chromosomes] [--json]
+$ genome register-annotation hg38 gencode_v50 [--force] [--no-check-chromosomes] [--infer-genes] [--infer-transcripts] [--json]
+$ genome register-gtf hg38 path/to/annotation.gtf mine [--force] [--no-check-chromosomes] [--infer-genes] [--infer-transcripts] [--json]
 $ genome annotations hg38 [--json]
 $ genome verify hg38 [--fasta PATH] [--json]
 $ genome table-row sacCer3 [--json]
@@ -103,13 +104,39 @@ Running it again on a registered annotation reads the record and downloads nothi
 exits `1` when the table lists no such annotation for that assembly (the message says
 what it does list), when the GTF names chromosomes the assembly does not carry, when the
 GTF is not the checksum pinned for it, or when the directory cannot be trusted — a
-half-built database from an interrupted run, say, which `--force` repairs. A GTF the
-table does not list is registered by path from Python instead, with
-`Genome.register_gtf`.
+half-built database from an interrupted run, say, which `--force` repairs.
 
 `--no-check-chromosomes` registers one whose chromosome-name mismatch you have looked at
 and accept; the record says the names went unchecked, so you can tell months later. See
 [The chromosome names have to match](aligner.md#the-chromosome-names-have-to-match).
+
+### Registering a GTF the table does not list
+
+`genome register-gtf` is the escape hatch: you say where the file is, and it is placed,
+checked, built and recorded exactly as a listed annotation is. Nothing is downloaded and
+no checksum is compared against — an unlisted GTF has none pinned for it — and the name
+you give is what addresses it from then on:
+
+```console
+$ genome register-gtf sacCer3 ~/annotations/sacCer3.WS298.gtf wormbase_ws298
+registered wormbase_ws298 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/wormbase_ws298
+  source  /home/you/annotations/sacCer3.WS298.gtf
+  sha256  9e1f0a5c6d2b8e4a1c7f3b0d5a8e2c4f6b9d1e3a7c5f8b2d4e6a0c9f1b3d5e7a
+  files   wormbase_ws298.db, wormbase_ws298.gtf
+```
+
+A `.gz` source is decompressed on the way in. Naming the assembly is what lets the
+chromosome check find its `chrom.sizes` without being told where it is, so an unlisted
+GTF is held to the same standard as a listed one — `--no-check-chromosomes` stands the
+check down here too. It exits `1` when the file is not there, when its chromosome names
+do not line up, or when the directory cannot be trusted, and `--force` repairs the last
+of those.
+
+Both registration commands take `--infer-genes` and `--infer-transcripts`, which
+reconstruct those features from exon lines. Leave them off for a GENCODE, Ensembl or
+RefSeq GTF, which declares both already; turn them on for a **bare exon-level GTF**, one
+whose only lines are exons, which otherwise registers as a database of exons and nothing
+else. See [Registering an annotation](aligner.md#registering-an-annotation).
 
 ### Listing what an assembly offers against what is registered
 

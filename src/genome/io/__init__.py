@@ -45,6 +45,7 @@ from genome.io.gtf import (
     fetch_annotation,
     list_annotations,
     register_annotation,
+    register_annotation_by_path,
     register_gtf,
 )
 from genome.io.twobit import TwoBit
@@ -81,6 +82,7 @@ __all__ = [
     "read_chrom_sizes",
     "read_record",
     "register_annotation",
+    "register_annotation_by_path",
     "register_assembly",
     "register_gtf",
     "sha256_file",

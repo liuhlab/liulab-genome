@@ -206,13 +206,16 @@ sacCer3.register_gtf("custom.gtf", name="custom")
 sacCer3.register_gtf("custom.gtf.gz", name="custom")  # .gz is decompressed for you
 ```
 
+Both ways in have a shell equivalent, `genome register-annotation <assembly>
+<name>` and `genome register-gtf <assembly> <path> <name>`.
+
 Either way the registration ends with the same record the assembly writes, and
 that record is the only thing that ever says the annotation is finished — never
 the database file's existence, which is equally true of a build killed half-way.
 Re-registering a name whose record is valid returns it silently: nothing is
 fetched and nothing is rebuilt. A directory holding files without a valid record
-raises instead, naming `genome register-annotation <assembly> <name> --force`,
-which is also what repairs it.
+raises instead, naming the command that registers that annotation again with
+`--force`, which is also what repairs it.
 
 Opening a genome never registers anything, whatever the table flags — that would
 be a gigabyte download and a database build inside a constructor someone called to

@@ -37,6 +37,7 @@ from genome.io.gtf import (
     fetch_annotation,
     list_annotations,
     register_annotation,
+    register_annotation_by_path,
     register_gtf,
 )
 from genome.io.utils import ChecksumMismatchError
@@ -52,6 +53,18 @@ _GTF = (
             'chrI\ttest\tgene\t1\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
             'chrI\ttest\ttranscript\t1\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
             'chrI\ttest\texon\t1\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
+        ]
+    )
+    + "\n"
+)
+
+# A bare exon-level GTF: exon lines and nothing else, which is what gene/transcript
+# inference exists for. Built with inference off it yields a database of exons alone.
+_BARE_GTF = (
+    "\n".join(
+        [
+            'chrI\ttest\texon\t1\t50\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
+            'chrI\ttest\texon\t60\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
         ]
     )
     + "\n"
@@ -84,6 +97,15 @@ def _row(
         sha256=sha256,
         default=default,
     )
+
+
+def _feature_types(database_path: Path) -> list[str]:
+    """The kinds of feature a built database holds, with the connection closed behind us."""
+    database = gffutils.FeatureDB(str(database_path))
+    try:
+        return sorted(database.featuretypes())
+    finally:
+        database.conn.close()
 
 
 def _write_chrom_sizes(assembly_dir: Path, *names: str, assembly: str = "tiny") -> Path:
@@ -715,3 +737,154 @@ class TestRegisterAnnotation:
         payload = register_annotation("tiny", _NAME, progressbar=False, metadata=_row())
 
         assert payload["directory"] == str(tmp_path / "genome" / "tiny" / "gtf" / _NAME)
+
+    def test_the_inference_knobs_reach_the_database_build(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        # A bare exon-level GTF: with inference left off the database holds exons and
+        # nothing else, so a caller who asks for genes and transcripts must be able to
+        # get them from this way in too.
+        bare = tmp_path / "bare.gtf"
+        bare.write_text(_BARE_GTF)
+        fake_fetch.serve(bare)
+        row = _row(url="https://mirror.example.invalid/annotations/bare.gtf")
+
+        default = register_annotation(
+            "tiny", "exons_only", cache_dir=tmp_path, progressbar=False, metadata=row
+        )
+        inferred = register_annotation(
+            "tiny",
+            "with_genes",
+            cache_dir=tmp_path,
+            progressbar=False,
+            metadata=row,
+            disable_infer_genes=False,
+            disable_infer_transcripts=False,
+        )
+
+        assert default["name"] == "exons_only"
+        assert _feature_types(annotation_dir(tmp_path, "exons_only") / "exons_only.db") == ["exon"]
+        assert inferred["name"] == "with_genes"
+        assert _feature_types(annotation_dir(tmp_path, "with_genes") / "with_genes.db") == [
+            "exon",
+            "gene",
+            "transcript",
+        ]
+
+
+class TestRegisterAnnotationByPath:
+    """``register_annotation_by_path`` — a GTF no row lists, addressed by assembly name."""
+
+    def test_it_returns_the_record_plus_where_it_landed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+
+        payload = register_annotation_by_path("tiny", source, "WS298")
+
+        directory = tmp_path / "genome" / "tiny" / "gtf" / "WS298"
+        assert payload["kind"] == "annotation"
+        assert payload["name"] == "WS298"
+        assert payload["assembly"] == "tiny"
+        assert payload["directory"] == str(directory)
+        assert payload["source_url"] == str(source)
+        assert payload["files"] == {
+            name: (directory / name).stat().st_size for name in ("WS298.gtf", "WS298.db")
+        }
+
+    def test_cache_dir_overrides_which_assembly_directory_it_is_filed_under(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        elsewhere = tmp_path / "elsewhere"
+
+        payload = register_annotation_by_path("tiny", source, "WS298", cache_dir=elsewhere)
+
+        assert payload["directory"] == str(annotation_dir(elsewhere, "WS298"))
+
+    def test_it_finds_the_assembly_chrom_sizes_without_being_told(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # What the by-directory form cannot do: given the assembly's name it knows where
+        # its chrom.sizes is, so an Ensembl-spelled GTF is refused rather than silently
+        # registered unchecked.
+        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
+
+        with pytest.raises(ChromosomeMismatchError):
+            register_annotation_by_path(
+                "tiny", data_dir / "ensembl_style.gtf", _NAME, cache_dir=tmp_path
+            )
+
+    def test_the_override_registers_the_mismatch_anyway_and_the_record_says_so(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
+
+        payload = register_annotation_by_path(
+            "tiny",
+            data_dir / "ensembl_style.gtf",
+            _NAME,
+            cache_dir=tmp_path,
+            check_chromosomes=False,
+        )
+
+        assert payload["details"] == {
+            "gffutils_version": gffutils.__version__,
+            "chromosomes_checked": False,
+        }
+
+    def test_the_inference_knobs_reach_the_database_build(self, tmp_path: Path) -> None:
+        source = tmp_path / "bare.gtf"
+        source.write_text(_BARE_GTF)
+
+        register_annotation_by_path("tiny", source, "exons_only", cache_dir=tmp_path)
+        register_annotation_by_path(
+            "tiny",
+            source,
+            "with_genes",
+            cache_dir=tmp_path,
+            disable_infer_genes=False,
+            disable_infer_transcripts=False,
+        )
+
+        assert _feature_types(annotation_dir(tmp_path, "exons_only") / "exons_only.db") == ["exon"]
+        assert _feature_types(annotation_dir(tmp_path, "with_genes") / "with_genes.db") == [
+            "exon",
+            "gene",
+            "transcript",
+        ]
+
+    def test_a_missing_source_says_what_to_pass(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError, match="GTF file not found"):
+            register_annotation_by_path("tiny", tmp_path / "nope.gtf", "WS298", cache_dir=tmp_path)
+
+    def test_a_broken_directory_names_the_command_that_repairs_it(self, tmp_path: Path) -> None:
+        # Addressed by assembly name, the repair is a command a shell can run — the
+        # by-directory form knows no assembly name and names the Python call instead.
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        directory = annotation_dir(tmp_path, "WS298")
+        directory.mkdir(parents=True)
+        (directory / "WS298.db").write_bytes(b"half a database")
+
+        with pytest.raises(UnfinishedRegistrationError) as excinfo:
+            register_annotation_by_path("tiny", source, "WS298", cache_dir=tmp_path)
+
+        assert f"genome register-gtf tiny {source} WS298 --force" in str(excinfo.value)
+
+    def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        directory = annotation_dir(tmp_path, "WS298")
+        directory.mkdir(parents=True)
+        (directory / "WS298.db").write_bytes(b"half a database")
+
+        payload = register_annotation_by_path(
+            "tiny", source, "WS298", cache_dir=tmp_path, force=True
+        )
+
+        assert payload["name"] == "WS298"
+        assert list(list_annotations(tmp_path)) == ["WS298"]

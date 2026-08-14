@@ -18,6 +18,7 @@ from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
 from genome.io.gtf import annotation_status as _annotation_status
 from genome.io.gtf import register_annotation as _register_annotation
+from genome.io.gtf import register_annotation_by_path as _register_annotation_by_path
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
 
@@ -27,6 +28,24 @@ from genome.seq import DNA
 #: it. ``RegistrationError`` and ``ToolNotFoundError`` are ``RuntimeError``s;
 #: ``ChecksumMismatchError`` is a ``ValueError``; a failed download is an ``OSError``.
 _ASSEMBLY_ERRORS = (ValueError, OSError, RuntimeError)
+
+#: Help for the two feature-inference switches, in one place: both registration
+#: commands offer them and a reader of either help text deserves the same explanation.
+#: ``{feature}`` is the GTF feature being reconstructed.
+_INFER_HELP = (
+    "Reconstruct {feature} features from exon lines. Off by default: GENCODE, Ensembl "
+    "and RefSeq GTFs declare them already and inferring is the slow path. Turn it on for "
+    "a bare exon-level GTF — one whose only lines are exons — which otherwise registers "
+    "as a database of exons and nothing else."
+)
+
+#: Help for the chromosome-name check, likewise shared by both registration commands.
+_CHECK_CHROMOSOMES_HELP = (
+    "Refuse a GTF naming sequences this assembly does not carry, before paying for the "
+    "database build. Pass --no-check-chromosomes to register one whose mismatch you have "
+    "inspected and accept — the annotation is built as it stands and the record says the "
+    "names went unchecked, so nothing later mistakes it for a verified one."
+)
 
 app = typer.Typer(help="Tools for handling genomic files.", no_args_is_help=True)
 
@@ -144,11 +163,15 @@ def register_annotation(
         help="Register again from scratch — the repair for a directory that raises.",
     ),
     check_chromosomes: bool = typer.Option(
-        True,
-        "--check-chromosomes/--no-check-chromosomes",
-        help="Refuse a GTF naming sequences this assembly does not carry, before paying "
-        "for the database build. Pass --no-check-chromosomes to register one whose "
-        "mismatch you have inspected and accept.",
+        True, "--check-chromosomes/--no-check-chromosomes", help=_CHECK_CHROMOSOMES_HELP
+    ),
+    infer_genes: bool = typer.Option(
+        False, "--infer-genes/--no-infer-genes", help=_INFER_HELP.format(feature="gene")
+    ),
+    infer_transcripts: bool = typer.Option(
+        False,
+        "--infer-transcripts/--no-infer-transcripts",
+        help=_INFER_HELP.format(feature="transcript"),
     ),
     json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
 ) -> None:
@@ -158,7 +181,8 @@ def register_annotation(
     the unpacked file against the pinned sha256 and its chromosome names against the
     assembly's, builds the gffutils database, and writes the registration record that
     says all of it finished. An annotation that is already registered is reported from
-    its record without fetching anything.
+    its record without fetching anything. A GTF the table does not list is registered
+    from a path instead, with `genome register-gtf`.
 
     The chromosome check needs the assembly's ``chrom.sizes``, so it can only run once
     the assembly itself is registered. Registering an annotation first is allowed and
@@ -177,11 +201,79 @@ def register_annotation(
             force=force,
             progressbar=not json,
             check_chromosomes=check_chromosomes,
+            disable_infer_genes=not infer_genes,
+            disable_infer_transcripts=not infer_transcripts,
         )
     except _ASSEMBLY_ERRORS as err:
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
 
+    _report_annotation(payload, json=json)
+
+
+@app.command("register-gtf")
+def register_gtf(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'hg38'."),
+    gtf: str = typer.Argument(..., help="Path to the GTF to register, plain or .gz."),
+    name: str = typer.Argument(
+        ..., help="Registered name to address it by afterwards, e.g. 'wormbase_ws298'."
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Register again from scratch — the repair for a directory that raises.",
+    ),
+    check_chromosomes: bool = typer.Option(
+        True, "--check-chromosomes/--no-check-chromosomes", help=_CHECK_CHROMOSOMES_HELP
+    ),
+    infer_genes: bool = typer.Option(
+        False, "--infer-genes/--no-infer-genes", help=_INFER_HELP.format(feature="gene")
+    ),
+    infer_transcripts: bool = typer.Option(
+        False,
+        "--infer-transcripts/--no-infer-transcripts",
+        help=_INFER_HELP.format(feature="transcript"),
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Register an annotation from a local GTF: place, check, build, record.
+
+    The escape hatch for a GTF the annotation table does not list — `genome
+    register-annotation` is the way in for one it does. Nothing is downloaded and no
+    checksum is compared against, because an unlisted GTF has none pinned for it: the
+    file you name is placed under `<assembly dir>/gtf/<name>/` (a `.gz` is decompressed
+    on the way), its chromosome names are checked against the assembly's, the gffutils
+    database is built, and the record that says all of it finished is written last. It
+    is addressed by `<name>` from then on, exactly as a listed annotation is, and shows
+    up in `genome annotations` as registered but not offered.
+
+    The assembly is named rather than inferred — it is what says which reference these
+    gene models describe — and naming it is also what lets the chromosome check find the
+    assembly's `chrom.sizes` without being told where it is.
+
+    Exits with code 1 when the GTF is not there, when it names chromosomes the assembly
+    does not carry, or when the directory holds a registration that cannot be trusted.
+    Re-run with `--force` to repair it.
+    """
+    try:
+        payload = _register_annotation_by_path(
+            assembly,
+            gtf,
+            name,
+            force=force,
+            check_chromosomes=check_chromosomes,
+            disable_infer_genes=not infer_genes,
+            disable_infer_transcripts=not infer_transcripts,
+        )
+    except _ASSEMBLY_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    _report_annotation(payload, json=json)
+
+
+def _report_annotation(payload: dict[str, object], *, json: bool) -> None:
+    """Print a finished annotation registration, as JSON or as the human summary."""
     if json:
         typer.echo(_json.dumps(payload))
         return
