@@ -130,6 +130,15 @@ _COMPONENT_ANNOTATION_DIGEST_KEY = "annotation_sha256"
 #: right, then says which level each join is at.
 _ANNOTATION_JOIN = "+"
 
+#: Every component of this chimera was compared against its own record and is still what
+#: it was. The strong answer :func:`components_status` can give.
+COMPONENTS_UNCHANGED = "unchanged"
+
+#: A comparison could not be made — a digest is absent on one side or the other — so this
+#: chimera is *unproven* rather than proven stale. Reported instead of left silent,
+#: because a caller who cannot tell the two apart reads the weaker one as the stronger.
+COMPONENTS_UNKNOWN = "unknown"
+
 #: A FASTA header split into the whitespace that follows ``>``, the sequence name after
 #: it, and everything after that. The leading run is its own group because ``samtools
 #: faidx`` and ``faToTwoBit`` both *skip* it and name the sequence from the first
@@ -235,6 +244,31 @@ class ChimeraDetails:
     def components(self) -> list[str]:
         """The component assembly names, sorted — a fresh list each call."""
         return [entry.name for entry in self.component_details]
+
+    @property
+    def merged_annotation(self) -> str | None:
+        """The **Registered name** of the **Merged annotation** this build wrote, or ``None``.
+
+        Read back rather than looked up: the name is the contributing annotations' names
+        joined by ``+`` in sorted-component order, which is what :func:`_merged_name` spelled
+        when the merge was registered. ``None`` when no component contributed one, which is
+        a build that registered no annotation at all rather than an empty one.
+
+        Examples
+        --------
+        >>> ChimeraDetails(
+        ...     "__",
+        ...     (
+        ...         ComponentDetails("ce11", "1a2b3c", "wormbase_ws298", "4d5e6f"),
+        ...         ComponentDetails("ecHT115", "7a8b9c", None, None),
+        ...     ),
+        ... ).merged_annotation
+        'wormbase_ws298'
+        """
+        contributed = [
+            entry.annotation for entry in self.component_details if entry.annotation is not None
+        ]
+        return _ANNOTATION_JOIN.join(contributed) if contributed else None
 
     @classmethod
     def from_record(cls, record: CompletionRecord | None) -> ChimeraDetails | None:
@@ -347,19 +381,63 @@ def check_components_unchanged(directory: Path, assembly: str) -> None:
     >>> from pathlib import Path
     >>> check_components_unchanged(Path("/tmp/definitely-not-a-build"), "notAChimera")
     """
+    components_status(directory, assembly)
+
+
+def components_status(directory: Path, assembly: str) -> str | None:
+    """Check every component as :func:`check_components_unchanged` does, and report the answer.
+
+    The same comparison, with its *result* returned rather than only its refusal — because
+    a surface that prints nothing when a check passes prints nothing when a check could not
+    be made either, and a reader cannot tell those apart. A component that pinned no digest
+    when this chimera was built, or that pins none now, leaves nothing to compare: that is
+    :data:`COMPONENTS_UNKNOWN`, and it is not a pass.
+
+    Parameters
+    ----------
+    directory : pathlib.Path
+        The **Assembly dir** the chimera was built in.
+    assembly : str
+        Its assembly name, quoted in the error along with the command that repairs it.
+
+    Returns
+    -------
+    str or None
+        :data:`COMPONENTS_UNCHANGED` when every component was compared and agreed,
+        :data:`COMPONENTS_UNKNOWN` when any comparison could not be made, and ``None`` for
+        an assembly that is not a chimera — which has no components to be asked about.
+
+    Raises
+    ------
+    genome.io.completion.RegistrationMismatchError
+        If a component, or the annotation it contributed, is not the one this chimera was
+        built from — exactly as :func:`check_components_unchanged` raises.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> components_status(Path("/tmp/definitely-not-a-build"), "notAChimera") is None
+    True
+    """
     details = read_chimera_details(directory)
     if details is None:
-        return
-    for entry in details.component_details:
+        return None
+    compared = [
         _check_component_unchanged(entry, assembly=assembly, directory=directory)
+        for entry in details.component_details
+    ]
+    return COMPONENTS_UNCHANGED if all(compared) else COMPONENTS_UNKNOWN
 
 
-def _check_component_unchanged(entry: ComponentDetails, *, assembly: str, directory: Path) -> None:
+def _check_component_unchanged(entry: ComponentDetails, *, assembly: str, directory: Path) -> bool:
     """Raise unless one component — its FASTA, then its annotation — is still itself.
 
     The component is found by name under the shared data root, exactly as an aligner index
     finds the assembly it was built from: a chimera's record carries component names and
     no paths, which is what keeps a registered directory movable.
+
+    Returns whether both digests it looked at were known on both sides, so that a caller
+    reporting the outcome can say *unknown* where nothing was actually compared.
     """
     component_dir = assembly_data_dir(entry.name)
     record = read_record(component_dir)
@@ -374,8 +452,9 @@ def _check_component_unchanged(entry: ComponentDetails, *, assembly: str, direct
             f"nothing about this chimera's own files can show, since they are unchanged. "
             f"Build it again with `{assembly_repair_command(assembly)}`."
         )
+    known = _both_known(entry.sha256, current)
     if entry.annotation is None:
-        return
+        return known
     gtf_dir = annotation_dir(component_dir, entry.annotation)
     annotation = read_record(gtf_dir)
     current_annotation = None if annotation is None else annotation.sha256
@@ -391,11 +470,17 @@ def _check_component_unchanged(entry: ComponentDetails, *, assembly: str, direct
             f"`{assembly_repair_command(assembly)}`, which rewrites the annotation and "
             f"the FASTA together."
         )
+    return known and _both_known(entry.annotation_sha256, current_annotation)
 
 
 def _disagree(recorded: str | None, current: str | None) -> bool:
     """Whether two recorded digests are known to differ — unknown on either side is not."""
     return recorded is not None and current is not None and recorded != current
+
+
+def _both_known(recorded: str | None, current: str | None) -> bool:
+    """Whether two recorded digests were both there to be compared."""
+    return recorded is not None and current is not None
 
 
 @dataclass(frozen=True)
