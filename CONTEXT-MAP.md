@@ -15,7 +15,9 @@ occasionally a real gap worth adding.
 
 **Two vocabularies, and they do not mix.** Domain terms come from these files. Architecture terms —
 module, interface, depth, seam, adapter, leverage, locality — are fixed, and "component", "service",
-"API" and "boundary" are not substitutes for them.
+"API" and "boundary" are not substitutes for them. One narrowing, not a loophole: "component" is a
+domain term in the [Assembly](./docs/context/assembly.md) context, so it is banned only as a
+substitute for *module*.
 
 ## Contexts
 

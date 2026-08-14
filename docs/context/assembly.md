@@ -44,12 +44,38 @@ into a download.
 _Avoid_: fetcher, client, mirror, provider
 
 **Source**:
-Where an assembly's **FASTA** comes from when no golden-path URL is derived: the URL its **Assembly
-metadata** row pins, or the local path or URL handed to `Genome(path_or_url=...)`. Naming a source
-means UCSC is never consulted about the assembly name — validation is a property of the source — and
-only a pinned source is checked against a recorded checksum; a hand-supplied one is trusted as given
-and degrades the assembly name to a label for the directory.
-_Avoid_: input, custom genome, reference
+Where an assembly's **FASTA** comes from when no golden-path URL is derived, in three kinds: the URL
+its **Assembly metadata** row pins, the local path or URL handed to `Genome(path_or_url=...)`, or a
+recipe — *these components* — which is what makes a **Chimera** an assembly rather than a type of
+its own (ADR-0008). Naming a source means UCSC is never consulted about the assembly name —
+validation is a property of the source — and only a pinned source is checked against a recorded
+checksum; a hand-supplied one is trusted as given and degrades the assembly name to a label for the
+directory. That last clause is about hand-supplied bytes alone: a chimera's name is derived from its
+component set, so it identifies the assembly rather than labelling its directory.
+_Avoid_: input, custom genome, reference; and `source_url` as the column a recipe lands in — that
+field is typed and read as a URL, so a component list there is a lie the parser cannot catch
+
+**Chimera**:
+An **Assembly** whose **FASTA** is concatenated from two or more prepared canonical assemblies
+instead of fetched — its **Component**s, never repeated and never themselves chimeras. Its identity
+is that component set rather than the order it arrived in, so the name derives by sorting the
+component names and joining them with `_` and is never overridable (ADR-0008), and every chromosome
+is suffixed `<chromosome>__<component>` unconditionally (ADR-0009), read back by
+`^(?P<chromosome>.+)__(?P<component>[A-Za-z0-9]+)$` with the chimera's own recorded separator
+substituted for `__` whenever a component forced a longer run. `Genome.components` is the single
+test of whether an assembly is one, answering `None` when it is not.
+_Avoid_: hybrid, combined genome, merged genome, multi-species reference; and "concatenated FASTA",
+which names the bytes rather than the assembly they belong to
+
+**Component**:
+One prepared canonical **Assembly** a **Chimera** is built from — never a bare FASTA, which is
+registered as an assembly of its own first, and never itself a chimera, so nesting is forbidden by
+the model rather than deferred. Component names are alphanumeric, enforced rather than assumed: that
+one rule makes the derived chimera name injective and lets a suffixed chromosome name be split back
+to the component it came from. `Genome.chrom_components` performs that split and is **total** — a
+non-chimera maps every chromosome to its own assembly rather than to nothing.
+_Avoid_: part, member, sub-genome, sub-assembly, constituent; and the architecture sense of the
+word, which `CONTEXT-MAP.md` bans as a substitute for *module*
 
 **Genome files**:
 The complete prepared set for an assembly: the FASTA plus its three derived files. Prepared as a
