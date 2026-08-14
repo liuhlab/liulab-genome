@@ -209,6 +209,12 @@ preparation is no longer indistinguishable from a finished one.
   in the same order**, and so is every key written to `.completion.json` — the types wrap those
   names and never rename them. A caller that indexed a returned dict reads an attribute instead, or
   calls `as_json()` for the mapping it had before.
+- **An index record's `parameters` means one thing: every tuning knob that determined the build**,
+  caller-supplied and package-computed alike, whether or not the command line also spells it. STAR
+  already recorded that superset; chromap recorded only its extra flags and rendered its command
+  line from them, so the same key held two contracts. Flags are now rendered from the caller's
+  keywords alone. Records already on disk are not migrated. `Genome.build_star_index`,
+  `build_chromap_index` and `get_index` also take `tool=` now, forwarding it to the aligner.
 
 ### Removed
 

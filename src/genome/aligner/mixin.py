@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from genome.aligner.aligner import Aligner
+    from genome.external import ExternalTool
     from genome.genome import Genome
 
 
@@ -21,7 +22,9 @@ class AlignerMixin:
     was opened in.
     """
 
-    def build_star_index(self, gtf: str, **kwargs: Any) -> Path:
+    def build_star_index(
+        self, gtf: str, *, tool: ExternalTool | None = None, **kwargs: Any
+    ) -> Path:
         """Build a STAR genome index for this assembly against annotation ``gtf``.
 
         A thin entry point onto :meth:`genome.aligner.star.STAR.index`; the
@@ -36,6 +39,12 @@ class AlignerMixin:
             :meth:`~genome.genome.Genome.get_gtf_path` and passed to STAR; the
             index is written to a per-annotation directory ``index/star_<gtf>/``,
             so different annotations build independent indexes.
+        tool : genome.external.ExternalTool, optional
+            The tool to drive, forwarded to the aligner — the same seam
+            :class:`~genome.aligner.aligner.Aligner` offers, reachable from here so
+            that arriving through a :class:`~genome.genome.Genome` does not close it.
+        **kwargs : Any
+            Forwarded to :meth:`genome.aligner.star.STAR.index`.
 
         Returns
         -------
@@ -44,9 +53,9 @@ class AlignerMixin:
         """
         from genome.aligner.star import STAR
 
-        return STAR(cast("Genome", self), gtf=gtf).index(**kwargs)
+        return STAR(cast("Genome", self), gtf=gtf, tool=tool).index(**kwargs)
 
-    def build_chromap_index(self, **kwargs: Any) -> Path:
+    def build_chromap_index(self, *, tool: ExternalTool | None = None, **kwargs: Any) -> Path:
         """Build a chromap genome index for this assembly.
 
         A thin entry point onto :meth:`genome.aligner.chromap.Chromap.index`; the
@@ -56,6 +65,13 @@ class AlignerMixin:
         ``gtf`` argument and one index serves the whole assembly. The index is
         written to ``index/chromap/chromap.index``.
 
+        Parameters
+        ----------
+        tool : genome.external.ExternalTool, optional
+            As :meth:`build_star_index`.
+        **kwargs : Any
+            Forwarded to :meth:`genome.aligner.chromap.Chromap.index`.
+
         Returns
         -------
         pathlib.Path
@@ -63,9 +79,9 @@ class AlignerMixin:
         """
         from genome.aligner.chromap import Chromap
 
-        return Chromap(cast("Genome", self)).index(**kwargs)
+        return Chromap(cast("Genome", self), tool=tool).index(**kwargs)
 
-    def get_index(self, aligner: str, **kwargs: Any) -> Path:
+    def get_index(self, aligner: str, *, tool: ExternalTool | None = None, **kwargs: Any) -> Path:
         """Return the path of an already-built index, for use in aligner commands.
 
         Locates the index a prior ``build_<aligner>_index`` produced and returns
@@ -82,6 +98,10 @@ class AlignerMixin:
         ----------
         aligner : str
             Aligner identifier, case-insensitive (e.g. ``"star"``).
+        tool : genome.external.ExternalTool, optional
+            As :meth:`build_star_index`. Spelled out rather than left to ``**kwargs``
+            so it cannot be read as one of the selectors below. Nothing is run here,
+            so passing one changes only which executable a later build would drive.
         **kwargs : Any
             Aligner-specific selectors forwarded to the aligner constructor to
             pin down the index. STAR requires ``gtf``.
@@ -103,7 +123,7 @@ class AlignerMixin:
             record that disagrees with them; rebuild it with ``overwrite=True``.
         """
         aligner_cls = _resolve_aligner(aligner)
-        return aligner_cls(cast("Genome", self), **kwargs).index_path
+        return aligner_cls(cast("Genome", self), tool=tool, **kwargs).index_path
 
     def get_star_index(self, gtf: str) -> Path:
         """Return the path of the STAR *genomeDir* built for annotation ``gtf``.
