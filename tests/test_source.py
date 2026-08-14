@@ -137,17 +137,16 @@ def test_a_mis_ordered_chimera_name_is_refused_and_told_its_spelling(tmp_path: P
 
 
 def test_only_a_prepared_component_counts_when_the_table_lists_neither(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path, liulab_data: Path
 ) -> None:
     # Neither half is in the shipped table, so nothing but a record of its own can make
     # `tinyCe_tinySc` read as two assemblies rather than as one name somebody chose.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
     here = AssemblyDir.locate("tinyCe_tinySc", tmp_path / "elsewhere")
 
     assert isinstance(resolve_source(here, metadata=None, golden_path_url=_GOLDEN), FetchedSource)
 
     for name in ("tinyCe", "tinySc"):
-        _record_a_genome(tmp_path / "genome" / name, name, None)
+        _record_a_genome(liulab_data / "genome" / name, name, None)
         assert is_prepared(name)
 
     assert resolve_source(here, metadata=None, golden_path_url=_GOLDEN) == ComponentSource(

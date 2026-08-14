@@ -192,37 +192,31 @@ class TestRegister:
     """``genome register`` — prepare an assembly and say what landed.
 
     Offline throughout: ``fake_fetch`` serves the committed ``tiny.fa.gz`` in place of
-    any download, the ``HEAD`` name check is stubbed, and ``LIULAB_DATA`` points the
-    assembly directory at a temp dir. The assembly is ``tiny``, which no shipped row
-    lists, so nothing is pinned for the fixture to disagree with.
+    any download, the ``HEAD`` name check is stubbed, and the shared ``liulab_data``
+    fixture puts the assembly directory under this test's own root. The assembly is
+    ``tiny``, which no shipped row lists, so nothing is pinned for the fixture to
+    disagree with.
     """
 
     @pytest.fixture(autouse=True)
-    def _offline(
-        self,
-        fake_fetch: FakeFetch,
-        offline_prepare: None,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
         fake_fetch.serve("tiny.fa.gz")
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
 
-    def test_registers_and_reports_where_it_landed(self, tmp_path: Path) -> None:
+    def test_registers_and_reports_where_it_landed(self, liulab_data: Path) -> None:
         result = runner.invoke(app, ["register", "tiny"])
 
         assert result.exit_code == 0
-        assert str(tmp_path / "genome" / "tiny") in result.stdout
+        assert str(liulab_data / "genome" / "tiny") in result.stdout
         assert _TINY_FA_SHA256 in result.stdout
-        assert (tmp_path / "genome" / "tiny" / "tiny.fa").is_file()
+        assert (liulab_data / "genome" / "tiny" / "tiny.fa").is_file()
 
-    def test_json(self, tmp_path: Path) -> None:
+    def test_json(self, liulab_data: Path) -> None:
         result = runner.invoke(app, ["register", "tiny", "--json"])
 
         assert result.exit_code == 0
         payload = _json.loads(result.stdout)
         assert payload["assembly"] == "tiny"
-        assert payload["directory"] == str(tmp_path / "genome" / "tiny")
+        assert payload["directory"] == str(liulab_data / "genome" / "tiny")
         assert payload["sha256"] == _TINY_FA_SHA256
         assert sorted(payload["files"]) == [
             "tiny.2bit",
@@ -231,8 +225,8 @@ class TestRegister:
             "tiny.fa.fai",
         ]
 
-    def test_a_broken_directory_exits_non_zero_naming_the_repair(self, tmp_path: Path) -> None:
-        directory = tmp_path / "genome" / "tiny"
+    def test_a_broken_directory_exits_non_zero_naming_the_repair(self, liulab_data: Path) -> None:
+        directory = liulab_data / "genome" / "tiny"
         directory.mkdir(parents=True)
         (directory / "tiny.fa").write_text("half a genome\n")
 
@@ -241,8 +235,8 @@ class TestRegister:
         assert result.exit_code == 1
         assert "genome register tiny --force" in _output(result)
 
-    def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
-        directory = tmp_path / "genome" / "tiny"
+    def test_force_repairs_what_the_error_named(self, liulab_data: Path) -> None:
+        directory = liulab_data / "genome" / "tiny"
         directory.mkdir(parents=True)
         (directory / "tiny.fa").write_text("half a genome\n")
 
@@ -272,15 +266,8 @@ class TestRegisterResolvesTheName:
     """
 
     @pytest.fixture(autouse=True)
-    def _offline(
-        self,
-        fake_fetch: FakeFetch,
-        offline_prepare: None,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
         fake_fetch.serve("tiny.fa.gz")
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
 
     def test_a_source_the_caller_named_settles_a_name_that_would_read_as_a_chimera(
         self, data_dir: Path, fake_fetch: FakeFetch
@@ -318,7 +305,7 @@ class TestRegisterResolvesTheName:
         assert fake_fetch.last.url.endswith("hg38_mm10.fa.gz")
 
     def test_only_a_lost_record_falls_back_to_the_name(
-        self, data_dir: Path, tmp_path: Path
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
         # …and with the record gone, the name is all that is left: the same directory now
         # reads as a chimera of hg38 and mm10, neither of which this machine has.
@@ -328,7 +315,7 @@ class TestRegisterResolvesTheName:
             ).exit_code
             == 0
         )
-        record_path(tmp_path / "genome" / "hg38_mm10").unlink()
+        record_path(liulab_data / "genome" / "hg38_mm10").unlink()
 
         result = runner.invoke(app, ["register", "hg38_mm10", "--force"])
 
@@ -382,17 +369,10 @@ class TestVerify:
     """``genome verify`` — re-read a FASTA and check it against the official row."""
 
     @pytest.fixture(autouse=True)
-    def _offline(
-        self,
-        fake_fetch: FakeFetch,
-        offline_prepare: None,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
         fake_fetch.serve("tiny.fa.gz")
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
 
-    def test_reports_the_digest_of_a_registered_assembly(self, tmp_path: Path) -> None:
+    def test_reports_the_digest_of_a_registered_assembly(self) -> None:
         assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
 
         result = runner.invoke(app, ["verify", "tiny"])
@@ -443,15 +423,8 @@ class TestWhatAVerifiedDigestWasHeldTo:
     """
 
     @pytest.fixture(autouse=True)
-    def _offline(
-        self,
-        fake_fetch: FakeFetch,
-        offline_prepare: None,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
+    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
         fake_fetch.serve("tiny.fa.gz")
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
 
     def test_the_row_pinned_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
         row = AssemblyMetadata(
@@ -515,31 +488,28 @@ class TestRegisterAnnotation:
     """
 
     @pytest.fixture(autouse=True)
-    def _offline(
-        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def _offline(self, fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_fetch.serve("tiny.gtf.gz")
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
         monkeypatch.setattr(metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
 
-    def test_registers_and_reports_where_it_landed(self, tmp_path: Path) -> None:
+    def test_registers_and_reports_where_it_landed(self, liulab_data: Path) -> None:
         result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
 
-        directory = tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101"
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101"
         assert result.exit_code == 0
         assert str(directory) in result.stdout
         assert _TINY_GTF_SHA256 in result.stdout
         assert (directory / "ensgene_v101.gtf").is_file()
         assert (directory / "ensgene_v101.db").is_file()
 
-    def test_json(self, tmp_path: Path) -> None:
+    def test_json(self, liulab_data: Path) -> None:
         result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101", "--json"])
 
         assert result.exit_code == 0
         payload = _json.loads(result.stdout)
         assert payload["assembly"] == "tiny"
         assert payload["name"] == "ensgene_v101"
-        assert payload["directory"] == str(tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101")
+        assert payload["directory"] == str(liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101")
         assert payload["source_url"] == _ANNOTATION_URL
         assert payload["sha256"] == _TINY_GTF_SHA256
         assert sorted(payload["files"]) == ["ensgene_v101.db", "ensgene_v101.gtf"]
@@ -553,8 +523,8 @@ class TestRegisterAnnotation:
         # what a caller who named an unlisted annotation is most likely reaching for.
         assert "genome register-gtf tiny" in _output(result)
 
-    def test_a_broken_directory_exits_non_zero_naming_the_repair(self, tmp_path: Path) -> None:
-        directory = tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101"
+    def test_a_broken_directory_exits_non_zero_naming_the_repair(self, liulab_data: Path) -> None:
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101"
         directory.mkdir(parents=True)
         (directory / "ensgene_v101.db").write_bytes(b"half a database")
 
@@ -563,8 +533,8 @@ class TestRegisterAnnotation:
         assert result.exit_code == 1
         assert "genome register-annotation tiny ensgene_v101 --force" in _output(result)
 
-    def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
-        directory = tmp_path / "genome" / "tiny" / "gtf" / "ensgene_v101"
+    def test_force_repairs_what_the_error_named(self, liulab_data: Path) -> None:
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101"
         directory.mkdir(parents=True)
         (directory / "ensgene_v101.db").write_bytes(b"half a database")
 
@@ -576,13 +546,13 @@ class TestRegisterAnnotation:
         assert _json.loads(result.stdout)["sha256"] == _TINY_GTF_SHA256
 
     def test_the_chromosome_check_is_stood_down_from_the_command_line(
-        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch, liulab_data: Path
     ) -> None:
         # The committed Ensembl-spelled GTF (I, II, III) against a UCSC-spelled
         # assembly (chrI, chrII, chrIII): refused by default, and registered anyway
         # once the caller says they have looked at the mismatch and accept it.
         fake_fetch.serve("ensembl_style.gtf")
-        assembly_dir = tmp_path / "genome" / "tiny"
+        assembly_dir = liulab_data / "genome" / "tiny"
         assembly_dir.mkdir(parents=True)
         (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
         row = replace(
@@ -610,7 +580,11 @@ class TestRegisterAnnotation:
         assert details["chromosomes_unchecked_because"] == "caller-override"
 
     def test_feature_inference_is_reachable_for_a_listed_annotation_too(
-        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        fake_fetch: FakeFetch,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        liulab_data: Path,
     ) -> None:
         # Nothing says a listed annotation declares genes and transcripts, so the
         # inference the API exposes has to be reachable on this command as well.
@@ -632,7 +606,7 @@ class TestRegisterAnnotation:
         )
 
         assert result.exit_code == 0
-        database = tmp_path / "genome" / "tiny" / "gtf" / "bare" / "bare.db"
+        database = liulab_data / "genome" / "tiny" / "gtf" / "bare" / "bare.db"
         assert _feature_types(database) == ["exon", "gene", "transcript"]
 
 
@@ -641,28 +615,25 @@ class TestRegisterGtf:
 
     The by-path way in, from a shell: no table row, no download, no checksum to compare
     against — the caller says where the file is. Offline by construction, since the GTF
-    is a local one; ``LIULAB_DATA`` points the assembly directory at a temp dir.
+    is a local one, and the shared ``liulab_data`` fixture puts the assembly directory
+    under this test's own root.
     """
 
-    @pytest.fixture(autouse=True)
-    def _offline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-
     def test_registers_a_gtf_no_row_lists_and_reports_where_it_landed(
-        self, tmp_path: Path, data_dir: Path
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
         source = data_dir / "tiny.gtf"
 
         result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine"])
 
-        directory = tmp_path / "genome" / "tiny" / "gtf" / "mine"
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "mine"
         assert result.exit_code == 0
         assert str(directory) in result.stdout
         assert str(source) in result.stdout
         assert (directory / "mine.gtf").is_file()
         assert (directory / "mine.db").is_file()
 
-    def test_json(self, tmp_path: Path, data_dir: Path) -> None:
+    def test_json(self, data_dir: Path, liulab_data: Path) -> None:
         source = data_dir / "tiny.gtf"
 
         result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine", "--json"])
@@ -671,7 +642,7 @@ class TestRegisterGtf:
         payload = _json.loads(result.stdout)
         assert payload["assembly"] == "tiny"
         assert payload["name"] == "mine"
-        assert payload["directory"] == str(tmp_path / "genome" / "tiny" / "gtf" / "mine")
+        assert payload["directory"] == str(liulab_data / "genome" / "tiny" / "gtf" / "mine")
         assert payload["source_url"] == str(source)
         assert payload["sha256"] == _TINY_GTF_SHA256
         assert sorted(payload["files"]) == ["mine.db", "mine.gtf"]
@@ -701,10 +672,10 @@ class TestRegisterGtf:
         assert "GTF file not found" in _output(result)
 
     def test_a_broken_directory_exits_non_zero_naming_the_repair(
-        self, tmp_path: Path, data_dir: Path
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
         source = data_dir / "tiny.gtf"
-        directory = tmp_path / "genome" / "tiny" / "gtf" / "mine"
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "mine"
         directory.mkdir(parents=True)
         (directory / "mine.db").write_bytes(b"half a database")
 
@@ -713,8 +684,8 @@ class TestRegisterGtf:
         assert result.exit_code == 1
         assert f"genome register-gtf tiny {source} mine --force" in _output(result)
 
-    def test_force_repairs_what_the_error_named(self, tmp_path: Path, data_dir: Path) -> None:
-        directory = tmp_path / "genome" / "tiny" / "gtf" / "mine"
+    def test_force_repairs_what_the_error_named(self, data_dir: Path, liulab_data: Path) -> None:
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "mine"
         directory.mkdir(parents=True)
         (directory / "mine.db").write_bytes(b"half a database")
 
@@ -726,13 +697,13 @@ class TestRegisterGtf:
         assert _json.loads(result.stdout)["sha256"] == _TINY_GTF_SHA256
 
     def test_the_chromosome_check_is_stood_down_from_the_command_line(
-        self, tmp_path: Path, data_dir: Path
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
         # The committed Ensembl-spelled GTF (I, II, III) against a UCSC-spelled assembly
         # (chrI, chrII, chrIII): the assembly's chrom.sizes is found from its name, so
         # this way in checks the names too — and stands the check down when asked.
         source = data_dir / "ensembl_style.gtf"
-        assembly_dir = tmp_path / "genome" / "tiny"
+        assembly_dir = liulab_data / "genome" / "tiny"
         assembly_dir.mkdir(parents=True)
         (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
 
@@ -751,13 +722,13 @@ class TestRegisterGtf:
         assert details["chromosomes_unchecked_because"] == "caller-override"
 
     def test_a_bare_exon_level_gtf_is_registrable_with_feature_inference(
-        self, tmp_path: Path
+        self, tmp_path: Path, liulab_data: Path
     ) -> None:
         # Without the flags the database holds exons and nothing else — genes and
         # transcripts are what a caller registers an annotation for.
         source = tmp_path / "bare.gtf"
         source.write_text(_BARE_GTF)
-        gtf_root = tmp_path / "genome" / "tiny" / "gtf"
+        gtf_root = liulab_data / "genome" / "tiny" / "gtf"
 
         assert runner.invoke(app, ["register-gtf", "tiny", str(source), "exons"]).exit_code == 0
         assert _feature_types(gtf_root / "exons" / "exons.db") == ["exon"]
@@ -785,17 +756,14 @@ class TestWhatARegistrationSaysAboutTheChromosomes:
     _ADVICE = "register the assembly first"
 
     @pytest.fixture(autouse=True)
-    def _offline(
-        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def _offline(self, fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_fetch.serve("tiny.gtf.gz")
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
         monkeypatch.setattr(metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
 
     @staticmethod
-    def _prepare_assembly(tmp_path: Path) -> None:
+    def _prepare_assembly(liulab_data: Path) -> None:
         """Put the assembly's ``chrom.sizes`` where the check looks for it."""
-        assembly_dir = tmp_path / "genome" / "tiny"
+        assembly_dir = liulab_data / "genome" / "tiny"
         assembly_dir.mkdir(parents=True, exist_ok=True)
         (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
 
@@ -850,14 +818,14 @@ class TestWhatARegistrationSaysAboutTheChromosomes:
             assert self._ADVICE not in result.stdout
 
     def test_a_record_written_before_the_reason_existed_reports_it_as_unknown(
-        self, tmp_path: Path
+        self, tmp_path: Path, liulab_data: Path
     ) -> None:
         # An annotation registered by an older version, reported by re-running the
         # command over it: the record returned is the one already on disk, whose bare
         # `false` stands for either reason. Neither may be claimed, and neither raises.
         self._prepare_assembly(tmp_path)
         assert runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"]).exit_code == 0
-        path = record_path(annotation_dir(tmp_path / "genome" / "tiny", "ensgene_v101"))
+        path = record_path(annotation_dir(liulab_data / "genome" / "tiny", "ensgene_v101"))
         written = _json.loads(path.read_text())
         written["details"] = {"chromosomes_checked": False}
         path.write_text(_json.dumps(written))
@@ -878,12 +846,8 @@ class TestAnnotations:
     and flags it as the default.
     """
 
-    @pytest.fixture(autouse=True)
-    def _offline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-
     def test_an_assembly_with_nothing_registered_is_the_case_it_serves(
-        self, tmp_path: Path
+        self, liulab_data: Path
     ) -> None:
         result = runner.invoke(app, ["annotations", "hg38"])
 
@@ -892,24 +856,24 @@ class TestAnnotations:
         assert "offered, not registered" in result.stdout
         assert "genome register-annotation hg38 gencode_v50" in result.stdout
         # Nothing was prepared to answer the question — the assembly is not even there.
-        assert not (tmp_path / "genome" / "hg38").exists()
+        assert not (liulab_data / "genome" / "hg38").exists()
 
-    def test_json(self, tmp_path: Path) -> None:
+    def test_json(self, liulab_data: Path) -> None:
         result = runner.invoke(app, ["annotations", "hg38", "--json"])
 
         assert result.exit_code == 0
         payload = _json.loads(result.stdout)
         assert payload["assembly"] == "hg38"
-        assert payload["directory"] == str(tmp_path / "genome" / "hg38")
+        assert payload["directory"] == str(liulab_data / "genome" / "hg38")
         assert payload["default_annotation"] == "gencode_v50"
         assert [
             (row["name"], row["offered"], row["registered"]) for row in payload["annotations"]
         ] == [("gencode_v50", True, False)]
 
     def test_it_sets_what_is_registered_here_against_what_is_offered(
-        self, tmp_path: Path, data_dir: Path
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
-        _register("hg38", tmp_path / "genome" / "hg38", data_dir / "tiny.gtf", "mine")
+        _register("hg38", liulab_data / "genome" / "hg38", data_dir / "tiny.gtf", "mine")
 
         result = runner.invoke(app, ["annotations", "hg38", "--json"])
 
@@ -931,12 +895,12 @@ class TestAnnotations:
         assert "tiny" in result.stdout
 
     def test_a_broken_offered_annotation_reads_as_broken_and_names_its_repair(
-        self, tmp_path: Path, data_dir: Path
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
         # It used to read `offered, not registered` — indistinguishable from one nobody
         # had ever fetched — and the closing line sent the reader to a command that
         # would itself raise and demand --force.
-        assembly_dir = tmp_path / "genome" / "hg38"
+        assembly_dir = liulab_data / "genome" / "hg38"
         _register("hg38", assembly_dir, data_dir / "tiny.gtf", "gencode_v50")
         record_path(annotation_dir(assembly_dir, "gencode_v50")).unlink()
 
@@ -952,9 +916,9 @@ class TestAnnotations:
         assert "--force" in default_line
 
     def test_a_broken_unlisted_annotation_is_listed_at_all(
-        self, tmp_path: Path, data_dir: Path
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
-        assembly_dir = tmp_path / "genome" / "hg38"
+        assembly_dir = liulab_data / "genome" / "hg38"
         annotation = _register("hg38", assembly_dir, data_dir / "tiny.gtf", "mine")
         annotation.db.write_bytes(b"truncated")
 
@@ -966,9 +930,9 @@ class TestAnnotations:
         assert f"genome register-gtf hg38 {data_dir / 'tiny.gtf'} mine --force" in result.stdout
 
     def test_json_carries_the_broken_state_and_the_repair(
-        self, tmp_path: Path, data_dir: Path
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
-        assembly_dir = tmp_path / "genome" / "hg38"
+        assembly_dir = liulab_data / "genome" / "hg38"
         _register("hg38", assembly_dir, data_dir / "tiny.gtf", "healthy")
         annotation = _register("hg38", assembly_dir, data_dir / "tiny.gtf", "mine")
         annotation.db.write_bytes(b"truncated")
@@ -991,17 +955,14 @@ class TestTableRow:
     """``genome table-row`` — download an assembly and print its finished table row.
 
     Offline throughout: ``fake_fetch`` serves the committed ``tiny.fa.gz`` in place of
-    any download, and ``LIULAB_DATA`` points the assembly directory at a temp dir. hg38
-    and sacCer3 are used because the shipped table pins a source URL for both, which
-    also skips the network name check.
+    any download, and the shared ``liulab_data`` fixture puts the assembly directory
+    under this test's own root. hg38 and sacCer3 are used because the shipped table pins a
+    source URL for both, which also skips the network name check.
     """
 
     @pytest.fixture(autouse=True)
-    def _offline(
-        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def _offline(self, fake_fetch: FakeFetch) -> None:
         fake_fetch.serve("tiny.fa.gz")
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
 
     def test_prints_the_row_to_paste(self) -> None:
         result = runner.invoke(app, ["table-row", "hg38"])
@@ -1063,10 +1024,6 @@ class TestTheSurfacesThatDidNotChange:
     ``--json`` half is pinned the same way and for a stronger reason: a script parses it
     positionally as often as by key, so a reordered key is a break nobody would see.
     """
-
-    @pytest.fixture(autouse=True)
-    def _offline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
 
     def test_annotations_json_is_the_same_keys_in_the_same_order(self) -> None:
         result = runner.invoke(app, ["annotations", "hg38", "--json"])
@@ -1159,10 +1116,6 @@ class TestChimeraFromTheCommandLine:
     the native tools are real, so what is asserted is what actually got written.
     """
 
-    @pytest.fixture(autouse=True)
-    def _root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-
     @staticmethod
     def _register_components(*names: str, annotate: bool = False) -> None:
         """Register each named tiny component — and its own annotation when asked."""
@@ -1177,7 +1130,7 @@ class TestChimeraFromTheCommandLine:
                 assert built.exit_code == 0, _output(built)
 
     def test_naming_a_chimera_builds_it_and_the_report_says_what_it_is_made_of(
-        self, tmp_path: Path
+        self, liulab_data: Path
     ) -> None:
         # The line that used to read `source None` is the components, and the closing one
         # names the annotation this same command registered.
@@ -1189,7 +1142,7 @@ class TestChimeraFromTheCommandLine:
         assert "  components  tinyCe, tinySc" in result.stdout
         assert "source" not in result.stdout
         assert f"  annotation  {COMPONENT_ANNOTATION}+{COMPONENT_ANNOTATION}" in result.stdout
-        assert (tmp_path / "genome" / "tinyCe_tinySc" / "tinyCe_tinySc.fa").is_file()
+        assert (liulab_data / "genome" / "tinyCe_tinySc" / "tinyCe_tinySc.fa").is_file()
 
     def test_a_build_with_nothing_to_merge_says_so_rather_than_saying_nothing(self) -> None:
         self._register_components("tinyCe", "tinySc")
@@ -1224,13 +1177,13 @@ class TestChimeraFromTheCommandLine:
         assert "components  unchanged" in human.stdout
 
     def test_a_component_that_pinned_nothing_reads_as_unknown_rather_than_as_a_pass(
-        self, tmp_path: Path
+        self, liulab_data: Path
     ) -> None:
         # The line prints either way: a chimera whose components could not be compared is
         # unproven, and silence would be exactly what a pass looks like.
         self._register_components("tinyCe", "tinySc")
         assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
-        directory = tmp_path / "genome" / "tinyCe_tinySc"
+        directory = liulab_data / "genome" / "tinyCe_tinySc"
         record = read_record(directory)
         assert record is not None
         for entry in record.details["components"]:
@@ -1264,7 +1217,7 @@ class TestChimeraFromTheCommandLine:
         assert _CHIMERA_REPAIR in _output(result)
 
     def test_the_repair_a_chimera_error_names_is_the_command_that_repairs_it(
-        self, tmp_path: Path
+        self, tmp_path: Path, liulab_data: Path
     ) -> None:
         # Run verbatim, not paraphrased: this command used to route to the downloader and
         # fail with "Unknown UCSC assembly", so every chimera error quoted a repair nobody
@@ -1283,19 +1236,19 @@ class TestChimeraFromTheCommandLine:
 
         assert repaired.exit_code == 0, _output(repaired)
         # Rebuilt, not merely re-recorded: the corrected component's bases are in it.
-        fasta = (tmp_path / "genome" / "tinyCe_tinySc" / "tinyCe_tinySc.fa").read_text()
+        fasta = (liulab_data / "genome" / "tinyCe_tinySc" / "tinyCe_tinySc.fa").read_text()
         assert "ACGTACGTAC" in fasta
         verified = runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"])
         assert _json.loads(verified.stdout)["components"] == "unchanged"
 
     def test_a_lost_record_is_rebuilt_from_the_name_by_the_command_it_names(
-        self, tmp_path: Path
+        self, liulab_data: Path
     ) -> None:
         # The residual a lost record leaves: the name is the only surviving information
         # about what this directory was, and it is enough.
         self._register_components("tinyCe", "tinySc")
         assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
-        record_path(tmp_path / "genome" / "tinyCe_tinySc").unlink()
+        record_path(liulab_data / "genome" / "tinyCe_tinySc").unlink()
         refused = runner.invoke(app, ["register", "tinyCe_tinySc"])
         assert refused.exit_code == 1
         assert _CHIMERA_REPAIR in _output(refused)

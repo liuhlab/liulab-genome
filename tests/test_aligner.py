@@ -183,14 +183,6 @@ def tools() -> _Tools:
     return _Tools()
 
 
-@pytest.fixture
-def data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point ``LIULAB_DATA`` at this test's own root, so an index dir lands under it."""
-    root = tmp_path / "data"
-    monkeypatch.setenv("LIULAB_DATA", str(root))
-    return root
-
-
 def _star_over(tools: _Tools, tmp_path: Path, chrom_sizes: pd.Series) -> STAR:
     """A stubbed STAR bound to ``toy`` over a genome of exactly ``chrom_sizes``."""
     return STAR(_make_genome(tmp_path, chrom_sizes=chrom_sizes), gtf="toy", tool=tools("STAR"))
@@ -225,13 +217,13 @@ def _record_of(aligner: aligner_mod.Aligner) -> CompletionRecord:
 
 
 @pytest.fixture
-def stub_star(tools: _Tools, data_root: Path, tmp_path: Path) -> STAR:
+def stub_star(tools: _Tools, tmp_path: Path) -> STAR:
     """A STAR (bound to the ``toy`` annotation) driving a recording tool."""
     return STAR(_make_genome(tmp_path), gtf="toy", tool=tools("STAR"))
 
 
 @pytest.fixture
-def stub_chromap(tools: _Tools, data_root: Path, tmp_path: Path) -> Chromap:
+def stub_chromap(tools: _Tools, tmp_path: Path) -> Chromap:
     """A Chromap driving a recording tool (no annotation — chromap needs none)."""
     return Chromap(_make_genome(tmp_path), tool=tools("chromap"))
 
@@ -272,7 +264,7 @@ def test_one_renderer_expands_a_list_value_after_its_flag(stub_star: STAR) -> No
 
 
 def test_constructing_an_aligner_runs_nothing(
-    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Nothing on PATH and no interpreter bin/ either: an aligner that resolved its binary
     # in its constructor could not be built here at all, which is what made every test
@@ -286,7 +278,7 @@ def test_constructing_an_aligner_runs_nothing(
 
 
 def test_a_missing_binary_raises_naming_what_installs_it(
-    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # The instructions travel in the error rather than being printed to stderr on the way
     # past: a library that writes to a console its caller may not have is not an error
@@ -306,7 +298,7 @@ def test_a_missing_binary_raises_naming_what_installs_it(
 
 
 def test_a_missing_chromap_raises_naming_what_installs_it(
-    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(external_mod.sys, "executable", str(tmp_path / "bin" / "python"))
@@ -323,9 +315,7 @@ def test_index_dir_is_per_annotation(stub_star: STAR) -> None:
     assert stub_star.index_dir.parts[-4:] == ("genome", "tiny", "index", "star_toy")
 
 
-def test_distinct_gtf_keys_use_distinct_index_dirs(
-    tools: _Tools, data_root: Path, tmp_path: Path
-) -> None:
+def test_distinct_gtf_keys_use_distinct_index_dirs(tools: _Tools, tmp_path: Path) -> None:
     genome = _make_genome(tmp_path, {"a": _TOY_GTF, "b": _TOY_GTF})
     star_a = STAR(genome, gtf="a", tool=tools("STAR"))
     star_b = STAR(genome, gtf="b", tool=tools("STAR"))
@@ -342,11 +332,11 @@ def test_the_index_dir_is_the_one_inside_the_genomes_own_assembly_dir(
     tmp_path: Path,
 ) -> None:
     # An **Index dir** is `<assembly dir>/index/<name>/`, and the assembly dir is the one
-    # this genome was opened in — never one re-derived from the shared data root. A genome
-    # opened somewhere else is the case that tells the two apart, and it is an ordinary
-    # one: every fixture in this suite that registers a component uses it.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
+    # this genome was opened in — never one re-derived from the shared data root. Moving
+    # the root out from under an already-open genome is the case that tells the two apart:
+    # every other test's genome sits under the root, where the two answers agree.
     genome = chimera_component("tinyCe")
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
 
     chromap = Chromap(genome, tool=tools("chromap"))
 
@@ -364,8 +354,8 @@ def test_an_index_pins_the_digest_of_the_assembly_it_was_opened_from(
     # shared root and it reads a record that is not there, so the digest is `None`, the
     # key is omitted, and a reference rebuilt underneath the index stops being noticed —
     # a guard that passes without having been exercised.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
     genome = chimera_component("tinyCe")
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
     assembly = read_record(genome.fasta_path.parent)
     assert assembly is not None
     assert assembly.sha256 is not None
@@ -615,7 +605,7 @@ def test_overwrite_rebuilds_over_an_interrupted_build(
 
 
 def test_a_rebuild_that_dies_leaves_nothing_vouching_for_the_directory(
-    stub_star: STAR, tools: _Tools, data_root: Path, tmp_path: Path, building_run: list[list[str]]
+    stub_star: STAR, tools: _Tools, tmp_path: Path, building_run: list[list[str]]
 ) -> None:
     stub_star.index()
 
@@ -663,7 +653,6 @@ def test_index_emits_sjdb_flags_from_bound_gtf(
 )
 def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
     tools: _Tools,
-    data_root: Path,
     tmp_path: Path,
     captured_run: list[list[str]],
     components: tuple[str, ...],
@@ -683,7 +672,7 @@ def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
 
 
 def test_chr_bin_nbits_is_passed_even_when_it_lands_on_stars_own_default(
-    tools: _Tools, data_root: Path, tmp_path: Path, captured_run: list[list[str]]
+    tools: _Tools, tmp_path: Path, captured_run: list[list[str]]
 ) -> None:
     # Two 1 Gb sequences: the recommendation is ~29.9, and the clause is a min, so 18
     # stands. It is still passed, so a record's parameters mean one thing either way.
@@ -697,7 +686,6 @@ def test_chr_bin_nbits_is_passed_even_when_it_lands_on_stars_own_default(
 @pytest.mark.parametrize(("sjdb_overhang", "expected"), [(100, 6), (149, 7)])
 def test_chr_bin_nbits_never_drops_below_one_read(
     tools: _Tools,
-    data_root: Path,
     tmp_path: Path,
     captured_run: list[list[str]],
     sjdb_overhang: int,
@@ -727,7 +715,7 @@ def test_an_explicit_chr_bin_nbits_wins_over_the_computed_one(
 
 
 @pytest.fixture
-def mixin_genome(data_root: Path, tmp_path: Path) -> Genome:
+def mixin_genome(tmp_path: Path) -> Genome:
     """A Genome-like object carrying :class:`AlignerMixin`.
 
     No patch anywhere: the mixin forwards ``tool=`` to the aligner it builds, so a test
@@ -846,8 +834,7 @@ def test_get_index_unknown_aligner_raises(mixin_genome: Genome) -> None:
 
 
 @_needs_star
-def test_real_star_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+def test_real_star_index_builds(tmp_path: Path) -> None:
     star = STAR(_make_genome(tmp_path), gtf="toy")
 
     out = star.index(threads=2)
@@ -878,8 +865,7 @@ def test_real_star_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
 
 @_needs_star
-def test_real_star_index_with_gtf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+def test_real_star_index_with_gtf(tmp_path: Path) -> None:
     star = STAR(_make_genome(tmp_path), gtf="toy")
 
     out = star.index(sjdb_overhang=49, threads=2)
@@ -1025,8 +1011,7 @@ def test_get_chromap_index_raises_before_build(mixin_genome: Genome) -> None:
 
 
 @_needs_chromap
-def test_real_chromap_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+def test_real_chromap_index_builds(tmp_path: Path) -> None:
     chromap = Chromap(_make_genome(tmp_path))
 
     out = chromap.index()
@@ -1046,13 +1031,10 @@ def test_real_chromap_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
 
 @_needs_chromap
-def test_real_chromap_accepts_the_minimizer_knobs_it_now_spells_itself(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_real_chromap_accepts_the_minimizer_knobs_it_now_spells_itself(tmp_path: Path) -> None:
     # kmer and window moved out of the rendered keywords and onto the command line, so
     # a real chromap is what says the two spellings it is given are ones it accepts —
     # the stubbed tests assert the string and would pass on a flag chromap rejects.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     chromap = Chromap(_make_genome(tmp_path))
 
     out = chromap.index(kmer=17, window=7)
@@ -1281,13 +1263,11 @@ _CHIMERA_GENES = 13
 
 
 @pytest.fixture
-def everyday_chimera(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Iterator[Genome]:
+def everyday_chimera(chimera_component: ComponentFactory) -> Iterator[Genome]:
     """The everyday chimera, built for real, with its merged annotation registered.
 
-    ``LIULAB_DATA`` is pointed at the test's own root so the components and the chimera
-    land beside each other, which is what a chimera's staleness comparison looks for.
+    The components and the chimera land beside each other under the test's own root,
+    which is what a chimera's staleness comparison looks for.
     Where the *index* goes no longer depends on it: an index dir and the assembly digest
     it pins both come from the genome's own **Assembly dir**, so a chimera built anywhere
     indexes into itself.
@@ -1295,7 +1275,6 @@ def everyday_chimera(
     Skips with :func:`chimera_component` when the preparation tools are absent, so a
     test using this needs no marker of its own beyond the aligner it drives.
     """
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     components = [chimera_component(name, with_annotation=True) for name in CHIMERA_EVERYDAY]
     with Genome.chimera(*components) as built:
         yield built

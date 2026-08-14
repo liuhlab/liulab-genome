@@ -40,12 +40,11 @@ def _derive(fasta: Path) -> GenomeFiles:
 
 
 def test_a_registration_defaults_to_the_assemblys_own_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path, liulab_data: Path
 ) -> None:
     # Construction moved with the steps: where an assembly's files belong is answered
     # once, so a builder that never downloads cannot answer it differently.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-    assert AssemblyRegistration("hg38").cache_dir == tmp_path / "genome" / "hg38"
+    assert AssemblyRegistration("hg38").cache_dir == liulab_data / "genome" / "hg38"
     assert AssemblyRegistration("hg38", tmp_path / "elsewhere").cache_dir == tmp_path / "elsewhere"
 
 
@@ -104,10 +103,7 @@ def test_another_contexts_subtree_does_not_make_an_assembly_look_broken(tmp_path
     assert registration._completed_genome(overwrite=False, repair="unused") is None
 
 
-def test_the_downloader_is_a_registration_that_also_fetches(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+def test_the_downloader_is_a_registration_that_also_fetches() -> None:
     dl = UCSCGenomeDownloader("hg38")
 
     assert isinstance(dl, AssemblyRegistration)
