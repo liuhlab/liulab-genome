@@ -1,0 +1,12 @@
+NZ_TINY01000001.1	ensGene.v101	transcript	224	1150	.	+	.	gene_id "YCL074W"; transcript_id "YCL074W";  gene_name "YCL074W";
+NZ_TINY01000001.1	ensGene.v101	exon	224	1150	.	+	.	gene_id "YCL074W"; transcript_id "YCL074W"; exon_number "1"; exon_id "YCL074W.1"; gene_name "YCL074W";
+NZ_TINY01000002.1	ensGene.v101	transcript	80	307	.	+	.	gene_id "YAL067W-A"; transcript_id "YAL067W-A_mRNA";  gene_name "YAL067W-A";
+NZ_TINY01000002.1	ensGene.v101	exon	80	307	.	+	.	gene_id "YAL067W-A"; transcript_id "YAL067W-A_mRNA"; exon_number "1"; exon_id "YAL067W-A_mRNA.1"; gene_name "YAL067W-A";
+NZ_TINY01000002.1	ensGene.v101	CDS	80	304	.	+	0	gene_id "YAL067W-A"; transcript_id "YAL067W-A_mRNA"; exon_number "1"; exon_id "YAL067W-A_mRNA.1"; gene_name "YAL067W-A";
+NZ_TINY01000002.1	ensGene.v101	start_codon	80	82	.	+	0	gene_id "YAL067W-A"; transcript_id "YAL067W-A_mRNA"; exon_number "1"; exon_id "YAL067W-A_mRNA.1"; gene_name "YAL067W-A";
+NZ_TINY01000002.1	ensGene.v101	stop_codon	305	307	.	+	0	gene_id "YAL067W-A"; transcript_id "YAL067W-A_mRNA"; exon_number "1"; exon_id "YAL067W-A_mRNA.1"; gene_name "YAL067W-A";
+chr1_KI270706v1_random	ensGene.v101	transcript	90	425	.	+	.	gene_id "YBL109W"; transcript_id "YBL109W_mRNA";  gene_name "YBL109W";
+chr1_KI270706v1_random	ensGene.v101	exon	90	425	.	+	.	gene_id "YBL109W"; transcript_id "YBL109W_mRNA"; exon_number "1"; exon_id "YBL109W_mRNA.1"; gene_name "YBL109W";
+chr1_KI270706v1_random	ensGene.v101	CDS	90	422	.	+	0	gene_id "YBL109W"; transcript_id "YBL109W_mRNA"; exon_number "1"; exon_id "YBL109W_mRNA.1"; gene_name "YBL109W";
+chr1_KI270706v1_random	ensGene.v101	start_codon	90	92	.	+	0	gene_id "YBL109W"; transcript_id "YBL109W_mRNA"; exon_number "1"; exon_id "YBL109W_mRNA.1"; gene_name "YBL109W";
+chr1_KI270706v1_random	ensGene.v101	stop_codon	423	425	.	+	0	gene_id "YBL109W"; transcript_id "YBL109W_mRNA"; exon_number "1"; exon_id "YBL109W_mRNA.1"; gene_name "YBL109W";

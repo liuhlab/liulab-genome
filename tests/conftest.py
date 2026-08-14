@@ -5,16 +5,18 @@ from __future__ import annotations
 import os
 import shutil
 import socket
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Protocol
 
 import pytest
 import requests
 
+from genome import Genome
 from genome.io import download as download_mod
 from genome.io import utils as utils_mod
+from genome.io.fasta import PREPARATION_TOOLS
 
 
 class NetworkAccessError(RuntimeError):
@@ -227,3 +229,174 @@ def fake_fetch(monkeypatch: pytest.MonkeyPatch) -> FakeFetch:
     fake = FakeFetch()
     monkeypatch.setattr(download_mod, "fetch_url", fake)
     return fake
+
+
+# ---------------------------------------------------------------------------------------
+# Tiny chimera components
+# ---------------------------------------------------------------------------------------
+
+#: Where the component fixtures live. ``tests/data/README.md`` carries their table in
+#: prose, :data:`CHIMERA_COMPONENTS` carries it as data, and ``test_chimera_fixtures``
+#: asserts the committed bytes against the data — so the two cannot drift.
+CHIMERA_DATA_DIR = DATA_DIR / "chimera"
+
+#: What a component's own annotation is registered as. Deliberately colourless: what a
+#: *merged* annotation is named is the merge's decision, and no fixture should pre-empt it.
+COMPONENT_ANNOTATION = "genes"
+
+
+@dataclass(frozen=True)
+class ChimeraComponent:
+    """One tiny component assembly and the committed bytes it is cut from.
+
+    What each one is in the set *for* is ``tests/data/README.md``'s table; what is here is
+    only what a test can check the bytes against.
+
+    Attributes
+    ----------
+    name : str
+        The component assembly name — alphanumeric, as the model requires.
+    slices : dict
+        Each chromosome, in file order, mapped to the ``(chromosome, start, end)`` slice
+        of ``tests/data/tiny.fa`` it was cut from — 1-based inclusive, as ``samtools
+        faidx`` takes them. Slices never overlap, across the whole set.
+    line_width : int
+        The column the FASTA is wrapped at.
+    soft_masked : tuple or None
+        The one lower-cased stretch, as ``(chromosome, bases)`` counted from its start, or
+        ``None`` for a component that carries no masking.
+    has_gtf : bool
+        Whether an annotation is shipped beside the FASTA.
+    """
+
+    name: str
+    slices: dict[str, tuple[str, int, int]]
+    line_width: int
+    soft_masked: tuple[str, int] | None = None
+    has_gtf: bool = True
+
+    @property
+    def fasta(self) -> Path:
+        """Path to the committed component FASTA."""
+        return CHIMERA_DATA_DIR / f"{self.name}.fa"
+
+    @property
+    def gtf(self) -> Path | None:
+        """Path to the committed component GTF, or ``None`` when it ships none."""
+        return CHIMERA_DATA_DIR / f"{self.name}.gtf" if self.has_gtf else None
+
+    @property
+    def chromosomes(self) -> list[str]:
+        """Chromosome names, in the order the FASTA declares them."""
+        return list(self.slices)
+
+    @property
+    def lengths(self) -> dict[str, int]:
+        """Each chromosome's length, derived from the slice it was cut from."""
+        return {chromosome: end - start + 1 for chromosome, (_, start, end) in self.slices.items()}
+
+
+#: Every tiny component, keyed by name and held in the sorted order a chimera puts its
+#: components in — so reading this table is reading the derived name left to right.
+CHIMERA_COMPONENTS: dict[str, ChimeraComponent] = {
+    "tinyCe": ChimeraComponent(
+        name="tinyCe",
+        slices={
+            "I": ("chrII", 2701, 5200),
+            "II": ("chrIII", 6301, 8650),
+            "MtDNA": ("chrI", 6901, 9200),
+        },
+        line_width=60,
+        soft_masked=("I", 200),
+    ),
+    "tinyEc": ChimeraComponent(
+        name="tinyEc",
+        slices={
+            "NZ_TINY01000001.1": ("chrIII", 2601, 6300),
+            "NZ_TINY01000002.1": ("chrI", 2401, 4600),
+            "chr1_KI270706v1_random": ("chrII", 5701, 7700),
+        },
+        line_width=80,
+    ),
+    "tinyEcDub": ChimeraComponent(
+        name="tinyEcDub",
+        slices={
+            "NZ_TINY02000001.1": ("chrII", 7701, 8300),
+            "NZ_TINY02__000002.1": ("chrII", 8301, 8800),
+        },
+        line_width=60,
+        has_gtf=False,
+    ),
+    "tinySc": ChimeraComponent(
+        name="tinySc",
+        slices={
+            "I": ("chrI", 1, 2400),
+            "II": ("chrII", 1, 2700),
+            "III": ("chrIII", 1, 2600),
+        },
+        line_width=60,
+    ),
+}
+
+#: The everyday components: three, sorted, and asking for the ``__`` separator every
+#: shipped assembly asks for. A pair from these mirrors the shipped ``ce11_ecHT115``;
+#: all three make N > 2 an ordinary case rather than an unexercised one.
+CHIMERA_EVERYDAY: tuple[str, ...] = ("tinyCe", "tinyEc", "tinySc")
+
+#: The component that forces the separator to escalate. Kept out of
+#: :data:`CHIMERA_EVERYDAY` so the everyday chimera is the ordinary one and escalation is
+#: opted into.
+CHIMERA_ESCALATION = "tinyEcDub"
+
+
+class ComponentFactory(Protocol):
+    """Registers a tiny component assembly and hands back the opened :class:`Genome`."""
+
+    def __call__(self, name: str, *, with_annotation: bool = False) -> Genome:
+        """Register ``name`` — and its annotation when asked — under the test's tmp dir."""
+        ...
+
+
+@pytest.fixture
+def chimera_component(tmp_path: Path) -> Iterator[ComponentFactory]:
+    """Return a factory that registers a tiny component assembly and opens it.
+
+    Each component lands in its own directory under ``tmp_path`` and is seeded from its
+    committed FASTA, so registration runs the real native tools and the real record path
+    without reaching the network — which the autouse guard would refuse anyway. Every
+    genome opened is closed at teardown::
+
+        def test_something(chimera_component):
+            worm = chimera_component("tinyCe", with_annotation=True)
+            draft = chimera_component("tinyEc")
+
+    Skips when the preparation tools are not on ``PATH``, so a test using this needs no
+    skip marker of its own. See ``tests/data/README.md`` for what each one exercises.
+    """
+    missing = [tool for tool in PREPARATION_TOOLS if shutil.which(tool) is None]
+    if missing:
+        pytest.skip(f"not on PATH: {', '.join(missing)}")
+
+    opened: list[Genome] = []
+
+    def register(name: str, *, with_annotation: bool = False) -> Genome:
+        component = CHIMERA_COMPONENTS[name]
+        genome = Genome(
+            name,
+            path_or_url=component.fasta,
+            cache_dir=tmp_path / name,
+            progressbar=False,
+        )
+        opened.append(genome)
+        if with_annotation:
+            if component.gtf is None:
+                raise ValueError(
+                    f"{name} ships no annotation; ask for one of "
+                    f"{[c.name for c in CHIMERA_COMPONENTS.values() if c.has_gtf]} instead."
+                )
+            genome.register_gtf(component.gtf, COMPONENT_ANNOTATION)
+        return genome
+
+    yield register
+    for genome in opened:
+        genome.close()
