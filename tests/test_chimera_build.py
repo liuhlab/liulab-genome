@@ -86,16 +86,14 @@ def _record_of(genome: Genome) -> CompletionRecord:
 
 
 @pytest.fixture
-def build_chimera(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Iterator[ChimeraFactory]:
+def build_chimera(chimera_component: ComponentFactory) -> Iterator[ChimeraFactory]:
     """Return a factory building a chimera of the named tiny components, in a temp root.
 
-    ``LIULAB_DATA`` is pointed at the test's own directory first: a chimera built into
-    the lab's shared reference data by a test would be a serious bug, and the default
-    path is the one worth exercising. Every chimera opened is closed at teardown.
+    No ``cache_dir``: the default path is the one worth exercising, and the shared
+    ``liulab_data`` fixture has already pointed the root at the test's own directory —
+    a chimera built into the lab's shared reference data by a test would be a serious
+    bug. Every chimera opened is closed at teardown.
     """
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     opened: list[Genome] = []
 
     def build(*names: str, cache_dir: str | Path | None = None, force: bool = False) -> Genome:
@@ -142,13 +140,13 @@ def test_the_component_order_a_caller_passes_does_not_reach_the_reference(
 
 
 def test_a_built_chimera_lands_where_it_is_told_to(
-    build_chimera: ChimeraFactory, tmp_path: Path
+    build_chimera: ChimeraFactory, tmp_path: Path, liulab_data: Path
 ) -> None:
     elsewhere = tmp_path / "elsewhere"
     chimera = build_chimera("tinyCe", "tinySc", cache_dir=elsewhere)
 
     assert chimera.fasta_path == elsewhere / "tinyCe_tinySc.fa"
-    assert not (tmp_path / "data" / "genome" / "tinyCe_tinySc").exists()
+    assert not (liulab_data / "genome" / "tinyCe_tinySc").exists()
 
 
 # --------------------------------------------------------------------------------------
@@ -228,13 +226,12 @@ def test_a_header_that_names_no_sequence_is_refused(line: bytes) -> None:
 
 
 def test_a_component_header_starting_with_whitespace_is_named_as_the_tools_name_it(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory, tmp_path: Path
 ) -> None:
     # End to end, because this is where reading the header differently from samtools shows
     # up: the component registers under `oddChr`, so the chimera must carry
     # `oddChr__tinyOdd` — and a build that suffixed the empty token instead writes
     # `__tinyOdd`, which the cross-check against the components' prediction refuses.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     fasta = tmp_path / "odd.fa"
     fasta.write_text(">  oddChr a description after two spaces\n" + "ACGT" * 15 + "\n")
     odd = Genome("tinyOdd", path_or_url=fasta, cache_dir=tmp_path / "tinyOdd", progressbar=False)
@@ -449,12 +446,11 @@ def test_a_chimera_directory_that_cannot_be_trusted_raises_naming_the_repair(
 
 
 def test_a_chrom_sizes_that_disagrees_with_the_components_is_never_recorded(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The cross-check between the tools' answer and the contract's prediction. Standing a
     # wrong chrom.sizes in is the only way to reach it: the build is a verbatim copy under
     # a derived name, so it is meant to be unreachable.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     prepare = chimera_mod.prepare_fasta
 
     def prepare_and_mangle(fasta: Path, *, overwrite: bool = False) -> GenomeFiles:

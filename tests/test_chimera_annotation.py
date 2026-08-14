@@ -74,17 +74,15 @@ def _seqids(db: Path) -> set[str]:
 
 
 @pytest.fixture
-def build_chimera(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Iterator[ChimeraFactory]:
+def build_chimera(chimera_component: ComponentFactory) -> Iterator[ChimeraFactory]:
     """Return a factory building a chimera of the named tiny components, in a temp root.
 
     Every component that ships a GTF is registered with it, so the everyday call is the
     annotated one; ``annotate=False`` builds the same components with nothing registered.
-    ``LIULAB_DATA`` is pointed at the test's own directory first — a chimera built into
-    the lab's shared reference data by a test would be a serious bug.
+    The chimera lands where the layout puts it, under the root the shared ``liulab_data``
+    fixture pointed at this test's own directory — a chimera built into the lab's shared
+    reference data by a test would be a serious bug.
     """
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     opened: list[Genome] = []
 
     def build(*names: str, annotate: bool = True, force: bool = False) -> Genome:
@@ -121,12 +119,11 @@ def test_the_everyday_chimera_arrives_with_its_merged_annotation_registered(
 
 
 def test_the_merged_name_is_the_plus_join_in_sorted_component_order(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory,
 ) -> None:
     # Distinct annotation names per component, so the order is visible: sorted by
     # component (tinyCe, tinyEc, tinySc) and not by annotation name, which would give
     # 'ecoli+worm+yeast'.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     named = {"tinyCe": "worm", "tinyEc": "ecoli", "tinySc": "yeast"}
     components = []
     for component, annotation in named.items():
@@ -170,11 +167,10 @@ def test_the_merged_gtf_is_unsorted_and_in_component_order(
 
 
 def test_every_data_line_survives_and_no_pragma_does(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory, tmp_path: Path
 ) -> None:
     # A #!genome-build pragma names the one assembly its file was built for, so several
     # of them concatenated would each be false about the chimera.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     expected = 0
     components = []
     for name in CHIMERA_EVERYDAY:
@@ -247,11 +243,10 @@ def test_no_contributors_at_all_registers_no_annotation(
 
 
 def test_a_component_whose_default_annotation_is_not_registered_raises(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory, liulab_data: Path
 ) -> None:
     # The cold-machine rule, one level down: a default is a name until something registers
     # it, and a chimera build must not turn that into a silently annotation-less reference.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     prepared = chimera_component("tinyCe")
     yeast = chimera_component("tinySc", with_annotation=True)
     with (
@@ -267,13 +262,12 @@ def test_a_component_whose_default_annotation_is_not_registered_raises(
 
     assert "register_path" in str(raised.value)
     # Nothing was built: the refusal comes before a byte is written.
-    assert not (tmp_path / "data" / "genome" / "tinyCe_tinySc").exists()
+    assert not (liulab_data / "genome" / "tinyCe_tinySc").exists()
 
 
 def test_several_registered_and_none_flagged_raises_naming_default_gtf(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory, liulab_data: Path
 ) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     worm = chimera_component("tinyCe", with_annotation=True)
     gtf = CHIMERA_COMPONENTS["tinyCe"].gtf
     assert gtf is not None
@@ -290,7 +284,7 @@ def test_several_registered_and_none_flagged_raises_naming_default_gtf(
 
     assert "tinyCe" in str(raised.value)
     assert "genes_again" in str(raised.value)
-    assert not (tmp_path / "data" / "genome" / "tinyCe_tinySc").exists()
+    assert not (liulab_data / "genome" / "tinyCe_tinySc").exists()
 
 
 # --------------------------------------------------------------------------------------
@@ -365,14 +359,13 @@ def test_force_repairs_the_annotation_as_well_as_the_fasta(
 
 
 def test_a_rebuild_whose_contributors_changed_leaves_only_the_annotation_it_wrote(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory,
 ) -> None:
     # The merged name is the +-join of what contributed, so a contributing set that
     # changes across a rebuild changes it — and the build owns both, so the one it no
     # longer owns goes. Left beside the new one it would be a second annotation with no
     # default between them, and a chimera that arrived annotated would come back from a
     # legitimate repair with `default_gtf` of None.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     worm = chimera_component("tinyCe", with_annotation=True)
     yeast = chimera_component("tinySc", with_annotation=True)
     with Genome.chimera(worm, yeast) as first:
@@ -399,12 +392,11 @@ def test_a_rebuild_whose_contributors_changed_leaves_only_the_annotation_it_wrot
 
 
 def test_a_rebuild_with_nothing_left_to_merge_leaves_no_annotation_at_all(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory,
 ) -> None:
     # The same fault at its worst: with nothing to merge, the annotation the previous
     # build wrote would be the *only* one registered here and therefore the default,
     # answering queries with gene models this chimera no longer merges from anything.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     worm = chimera_component("tinyCe", with_annotation=True)
     yeast = chimera_component("tinySc")
     with Genome.chimera(worm, yeast) as first:
@@ -444,11 +436,10 @@ def test_a_broken_merged_annotation_names_the_command_that_rebuilds_the_chimera(
 
 
 def test_a_merge_that_misspells_a_name_is_refused_before_it_is_registered(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # check_chromosomes is the one place the merge's answer and the FASTA build's answer
     # are set against each other, so it is left on and this is what it buys.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     components = [chimera_component(name, with_annotation=True) for name in ("tinyCe", "tinySc")]
     monkeypatch.setattr(
         gtf_mod, "suffixed", lambda chromosome, component, separator: f"{chromosome}__wrong"

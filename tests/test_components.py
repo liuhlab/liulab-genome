@@ -223,10 +223,10 @@ def test_a_broken_record_raises_where_a_chimeras_details_are_asked_for(tmp_path:
 # ---------------------------------------------------------------------------
 
 
-def test_an_assembly_with_no_components_has_nothing_to_compare(tmp_path: Path) -> None:
+def test_an_assembly_with_no_components_has_nothing_to_compare(liulab_data: Path) -> None:
     # What makes an ordinary assembly pay nothing: it records no components, so there is
     # nothing to iterate rather than a question to answer about it.
-    here = AssemblyDir.locate("hg38", tmp_path / "genome" / "hg38")
+    here = AssemblyDir.locate("hg38", liulab_data / "genome" / "hg38")
     _record(here.path, "hg38")
 
     assert components_status(here) is None

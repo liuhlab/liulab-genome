@@ -18,6 +18,7 @@ from genome import Genome
 from genome.external import ExternalTool, clear_version_cache
 from genome.io import fetch as fetch_mod
 from genome.io.fasta import PREPARATION_TOOLS
+from genome.io.registration import LIULAB_DATA_ENV, assembly_data_dir
 
 
 class NetworkAccessError(RuntimeError):
@@ -51,32 +52,12 @@ def _address_text(address: Any) -> str:
     return str(address)
 
 
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make reaching the network a failure — in every test, without being asked for.
+def install_network_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make reaching the network raise, for as long as ``monkeypatch`` is in force.
 
-    "No test ever touches the network" is a guarantee only if nothing can slip past
-    it, so this is autouse and cuts in two places:
-
-    - ``requests.Session.request``, which every ``requests`` call funnels through: the
-      ``requests.head`` of the UCSC assembly-name check, and the ``requests.get`` inside
-      pooch's HTTP downloader — so a download a test forgot to replace trips here,
-      naming the URL it was about to pull.
-    - ``socket.socket.connect``/``connect_ex`` for the internet address families, as the
-      backstop under everything that is not ``requests``: pooch's ftp and sftp
-      transports, urllib, a dependency phoning home. ``AF_UNIX`` is local IPC rather
-      than the network, and is left alone.
-
-    ``pooch.retrieve`` is deliberately **not** blocked, though it is the package's only
-    transport: it serves a file already sitting at the destination without any network
-    call, which two tests in test_download exercise for real. Cutting at the transport
-    underneath keeps those honest and still catches every download pooch would actually
-    perform.
-
-    Nothing opts out. A test that needs a download stands one in with ``fake_fetch``; a
-    test that needs the UCSC name check stubs ``requests.head`` itself. Both are
-    installed after this one — an autouse fixture is set up first — so they win for the
-    test that asked, and the guard is back for the one that did not.
+    The guard itself, separated from the fixture that applies it to every test, so that
+    work done *outside* a test — a session-scoped fixture preparing a genome — can be
+    held to the same promise instead of being the one hole in it.
     """
     real_connect = socket.socket.connect
     real_connect_ex = socket.socket.connect_ex
@@ -99,6 +80,55 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(requests.sessions.Session, "request", blocked_request)
     monkeypatch.setattr(socket.socket, "connect", blocked_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", blocked_connect_ex)
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make reaching the network a failure — in every test, without being asked for.
+
+    "No test ever touches the network" is a guarantee only if nothing can slip past
+    it, so this is autouse and :func:`install_network_guard` cuts in two places:
+
+    - ``requests.Session.request``, which every ``requests`` call funnels through: the
+      ``requests.head`` of the UCSC assembly-name check, and the ``requests.get`` inside
+      pooch's HTTP downloader — so a download a test forgot to replace trips here,
+      naming the URL it was about to pull.
+    - ``socket.socket.connect``/``connect_ex`` for the internet address families, as the
+      backstop under everything that is not ``requests``: pooch's ftp and sftp
+      transports, urllib, a dependency phoning home. ``AF_UNIX`` is local IPC rather
+      than the network, and is left alone.
+
+    ``pooch.retrieve`` is deliberately **not** blocked, though it is the package's only
+    transport: it serves a file already sitting at the destination without any network
+    call, which two tests in test_download exercise for real. Cutting at the transport
+    underneath keeps those honest and still catches every download pooch would actually
+    perform.
+
+    Nothing opts out. A test that needs a download stands one in with ``fake_fetch``; a
+    test that needs the UCSC name check stubs ``requests.head`` itself. Both are
+    installed after this one — an autouse fixture is set up first — so they win for the
+    test that asked, and the guard is back for the one that did not.
+    """
+    install_network_guard(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def liulab_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the **Data dir** at this test's own directory — in every test, unasked.
+
+    The one place the root is set. An explicit ``cache_dir`` is honoured everywhere, but
+    a test exercising the *default* layout still has to point the root somewhere, and
+    every such test pointing it somewhere itself is how forty-odd copies of one line
+    happened. It is autouse for the same reason :func:`no_network` is: a test that forgot
+    would write into the lab's real reference data, and "no test ever touches it" is a
+    guarantee only if nothing can slip past.
+
+    Request it to name the root — ``liulab_data / "genome" / "hg38"`` is where that
+    assembly lands — and re-point it with ``monkeypatch.setenv`` in the few tests that
+    are *about* the root: one that wants it unset, empty, or somewhere else again.
+    """
+    monkeypatch.setenv(LIULAB_DATA_ENV, str(tmp_path))
+    return tmp_path
 
 
 #: Committed fixture files — small, subsampled real sacCer3 bytes. See tests/data/README.md.
@@ -367,22 +397,82 @@ class ComponentFactory(Protocol):
     """Registers a tiny component assembly and hands back the opened :class:`Genome`."""
 
     def __call__(self, name: str, *, with_annotation: bool = False) -> Genome:
-        """Register ``name`` — and its annotation when asked — under the test's tmp dir."""
+        """Register ``name`` — and its annotation when asked — under the test's data root."""
         ...
 
 
+class PreparedComponents:
+    """Every tiny component registered once, kept to be copied rather than built again.
+
+    Registering one is three native-tool runs over a few kilobytes, and the suite asks
+    for a hundred and sixty-odd of them — the same four files, every time, from committed bytes that
+    cannot differ. So each ``(name, annotated)`` pair is built at most once and the
+    result is handed out as a *copy*: :meth:`directory` returns a path a caller must
+    never write to, and :meth:`copy_into` is how a test gets one of its own.
+
+    Nothing here is shared *mutable* state. The suite runs under ``--dist=load``, where
+    which test runs beside which changes run to run, so a directory two tests both wrote
+    to would fail in whichever order happened to expose it.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._built: dict[tuple[str, bool], Path] = {}
+
+    def directory(self, name: str, *, with_annotation: bool) -> Path:
+        """Return the prepared tree for ``name``, registering it on first ask. Read-only."""
+        key = (name, with_annotation)
+        if key not in self._built:
+            self._built[key] = self._prepare(name, with_annotation=with_annotation)
+        return self._built[key]
+
+    def copy_into(self, destination: Path, name: str, *, with_annotation: bool) -> None:
+        """Copy the prepared tree for ``name`` to ``destination``, mtimes and all."""
+        shutil.copytree(self.directory(name, with_annotation=with_annotation), destination)
+
+    def _prepare(self, name: str, *, with_annotation: bool) -> Path:
+        component = CHIMERA_COMPONENTS[name]
+        path = self._root / ("annotated" if with_annotation else "plain") / name
+        # The build runs before any test's setup, so the autouse guard is not up yet:
+        # stand one up here rather than leave the one registration nobody watches.
+        with pytest.MonkeyPatch.context() as guard:
+            install_network_guard(guard)
+            genome = Genome(name, path_or_url=component.fasta, cache_dir=path, progressbar=False)
+            try:
+                if with_annotation:
+                    assert component.gtf is not None
+                    genome.annotations.register_path(component.gtf, COMPONENT_ANNOTATION)
+            finally:
+                genome.close()
+        return path
+
+
+@pytest.fixture(scope="session")
+def _prepared_components(tmp_path_factory: pytest.TempPathFactory) -> PreparedComponents:
+    """Return the session's :class:`PreparedComponents`, in a directory no test can reach."""
+    return PreparedComponents(tmp_path_factory.mktemp("prepared-components"))
+
+
 @pytest.fixture
-def chimera_component(tmp_path: Path) -> Iterator[ComponentFactory]:
+def chimera_component(_prepared_components: PreparedComponents) -> Iterator[ComponentFactory]:
     """Return a factory that registers a tiny component assembly and opens it.
 
-    Each component lands in its own directory under ``tmp_path`` and is seeded from its
-    committed FASTA, so registration runs the real native tools and the real record path
-    without reaching the network — which the autouse guard would refuse anyway. Every
-    genome opened is closed at teardown::
+    Each component lands where the layout puts one — ``<data root>/genome/<name>/``, the
+    root being wherever it points when the factory is called, which the :func:`liulab_data`
+    fixture makes this test's own directory. So a chimera built from two of them finds
+    them beside itself, which is what the staleness comparison does and what a test
+    placing each component in a directory of its own would never exercise. Every genome
+    opened is closed at teardown::
 
         def test_something(chimera_component):
             worm = chimera_component("tinyCe", with_annotation=True)
             draft = chimera_component("tinyEc")
+
+    The bytes are a copy of a registration :class:`PreparedComponents` ran once for the
+    whole session, not a fresh build: the same four files either way, and the copy is the
+    only thing a test is ever handed. Asking twice for the same component opens what is
+    there rather than laying the prepared bytes back down over it — so a test that
+    re-registers one underneath a chimera sees the new one, as it would on disk.
 
     Skips when the preparation tools are not on ``PATH``, so a test using this needs no
     skip marker of its own. See ``tests/data/README.md`` for what each one exercises.
@@ -395,19 +485,18 @@ def chimera_component(tmp_path: Path) -> Iterator[ComponentFactory]:
 
     def register(name: str, *, with_annotation: bool = False) -> Genome:
         component = CHIMERA_COMPONENTS[name]
-        genome = Genome(
-            name,
-            path_or_url=component.fasta,
-            cache_dir=tmp_path / name,
-            progressbar=False,
-        )
+        if with_annotation and component.gtf is None:
+            raise ValueError(
+                f"{name} ships no annotation; ask for one of "
+                f"{[c.name for c in CHIMERA_COMPONENTS.values() if c.has_gtf]} instead."
+            )
+        destination = assembly_data_dir(name)
+        if not destination.exists():
+            _prepared_components.copy_into(destination, name, with_annotation=with_annotation)
+        genome = Genome(name, path_or_url=component.fasta, progressbar=False)
         opened.append(genome)
-        if with_annotation:
-            if component.gtf is None:
-                raise ValueError(
-                    f"{name} ships no annotation; ask for one of "
-                    f"{[c.name for c in CHIMERA_COMPONENTS.values() if c.has_gtf]} instead."
-                )
+        if with_annotation and COMPONENT_ANNOTATION not in genome.annotations.registered:
+            assert component.gtf is not None
             genome.annotations.register_path(component.gtf, COMPONENT_ANNOTATION)
         return genome
 

@@ -8,15 +8,15 @@ concatenation code fails here rather than on every user's disk. The rest are the
 a chimera — the one failure no digest of the chimera's own bytes can show, since those
 bytes do not change when the component they were copied from does.
 
-Components are registered under their own names in a temporary data root rather than in
-a directory of the test's choosing, because finding a component by name in the data root
-is exactly what the comparison does. Nothing here reaches the network.
+These are the tests the shared ``chimera_component`` fixture had to be right for: the
+comparison resolves a component by name beside the chimera, so it only has anything to
+compare when the components sit where the layout puts them. That is now what the shared
+fixture does, and the near-copy of it this module used to carry is gone. Nothing here
+reaches the network.
 """
 
 from __future__ import annotations
 
-import shutil
-from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -30,10 +30,9 @@ from genome.io.completion import (
 )
 from genome.io.components import COMPONENTS_UNKNOWN, components_status
 from genome.io.download import register_assembly, verify_assembly
-from genome.io.fasta import PREPARATION_TOOLS
 from genome.io.utils import sha256_file
 
-from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY, COMPONENT_ANNOTATION
+from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY, COMPONENT_ANNOTATION, ComponentFactory
 
 #: The sha256 of the FASTA the everyday three concatenate to. Committed here rather than
 #: pinned in the shipped table on purpose (ADR-0008) — see the test that asserts it.
@@ -42,37 +41,6 @@ _EVERYDAY_FASTA_SHA256 = "1b04166c34b8cf3e080cfa588fb0c9e7d9fa4c191ec6f8f2b6e155
 #: The pair most of these use — the smallest chimera there is, and the one whose
 #: components collide, so the names being right is not incidental to the digests.
 _PAIR = "tinyCe_tinySc"
-
-ComponentFactory = Callable[..., Genome]
-
-
-@pytest.fixture
-def component(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[ComponentFactory]:
-    """Return a factory registering a tiny component under its own name in a temp root.
-
-    ``LIULAB_DATA`` is pointed at the test's own directory, so every component lands where
-    a component is normally found — ``<root>/genome/<name>/`` — which is the workflow the
-    staleness comparison is written for and the one a test using a directory of its own
-    would never exercise. Skips when the preparation tools are not on ``PATH``.
-    """
-    missing = [tool for tool in PREPARATION_TOOLS if shutil.which(tool) is None]
-    if missing:
-        pytest.skip(f"not on PATH: {', '.join(missing)}")
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
-    opened: list[Genome] = []
-
-    def register(name: str, *, annotate: bool = False) -> Genome:
-        fixture = CHIMERA_COMPONENTS[name]
-        genome = Genome(name, path_or_url=fixture.fasta, progressbar=False)
-        opened.append(genome)
-        if annotate:
-            assert fixture.gtf is not None
-            genome.annotations.register_path(fixture.gtf, COMPONENT_ANNOTATION)
-        return genome
-
-    yield register
-    for genome in opened:
-        genome.close()
 
 
 def _other_fasta(destination: Path) -> Path:
@@ -108,14 +76,14 @@ def _blank_component_digest(directory: Path, component: str) -> None:
 
 
 def test_the_everyday_chimera_hashes_to_the_digest_this_concatenation_pins(
-    component: ComponentFactory,
+    chimera_component: ComponentFactory,
 ) -> None:
     # The everyday three, and not the escalating fourth: these are the components every
     # other build test uses, they derive the `__` separator every shipped assembly
     # derives, and between them they disagree about wrap width (60 against 80) and about
     # soft-masking — the two things "bytes copied verbatim" is a claim about. Adding
     # tinyEcDub would pin the escalated-separator path instead of the ordinary one.
-    chimera = Genome.chimera(*(component(name) for name in CHIMERA_EVERYDAY))
+    chimera = Genome.chimera(*(chimera_component(name) for name in CHIMERA_EVERYDAY))
     try:
         digest = sha256_file(chimera.fasta_path)
     finally:
@@ -138,12 +106,12 @@ def test_the_everyday_chimera_hashes_to_the_digest_this_concatenation_pins(
 
 
 def test_a_component_registered_again_underneath_a_chimera_refuses_to_reopen(
-    component: ComponentFactory, tmp_path: Path
+    chimera_component: ComponentFactory, tmp_path: Path
 ) -> None:
     # The failure the ticket calls the one no digest can see: the chimera's own bytes are
     # untouched and still agree with its record, and its tinySc sequences are a copy of
     # bytes that are no longer anywhere.
-    worm, yeast = component("tinyCe"), component("tinySc")
+    worm, yeast = chimera_component("tinyCe"), chimera_component("tinySc")
     chimera = Genome.chimera(worm, yeast)
     written = chimera.fasta_path.stat().st_mtime_ns
     chimera.close()
@@ -152,7 +120,7 @@ def test_a_component_registered_again_underneath_a_chimera_refuses_to_reopen(
     )
 
     with pytest.raises(RegistrationMismatchError, match=f"genome register {_PAIR} --force"):
-        Genome.chimera(worm, component("tinySc"))
+        Genome.chimera(worm, chimera_component("tinySc"))
 
     # Nothing was rewritten on the way to refusing, and the stale bytes are still there
     # to be looked at rather than replaced behind the caller's back.
@@ -160,9 +128,9 @@ def test_a_component_registered_again_underneath_a_chimera_refuses_to_reopen(
 
 
 def test_a_component_registered_again_underneath_a_chimera_fails_verification(
-    component: ComponentFactory, tmp_path: Path
+    chimera_component: ComponentFactory, tmp_path: Path
 ) -> None:
-    worm, yeast = component("tinyCe"), component("tinySc")
+    worm, yeast = chimera_component("tinyCe"), chimera_component("tinySc")
     chimera = Genome.chimera(worm, yeast)
     chimera.close()
     register_assembly(
@@ -178,13 +146,13 @@ def test_a_component_registered_again_underneath_a_chimera_fails_verification(
 
 
 def test_a_component_annotation_registered_again_underneath_a_chimera_refuses(
-    component: ComponentFactory, tmp_path: Path
+    chimera_component: ComponentFactory, tmp_path: Path
 ) -> None:
     # One level down, and the reason the FASTA digests are not enough: not a base of the
     # chimera changes when a component's gene models are re-registered, so its own digest
     # agrees with its record while the merged annotation is of models nobody has now.
-    worm = component("tinyCe", annotate=True)
-    yeast = component("tinySc", annotate=True)
+    worm = chimera_component("tinyCe", with_annotation=True)
+    yeast = chimera_component("tinySc", with_annotation=True)
     chimera = Genome.chimera(worm, yeast)
     fasta_digest = sha256_file(chimera.fasta_path)
     chimera.close()
@@ -208,11 +176,11 @@ def test_a_component_annotation_registered_again_underneath_a_chimera_refuses(
 
 
 def test_a_component_with_no_record_of_its_own_reads_as_unknown(
-    component: ComponentFactory, tmp_path: Path
+    chimera_component: ComponentFactory, tmp_path: Path
 ) -> None:
     # The current side unknown: nothing to compare against is not a disagreement, the
     # same reading a tool that never answered gets in `tool_versions`.
-    worm, yeast = component("tinyCe"), component("tinySc")
+    worm, yeast = chimera_component("tinyCe"), chimera_component("tinySc")
     chimera = Genome.chimera(worm, yeast)
     chimera.close()
     register_assembly(
@@ -224,11 +192,11 @@ def test_a_component_with_no_record_of_its_own_reads_as_unknown(
 
 
 def test_a_chimera_that_recorded_no_digest_for_a_component_reads_as_unknown(
-    component: ComponentFactory, tmp_path: Path
+    chimera_component: ComponentFactory, tmp_path: Path
 ) -> None:
     # And the recorded side: a chimera built before its component pinned anything leaves
     # that component unguarded rather than unopenable.
-    worm, yeast = component("tinyCe"), component("tinySc")
+    worm, yeast = chimera_component("tinyCe"), chimera_component("tinySc")
     chimera = Genome.chimera(worm, yeast)
     directory = chimera.fasta_path.parent
     chimera.close()
@@ -237,16 +205,16 @@ def test_a_chimera_that_recorded_no_digest_for_a_component_reads_as_unknown(
         "tinySc", source=_other_fasta(tmp_path / "corrected.fa"), force=True, progressbar=False
     )
 
-    reopened = Genome.chimera(worm, component("tinySc"))
+    reopened = Genome.chimera(worm, chimera_component("tinySc"))
     reopened.close()
 
 
 def test_an_assembly_with_no_components_has_nothing_to_compare(
-    component: ComponentFactory,
+    chimera_component: ComponentFactory,
 ) -> None:
     # What makes a plain assembly pay nothing: it records no components, so the
     # comparison has nothing to iterate rather than a question to ask about it.
-    yeast = component("tinySc")
+    yeast = chimera_component("tinySc")
 
     assert components_status(yeast.assembly_dir) is None
 

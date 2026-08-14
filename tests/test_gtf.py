@@ -623,17 +623,13 @@ class TestDefaultAnnotation:
 class TestAnnotationStatus:
     """What an assembly's table offers, set against what is registered on this machine."""
 
-    def test_it_reports_what_is_offered_with_nothing_registered(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_it_reports_what_is_offered_with_nothing_registered(self, liulab_data: Path) -> None:
         # The case it most needs to serve: a fresh machine, where the answer is
         # entirely the shipped table's.
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-
         payload = annotation_status("sacCer3")
 
         assert payload.assembly == "sacCer3"
-        assert payload.directory == tmp_path / "genome" / "sacCer3"
+        assert payload.directory == liulab_data / "genome" / "sacCer3"
         assert payload.default_annotation == "ensgene_v101"
         rows = payload.annotations
         assert [(r.name, r.offered, r.registered) for r in rows] == [("ensgene_v101", True, False)]
@@ -641,28 +637,22 @@ class TestAnnotationStatus:
         assert rows[0].path is None
 
     def test_the_payload_it_serializes_is_the_rows_under_their_own_names(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, liulab_data: Path
     ) -> None:
         # `--json` is this report rendered, so a row's fields and the payload's keys are
         # one spelling: a surface reads attributes and never names a key of its own.
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-
         payload = annotation_status("sacCer3")
 
         assert payload.as_json() == {
             "assembly": "sacCer3",
-            "directory": str(tmp_path / "genome" / "sacCer3"),
+            "directory": str(liulab_data / "genome" / "sacCer3"),
             "default_annotation": "ensgene_v101",
             "annotations": [asdict(row) for row in payload.annotations],
         }
 
-    def test_the_default_annotations_own_row_is_reachable_without_a_search(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_the_default_annotations_own_row_is_reachable_without_a_search(self) -> None:
         # What the closing line of `genome annotations` needs: the default's own state,
         # so "not registered here" and "broken here" are told apart by the report itself.
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-
         offered = annotation_status("sacCer3")
         nothing = annotation_status("tiny")
 
@@ -676,14 +666,12 @@ class TestAnnotationStatus:
         assert nothing.default_row is None
 
     def test_it_creates_nothing_and_fetches_nothing(
-        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, fake_fetch: FakeFetch, liulab_data: Path
     ) -> None:
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-
         annotation_status("hg38")
 
         assert fake_fetch.calls == []
-        assert not (tmp_path / "genome" / "hg38").exists()
+        assert not (liulab_data / "genome" / "hg38").exists()
 
     def test_a_registered_annotation_the_table_offers_is_reported_as_both(
         self, tmp_path: Path
@@ -940,13 +928,13 @@ class TestAnnotationRegistry:
             "tiny", cache_dir=tmp_path
         )
 
-    def test_nothing_is_created_by_asking(self, tmp_path: Path) -> None:
-        registry = AnnotationRegistry.locate("sacCer3", tmp_path / "genome" / "sacCer3")
+    def test_nothing_is_created_by_asking(self, liulab_data: Path) -> None:
+        registry = AnnotationRegistry.locate("sacCer3", liulab_data / "genome" / "sacCer3")
 
         assert registry.registered == []
         assert registry.broken == []
         assert registry.default == "ensgene_v101"
-        assert not (tmp_path / "genome").exists()
+        assert not (liulab_data / "genome").exists()
 
 
 class TestChromosomeNames:
@@ -1251,14 +1239,13 @@ class TestRegisterAnnotation:
         }
 
     def test_it_files_the_annotation_under_the_assembly_data_dir(
-        self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, fake_fetch: FakeFetch, liulab_data: Path
     ) -> None:
         fake_fetch.serve("tiny.gtf.gz")
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
 
         payload = register_annotation("tiny", _NAME, progressbar=False, metadata=_row())
 
-        assert payload.directory == tmp_path / "genome" / "tiny" / "gtf" / _NAME
+        assert payload.directory == liulab_data / "genome" / "tiny" / "gtf" / _NAME
 
     def test_the_inference_knobs_reach_the_database_build(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -1298,15 +1285,14 @@ class TestRegisterGtf:
     """``register_gtf`` — a GTF no row lists, addressed by assembly name."""
 
     def test_it_returns_the_record_plus_where_it_landed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, liulab_data: Path
     ) -> None:
-        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
 
         payload = register_gtf("tiny", source, "WS298")
 
-        directory = tmp_path / "genome" / "tiny" / "gtf" / "WS298"
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "WS298"
         assert payload.record.kind == "annotation"
         assert payload.name == "WS298"
         assert payload.assembly == "tiny"

@@ -143,17 +143,13 @@ def test_liulab_data_dir_empty_env_falls_back(monkeypatch: pytest.MonkeyPatch) -
     assert liulab_data_dir() == Path.home() / "liulab_data"
 
 
-def test_assembly_data_dir_layout(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-    assert assembly_data_dir("hg38") == tmp_path / "genome" / "hg38"
+def test_assembly_data_dir_layout(liulab_data: Path) -> None:
+    assert assembly_data_dir("hg38") == liulab_data / "genome" / "hg38"
 
 
-def test_ucsc_default_cache_dir_is_assembly_data_dir(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+def test_ucsc_default_cache_dir_is_assembly_data_dir(liulab_data: Path) -> None:
     dl = UCSCGenomeDownloader("mm39")
-    assert dl.cache_dir == tmp_path / "genome" / "mm39"
+    assert dl.cache_dir == liulab_data / "genome" / "mm39"
 
 
 def test_ucsc_fasta_url() -> None:
