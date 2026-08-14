@@ -103,6 +103,10 @@ preparation is no longer indistinguishable from a finished one.
 - **`genome table-row` reports an existing pinned checksum rather than enforcing it**, since it is
   the command a maintainer runs precisely when an upstream file has changed and the pin must be
   regenerated.
+- **A blank identifier cell in the assembly table reads back as unknown**, rather than as the string
+  `nan` — or, for a blank taxonomy id, an exception. The row `genome table-row` emits for an
+  assembly the table does not list yet leaves the species and the NCBI identifiers blank, so pasting
+  that line in is now a working route rather than one that breaks the next lookup.
 
 ### Upgrading
 
