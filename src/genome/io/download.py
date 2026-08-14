@@ -51,14 +51,15 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import pooch
 import requests
 
-from genome.io.completion import RECORD_NAME, RegistrationError, read_record
+from genome.io.completion import RECORD_NAME, CompletionRecord, RegistrationError, read_record
 from genome.io.fasta import GenomeFiles, prepare_fasta
 
 # Re-exported, not used here: the **Assembly dir** layout moved to `registration`
@@ -70,6 +71,7 @@ from genome.io.registration import AssemblyDir, AssemblyRegistration, assembly_r
 from genome.io.registration import assembly_data_dir as assembly_data_dir
 from genome.io.registration import liulab_data_dir as liulab_data_dir
 from genome.io.source import (
+    ChimeraDetails,
     ComponentSource,
     FetchedSource,
     SeededSource,
@@ -78,7 +80,7 @@ from genome.io.source import (
     resolve_source,
 )
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
-from genome.metadata import METADATA_FIELDS, AssemblyMetadata, lookup_assembly
+from genome.metadata import AssemblyMetadata, lookup_assembly
 
 # A pooch post-processor: called with (fname, action, pooch_instance) and
 # returns the path (or paths) to use as the result of the download.
@@ -96,6 +98,174 @@ _URL_SCHEMES = frozenset({"http", "https", "ftp", "sftp"})
 #: raw status the day one of these was renamed, rather than failing.
 EXPECTED_FROM_TABLE = "table"
 EXPECTED_FROM_RECORD = "record"
+
+
+@dataclass(frozen=True)
+class RegisteredAssembly:
+    """What preparing an assembly on disk produced: its record, and where that landed.
+
+    :func:`register_assembly`'s answer — what ``genome register`` prints, and what its
+    ``--json`` serializes. The **Completion marker** the run wrote *is* the answer, so it
+    is carried whole rather than copied out field by field, and the two questions a
+    surface then asks — which files are claimed, and is this a **Chimera** — are answered
+    from that one record instead of by reading the directory again.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** that was registered, under the name the caller asked for.
+    directory : pathlib.Path
+        Its **Assembly dir** — where those files and that record are.
+    record : genome.io.completion.CompletionRecord
+        The record the registration wrote, read back.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> from genome.io.completion import CompletionRecord
+    >>> registered = RegisteredAssembly(
+    ...     assembly="hg38",
+    ...     directory=Path("/data/genome/hg38"),
+    ...     record=CompletionRecord(
+    ...         kind="genome",
+    ...         name="hg38",
+    ...         files={"hg38.fa.fai": 21, "hg38.fa": 12},
+    ...         source_url="https://example.org/hg38.fa.gz",
+    ...         sha256="1a2b3c",
+    ...         tool_versions={},
+    ...         package_version="2026.8.0",
+    ...         completed_at="2026-08-12T09:00:00+00:00",
+    ...         details={},
+    ...     ),
+    ... )
+    >>> registered.file_names
+    ['hg38.fa', 'hg38.fa.fai']
+    >>> registered.chimera is None
+    True
+    >>> registered.as_json()["directory"]
+    '/data/genome/hg38'
+    """
+
+    assembly: str
+    directory: Path
+    record: CompletionRecord
+
+    @property
+    def source_url(self) -> str | None:
+        """Where the bytes were fetched from, or ``None`` when nothing was — a chimera's."""
+        return self.record.source_url
+
+    @property
+    def sha256(self) -> str | None:
+        """Digest of the unpacked FASTA, or ``None`` when none was computed."""
+        return self.record.sha256
+
+    @property
+    def file_names(self) -> list[str]:
+        """Every file the record claims, sorted — a fresh list each call."""
+        return sorted(self.record.files)
+
+    @property
+    def chimera(self) -> ChimeraDetails | None:
+        """What the build recorded about its components, or ``None`` for anything else.
+
+        The record is what says an assembly is a **Chimera**, here as everywhere else —
+        and the record is already in hand, so a surface reporting the registration that
+        just happened never reads the same file a second time to find out.
+        """
+        return ChimeraDetails.from_record(self.record)
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this registration as the payload ``--json`` serializes.
+
+        The record's own fields under the record's own names, then the ``assembly`` asked
+        for and the ``directory`` it landed in — the two facts a record does not hold
+        about itself. The names are the ones written on disk and are never respelled here.
+
+        Returns
+        -------
+        dict
+            The record's fields, followed by ``assembly`` and ``directory``.
+        """
+        return {**asdict(self.record), "assembly": self.assembly, "directory": str(self.directory)}
+
+
+@dataclass(frozen=True)
+class VerifiedAssembly:
+    """What re-reading a FASTA proved: its digest, what that was held to, and the components.
+
+    :func:`verify_assembly`'s answer, and three results a caller must be able to tell
+    apart, so each is a field of its own: the digest computed, *what supplied* the digest
+    it was held to — being held to the lab's pin and being held to what this machine last
+    produced are different answers — and, for a **Chimera**, what comparing its components
+    settled. A digest that disagreed raises rather than arriving here, so this is what
+    nothing refused.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** whose row supplied the digest to check against.
+    fasta : pathlib.Path
+        The file that was read.
+    sha256 : str
+        The digest computed over it.
+    expected : str or None
+        The digest it was held to, or ``None`` when nothing pinned one.
+    expected_from : str or None
+        What answered with ``expected`` — :data:`EXPECTED_FROM_TABLE`,
+        :data:`EXPECTED_FROM_RECORD`, or ``None`` when nothing did.
+    components : str or None
+        :data:`~genome.io.source.COMPONENTS_UNCHANGED` or
+        :data:`~genome.io.source.COMPONENTS_UNKNOWN` for a chimera, and ``None`` for
+        anything else — including every ``fasta`` checked on its own.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> checked = VerifiedAssembly(
+    ...     assembly="sacCer3",
+    ...     fasta=Path("/data/genome/sacCer3/sacCer3.fa"),
+    ...     sha256="6ff72f07",
+    ...     expected="6ff72f07",
+    ...     expected_from=EXPECTED_FROM_TABLE,
+    ...     components=None,
+    ... )
+    >>> checked.verified
+    True
+    >>> checked.as_json()["expected_from"]
+    'table'
+    """
+
+    assembly: str
+    fasta: Path
+    sha256: str
+    expected: str | None
+    expected_from: str | None
+    components: str | None
+
+    @property
+    def verified(self) -> bool:
+        """Whether there was a digest to check against at all, rather than merely one computed."""
+        return self.expected is not None
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this verification as the payload ``--json`` serializes.
+
+        Returns
+        -------
+        dict
+            Every attribute above, with ``fasta`` rendered as text and :attr:`verified`
+            written out beside the fields it is read from.
+        """
+        return {
+            "assembly": self.assembly,
+            "fasta": str(self.fasta),
+            "sha256": self.sha256,
+            "expected": self.expected,
+            "expected_from": self.expected_from,
+            "verified": self.verified,
+            "components": self.components,
+        }
 
 
 def _looks_like_url(source: str) -> bool:
@@ -793,7 +963,7 @@ def register_assembly(
     cache_dir: str | Path | None = None,
     progressbar: bool = True,
     metadata: AssemblyMetadata | None = None,
-) -> dict[str, object]:
+) -> RegisteredAssembly:
     """Prepare ``assembly`` on disk and return the record of what that did.
 
     Naming an assembly is enough: where its FASTA comes from and which digest it must
@@ -832,10 +1002,10 @@ def register_assembly(
 
     Returns
     -------
-    dict
-        The completion record's own fields — ``files``, ``source_url``, ``sha256``,
-        ``tool_versions``, ``completed_at`` and the rest — plus ``assembly`` and the
-        ``directory`` they live in. Ready to serialize as it is.
+    RegisteredAssembly
+        The completion record the run wrote — ``files``, ``source_url``, ``sha256``,
+        ``tool_versions``, ``completed_at`` and the rest — with the ``assembly`` and the
+        ``directory`` it lives in. :meth:`RegisteredAssembly.as_json` serializes it.
 
     Raises
     ------
@@ -853,7 +1023,7 @@ def register_assembly(
     Examples
     --------
     >>> register_assembly("sacCer3")                       # doctest: +SKIP
-    {'kind': 'genome', 'name': 'sacCer3', 'files': {...}, ...}
+    RegisteredAssembly(assembly='sacCer3', directory=PosixPath('...'), record=...)
     """
     downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=metadata)
     if source is None:
@@ -867,10 +1037,7 @@ def register_assembly(
             f"there, so nothing can vouch for it. Register it again with "
             f"`{assembly_repair_command(assembly, source)}`."
         )
-    payload: dict[str, object] = dict(asdict(record))
-    payload["assembly"] = assembly
-    payload["directory"] = str(downloader.cache_dir)
-    return payload
+    return RegisteredAssembly(assembly=assembly, directory=downloader.cache_dir, record=record)
 
 
 def verify_assembly(
@@ -879,7 +1046,7 @@ def verify_assembly(
     fasta: str | Path | None = None,
     cache_dir: str | Path | None = None,
     metadata: AssemblyMetadata | None = None,
-) -> dict[str, object]:
+) -> VerifiedAssembly:
     """Re-read a FASTA and check its sha256 against the digest expected of it.
 
     The one operation that reads bytes rather than sizes. Registering an assembly and
@@ -918,14 +1085,11 @@ def verify_assembly(
 
     Returns
     -------
-    dict
-        ``assembly``, the ``fasta`` that was read, its computed ``sha256``, the
-        ``expected`` digest (``None`` when nothing pins one), ``expected_from`` —
-        ``"table"``, ``"record"``, or ``None`` for the same case — ``verified``,
-        whether there was anything to check against at all, and ``components``,
-        ``"unchanged"`` or ``"unknown"`` for a chimera and ``None`` for anything else,
-        including every ``fasta`` checked on its own. A digest that disagrees raises
-        rather than reporting ``False``; components that disagree likewise.
+    VerifiedAssembly
+        The digest computed, what it was held to and what supplied that, and — for a
+        chimera — what comparing the components settled. A digest that disagrees raises
+        rather than reporting :attr:`~VerifiedAssembly.verified` ``False``; components
+        that disagree likewise.
 
     Raises
     ------
@@ -940,10 +1104,10 @@ def verify_assembly(
 
     Examples
     --------
-    >>> verify_assembly("sacCer3")                          # doctest: +SKIP
-    {'assembly': 'sacCer3', 'fasta': '...', 'sha256': '6ff72f07...', ...}
+    >>> verify_assembly("sacCer3").verified                  # doctest: +SKIP
+    True
     >>> verify_assembly("sacCer3", fasta="/tmp/copied.fa")  # doctest: +SKIP
-    {'assembly': 'sacCer3', 'fasta': '/tmp/copied.fa', ...}
+    VerifiedAssembly(assembly='sacCer3', fasta=PosixPath('/tmp/copied.fa'), ...)
     """
     components: str | None = None
     assembly_dir = AssemblyDir.locate(assembly, cache_dir)
@@ -973,15 +1137,14 @@ def verify_assembly(
     actual = sha256_file(target)
     if expected is not None and actual != expected:
         raise ChecksumMismatchError(target, expected, actual)
-    return {
-        "assembly": assembly,
-        "fasta": str(target),
-        "sha256": actual,
-        "expected": expected,
-        "expected_from": expected_from,
-        "verified": expected is not None,
-        "components": components,
-    }
+    return VerifiedAssembly(
+        assembly=assembly,
+        fasta=target,
+        sha256=actual,
+        expected=expected,
+        expected_from=expected_from,
+        components=components,
+    )
 
 
 def assembly_table_row(
@@ -989,7 +1152,7 @@ def assembly_table_row(
     *,
     cache_dir: str | Path | None = None,
     progressbar: bool = True,
-) -> dict[str, object]:
+) -> AssemblyMetadata:
     r"""Fetch ``assembly``'s FASTA and return the metadata table row describing it.
 
     What makes filling in the table's checksum column a copy-paste rather than a manual
@@ -1017,9 +1180,10 @@ def assembly_table_row(
 
     Returns
     -------
-    dict
-        Field name to value over :data:`~genome.metadata.METADATA_FIELDS`, with
-        ``None`` for anything still unknown. Hand it to
+    genome.metadata.AssemblyMetadata
+        The row itself, with ``None`` for anything still unknown — the same type the
+        curated table parses into, since that is what this computes. Hand
+        :func:`dataclasses.asdict` of it to
         :func:`~genome.metadata.format_table_row` for the line to paste into
         ``data/assembly_metadata.tsv``.
 
@@ -1047,8 +1211,9 @@ def assembly_table_row(
 
     Examples
     --------
+    >>> from dataclasses import asdict
     >>> from genome.metadata import format_table_row
-    >>> format_table_row(assembly_table_row("sacCer3"))       # doctest: +SKIP
+    >>> format_table_row(asdict(assembly_table_row("sacCer3")))   # doctest: +SKIP
     'sacCer3\tSaccharomyces cerevisiae\t...\t6ff72f07...'
     """
     downloader = UCSCGenomeDownloader(assembly, cache_dir)
@@ -1065,19 +1230,15 @@ def assembly_table_row(
             f"{assembly}`, which compares the components rather than a pin."
         )
     fasta = downloader.fetch_fasta(progressbar=progressbar)
+    # Every identifier the row knows, and all of them blank when the table lists no row at
+    # all, in which case the name is the only one that does not need a person to supply it.
     record = downloader.metadata
-    # Every column the record knows; all blank when the table lists no row at all, in
-    # which case the name is the only thing that does not need a person to supply it.
-    row: dict[str, object] = {name: getattr(record, name, None) for name in METADATA_FIELDS}
-    if record is None:
-        row["assembly_name"] = assembly
-    row["source_url"] = downloader.fasta_url
-    # Reported, never enforced: this is the command a maintainer runs *because* the
-    # pinned digest needs regenerating, so comparing against the stale one would
-    # refuse exactly when it is needed. Checking a FASTA against the official row is
-    # what verifying an assembly is for.
-    row["sha256"] = sha256_file(fasta)
-    return row
+    identifiers = record if record is not None else AssemblyMetadata.unknown(assembly)
+    # The digest is reported, never enforced: this is the command a maintainer runs
+    # *because* the pinned one needs regenerating, so comparing against the stale one
+    # would refuse exactly when it is needed. Checking a FASTA against the official row
+    # is what verifying an assembly is for.
+    return replace(identifiers, source_url=downloader.fasta_url, sha256=sha256_file(fasta))
 
 
 if __name__ == "__main__":

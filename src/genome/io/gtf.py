@@ -94,6 +94,7 @@ from genome.chimera import suffixed
 from genome.io import download
 from genome.io.completion import (
     RECORD_NAME,
+    CompletionRecord,
     RegistrationError,
     build_record,
     check_registration,
@@ -385,6 +386,252 @@ class BrokenAnnotation:
     directory: Path
     problem: str
     repair: str
+
+
+@dataclass(frozen=True)
+class RegisteredAnnotation:
+    """What registering one annotation produced: its record, and where that landed.
+
+    :func:`register_annotation`'s answer and :func:`register_annotation_by_path`'s — what
+    ``genome register-annotation`` and ``genome register-gtf`` print, and what their
+    ``--json`` serializes. A :class:`GtfAnnotation` says where an annotation's two files
+    are; this says what the run that wrote them did, which is the **Completion marker**
+    itself, carried whole. Every question a surface then asks — the digest, the source,
+    the files claimed, whether the chromosome names were actually checked — is answered
+    from that one record rather than by reading the directory again.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** the annotation belongs to. It is not in the record, which names
+        the annotation rather than what it annotates.
+    directory : pathlib.Path
+        The annotation's own directory, ``<assembly dir>/gtf/<name>/``.
+    record : genome.io.completion.CompletionRecord
+        The record the registration wrote, read back.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> from genome.io.completion import CompletionRecord
+    >>> registered = RegisteredAnnotation(
+    ...     assembly="hg38",
+    ...     directory=Path("/data/genome/hg38/gtf/gencode_v50"),
+    ...     record=CompletionRecord(
+    ...         kind="annotation",
+    ...         name="gencode_v50",
+    ...         files={"gencode_v50.gtf": 12, "gencode_v50.db": 34},
+    ...         source_url="https://example.org/gencode_v50.gtf.gz",
+    ...         sha256="1a2b3c",
+    ...         tool_versions={},
+    ...         package_version="2026.8.0",
+    ...         completed_at="2026-08-12T09:00:00+00:00",
+    ...         details={"chromosomes_checked": True},
+    ...     ),
+    ... )
+    >>> registered.name, registered.file_names
+    ('gencode_v50', ['gencode_v50.db', 'gencode_v50.gtf'])
+    >>> print(registered.chromosome_check)
+    chromosomes checked — every name the GTF uses is one the assembly carries
+    """
+
+    assembly: str
+    directory: Path
+    record: CompletionRecord
+
+    @property
+    def name(self) -> str:
+        """The **Registered name** it is addressed by — the record's own name."""
+        return self.record.name
+
+    @property
+    def source_url(self) -> str | None:
+        """The URL fetched, or the path a GTF was handed over at; ``None`` for a merge."""
+        return self.record.source_url
+
+    @property
+    def sha256(self) -> str | None:
+        """Digest of the placed GTF, or ``None`` when none was computed."""
+        return self.record.sha256
+
+    @property
+    def file_names(self) -> list[str]:
+        """Every file the record claims, sorted — a fresh list each call."""
+        return sorted(self.record.files)
+
+    @property
+    def chromosome_check(self) -> str:
+        """The one line saying what the chromosome-name check settled for this annotation.
+
+        :func:`chromosome_check_summary` over the record this registration wrote, so the
+        surface that prints it never reads the record's own keys. Always a sentence:
+        silence would read as a pass.
+        """
+        return chromosome_check_summary(self.record.details)
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this registration as the payload ``--json`` serializes.
+
+        The record's own fields under the record's own names, then the ``assembly`` it
+        belongs to and the ``directory`` it landed in — the two facts a record does not
+        hold about itself. The names are the ones written on disk and are never respelled
+        here.
+
+        Returns
+        -------
+        dict
+            The record's fields, followed by ``assembly`` and ``directory``.
+        """
+        return {**asdict(self.record), "assembly": self.assembly, "directory": str(self.directory)}
+
+
+@dataclass(frozen=True)
+class AnnotationStatusRow:
+    """One annotation, in whichever of its states it is: offered, registered, broken.
+
+    One shape for all of them, so a reader never has to ask which fields a row has — a
+    name the table does not list carries the table's columns as ``None``, and one nothing
+    is wrong with carries the broken columns as ``None``. :attr:`registered` and
+    :attr:`broken` are never both true: a registration nothing vouches for is not one.
+
+    Attributes
+    ----------
+    name : str
+        The **Registered name** this row is about.
+    offered : bool
+        Whether the annotation table lists it for this assembly.
+    registered : bool
+        Whether a record here vouches for it.
+    broken : bool
+        Whether its directory is here and cannot be trusted.
+    default : bool
+        The table's own default flag, ``False`` for a name no row lists.
+    provider : str or None
+        Who publishes it, from the table's row; ``None`` for an unlisted one.
+    version : str or None
+        The provider's release identifier; ``None`` for an unlisted one.
+    url : str or None
+        Where the table says its GTF is fetched from; ``None`` for an unlisted one.
+    sha256 : str or None
+        The digest the table pins; ``None`` when it pins none, and for an unlisted one.
+    path : str or None
+        The registered GTF's path, or ``None`` when it is not registered here.
+    problem : str or None
+        What is wrong, when :attr:`broken`; ``None`` otherwise.
+    repair : str or None
+        The command that registers it again from scratch, when :attr:`broken`.
+
+    Examples
+    --------
+    >>> row = AnnotationStatusRow(
+    ...     name="gencode_v50",
+    ...     offered=True,
+    ...     registered=False,
+    ...     broken=False,
+    ...     default=True,
+    ...     provider="GENCODE",
+    ...     version="v50",
+    ...     url="https://example.org/gencode_v50.gtf.gz",
+    ...     sha256=None,
+    ...     path=None,
+    ...     problem=None,
+    ...     repair=None,
+    ... )
+    >>> row.as_json()["offered"]
+    True
+    """
+
+    name: str
+    offered: bool
+    registered: bool
+    broken: bool
+    default: bool
+    provider: str | None
+    version: str | None
+    url: str | None
+    sha256: str | None
+    path: str | None
+    problem: str | None
+    repair: str | None
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this row as ``--json`` serializes it: every attribute above, in order.
+
+        Returns
+        -------
+        dict
+            The row's fields, under their own names.
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AnnotationStatus:
+    """What one assembly's table offers, set against what is registered on this machine.
+
+    :meth:`AnnotationRegistry.status`'s answer, and what ``genome annotations`` prints.
+    Two questions joined for one reader, with a third riding along because this is where
+    anyone would look for it: a directory that cannot be trusted is ``broken`` rather than
+    registered, and reporting one is the point — nothing here raises.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** reported on.
+    directory : pathlib.Path
+        Its **Assembly dir**, whether or not anything is there.
+    default_annotation : str or None
+        The **Default annotation**'s name, or ``None`` when nothing decides one. It may
+        name one nobody has registered here, which is a fresh machine's ordinary state.
+    annotations : tuple of AnnotationStatusRow
+        One row per name: the offered ones in table order, then anything on this disk
+        that no row lists.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> status = AnnotationStatus(
+    ...     assembly="hg38",
+    ...     directory=Path("/data/genome/hg38"),
+    ...     default_annotation=None,
+    ...     annotations=(),
+    ... )
+    >>> status.default_row is None
+    True
+    >>> status.as_json()["directory"]
+    '/data/genome/hg38'
+    """
+
+    assembly: str
+    directory: Path
+    default_annotation: str | None
+    annotations: tuple[AnnotationStatusRow, ...]
+
+    @property
+    def default_row(self) -> AnnotationStatusRow | None:
+        """The **Default annotation**'s own row, or ``None`` when no row is about it.
+
+        ``None`` covers both of the ways that happens, and a caller wanting to tell them
+        apart reads :attr:`default_annotation` beside this: nothing decided a default, or
+        one is decided and the table lists it under a name this disk knows nothing about.
+        """
+        return next((row for row in self.annotations if row.name == self.default_annotation), None)
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this report as the payload ``--json`` serializes.
+
+        Returns
+        -------
+        dict
+            ``assembly``, the ``directory`` as text, the ``default_annotation`` name, and
+            ``annotations`` as a list of :meth:`AnnotationStatusRow.as_json` rows.
+        """
+        return {
+            "assembly": self.assembly,
+            "directory": str(self.directory),
+            "default_annotation": self.default_annotation,
+            "annotations": [row.as_json() for row in self.annotations],
+        }
 
 
 def _annotations_root(assembly_dir: Path) -> Path:
@@ -1015,7 +1262,7 @@ class AnnotationRegistry:
             )
         )
 
-    def status(self) -> dict[str, object]:
+    def status(self) -> AnnotationStatus:
         """Report what this assembly's table offers against what is registered here.
 
         Two questions with two answers, joined for one reader: the table's rows say what
@@ -1029,25 +1276,18 @@ class AnnotationRegistry:
 
         Returns
         -------
-        dict
-            ``assembly``, the ``directory`` inspected, the ``default_annotation`` name (or
-            ``None``), and ``annotations``: one row per name, the offered ones in table
-            order followed by anything on this disk that no row lists. Each row carries the
-            ``name``, whether it is ``offered``, whether it is ``registered`` and whether it
-            is ``broken``, the table's ``default`` flag, the row's
-            ``provider``/``version``/``url``/``sha256`` (``None`` for an unlisted one), the
-            ``path`` of the registered GTF (``None`` when it is not registered here), and —
-            for a broken one — the ``problem`` and the ``repair`` command that fixes it
-            (``None`` otherwise). ``registered`` and ``broken`` are never both true: a
-            registration nothing vouches for is not one. Ready to serialize as it is.
+        AnnotationStatus
+            The assembly, its directory, the **Default annotation**'s name, and one
+            :class:`AnnotationStatusRow` per name — the offered ones in table order,
+            followed by anything on this disk that no row lists.
 
         Examples
         --------
         >>> here = AnnotationRegistry.locate("sacCer3", "/tmp/definitely-not-an-assembly")
-        >>> here.status()["default_annotation"]
+        >>> here.status().default_annotation
         'ensgene_v101'
         """
-        rows: list[dict[str, object]] = [
+        rows: list[AnnotationStatusRow] = [
             _status_row(
                 record.name, table_row=record, registered=self._registered, broken=self._broken
             )
@@ -1058,12 +1298,12 @@ class AnnotationRegistry:
             _status_row(name, table_row=None, registered=self._registered, broken=self._broken)
             for name in sorted((self._registered.keys() | self._broken.keys()) - listed)
         )
-        return {
-            "assembly": self.assembly,
-            "directory": str(self._dir.path),
-            "default_annotation": self._default,
-            "annotations": rows,
-        }
+        return AnnotationStatus(
+            assembly=self.assembly,
+            directory=self._dir.path,
+            default_annotation=self._default,
+            annotations=tuple(rows),
+        )
 
     def _adopt(self, annotation: GtfAnnotation) -> GtfAnnotation:
         """Fold a just-registered annotation into the four states, adopting it if alone.
@@ -1081,7 +1321,7 @@ class AnnotationRegistry:
         return annotation
 
 
-def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> dict[str, object]:
+def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> AnnotationStatus:
     """Report what ``assembly``'s table offers against what is registered on this machine.
 
     :meth:`AnnotationRegistry.status` for an assembly named rather than opened, which is
@@ -1098,13 +1338,12 @@ def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> 
 
     Returns
     -------
-    dict
-        The payload :meth:`AnnotationRegistry.status` describes, ready to serialize.
+    AnnotationStatus
+        The report :meth:`AnnotationRegistry.status` describes.
 
     Examples
     --------
-    >>> payload = annotation_status("sacCer3")
-    >>> payload["default_annotation"]
+    >>> annotation_status("sacCer3").default_annotation
     'ensgene_v101'
     """
     return AnnotationRegistry.locate(assembly, cache_dir).status()
@@ -1116,29 +1355,24 @@ def _status_row(
     table_row: AnnotationMetadata | None,
     registered: dict[str, GtfAnnotation],
     broken: dict[str, BrokenAnnotation],
-) -> dict[str, object]:
-    """Return one :func:`annotation_status` row, whichever of the three states it is in.
-
-    One shape for all of them, so a reader of the payload never has to ask which keys a
-    row has — a name the table does not list carries the table's columns as ``None``,
-    and one nothing is wrong with carries the broken columns as ``None``.
-    """
+) -> AnnotationStatusRow:
+    """Return one :class:`AnnotationStatus` row, whichever of the three states it is in."""
     annotation = registered.get(name)
     broken_annotation = broken.get(name)
-    return {
-        "name": name,
-        "offered": table_row is not None,
-        "registered": annotation is not None,
-        "broken": broken_annotation is not None,
-        "default": table_row.default if table_row is not None else False,
-        "provider": table_row.provider if table_row is not None else None,
-        "version": table_row.version if table_row is not None else None,
-        "url": table_row.url if table_row is not None else None,
-        "sha256": table_row.sha256 if table_row is not None else None,
-        "path": str(annotation.gtf) if annotation is not None else None,
-        "problem": broken_annotation.problem if broken_annotation is not None else None,
-        "repair": broken_annotation.repair if broken_annotation is not None else None,
-    }
+    return AnnotationStatusRow(
+        name=name,
+        offered=table_row is not None,
+        registered=annotation is not None,
+        broken=broken_annotation is not None,
+        default=table_row.default if table_row is not None else False,
+        provider=table_row.provider if table_row is not None else None,
+        version=table_row.version if table_row is not None else None,
+        url=table_row.url if table_row is not None else None,
+        sha256=table_row.sha256 if table_row is not None else None,
+        path=str(annotation.gtf) if annotation is not None else None,
+        problem=broken_annotation.problem if broken_annotation is not None else None,
+        repair=broken_annotation.repair if broken_annotation is not None else None,
+    )
 
 
 def register_gtf(
@@ -1569,7 +1803,7 @@ def register_annotation(
     check_chromosomes: bool = True,
     disable_infer_genes: bool = True,
     disable_infer_transcripts: bool = True,
-) -> dict[str, object]:
+) -> RegisteredAnnotation:
     """Register ``name`` for ``assembly`` and return the record of what that did.
 
     :meth:`AnnotationRegistry.register` addressed by assembly name, and answering with the
@@ -1605,10 +1839,11 @@ def register_annotation(
 
     Returns
     -------
-    dict
-        The completion record's own fields — ``files``, ``source_url``, ``sha256``,
-        ``details``, ``completed_at`` and the rest — plus the ``assembly`` and the
-        ``directory`` they live in. Ready to serialize as it is.
+    RegisteredAnnotation
+        The completion record the run wrote — ``files``, ``source_url``, ``sha256``,
+        ``details``, ``completed_at`` and the rest — with the ``assembly`` it belongs to
+        and the ``directory`` it lives in. :meth:`RegisteredAnnotation.as_json`
+        serializes it.
 
     Raises
     ------
@@ -1625,7 +1860,7 @@ def register_annotation(
     Examples
     --------
     >>> register_annotation("sacCer3", "ensgene_v101")   # doctest: +SKIP
-    {'kind': 'annotation', 'name': 'ensgene_v101', 'files': {...}, ...}
+    RegisteredAnnotation(assembly='sacCer3', directory=PosixPath('...'), record=...)
     """
     annotation = AnnotationRegistry.locate(assembly, cache_dir).register(
         name,
@@ -1651,7 +1886,7 @@ def register_annotation_by_path(
     check_chromosomes: bool = True,
     disable_infer_genes: bool = True,
     disable_infer_transcripts: bool = True,
-) -> dict[str, object]:
+) -> RegisteredAnnotation:
     """Register the GTF at ``gtf`` for ``assembly`` and return the record of what that did.
 
     :meth:`AnnotationRegistry.register_path` addressed by assembly name, and answering
@@ -1692,9 +1927,9 @@ def register_annotation_by_path(
 
     Returns
     -------
-    dict
-        The completion record's own fields plus the ``assembly`` and the ``directory``
-        they live in, exactly as :func:`register_annotation` returns them. The
+    RegisteredAnnotation
+        The completion record the run wrote, with the ``assembly`` and the ``directory``
+        it lives in, exactly as :func:`register_annotation` returns them. The
         ``source_url`` is the path the GTF was taken from.
 
     Raises
@@ -1712,7 +1947,7 @@ def register_annotation_by_path(
     >>> register_annotation_by_path(                     # doctest: +SKIP
     ...     "sacCer3", "custom.gtf.gz", "custom"
     ... )
-    {'kind': 'annotation', 'name': 'custom', 'files': {...}, ...}
+    RegisteredAnnotation(assembly='sacCer3', directory=PosixPath('...'), record=...)
     """
     source = Path(gtf)
     annotation = AnnotationRegistry.locate(assembly, cache_dir).register_path(
@@ -1739,11 +1974,11 @@ def chromosome_check_summary(details: Mapping[str, Any]) -> str:
     does not say which, and none of the three may be claimed. Silence is not a fifth
     state — a surface that prints nothing about the check reads as one that passed.
 
-    ``details`` is a registration record's ``details``, as
-    :func:`register_annotation` and :func:`register_annotation_by_path` return it. The two
-    fields read are ``chromosomes_checked`` — the check ran and the GTF's names were all
-    the assembly's — and ``chromosomes_unchecked_because``, which says which of the two
-    reasons it did not, and is ``None`` when it did.
+    ``details`` is a registration record's ``details``; a caller holding what a
+    registration answered with asks :attr:`RegisteredAnnotation.chromosome_check` instead
+    and never spells the two fields. Those are ``chromosomes_checked`` — the check ran and
+    the GTF's names were all the assembly's — and ``chromosomes_unchecked_because``, which
+    says which of the two reasons it did not, and is ``None`` when it did.
 
     A record written before the second field existed carries a bare
     ``chromosomes_checked: false`` that was written for either reason, and nothing on disk
@@ -1797,8 +2032,8 @@ def _chromosome_check_details(known: frozenset[str] | None, *, requested: bool) 
 
 def _registration_payload(
     annotation: GtfAnnotation, *, assembly: str, repair: str
-) -> dict[str, object]:
-    """Return the record a just-registered annotation left, as a serializable payload.
+) -> RegisteredAnnotation:
+    """Return the record a just-registered annotation left, as the value both ways in answer with.
 
     The record is what registering *produced*, so a registration that reports success
     and leaves none is a contradiction rather than a missing file, and raises naming the
@@ -1813,10 +2048,7 @@ def _registration_payload(
             f"{RECORD_NAME} is there, so nothing can vouch for it. Register it again "
             f"with `{repair}`."
         )
-    payload: dict[str, object] = dict(asdict(record))
-    payload["assembly"] = assembly
-    payload["directory"] = str(directory)
-    return payload
+    return RegisteredAnnotation(assembly=assembly, directory=directory, record=record)
 
 
 def _already_registered(directory: Path, *, force: bool, repair: str) -> bool:
