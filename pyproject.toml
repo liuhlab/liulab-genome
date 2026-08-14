@@ -119,6 +119,12 @@ typecheck = "pyright"
 test      = "pytest"
 test-cov  = "pytest --cov=genome --cov-report=term-missing"
 check     = { depends-on = ["lint", "fmt-check", "typecheck", "test"] }
+# The STAR and chromap integration tests skip themselves when their binary is not
+# on PATH, so running the suite proves nothing about them unless the binaries are
+# known to be there. Ask each tool for its version first: absent, this fails here
+# instead of reporting a green run whose only aligner coverage was three skips.
+# Meant for the `aligners` environment: `pixi run -e aligners test-aligners`.
+test-aligners = "STAR --version && chromap --version && pytest"
 build     = "python -m build"
 docs      = "mkdocs serve"
 # Register THIS env's Python as a Jupyter kernel (idempotent). Run once so a
