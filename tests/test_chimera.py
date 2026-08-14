@@ -8,7 +8,9 @@ this module asserts the contract, never the fixtures.
 
 Hypothesis pins the invariants the fixtures can only sample: suffixing then splitting is
 the identity, the derived name does not depend on the order its components arrived in,
-and the derived separator always beats every run in its inputs.
+the derived separator always beats every run in its inputs, and the published pattern
+reads *any* string exactly as the split does — the fixture names all being well formed is
+what let those two drift apart once.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import string
 from collections.abc import Iterable
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from genome.chimera import (
@@ -311,6 +313,25 @@ def test_a_non_alphanumeric_component_cannot_be_suffixed_onto_anything() -> None
         suffixed("I", "tiny_Ce", "__")
 
 
+def test_suffixing_nothing_spells_the_tail_alone_and_reads_back_as_no_chromosome() -> None:
+    # The one call that is not a chromosome name: the merged-GTF writer spells the tail
+    # every seqname of one component gains with it, once instead of per line. Writing it
+    # is legal and reading it back as a name is not, which is the whole asymmetry.
+    assert suffixed("", "tinyCe", "__") == "__tinyCe"
+    with pytest.raises(ChimeraNamingError, match="suffix and nothing else"):
+        split_suffixed("__tinyCe")
+
+
+@pytest.mark.parametrize(("name", "separator"), [("__tinyCe", "__"), ("___tinyCe", "___")])
+def test_a_name_that_is_suffix_and_nothing_else_is_refused(name: str, separator: str) -> None:
+    # The one disagreement the published pattern and the split used to have: the regex
+    # spells the chromosome `.+` and matched neither of these, while the split returned an
+    # empty chromosome for both.
+    with pytest.raises(ChimeraNamingError, match="suffix and nothing else"):
+        split_suffixed(name, separator)
+    assert re.match(suffix_pattern(separator), name) is None
+
+
 # --------------------------------------------------------------------------------------
 # The published regex
 # --------------------------------------------------------------------------------------
@@ -390,6 +411,13 @@ def test_the_check_refuses_an_illegal_component_set() -> None:
         check_roundtrip(_chromosomes("tinyCe"), "__")
 
 
+def test_the_check_refuses_a_component_chromosome_with_no_name() -> None:
+    # A name the round trip used to wave through: it suffixed to '__tinyCe' and split back
+    # to ('', 'tinyCe'), while the published pattern matched nothing at all.
+    with pytest.raises(ChimeraNamingError, match="suffix and nothing else"):
+        check_roundtrip({"tinyCe": [""], "tinySc": ["I"]}, "__")
+
+
 # --------------------------------------------------------------------------------------
 # The invariants, over generated names
 # --------------------------------------------------------------------------------------
@@ -412,6 +440,22 @@ _chromosome_map = st.dictionaries(
 )
 
 
+@st.composite
+def _name_under_a_separator(draw: st.DrawFn) -> tuple[str, str]:
+    """Draw a ``(name, separator)`` pair — any name at all, legal or not.
+
+    The separator is one of the pieces the name is built from, because a name drawn from
+    letters and lone underscores lands on the shapes the two readers could disagree about
+    far too rarely — a whole name that is one separator run and a component, say. No
+    newline in the alphabet: :func:`suffix_pattern` anchors with ``$`` and
+    :func:`split_suffixed` at the end of the string, so a trailing newline is a documented
+    difference between them rather than drift.
+    """
+    separator = draw(_separator)
+    pieces = draw(st.lists(st.sampled_from(["a", "1", ".", "_", separator]), max_size=5))
+    return "".join(pieces), separator
+
+
 @given(chromosome=_chromosome, component=_component, separator=_separator)
 def test_suffixing_then_splitting_is_the_identity(
     chromosome: str, component: str, separator: str
@@ -427,6 +471,28 @@ def test_the_published_pattern_reads_what_suffixing_wrote(
     match = re.match(suffix_pattern(separator), suffixed(chromosome, component, separator))
     assert match is not None
     assert (match["chromosome"], match["component"]) == (chromosome, component)
+
+
+@given(pair=_name_under_a_separator())
+@example(pair=("__a", "__"))
+@example(pair=("___a", "___"))
+def test_the_published_pattern_and_the_split_agree_on_any_name_at_all(
+    pair: tuple[str, str],
+) -> None:
+    # Not only on names a build wrote: the pattern is the contract awk, R and shell
+    # consumers hold, so any string either splits the same way in both or is refused by
+    # both. Reading a name one way here and another way there is the drift this module
+    # exists to prevent, and the fixtures cannot show it — the two pinned examples are the
+    # whole disagreement class, kept explicit so the property is never left to luck.
+    name, separator = pair
+    match = re.match(suffix_pattern(separator), name)
+    try:
+        split = split_suffixed(name, separator)
+    except ChimeraNamingError:
+        assert match is None
+        return
+    assert match is not None
+    assert (match["chromosome"], match["component"]) == split
 
 
 @given(components=_component_set, data=st.data())

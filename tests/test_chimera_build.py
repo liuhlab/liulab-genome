@@ -201,12 +201,49 @@ def test_components_that_disagree_about_masking_keep_their_own_case(
         (b">I\tdesc here\n", b">I__tinyCe\tdesc here\n"),
         (b">I", b">I__tinyCe"),  # a final header with no line ending
         (b">I\r\n", b">I__tinyCe\r\n"),
+        # Whitespace after '>' is skipped by samtools faidx and faToTwoBit, which name
+        # the sequence from the token after it — so `> desc` declares `desc`, and that is
+        # what carries the suffix. The skipped bytes are written back where they were.
+        (b"> desc\n", b"> desc__tinyCe\n"),
+        (b">\t chrA desc\n", b">\t chrA__tinyCe desc\n"),
+        (b">   I\n", b">   I__tinyCe\n"),
     ],
 )
-def test_only_the_first_token_of_a_header_is_extended(line: bytes, expected: bytes) -> None:
-    # The suffix rides on the first token because STAR and chromap both truncate a header
-    # there; everything after it is description, and is written back untouched.
+def test_only_the_name_a_header_gives_its_sequence_is_extended(
+    line: bytes, expected: bytes
+) -> None:
+    # The suffix rides on the sequence's name because STAR and chromap both truncate a
+    # header at the first whitespace; everything else on the line is description or
+    # layout, and is written back untouched.
     assert _extend_header(line, "tinyCe", "__") == expected
+
+
+@pytest.mark.parametrize("line", [b">\n", b">", b">   \n", b">\t\n", b">\r\n"])
+def test_a_header_that_names_no_sequence_is_refused(line: bytes) -> None:
+    # There is nothing for the suffix to ride on, and writing '>__tinyCe' would file the
+    # sequence under a name that is suffix and nothing else — which samtools reads as the
+    # empty name and the naming contract refuses outright.
+    with pytest.raises(ChimeraNamingError, match="names no sequence"):
+        _extend_header(line, "tinyCe", "__")
+
+
+def test_a_component_header_starting_with_whitespace_is_named_as_the_tools_name_it(
+    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # End to end, because this is where reading the header differently from samtools shows
+    # up: the component registers under `oddChr`, so the chimera must carry
+    # `oddChr__tinyOdd` — and a build that suffixed the empty token instead writes
+    # `__tinyOdd`, which the cross-check against the components' prediction refuses.
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+    fasta = tmp_path / "odd.fa"
+    fasta.write_text(">  oddChr a description after two spaces\n" + "ACGT" * 15 + "\n")
+    odd = Genome("tinyOdd", path_or_url=fasta, cache_dir=tmp_path / "tinyOdd", progressbar=False)
+
+    assert odd.chromosomes == ["oddChr"]  # what samtools and faToTwoBit called it
+
+    with odd, Genome.chimera(odd, chimera_component("tinySc")) as chimera:
+        assert "oddChr__tinyOdd" in chimera.chromosomes
+        assert chimera["oddChr__tinyOdd"] == odd["oddChr"]
 
 
 # --------------------------------------------------------------------------------------
@@ -228,13 +265,59 @@ def test_sequence_retrieval_agrees_with_the_component_it_came_from(
     assert chimera["MtDNA__tinyCe"] == worm["MtDNA"]
 
 
-def test_a_bare_chromosome_name_does_not_resolve(build_chimera: ChimeraFactory) -> None:
-    # Resolving `I` too would restore the ambiguity the suffix abolishes, and would make
-    # what a name means depend on which components happen to be present (ADR-0009).
+def test_a_bare_chromosome_name_does_not_resolve_and_the_refusal_names_the_spelling(
+    build_chimera: ChimeraFactory,
+) -> None:
+    # Resolving `III` too would restore the ambiguity the suffix abolishes, and would make
+    # what a name means depend on which components happen to be present (ADR-0009). What
+    # makes that bearable is naming the spelling that does resolve — `III` is the ninth of
+    # the nine sequences here, so a message merely listing the first few never mentions it.
     chimera = build_chimera(*CHIMERA_EVERYDAY)
 
-    with pytest.raises(ValueError, match="I__tinyCe"):
+    with pytest.raises(ValueError, match="III__tinySc"):
+        chimera["III:0-100"]
+
+    # ...and what it named is a name that resolves, which is what makes it a next action.
+    assert len(chimera["III__tinySc:0-100"]) == 100
+
+
+def test_a_bare_name_two_components_carry_is_answered_with_both(
+    build_chimera: ChimeraFactory,
+) -> None:
+    # tinyCe and tinySc both carry `I`. Naming one spelling would be picking for the
+    # caller the very thing the suffix exists to make them say, so both are named.
+    chimera = build_chimera(*CHIMERA_EVERYDAY)
+
+    with pytest.raises(ValueError, match="I__tinySc") as refusal:
         chimera["I:0-100"]
+
+    assert "I__tinyCe" in str(refusal.value)
+
+
+def test_an_unknown_name_no_component_carries_is_refused_as_it_always_was(
+    build_chimera: ChimeraFactory,
+) -> None:
+    # A chimera has one more thing to say only about a bare name it actually carries; a
+    # name nothing carries gets the general message, on a chimera as anywhere else.
+    chimera = build_chimera(*CHIMERA_EVERYDAY)
+
+    with pytest.raises(ValueError, match="known sequences include") as refusal:
+        chimera["chrZ:0-5"]
+
+    assert "ADR-0009" not in str(refusal.value)
+
+
+def test_a_plain_assembly_says_nothing_about_components(
+    chimera_component: ComponentFactory,
+) -> None:
+    # `III` is a real tinySc chromosome and unknown to tinyCe, and an assembly that is not
+    # a chimera has no suffixed spelling to offer for it — so nothing here changes.
+    worm = chimera_component("tinyCe")
+
+    with pytest.raises(ValueError, match="known sequences include") as refusal:
+        worm["III:0-100"]
+
+    assert "ADR-0009" not in str(refusal.value)
 
 
 def test_two_components_that_collide_get_four_distinct_names(

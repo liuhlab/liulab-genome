@@ -16,10 +16,12 @@ that also rewraps every byte. Rewrapping is not cosmetic here, so the concatenat
 streaming pass in this module — the only thing in the build that is not a native binary.
 
 **Sequence lines are copied verbatim.** The only line that changes is a header, and the
-only part of it that changes is the first whitespace-delimited token: ``>I some
-description`` becomes ``>I__tinyCe some description``. The suffix rides on that token
-because both STAR and chromap truncate a FASTA header at the first whitespace (measured
-in ``docs/research/aligner-index-params-and-reference-names.md``). Leaving every
+only part of it that changes is the name it gives its sequence — the first non-whitespace
+token after ``>``, which is where ``samtools faidx`` and ``faToTwoBit`` read a name from,
+whitespace after the ``>`` skipped. ``>I some description`` becomes ``>I__tinyCe some
+description``. The suffix rides on that token because both STAR and chromap truncate a
+FASTA header at the first whitespace (measured in
+``docs/research/aligner-index-params-and-reference-names.md``). Leaving every
 sequence byte alone is what makes components that disagree about wrap width and about
 soft-masking correct by default rather than by special case: ``ce11`` wraps at 60 and is
 21.95% lower case, ``ecHT115`` wraps at 80 and is not masked at all, and a chimera of
@@ -128,10 +130,14 @@ _COMPONENT_ANNOTATION_DIGEST_KEY = "annotation_sha256"
 #: right, then says which level each join is at.
 _ANNOTATION_JOIN = "+"
 
-#: A FASTA header split into its first whitespace-delimited token and everything after
-#: it. ``DOTALL`` so the trailing newline lands in the remainder and is written back
-#: unchanged; ASCII ``\S`` because a bytes pattern is ASCII by definition.
-_HEADER_RE = re.compile(rb">(\S*)(.*)", re.DOTALL)
+#: A FASTA header split into the whitespace that follows ``>``, the sequence name after
+#: it, and everything after that. The leading run is its own group because ``samtools
+#: faidx`` and ``faToTwoBit`` both *skip* it and name the sequence from the first
+#: non-whitespace token — measured, not assumed — so a header ``> chrA desc`` names
+#: ``chrA``, and a pattern that read the token as empty would suffix the wrong thing.
+#: ``DOTALL`` so the trailing newline lands in the remainder and is written back
+#: unchanged; ASCII ``\s``/``\S`` because a bytes pattern is ASCII by definition.
+_HEADER_RE = re.compile(rb">(\s*)(\S*)(.*)", re.DOTALL)
 
 
 class AmbiguousDefaultAnnotationError(ValueError):
@@ -508,6 +514,9 @@ class ChimeraBuilder(AssemblyRegistration):
 
         Raises
         ------
+        genome.chimera.ChimeraNamingError
+            If a component's FASTA carries a header that names no sequence, so there is
+            nothing for the suffix to ride on.
         genome.io.gtf.AnnotationNotRegisteredError
             If a component's **Default annotation** names something nobody registered on
             this machine. Raised before anything is written, and the message names the
@@ -797,19 +806,35 @@ def _check_not_nested(components: Sequence[Genome]) -> None:
 
 
 def _extend_header(line: bytes, component: str, separator: str) -> bytes:
-    """Return ``line`` with its first whitespace-delimited token suffixed by ``component``.
+    """Return ``line`` with the name it gives its sequence suffixed by ``component``.
 
-    ``b">I some description"`` becomes ``b">I__tinyCe some description"``. Everything
-    after the first token — the description, and the line ending, whatever it is — is
-    written back byte for byte, because it is not what any tool reads: STAR and chromap
-    both truncate a header at the first whitespace.
+    ``b">I some description"`` becomes ``b">I__tinyCe some description"``. The name is
+    the first non-whitespace token after ``>``, which is the sequence name **as the
+    native tools read it**: ``samtools faidx`` and ``faToTwoBit`` both skip whitespace
+    that follows ``>``, so ``b"> desc"`` declares a sequence called ``desc`` and that is
+    what gets suffixed. Every other byte of the line — the skipped whitespace, the
+    description, and the line ending, whatever it is — is written back untouched, because
+    none of it is what a tool reads: STAR and chromap truncate a header at the first
+    whitespace.
+
+    A header that names nothing raises rather than writing a name made only of separator
+    and component, which the naming contract cannot read back and which ``samtools
+    faidx`` would file under the empty name.
     """
     match = _HEADER_RE.match(line)
     if match is None:  # pragma: no cover - the caller only passes lines starting with '>'
         return line
-    name, remainder = match.groups()
+    leading, name, remainder = match.groups()
+    if not name:
+        raise ChimeraNamingError(
+            f"the {component} FASTA carries a header that names no sequence: {line!r}. A "
+            f"sequence is named by the first non-whitespace token after '>' — that is "
+            f"what samtools faidx and faToTwoBit read — so there is nothing here to "
+            f"suffix with {component!r} and nothing a chimera could attribute. Name every "
+            f"sequence in that FASTA and register {component!r} again."
+        )
     spelled = suffixed(name.decode("utf-8", "surrogateescape"), component, separator)
-    return b">" + spelled.encode("utf-8", "surrogateescape") + remainder
+    return b">" + leading + spelled.encode("utf-8", "surrogateescape") + remainder
 
 
 def _first_difference(built: list[tuple[str, int]], expected: list[tuple[str, int]]) -> str:

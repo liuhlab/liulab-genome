@@ -254,6 +254,12 @@ def suffixed(chromosome: str, component: str, separator: str) -> str:
     the self-announcing property the derivation exists to preserve, in a way no round trip
     can detect.
 
+    An empty ``chromosome`` is not refused, and gives back the tail alone: that is how
+    :func:`~genome.io.gtf.register_merged_gtf` spells the suffix it appends to a whole
+    file's seqnames, validating the component and the separator once rather than per line.
+    It is the one thing this function returns that is not a chromosome name, and
+    :func:`split_suffixed` refuses to read it back as one.
+
     Parameters
     ----------
     chromosome : str
@@ -319,8 +325,9 @@ def split_suffixed(name: str, separator: str = "__") -> tuple[str, str]:
     Raises
     ------
     ChimeraNamingError
-        If ``separator`` is not a run of two or more underscores, or ``name`` carries no
-        component suffix under it.
+        If ``separator`` is not a run of two or more underscores, ``name`` carries no
+        component suffix under it, or nothing precedes that suffix — the last of which is
+        what :func:`suffix_pattern` refuses with ``.+``, so the two agree.
 
     Examples
     --------
@@ -340,6 +347,16 @@ def split_suffixed(name: str, separator: str = "__") -> tuple[str, str]:
             f"<chromosome>{separator}<component> with an alphanumeric component, as in "
             f"'I{separator}ce11'. Check the separator against the one this chimera "
             f"recorded, and check that the name came from a chimera at all."
+        )
+    if not chromosome:
+        raise ChimeraNamingError(
+            f"chromosome name {name!r} is suffix and nothing else: nothing precedes the "
+            f"separator {separator!r}, so it names no sequence. The published pattern "
+            f"refuses it for the same reason, which is what keeps this function and every "
+            f"consumer holding that regex reading a name the same way. A chimera's "
+            f"chromosome is spelled <chromosome>{separator}<component>, as in "
+            f"'I{separator}ce11'; check that the component's FASTA names every sequence "
+            f"it declares."
         )
     return chromosome, component
 
@@ -361,6 +378,10 @@ def suffix_pattern(separator: str = "__") -> str:
     line at a time and a chromosome name is one field of one line. :func:`split_suffixed`
     anchors at the end of the string instead, since a Python caller can hold a name with a
     trailing newline in it that a line-oriented tool never could.
+
+    ``.+`` and not ``.*``: a name with nothing before the separator names no sequence, and
+    :func:`split_suffixed` refuses it for the same reason. That is the one place the two
+    could disagree without any real name showing it, so it is stated in both.
 
     Parameters
     ----------

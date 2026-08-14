@@ -31,7 +31,7 @@ from typing import Self
 import pandas as pd
 
 from genome.aligner.mixin import AlignerMixin
-from genome.chimera import split_suffixed
+from genome.chimera import ChimeraNamingError, split_suffixed
 from genome.io.chimera import ChimeraBuilder, ChimeraDetails, read_chimera_details
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
@@ -234,7 +234,8 @@ class Genome(AlignerMixin):
         ------
         genome.chimera.ChimeraNamingError
             If fewer than two components are given, a component repeats, a component's
-            name is not alphanumeric, or a component is itself a chimera.
+            name is not alphanumeric, a component is itself a chimera, or a component's
+            FASTA carries a header that names no sequence for the suffix to ride on.
         genome.io.gtf.AnnotationNotRegisteredError
             If a component's default annotation is named but not registered here; the
             message names the command that registers it.
@@ -716,7 +717,9 @@ class Genome(AlignerMixin):
         ------
         ValueError
             If ``region`` is malformed, names an unknown chromosome, or its
-            coordinates fall outside ``[0, chromosome length]``.
+            coordinates fall outside ``[0, chromosome length]``. Against a chimera a
+            bare chromosome name is one of the unknown ones (ADR-0009), and the message
+            names the suffixed spellings that do resolve.
 
         Examples
         --------
@@ -746,11 +749,7 @@ class Genome(AlignerMixin):
             strand = "."
 
         if chrom not in self._chrom_sizes.index:
-            known = ", ".join(str(name) for name in list(self._chrom_sizes.index)[:5])
-            raise ValueError(
-                f"unknown chromosome {chrom!r}; known sequences include: {known}, ... "
-                f"(see Genome.chromosomes for the full list)."
-            )
+            raise self._unknown_chromosome(chrom)
         size = int(self._chrom_sizes[chrom])
 
         if start is None or end is None:
@@ -765,3 +764,53 @@ class Genome(AlignerMixin):
                 f"Coordinates are 0-based half-open, so the maximum valid end is {size}."
             )
         return Region(chrom, start, end, strand)
+
+    def _unknown_chromosome(self, chrom: str) -> ValueError:
+        """Return the error a name this reference does not carry earns, unraised.
+
+        Two messages, because a chimera has one more thing to say. A bare name that this
+        chimera carries under one or more suffixed spellings is not merely unknown — it is
+        the name of a real sequence, spelled the way a component spells it — and the
+        refusal that ADR-0009 accepted the cost of is only bearable if it hands back the
+        spellings that do resolve. Every other unknown name, on a chimera or not, gets the
+        general message, which names a few sequences and where the rest are.
+
+        A :class:`ValueError` in both cases: it is the type this raises today and the one
+        callers catch.
+        """
+        spellings = self._suffixed_spellings(chrom)
+        if spellings:
+            listed = ", ".join(spellings)
+            return ValueError(
+                f"unknown chromosome {chrom!r}; {self.assembly} is a chimera, and every "
+                f"chromosome name in one carries the component it came from, so a bare "
+                f"name never resolves (ADR-0009). It carries {chrom!r} as: {listed}. Ask "
+                f"for the one you meant."
+            )
+        known = ", ".join(str(name) for name in list(self._chrom_sizes.index)[:5])
+        return ValueError(
+            f"unknown chromosome {chrom!r}; known sequences include: {known}, ... "
+            f"(see Genome.chromosomes for the full list)."
+        )
+
+    def _suffixed_spellings(self, chrom: str) -> list[str]:
+        """Return this chimera's names for the bare chromosome ``chrom``, in reference order.
+
+        Empty for an assembly that is not a chimera, and empty for a bare name none of its
+        components contributed — so an ordinary unknown name reads the same either way.
+        Computed here rather than kept, since nothing but a failed lookup ever asks.
+        """
+        if self._chimera is None:
+            return []
+        spellings: list[str] = []
+        for name in self._chrom_sizes.index:
+            spelled = str(name)
+            try:
+                bare, _component = split_suffixed(spelled, self._chimera.separator)
+            except ChimeraNamingError:
+                # A name no chimera build wrote — skipped rather than raised on, since
+                # this is already the error path and a second failure helps nobody.
+                continue
+            if bare == chrom:
+                spellings.append(spelled)
+        return spellings
