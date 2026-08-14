@@ -1,10 +1,9 @@
 """Tests for genome.io.download.
 
-Every download in the package goes through ``download.fetch_url``, so the suite stays
+Every download in the package goes through ``fetch.fetch_url``, so the suite stays
 offline by replacing that one function with the shared ``fake_fetch`` fixture (see
-tests/conftest.py) and asserting the arguments each caller wires through. ``fetch_url``
-itself is exercised for real against an already-present file, which pooch serves without
-touching the network. Nothing here monkeypatches pooch's own retrieve function.
+tests/conftest.py) and asserting the arguments each caller wires through. The fetch step
+itself lives in its own module now and is tested there — see test_fetch.
 
 Metadata is injected as an in-memory :class:`AssemblyMetadata` record, so no test here
 reads or fakes the shipped TSV; the table itself is tested in test_metadata.
@@ -12,7 +11,6 @@ reads or fakes the shipped TSV; the table itself is tested in test_metadata.
 
 from __future__ import annotations
 
-import hashlib
 import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -32,11 +30,9 @@ from genome.io.completion import (
     work_dir,
 )
 from genome.io.download import (
-    Downloader,
     UCSCGenomeDownloader,
     assembly_data_dir,
     assembly_table_row,
-    fetch_url,
     liulab_data_dir,
     register_assembly,
     verify_assembly,
@@ -89,11 +85,6 @@ def head_recorder(monkeypatch: pytest.MonkeyPatch) -> _HeadRecorder:
     recorder = _HeadRecorder()
     monkeypatch.setattr(download_mod.requests, "head", recorder)
     return recorder
-
-
-def _sha256(path: Path) -> str:
-    """Return the sha256 of ``path`` in the ``algorithm:hexdigest`` form pooch accepts."""
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _row(*, source_url: str | None = None, sha256: str | None = None) -> AssemblyMetadata:
@@ -163,73 +154,6 @@ def test_ucsc_default_cache_dir_is_assembly_data_dir(
     monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
     dl = UCSCGenomeDownloader("mm39")
     assert dl.cache_dir == tmp_path / "genome" / "mm39"
-
-
-def test_default_cache_dir_is_under_pooch_os_cache() -> None:
-    dl = Downloader()
-    assert dl.cache_dir == Path(pooch.os_cache("genome"))
-
-
-def test_explicit_cache_dir_is_used(tmp_path: Path) -> None:
-    dl = Downloader(cache_dir=tmp_path / "cache")
-    assert dl.cache_dir == tmp_path / "cache"
-
-
-# --- the one fetch step ------------------------------------------------------
-
-
-def test_fetch_url_serves_a_matching_local_file_without_downloading(
-    tmp_path: Path, data_dir: Path
-) -> None:
-    # A file already at the destination whose hash matches is handed back as-is:
-    # no downloader is ever constructed, so this exercises fetch_url offline.
-    dest = tmp_path / "tiny.fa"
-    dest.write_bytes((data_dir / "tiny.fa").read_bytes())
-
-    result = fetch_url(
-        "https://example.org/tiny.fa",
-        tmp_path,
-        known_hash=_sha256(dest),
-        fname="tiny.fa",
-        progressbar=False,
-    )
-
-    assert result.resolve() == dest.resolve()
-    assert result.read_bytes() == (data_dir / "tiny.fa").read_bytes()
-
-
-def test_fetch_url_returns_the_processor_output(tmp_path: Path, data_dir: Path) -> None:
-    dest = tmp_path / "sacCer3.fa.gz"
-    dest.write_bytes((data_dir / "tiny.fa.gz").read_bytes())
-
-    result = fetch_url(
-        "https://example.org/sacCer3.fa.gz",
-        tmp_path,
-        known_hash=_sha256(dest),
-        fname="sacCer3.fa.gz",
-        processor=pooch.Decompress(method="gzip", name="sacCer3.fa"),
-        progressbar=False,
-    )
-
-    assert result.resolve() == (tmp_path / "sacCer3.fa").resolve()
-    assert result.read_text() == (data_dir / "tiny.fa").read_text()
-
-
-def test_fetch_passes_arguments_to_the_fetch_step(fake_fetch: FakeFetch, tmp_path: Path) -> None:
-    dl = Downloader(cache_dir=tmp_path)
-    result = dl.fetch(
-        "https://example.org/big.bed.gz",
-        known_hash="md5:abc",
-        fname="big.bed.gz",
-    )
-
-    assert result == tmp_path / "big.bed.gz"
-    call = fake_fetch.last
-    assert call.url == "https://example.org/big.bed.gz"
-    assert call.known_hash == "md5:abc"
-    assert call.fname == "big.bed.gz"
-    assert call.dest_dir == tmp_path
-    assert call.progressbar is True
 
 
 def test_ucsc_fasta_url() -> None:

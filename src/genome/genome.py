@@ -32,7 +32,8 @@ import pandas as pd
 
 from genome.aligner.mixin import AlignerMixin
 from genome.chimera import ChimeraNamingError, split_suffixed
-from genome.io.chimera import ChimeraBuilder, ChimeraDetails, read_chimera_details
+from genome.io.chimera import ChimeraBuilder
+from genome.io.components import ChimeraDetails, read_chimera_details
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import AnnotationRegistry, BrokenAnnotation, GtfAnnotation

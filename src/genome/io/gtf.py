@@ -91,7 +91,7 @@ import gffutils
 import pooch
 
 from genome.chimera import suffixed
-from genome.io import download
+from genome.io import fetch
 from genome.io.completion import (
     RECORD_NAME,
     CompletionRecord,
@@ -105,13 +105,13 @@ from genome.io.completion import (
     write_record,
 )
 from genome.io.fasta import read_chrom_sizes
-from genome.io.registration import AssemblyDir, assembly_repair_command
+from genome.io.registration import ANNOTATIONS_SUBDIR, AssemblyDir, assembly_repair_command
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import AnnotationMetadata, list_annotation_metadata, lookup_annotation
 
 #: Subdirectory under an assembly's data dir holding all its GTF annotations.
 #: The Assembly context owns the layout, so the name is read from there.
-_GTF_SUBDIR = download.ANNOTATIONS_SUBDIR
+_GTF_SUBDIR = ANNOTATIONS_SUBDIR
 
 #: How many names an error lists before saying how many it left out. A whole-genome
 #: mismatch offends in the thousands, and a message that long is one nobody reads.
@@ -2161,7 +2161,7 @@ def _fetch_gtf(
     gzipped = row.url.endswith(".gz")
     # Named after the annotation, not after the URL: a provider's file name says
     # nothing about the name the lab registered it under.
-    fetched = download.fetch_url(
+    fetched = fetch.fetch_url(
         row.url,
         work_dir(directory),
         fname=f"{annotation.name}.gtf.gz" if gzipped else annotation.gtf.name,

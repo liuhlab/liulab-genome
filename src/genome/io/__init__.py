@@ -19,7 +19,6 @@ from genome.io.completion import (
     write_record,
 )
 from genome.io.download import (
-    Downloader,
     RegisteredAssembly,
     UCSCGenomeDownloader,
     VerifiedAssembly,
@@ -72,7 +71,6 @@ __all__ = [
     "ChecksumMismatchError",
     "ChromosomeMismatchError",
     "CompletionRecord",
-    "Downloader",
     "FileDisagreement",
     "GenomeFiles",
     "GtfAnnotation",

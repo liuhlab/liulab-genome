@@ -14,9 +14,9 @@ import typer
 from genome import __version__ as _package_version
 from genome.external import ToolNotFoundError
 from genome.external import doctor as _doctor
-from genome.io.chimera import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
-from genome.io.chimera import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
-from genome.io.chimera import ChimeraDetails as _ChimeraDetails
+from genome.io.components import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
+from genome.io.components import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
+from genome.io.components import ChimeraDetails as _ChimeraDetails
 from genome.io.download import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.io.download import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
 from genome.io.download import VerifiedAssembly as _VerifiedAssembly

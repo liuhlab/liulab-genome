@@ -49,6 +49,14 @@
 
 ::: genome.io.source
 
+## `genome.io.components`
+
+::: genome.io.components
+
+## `genome.io.fetch`
+
+::: genome.io.fetch
+
 ## `genome.io.download`
 
 ::: genome.io.download

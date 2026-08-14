@@ -201,6 +201,16 @@ preparation is no longer indistinguishable from a finished one.
   in the same order**, and so is every key written to `.completion.json` — the types wrap those
   names and never rename them. A caller that indexed a returned dict reads an attribute instead, or
   calls `as_json()` for the mapping it had before.
+- **A chimera's completion-record shape is `genome.io.components`, and the one fetch step is
+  `genome.io.fetch`** — split out of `genome.io.source` and `genome.io.download`, which closes the
+  `download → chimera → gtf → download` import cycle. `ChimeraDetails` and friends are no longer
+  importable from `genome.io.chimera` or `genome.io.source`, and `download.fetch_url` is now
+  `fetch.fetch_url` — the patch target for taking a test offline is `genome.io.fetch.fetch_url`.
+- **`ChimeraDetails.from_details` takes the assembly name and refuses a broken record.** It returned
+  `None` both for *not a chimera* and for *this record is malformed*, so a half-written chimera
+  record read back as an ordinary assembly nothing ever checked against its components. Malformed
+  now raises `RegistrationError` naming `genome register <assembly> --force` (ADR-0007); *not a
+  chimera* is still `None`.
 
 ### Removed
 
@@ -231,6 +241,9 @@ preparation is no longer indistinguishable from a finished one.
 - **The three old completion markers are gone**: the `.genome_prepared` sentinel, an index's
   `.success` flag, and the separate `<name>.index.json` sidecar, whose contents the shared record
   now carries.
+- **`Downloader`**, the pooch-cache wrapper no caller in the package used.
+  `UCSCGenomeDownloader` deliberately did not subclass it, so nothing moves anywhere: reach
+  `genome.io.fetch.fetch_url` with a directory of your own instead.
 
 ### Fixed
 
