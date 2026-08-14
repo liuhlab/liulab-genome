@@ -1,56 +1,60 @@
 # liulab-genome
 
-A library for handling reference genomes, including genome assembly, annotation, and aligner index and other artifacts.
+Reference genomes on disk, ready to query. Name an assembly and `genome` fetches it,
+prepares the companion files every tool expects (`.fai`, `.2bit`, `chrom.sizes`), and
+answers sequence queries by region. It also registers GTF annotations against an
+assembly and builds STAR and chromap indexes.
 
-## Where to go next
+Import name: `genome`.
 
-- [**Usage**](usage.md) — installation, environment setup, and the CLI.
-- [**Genome**](genome.md) — the `Genome` class, the main entry point: name an
-  assembly, query its sequence.
-- [**Sequences**](sequences.md) — the typed `DNA` / `RNA` / `Protein` classes,
-  with worked examples.
-- [**Genome files**](genome-files.md) — the download/prepare machinery behind
-  `Genome` (`UCSCGenomeDownloader`, `prepare_fasta`).
-- [**API reference**](reference.md) — auto-generated from docstrings (secondary
- to the hand-authored pages above).
+## Install
 
-## At a glance
-
-The `Genome` class is the main entry point — name an assembly and query it in
-**0-based, half-open** coordinates:
-
-```python
-from genome import Genome
-
-sacCer3 = Genome("sacCer3")              # download + prepare on first use (cached)
-sacCer3.fetch_sequence("chrIV:0-10")     # DNA('ACACCACACC')
-sacCer3["chrIV:0-10"].reverse_complement()  # indexing is sugar; result is a DNA
-```
-
-The typed sequence classes it returns stand alone too:
-
-```python
-from genome import DNA
-
-s = DNA("aTcG")
-s.reverse_complement()        # DNA('CgAt') — case preserved
-s.transcribe().gc_content     # 0.5
-s[1:3]                        # DNA('Tc') — slicing stays typed
-```
+The package drives native tools from bioconda (`samtools`, `faToTwoBit`, `twoBitInfo`),
+so [pixi](https://pixi.sh) is the supported path:
 
 ```bash
-$ genome revcomp ATCG
-CGAT
+git clone https://github.com/liuhlab/liulab-genome.git
+cd liulab-genome
+pixi install --locked
+pixi shell
+```
 
+`pip install liulab-genome` installs the Python API alone — you supply the native tools
+yourself, and `gffutils` too if you need annotations.
+
+Check the toolchain at any time:
+
+```bash
 $ genome doctor
 samtools: samtools 1.21 ...
 bedtools: bedtools v2.31.1
 ```
 
-## Project conventions
+## Quickstart
 
-This project follows a strict set of domain invariants (0-based half-open
-intervals, explicit reference assembly, normalized chromosome names, streaming
-I/O). They are documented in
-[`AGENTS.md`](https://github.com/lhqing/liulab-genome/blob/main/AGENTS.md);
-read it before contributing.
+Coordinates are **0-based, half-open** everywhere: `chrIV:0-10` is the first ten bases.
+
+```python
+from genome import Genome
+
+sacCer3 = Genome("sacCer3")                   # fetch + prepare on first use, cached after
+sacCer3.fetch_sequence("chrIV:0-10")          # DNA('ACACCACACC')
+sacCer3["chrIV:0-10"].reverse_complement()    # indexing is sugar; the result is a DNA
+sacCer3.chrom_sizes["chrIV"]                  # 1531933
+```
+
+The same from a shell:
+
+```bash
+$ genome register sacCer3
+$ genome revcomp ATCG
+CGAT
+```
+
+## Where to go next
+
+- [**Genome**](genome.md) — the main guide: prepare an assembly, fetch sequence,
+  register annotations, build aligner indexes.
+- [**Sequences**](sequences.md) — the typed `DNA` / `RNA` / `Protein` classes.
+- [**CLI**](cli.md) — every command, with its options and exit codes.
+- [**API reference**](reference.md) — generated from docstrings.

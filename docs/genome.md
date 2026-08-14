@@ -1,64 +1,256 @@
-# The `Genome` class
+# Genome
 
-`Genome` is the package's main entry point. You name an assembly, and it makes
-sure every reference file exists locally — then you query it for sequence.
-Everything downstream (download, indexing, 2bit conversion, the open file
-handle) is handled behind the scenes.
+`Genome` is the entry point. Name an assembly, and every reference file for it is on
+disk by the time the constructor returns — then you query sequence, register
+annotations, and build aligner indexes off the same object.
 
 ```python
 from genome import Genome
 
-sacCer3 = Genome("sacCer3")              # download + prepare on first use (cached after)
+sacCer3 = Genome("sacCer3")
 sacCer3.fetch_sequence("chrIV:0-10")     # DNA('ACACCACACC')
 ```
 
-## Coordinates are 0-based, half-open
+## Preparing an assembly
 
-**Every coordinate in this package is 0-based and half-open** — `[start, end)`,
-the BED convention. `chrIV:0-10` is the first ten bases (positions 0–9);
-`chrIV:10-20` is the next ten, with no overlap. This is the same convention used
-internally throughout the package (see [`genome.region`](#regions) below); there
-is no hidden 1-based conversion.
+The first construction fetches the FASTA, checks it against the checksum the metadata
+table pins, derives the `.fai`, `.2bit` and `chrom.sizes`, and records that it finished.
+Everything lands in one directory per assembly:
 
-```python
-sacCer3.fetch_sequence("chrIV:0-10")     # DNA('ACACCACACC')  — bases 0..9
-len(sacCer3.fetch_sequence("chrIV:0-10"))  # 10
+```
+<LIULAB_DATA>/genome/sacCer3/
+├── sacCer3.fa
+├── sacCer3.fa.fai
+├── sacCer3.2bit
+├── sacCer3.chrom.sizes
+└── .completion.json
 ```
 
-## Constructing a genome
+Later constructions read that record and open the `.2bit` — instant, and offline.
+Nothing is downloaded twice.
+
+`LIULAB_DATA` sets the data root. Unset, the well-known lab paths are tried in order and
+`~/liulab_data` is the fallback. Pass `cache_dir=` to place a single assembly elsewhere:
 
 ```python
-Genome("sacCer3")                        # yeast — small, good for examples
-Genome("hg38")                           # human
-Genome("mm39", cache_dir="/data/ref")    # override where files are stored
+Genome("hg38")
+Genome("mm39", cache_dir="/data/ref")
 ```
 
-On construction `Genome`:
+Preparing a large assembly takes a while, so it is often worth doing once from a shell
+before a pipeline runs: `genome register hg38`. See the [CLI](cli.md).
 
-1. looks the assembly up in the curated metadata table,
-2. downloads `<assembly>.fa.gz` — from the URL that row pins, or, for an assembly
-   the table does not list, from the UCSC golden path after validating the name
-   against UCSC (a typo fails fast),
-3. checks the unpacked FASTA against the row's checksum, when it pins one,
-4. prepares the `.fai` index, `.2bit` encoding, and `chrom.sizes`,
-5. writes the registration record that says all of that finished,
-6. opens the `.2bit` for reading.
+### Using your own FASTA
 
-Everything lands under `<LIULAB_DATA>/genome/<assembly>/` (configurable via the
-`LIULAB_DATA` environment variable; default `~/liulab_data`). A second construction
-reads that assembly's [registration record](genome-files.md#the-registration-record),
-confirms every file it claims is present and the right size — no file contents are read
-— and opens the `.2bit`, so it is instant and works offline. Nothing is downloaded
-twice, and the compressed download is deleted once the record is written. The underlying
-machinery is documented in [Downloading and preparing genomes](genome-files.md);
-`Genome` is the high-level front door to it.
+When the download source is unreachable, or the reference is one no public site carries,
+pass `path_or_url=` — a local file or a URL. A `.gz` source is decompressed for you:
 
-### A registration that cannot be trusted stops you
+```python
+Genome("ce11", path_or_url="/data/ce11.fa.gz")
+Genome("ce11", path_or_url="https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11/bigZips/ce11.fa.gz")
+```
 
-If that directory holds files but no record (an interrupted preparation), or a record
-that disagrees with what is on disk (a file deleted or truncated afterwards), construction
-raises a `RegistrationError` naming the file and the command that fixes it — rather than
-rebuilding quietly, or handing back a genome that answers queries from a partial file:
+Everything else is identical: the same derived files, the same directory, the same
+record. Later plain `Genome("ce11")` calls reuse them. Nothing is downloaded, and the
+assembly name only labels the directory.
+
+## Fetching sequence
+
+`fetch_sequence` takes a locus string, a bare chromosome name, or a
+[`Region`](#regions), and returns a [`DNA`](sequences.md):
+
+```python
+sacCer3.fetch_sequence("chrIV:0-10")     # DNA('ACACCACACC')
+sacCer3["chrIV:0-10"]                    # same thing — indexing is sugar
+sacCer3.fetch_sequence("chrM")           # a bare name is the whole chromosome
+```
+
+Because the result is a `DNA`, the transforms are right there:
+
+```python
+sacCer3.fetch_sequence("chrIV:0-10").reverse_complement()
+sacCer3.fetch_sequence("chrIV:0-1000").gc_content
+```
+
+Lower-case bases (repeat soft-masking) come back verbatim — they carry meaning and are
+never upper-cased for you.
+
+A bare string is read on the forward strand. Pass a `Region` with strand `"-"` to get the
+reverse complement of the interval:
+
+```python
+from genome import Region
+
+sacCer3.fetch_sequence(Region("chrIV", 0, 10, "-"))
+```
+
+An `end` past the chromosome length raises rather than truncating silently; `end` equal
+to the length is valid. Unknown chromosomes and malformed loci raise `ValueError` too.
+
+```python
+sacCer3.fetch_sequence("chrIV:0-999999999")
+# ValueError: region chrIV:0-999999999: end (999999999) exceeds chrIV length (1531933).
+```
+
+## Inspecting an assembly
+
+```python
+sacCer3.assembly                 # 'sacCer3'
+sacCer3.chromosomes              # ['chrI', 'chrII', ..., 'chrM'] in reference order
+sacCer3.chrom_sizes              # pandas Series of lengths, indexed by chromosome
+sacCer3.chrom_sizes["chrIV"]     # 1531933
+sacCer3.files                    # GenomeFiles: fasta / fai / twobit / chrom_sizes paths
+sacCer3.source_url               # where the FASTA came from
+sacCer3.sha256                   # digest of the unpacked FASTA (None if unpinned)
+```
+
+`chrom_sizes` is returned as a copy, so mutating it never corrupts the genome's own view.
+`twobit_path`, `fasta_path` and `chrom_sizes_path` are there to hand to other tools.
+
+## Releasing the file handle
+
+`Genome` keeps the `.2bit` open so repeated queries are fast. Use it as a context manager
+(or call `close()`) when you want the handle released at a known point:
+
+```python
+with Genome("sacCer3") as sacCer3:
+    seq = sacCer3.fetch_sequence("chrIV:0-100")
+```
+
+## Gene annotations
+
+A genome can carry several annotations, each under a short name. Name one the annotation
+table lists for this assembly and it is fetched, verified, and built into a
+[gffutils](https://gffutils.readthedocs.io/) database beside the assembly's files:
+
+```python
+sacCer3.register_annotation("ensgene_v101")   # fetch + verify + build + record
+sacCer3.annotations                           # ['ensgene_v101'] — registered here
+sacCer3.offered_annotations                   # what the table offers for this assembly
+sacCer3.get_gtf_path("ensgene_v101")          # Path to the placed .gtf
+sacCer3.default_gtf                           # the annotation used when you name none
+```
+
+`annotations` and `offered_annotations` answer different questions: what this machine
+has, and what the lab supports. `genome annotations <assembly>` prints one against the
+other.
+
+For a GTF the table does not list, hand over the path — a `.gz` is decompressed:
+
+```python
+sacCer3.register_gtf("custom.gtf", name="custom")
+```
+
+Each annotation gets its own directory, `<assembly dir>/gtf/<name>/`, holding the GTF,
+the `.db`, and the record. Re-registering a name that is already registered does
+nothing — no download, no rebuild.
+
+Two things to know when a registration is refused:
+
+- **Chromosome names must match.** Every sequence the GTF names has to be one the
+  assembly carries, so an Ensembl-spelled GTF (`1`, `MT`) against a UCSC-spelled assembly
+  (`chr1`, `chrM`) raises `ChromosomeMismatchError` instead of building an annotation
+  that lines up with nothing. The check is one streaming pass, before the slow database
+  build. If you have looked at the mismatch and accept it, pass
+  `check_chromosomes=False`. The reverse is fine: an assembly may carry scaffolds the
+  annotation never mentions.
+- **Gene and transcript inference is off.** GENCODE, Ensembl and RefSeq GTFs declare
+  those features already, and inferring them is gffutils' slow path. Turn it on
+  (`disable_infer_genes=False`) only for a bare exon-level GTF, which otherwise registers
+  as a database of exons and nothing else.
+
+### The default annotation
+
+`default_gtf` is what a caller gets when they name none: an explicit `default_gtf=` at
+construction, else the one the table flags for this assembly, else the sole registered
+annotation, else `None`.
+
+```python
+sacCer3.default_gtf                        # 'ensgene_v101'
+Genome("hg38", default_gtf="refseq_2023")  # …unless you say otherwise
+```
+
+It names an annotation without locating one — opening a genome never starts a download —
+so on a fresh machine the default is typically not registered yet. Asking for
+`default_gtf_path` is what surfaces that, naming the command that closes the gap.
+
+## Aligner indexes
+
+Two aligners ship, and they differ in whether an annotation is involved:
+
+| Aligner | Maps | Annotation | Index |
+|---------|------|------------|-------|
+| [STAR](https://github.com/alexdobin/STAR) | RNA-seq (splice-aware) | **required** — one index per GTF | `index/star_<gtf>/` — a directory |
+| [chromap](https://github.com/haowenz/chromap) | ATAC-seq, ChIP-seq, Hi-C | none | `index/chromap/chromap.index` — one file |
+
+```python
+sacCer3.build_star_index(gtf="ensgene_v101", threads=8)
+sacCer3.build_chromap_index()
+```
+
+The `gtf` key is required for STAR and becomes part of the index directory name, so
+indexes for different annotations never collide. A finished index is cached and reused;
+pass `overwrite=True` to rebuild.
+
+Commonly tuned options are named and everything else is forwarded to the tool as a raw
+flag:
+
+```python
+sacCer3.build_star_index(
+    gtf="ensgene_v101",
+    sjdb_overhang=99,        # --sjdbOverhang; ideally read_length - 1
+    threads=8,               # --runThreadN
+    genomeSAindexNbases=11,  # any other genomeGenerate flag, sans the leading --
+)
+
+sacCer3.build_chromap_index(
+    kmer=20,                 # -k/--kmer
+    window=10,               # -w/--window
+    min_frag_length=30,      # any other --build-index flag; underscores become hyphens
+)
+```
+
+`genomeSAindexNbases` and `genomeChrBinNbits` are sized from the assembly unless you set
+them. chromap's index build is single-threaded, so there is no `threads`.
+
+Building an index and using one are separate jobs. The `get_*` methods return the path a
+mapping run needs and build nothing:
+
+```python
+sacCer3.get_star_index("ensgene_v101")   # -> STAR --genomeDir
+sacCer3.get_chromap_index()              # -> chromap -x
+```
+
+Neither aligner is in the default environment — install what you need with `pixi add star`
+/ `pixi add chromap`, or use the project's `aligners` environment
+(`pixi run -e aligners ...`). A missing binary fails fast with the install command.
+
+## Regions
+
+`Region` is the shared coordinate type: frozen, validated, 0-based half-open, with an
+explicit strand that is never defaulted to `+`.
+
+```python
+from genome import Region
+from genome.region import parse_region
+
+r = Region("chrIV", 0, 10)         # Region(chrom='chrIV', start=0, end=10, strand='.')
+len(r)                             # 10
+str(r)                             # 'chrIV:0-10'
+Region("chrIV", 0, 10, "-")
+
+parse_region("chrIV:1,000-2,000")  # ('chrIV', 1000, 2000) — separators tolerated
+parse_region("chrM")               # ('chrM', None, None) — a bare chromosome name
+```
+
+Construction enforces `start >= 0`, `end >= start`, and `strand` in `{"+", "-", "."}`.
+
+## When a directory cannot be trusted
+
+Registration is finished when its record says so, never because the files look present.
+A directory holding files with no record (a run that was interrupted) or a record that
+disagrees with what is on disk (a file deleted or truncated afterwards) raises rather
+than being rebuilt quietly:
 
 ```python
 Genome("hg38")
@@ -67,231 +259,14 @@ Genome("hg38")
 # were registered. Re-register it with `genome register hg38 --force`.
 ```
 
-An absent or empty directory is not this — that is a fresh registration and proceeds
-normally. `genome verify <assembly>` re-reads and re-checksums on demand when you suspect
-a problem but nothing has raised. See
-[When a registration cannot be trusted](genome-files.md#when-a-registration-cannot-be-trusted)
-for the repair and the one trade-off it carries.
+Every such message names its own repair, and the repair is always the same shape:
+re-register with `--force` (or `overwrite=True` for an index). It keeps whatever is
+provably good — an unpacked FASTA whose checksum still matches is reused, and only the
+derived files are rebuilt.
 
-### Where the bytes came from
+An empty or absent directory is not this: that is a fresh registration and proceeds
+normally. A broken *annotation* never blocks opening the genome; it is reported instead,
+in `broken_annotations`, each entry carrying the command that repairs it.
 
-An assembly the lab officially supports carries its source and, once someone has
-pinned it, the sha256 of its **unpacked** FASTA. Both are readable off the genome:
-
-```python
-sacCer3.source_url   # 'https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz'
-sacCer3.sha256       # '6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3'
-```
-
-A FASTA that does not match a pinned checksum raises `ChecksumMismatchError` naming
-both values, rather than being prepared and quietly used. `None` on either property
-means the table pins nothing for this assembly — which is legal, and takes nothing
-away: preparation proceeds exactly as it does for an assembly with no row at all.
-See [Pinned sources and checksums](genome-files.md#pinned-sources-and-checksums).
-
-### Seeding from your own FASTA (offline, mirrors, custom references)
-
-When UCSC is unreachable (a firewalled compute node, a proxy-only network) or
-you have a custom reference that isn't on the golden path, pass `path_or_url=`
-to seed the assembly from a FASTA you provide instead of downloading from UCSC:
-
-```python
-# a local file — copied into the assembly's directory, then prepared
-Genome("ce11", path_or_url="/data/ce11.fa.gz")
-
-# a non-UCSC URL (e.g. a UCSC mirror)
-Genome("ce11", path_or_url="https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11/bigZips/ce11.fa.gz")
-```
-
-In this mode **UCSC is never contacted** — there is no assembly-name validation,
-so the name only labels the directory and the prepared files, and no pinned
-source or checksum from the metadata table is consulted. A gzipped
-(`.gz`) source is decompressed automatically. Everything else is identical to the
-UCSC path: the `.fai`, `.2bit`, and `chrom.sizes` are prepared under
-`<LIULAB_DATA>/genome/<assembly>/` and the same registration record is written — with
-the path you gave as its source and the digest of what arrived — so later plain
-`Genome("ce11")` calls reuse them. See
-[Seeding from a local file or URL](genome-files.md#seeding-from-a-local-file-or-url)
-for the underlying `fetch_genome_from`.
-
-## Fetching sequence
-
-`fetch_sequence` accepts a locus string, a bare chromosome name, or a
-[`Region`](#regions), and returns a [`DNA`](sequences.md):
-
-```python
-sacCer3.fetch_sequence("chrIV:0-10")     # DNA('ACACCACACC')
-sacCer3["chrIV:0-10"]                     # same thing — indexing is sugar
-sacCer3.fetch_sequence("chrM")           # bare name -> the whole chromosome
-```
-
-Because the result is a `DNA`, the sequence transforms are right there:
-
-```python
-sacCer3.fetch_sequence("chrIV:0-10").reverse_complement()
-sacCer3.fetch_sequence("chrIV:0-1000").gc_content
-```
-
-### Soft-masking is preserved
-
-Lower-case bases (repeat soft-masking) are kept verbatim — they carry meaning,
-so they are not silently upper-cased:
-
-```python
-sacCer3.fetch_sequence("chrIV:0-20")     # e.g. DNA('ACACCACACCacacccacac')
-```
-
-### Strand
-
-A bare string is always read on the forward strand. Pass a `Region` with strand
-`"-"` to get the reverse complement of the interval:
-
-```python
-from genome import Region
-
-sacCer3.fetch_sequence(Region("chrIV", 0, 10, "+"))   # forward
-sacCer3.fetch_sequence(Region("chrIV", 0, 10, "-"))   # reverse complement
-```
-
-### Out-of-range coordinates raise
-
-An `end` past the chromosome length is an error, not a silent truncation:
-
-```python
-sacCer3.fetch_sequence("chrIV:0-999999999")
-# ValueError: region chrIV:0-999999999: end (999999999) exceeds chrIV length (1531933).
-# Coordinates are 0-based half-open, so the maximum valid end is 1531933.
-```
-
-`end == length` is valid (it selects through the last base); `end > length`
-raises. Unknown chromosomes and malformed loci raise `ValueError` too.
-
-## Inspecting the assembly
-
-```python
-sacCer3.assembly                 # 'sacCer3'
-sacCer3.chromosomes              # ['chrI', 'chrII', ..., 'chrM'] in reference order
-sacCer3.chrom_sizes              # pandas Series: lengths indexed by chromosome name
-sacCer3.chrom_sizes["chrIV"]     # 1531933
-sacCer3.files                    # GenomeFiles: paths to fasta/.fai/.2bit/chrom.sizes
-```
-
-`chrom_sizes` is a pandas `Series` (integer lengths, indexed by chromosome name,
-in reference order). It is returned as a copy, so mutating it never corrupts the
-genome's own view.
-
-## Gene annotations (GTF)
-
-Beyond sequence, a `Genome` can carry one or more gene annotations. Name one the
-annotation table lists for this assembly and it is fetched, checked against the
-checksum that table pins, placed alongside the assembly's files and built into a
-gffutils database:
-
-```python
-sacCer3.register_annotation("ensgene_v101")   # fetch + verify + build + record
-sacCer3.annotations                  # ['ensgene_v101'] — registered on this machine
-sacCer3.offered_annotations          # what the table offers for this assembly
-sacCer3.get_gtf_path("ensgene_v101") # Path to the placed .gtf
-sacCer3.default_gtf                  # 'ensgene_v101' — the annotation the table flags
-```
-
-Those first two are different questions on purpose: `annotations` is what this
-machine has, `offered_annotations` is what the lab supports for this assembly,
-registered or not. `genome annotations <assembly>` prints one against the other.
-
-For a GTF the table does not list, hand over the path instead:
-
-```python
-sacCer3.register_gtf("custom.gtf", name="custom")
-sacCer3.register_gtf("custom.gtf.gz", name="custom")  # .gz is decompressed for you
-```
-
-Both ways in have a shell equivalent, `genome register-annotation <assembly>
-<name>` and `genome register-gtf <assembly> <path> <name>`.
-
-Either way the registration ends with the same record the assembly writes, and
-that record is the only thing that ever says the annotation is finished — never
-the database file's existence, which is equally true of a build killed half-way.
-Re-registering a name whose record is valid returns it silently: nothing is
-fetched and nothing is rebuilt. A directory holding files without a valid record
-raises instead, naming the command that registers that annotation again with
-`--force`, which is also what repairs it.
-
-Opening a genome never raises over one of those, though — one annotation nobody
-can vouch for must not cost you the genome or the annotations beside it. It is
-reported rather than raised over, and each entry says what is wrong and names the
-one command that fixes it:
-
-```python
-sacCer3.broken_annotations           # [BrokenAnnotation(name='ensgene_v101', ...)]
-sacCer3.broken_annotations[0].repair # 'genome register-annotation sacCer3 ensgene_v101 --force'
-```
-
-Asking for a broken annotation by name raises as an unregistered one does, and the
-message quotes that same repair — the command that works, not one that would raise
-in turn and demand `--force`.
-
-Opening a genome never registers anything, whatever the table flags — that would
-be a gigabyte download and a database build inside a constructor someone called to
-fetch one sequence. So `default_gtf` may name an annotation this machine does not
-have, and `default_gtf_path` is where that is reported, naming the command that
-registers it.
-
-Annotations are the basis for building aligner indexes (a STAR index is built
-against a specific GTF). Registration, the default-annotation rules, and
-`Genome.build_star_index(gtf=...)` are covered in
-[Annotations & aligner indexes](aligner.md).
-
-## Releasing the file handle
-
-`Genome` holds the `.2bit` file open so repeated queries are fast. Use it as a
-context manager (or call `close()`) when you want the handle released
-deterministically:
-
-```python
-with Genome("sacCer3") as sacCer3:
-    seq = sacCer3.fetch_sequence("chrIV:0-100")
-# handle closed here
-```
-
-## Regions
-
-`genome.region.Region` is the shared coordinate primitive that later features
-build on. It is a frozen, validated, 0-based half-open interval with an explicit
-strand:
-
-```python
-from genome import Region
-from genome.region import parse_region
-
-r = Region("chrIV", 0, 10)       # Region(chrom='chrIV', start=0, end=10, strand='.')
-len(r)                           # 10
-str(r)                           # 'chrIV:0-10'
-Region("chrIV", 0, 10, "-")      # strand is explicit; never defaulted to '+'
-
-parse_region("chrIV:0-10")       # ('chrIV', 0, 10)
-parse_region("chrIV:1,000-2,000")  # ('chrIV', 1000, 2000) — separators tolerated
-parse_region("chrM")             # ('chrM', None, None) — a bare chromosome name
-```
-
-Construction enforces the invariants: `start >= 0`, `end >= start`, and `strand`
-in `{"+", "-", "."}`.
-
-## Reading sequence directly: `TwoBit`
-
-`Genome` reads sequence through `genome.io.twobit.TwoBit`, a thin wrapper over
-`py2bit` that holds an open 2bit handle. You can use it on its own against any
-`.2bit` file:
-
-```python
-from genome.io.twobit import TwoBit
-
-with TwoBit("sacCer3.2bit") as tb:
-    tb.chroms()                  # {'chrI': 230218, ..., 'chrM': 85779}
-    tb.sequence("chrIV", 0, 10)  # 'ACACCACACC'  (0-based, half-open)
-```
-
-Like `Genome`, `TwoBit.sequence` bounds-checks coordinates — an over-long `end`
-raises a `ValueError` instead of being silently clamped (py2bit's default).
-`masked=True` (the default) preserves soft-masking; pass `masked=False` to
-upper-case everything.
+To re-check integrity when nothing has raised but you suspect a problem, `genome verify
+<assembly>` re-reads the FASTA and re-computes its digest.

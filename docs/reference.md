@@ -1,11 +1,9 @@
 # API reference
 
 !!! note
-    This page is auto-generated from docstrings. The hand-authored narrative
-    pages — [Usage](usage.md), [Sequences](sequences.md), and
-    [Annotations & indexes](aligner.md) — are the **primary** documentation.
-    If you find a discrepancy, the narrative pages are the source of truth
-    and the docstrings (and this page) should be updated to match.
+    Generated from docstrings. The hand-authored pages — [Genome](genome.md),
+    [Sequences](sequences.md) and [CLI](cli.md) — are the primary documentation; reach
+    for this one for a signature or a parameter you already know you want.
 
 ## `genome.genome`
 
@@ -19,6 +17,10 @@
 
 ::: genome.seq
 
+## `genome.aligner.mixin`
+
+::: genome.aligner.mixin
+
 ## `genome.aligner.aligner`
 
 ::: genome.aligner.aligner
@@ -31,21 +33,13 @@
 
 ::: genome.aligner.chromap
 
-## `genome.aligner.mixin`
+## `genome.metadata`
 
-::: genome.aligner.mixin
+::: genome.metadata
 
 ## `genome.external`
 
 ::: genome.external
-
-## `genome.io.completion`
-
-::: genome.io.completion
-
-## `genome.io.registration`
-
-::: genome.io.registration
 
 ## `genome.io.download`
 
@@ -59,13 +53,17 @@
 
 ::: genome.io.gtf
 
-## `genome.metadata`
-
-::: genome.metadata
-
 ## `genome.io.twobit`
 
 ::: genome.io.twobit
+
+## `genome.io.completion`
+
+::: genome.io.completion
+
+## `genome.io.registration`
+
+::: genome.io.registration
 
 ## `genome.cli`
 
