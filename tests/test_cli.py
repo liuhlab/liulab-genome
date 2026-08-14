@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json as _json
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import gffutils
-import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
@@ -20,6 +19,7 @@ from genome.io import download as download_mod
 from genome.io.completion import read_record, record_path, write_record
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.io.gtf import annotation_dir, register_gtf
+from genome.metadata import AnnotationMetadata, AssemblyMetadata
 
 from .conftest import CHIMERA_COMPONENTS, COMPONENT_ANNOTATION, FakeFetch
 
@@ -35,6 +35,18 @@ _TINY_GTF_SHA256 = "255f43bd9abef76424d1c2d89a40cccc1a36215409bbc8f32dcead49ca3b
 
 #: The URL the stood-in annotation row pins, served from ``tests/data``.
 _ANNOTATION_URL = "https://mirror.example.invalid/annotations/tiny.gtf.gz"
+
+#: The row the annotation table is stood in with: the committed ``tiny.gtf.gz``, pinned.
+#: The CLI takes no metadata argument by design, so the table it reads is what moves.
+_TINY_ANNOTATION = AnnotationMetadata(
+    assembly="tiny",
+    name="ensgene_v101",
+    provider="UCSC",
+    version="ensGene.v101",
+    url=_ANNOTATION_URL,
+    sha256=_TINY_GTF_SHA256,
+    default=True,
+)
 
 # A bare exon-level GTF — exon lines and nothing else, which is what gene/transcript
 # inference exists for. Built with inference off, its database holds exons alone.
@@ -409,30 +421,20 @@ class TestWhatAVerifiedDigestWasHeldTo:
         monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
 
     def test_the_row_pinned_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        table = pd.DataFrame(
-            [
-                {
-                    "assembly_name": "tiny",
-                    "species": "Testus minimus",
-                    "ucsc_name": "tiny",
-                    "ncbi_name": "TINY.1",
-                    "ncbi_assembly_id": "GCF_0.0",
-                    "ncbi_taxid": "1",
-                    "source_url": "https://mirror.example.invalid/tiny.fa.gz",
-                    "sha256": _TINY_FA_SHA256,
-                }
-            ],
-            dtype=str,
+        row = AssemblyMetadata(
+            assembly_name="tiny",
+            species="Testus minimus",
+            ucsc_name="tiny",
+            ncbi_name="TINY.1",
+            ncbi_assembly_id="GCF_0.0",
+            ncbi_taxid=1,
+            source_url="https://mirror.example.invalid/tiny.fa.gz",
+            sha256=_TINY_FA_SHA256,
         )
-        monkeypatch.setattr(metadata, "_metadata_table", lambda: table)
-        # The lookup is cached module-wide; leaving the stand-in's row in it would leak
-        # into every later test in this worker.
-        metadata.lookup_assembly.cache_clear()
-        try:
-            assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
-            result = runner.invoke(app, ["verify", "tiny"])
-        finally:
-            metadata.lookup_assembly.cache_clear()
+        monkeypatch.setattr(metadata, "assembly_table", lambda: (row,))
+
+        assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
+        result = runner.invoke(app, ["verify", "tiny"])
 
         assert result.exit_code == 0
         assert "matches the digest the metadata table pins for it" in result.stdout
@@ -485,21 +487,7 @@ class TestRegisterAnnotation:
     ) -> None:
         fake_fetch.serve("tiny.gtf.gz")
         monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-        table = pd.DataFrame(
-            [
-                {
-                    "assembly": "tiny",
-                    "name": "ensgene_v101",
-                    "provider": "UCSC",
-                    "version": "ensGene.v101",
-                    "url": _ANNOTATION_URL,
-                    "sha256": _TINY_GTF_SHA256,
-                    "default": "yes",
-                }
-            ],
-            dtype=str,
-        )
-        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+        monkeypatch.setattr(metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
 
     def test_registers_and_reports_where_it_landed(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
@@ -564,21 +552,12 @@ class TestRegisterAnnotation:
         assembly_dir = tmp_path / "genome" / "tiny"
         assembly_dir.mkdir(parents=True)
         (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
-        table = pd.DataFrame(
-            [
-                {
-                    "assembly": "tiny",
-                    "name": "ensgene_v101",
-                    "provider": "UCSC",
-                    "version": "ensGene.v101",
-                    "url": "https://mirror.example.invalid/annotations/ensembl_style.gtf",
-                    "sha256": None,
-                    "default": "yes",
-                }
-            ],
-            dtype=str,
+        row = replace(
+            _TINY_ANNOTATION,
+            url="https://mirror.example.invalid/annotations/ensembl_style.gtf",
+            sha256=None,
         )
-        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+        monkeypatch.setattr(metadata, "annotation_table", lambda: (row,))
 
         refused = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
 
@@ -605,21 +584,15 @@ class TestRegisterAnnotation:
         bare = tmp_path / "bare.gtf"
         bare.write_text(_BARE_GTF)
         fake_fetch.serve(bare)
-        table = pd.DataFrame(
-            [
-                {
-                    "assembly": "tiny",
-                    "name": "bare",
-                    "provider": "somebody",
-                    "version": "1",
-                    "url": "https://mirror.example.invalid/annotations/bare.gtf",
-                    "sha256": None,
-                    "default": "yes",
-                }
-            ],
-            dtype=str,
+        row = replace(
+            _TINY_ANNOTATION,
+            name="bare",
+            provider="somebody",
+            version="1",
+            url="https://mirror.example.invalid/annotations/bare.gtf",
+            sha256=None,
         )
-        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+        monkeypatch.setattr(metadata, "annotation_table", lambda: (row,))
 
         result = runner.invoke(
             app, ["register-annotation", "tiny", "bare", "--infer-genes", "--infer-transcripts"]
@@ -784,21 +757,7 @@ class TestWhatARegistrationSaysAboutTheChromosomes:
     ) -> None:
         fake_fetch.serve("tiny.gtf.gz")
         monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-        table = pd.DataFrame(
-            [
-                {
-                    "assembly": "tiny",
-                    "name": "ensgene_v101",
-                    "provider": "UCSC",
-                    "version": "ensGene.v101",
-                    "url": _ANNOTATION_URL,
-                    "sha256": _TINY_GTF_SHA256,
-                    "default": "yes",
-                }
-            ],
-            dtype=str,
-        )
-        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+        monkeypatch.setattr(metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
 
     @staticmethod
     def _prepare_assembly(tmp_path: Path) -> None:
