@@ -21773,11 +21773,11 @@ column by column, parsed by each field's own declared type, and a whole record i
 <a href="#genome.metadata.AssemblyMetadata" class="headerlink" title="Permanent link">&para;</a></h3>
 <div class="language-python doc-signature highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nf">AssemblyMetadata</span><span class="p">(</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">assembly_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">species</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">species</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">ucsc_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">ncbi_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">ncbi_assembly_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">ncbi_taxid</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">ncbi_name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">ncbi_assembly_id</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">ncbi_taxid</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span>
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">source_url</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">sha256</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="p">)</span>
@@ -21791,16 +21791,20 @@ column by column, parsed by each field's own declared type, and a whole record i
 <p>The single declaration of what an assembly's metadata consists of: the table
 is parsed through these fields, and a complete record is what
 :class:<code>~genome.genome.Genome</code> accepts in place of the table's own row.</p>
+<p>Only <code>assembly_name</code> is required. Every other column may be left blank, and a
+blank cell reads back as <code>None</code> rather than as text: the table fills in over
+time, and a freshly prepared assembly pins its source and digest well before
+anyone supplies its species, its UCSC and NCBI names or its taxonomy id.</p>
 <p>The last two fields are what makes preparing an assembly reproducible.
 <code>source_url</code> pins where its FASTA is fetched from, so nothing has to be derived
 or guessed; <code>sha256</code> pins the digest of the <strong>unpacked</strong> FASTA that source
 yields — not of the compressed archive it arrives in, so a copy taken from a
-mirror or recompressed elsewhere still matches (ADR-0006). Either may be <code>None</code>:
-the table fills in over time, and a row with no digest is unverified rather than
-wrong.</p>
-<p><code>ucsc_name</code> may be <code>None</code> too, and for the same reason the assembly id is a
-local key rather than a UCSC one (ADR-0003): the lab supports references UCSC has
-never carried, and such a row simply has no name in that namespace to give.</p>
+mirror or recompressed elsewhere still matches (ADR-0006). A row with no digest is
+unverified rather than wrong.</p>
+<p><code>ucsc_name</code> is blank permanently rather than pending in some rows, for the same
+reason the assembly id is a local key rather than a UCSC one (ADR-0003): the lab
+supports references UCSC has never carried, and such a row simply has no name in
+that namespace to give.</p>
 
 
 <p><span class="doc-section-title">Examples:</span></p>
@@ -22097,12 +22101,7 @@ with no trailing newline.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/genome/metadata.py</code></summary>
-              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-156">156</a></span>
-<span class="normal"><a href="#__codelineno-0-157">157</a></span>
-<span class="normal"><a href="#__codelineno-0-158">158</a></span>
-<span class="normal"><a href="#__codelineno-0-159">159</a></span>
-<span class="normal"><a href="#__codelineno-0-160">160</a></span>
-<span class="normal"><a href="#__codelineno-0-161">161</a></span>
+              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-161">161</a></span>
 <span class="normal"><a href="#__codelineno-0-162">162</a></span>
 <span class="normal"><a href="#__codelineno-0-163">163</a></span>
 <span class="normal"><a href="#__codelineno-0-164">164</a></span>
@@ -22121,31 +22120,36 @@ with no trailing newline.</p>
 <span class="normal"><a href="#__codelineno-0-177">177</a></span>
 <span class="normal"><a href="#__codelineno-0-178">178</a></span>
 <span class="normal"><a href="#__codelineno-0-179">179</a></span>
-<span class="normal"><a href="#__codelineno-0-180">180</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-156" name="__codelineno-0-156"></a><span class="k">def</span><span class="w"> </span><span class="nf">format_table_row</span><span class="p">(</span><span class="n">row</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-157" name="__codelineno-0-157"></a><span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Render one metadata row as a tab-separated line, in table-column order.</span>
-<a id="__codelineno-0-158" name="__codelineno-0-158"></a>
-<a id="__codelineno-0-159" name="__codelineno-0-159"></a><span class="sd">    Blank means unknown: a field that is ``None``, or missing from ``row`` altogether,</span>
-<a id="__codelineno-0-160" name="__codelineno-0-160"></a><span class="sd">    renders as an empty cell — exactly how the shipped table spells a value nobody has</span>
-<a id="__codelineno-0-161" name="__codelineno-0-161"></a><span class="sd">    pinned yet. The result is the line to paste into ``data/assembly_metadata.tsv``,</span>
-<a id="__codelineno-0-162" name="__codelineno-0-162"></a><span class="sd">    with no trailing newline.</span>
+<span class="normal"><a href="#__codelineno-0-180">180</a></span>
+<span class="normal"><a href="#__codelineno-0-181">181</a></span>
+<span class="normal"><a href="#__codelineno-0-182">182</a></span>
+<span class="normal"><a href="#__codelineno-0-183">183</a></span>
+<span class="normal"><a href="#__codelineno-0-184">184</a></span>
+<span class="normal"><a href="#__codelineno-0-185">185</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-161" name="__codelineno-0-161"></a><span class="k">def</span><span class="w"> </span><span class="nf">format_table_row</span><span class="p">(</span><span class="n">row</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">object</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-162" name="__codelineno-0-162"></a><span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;Render one metadata row as a tab-separated line, in table-column order.</span>
 <a id="__codelineno-0-163" name="__codelineno-0-163"></a>
-<a id="__codelineno-0-164" name="__codelineno-0-164"></a><span class="sd">    Parameters</span>
-<a id="__codelineno-0-165" name="__codelineno-0-165"></a><span class="sd">    ----------</span>
-<a id="__codelineno-0-166" name="__codelineno-0-166"></a><span class="sd">    row : mapping of str to object</span>
-<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="sd">        Field name to value, such as :func:`dataclasses.asdict` of an</span>
-<a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">        :class:`AssemblyMetadata`. Keys outside :data:`METADATA_FIELDS` are ignored.</span>
-<a id="__codelineno-0-169" name="__codelineno-0-169"></a>
-<a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">    Returns</span>
-<a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">    -------</span>
-<a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">    str</span>
-<a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">        The row&#39;s values joined by tabs, in :data:`METADATA_FIELDS` order.</span>
+<a id="__codelineno-0-164" name="__codelineno-0-164"></a><span class="sd">    Blank means unknown: a field that is ``None``, or missing from ``row`` altogether,</span>
+<a id="__codelineno-0-165" name="__codelineno-0-165"></a><span class="sd">    renders as an empty cell — exactly how the shipped table spells a value nobody has</span>
+<a id="__codelineno-0-166" name="__codelineno-0-166"></a><span class="sd">    pinned yet. The result is the line to paste into ``data/assembly_metadata.tsv``,</span>
+<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="sd">    with no trailing newline.</span>
+<a id="__codelineno-0-168" name="__codelineno-0-168"></a>
+<a id="__codelineno-0-169" name="__codelineno-0-169"></a><span class="sd">    Parameters</span>
+<a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">    ----------</span>
+<a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">    row : mapping of str to object</span>
+<a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">        Field name to value, such as :func:`dataclasses.asdict` of an</span>
+<a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">        :class:`AssemblyMetadata`. Keys outside :data:`METADATA_FIELDS` are ignored.</span>
 <a id="__codelineno-0-174" name="__codelineno-0-174"></a>
-<a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">    Examples</span>
-<a id="__codelineno-0-176" name="__codelineno-0-176"></a><span class="sd">    --------</span>
-<a id="__codelineno-0-177" name="__codelineno-0-177"></a><span class="sd">    &gt;&gt;&gt; format_table_row({&quot;assembly_name&quot;: &quot;sacCer3&quot;, &quot;ncbi_taxid&quot;: 559292})</span>
-<a id="__codelineno-0-178" name="__codelineno-0-178"></a><span class="sd">    &#39;sacCer3\t\t\t\t\t559292\t\t&#39;</span>
-<a id="__codelineno-0-179" name="__codelineno-0-179"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-180" name="__codelineno-0-180"></a>    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\t</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">name</span><span class="p">])</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">METADATA_FIELDS</span><span class="p">)</span>
+<a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">    Returns</span>
+<a id="__codelineno-0-176" name="__codelineno-0-176"></a><span class="sd">    -------</span>
+<a id="__codelineno-0-177" name="__codelineno-0-177"></a><span class="sd">    str</span>
+<a id="__codelineno-0-178" name="__codelineno-0-178"></a><span class="sd">        The row&#39;s values joined by tabs, in :data:`METADATA_FIELDS` order.</span>
+<a id="__codelineno-0-179" name="__codelineno-0-179"></a>
+<a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">    Examples</span>
+<a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="sd">    --------</span>
+<a id="__codelineno-0-182" name="__codelineno-0-182"></a><span class="sd">    &gt;&gt;&gt; format_table_row({&quot;assembly_name&quot;: &quot;sacCer3&quot;, &quot;ncbi_taxid&quot;: 559292})</span>
+<a id="__codelineno-0-183" name="__codelineno-0-183"></a><span class="sd">    &#39;sacCer3\t\t\t\t\t559292\t\t&#39;</span>
+<a id="__codelineno-0-184" name="__codelineno-0-184"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-185" name="__codelineno-0-185"></a>    <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\t</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;&quot;</span> <span class="k">if</span> <span class="n">row</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">name</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="nb">str</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">name</span><span class="p">])</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">METADATA_FIELDS</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -22247,12 +22251,7 @@ an optional column reads back as <code>None</code>.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/genome/metadata.py</code></summary>
-              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-246">246</a></span>
-<span class="normal"><a href="#__codelineno-0-247">247</a></span>
-<span class="normal"><a href="#__codelineno-0-248">248</a></span>
-<span class="normal"><a href="#__codelineno-0-249">249</a></span>
-<span class="normal"><a href="#__codelineno-0-250">250</a></span>
-<span class="normal"><a href="#__codelineno-0-251">251</a></span>
+              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-251">251</a></span>
 <span class="normal"><a href="#__codelineno-0-252">252</a></span>
 <span class="normal"><a href="#__codelineno-0-253">253</a></span>
 <span class="normal"><a href="#__codelineno-0-254">254</a></span>
@@ -22284,44 +22283,49 @@ an optional column reads back as <code>None</code>.</p>
 <span class="normal"><a href="#__codelineno-0-280">280</a></span>
 <span class="normal"><a href="#__codelineno-0-281">281</a></span>
 <span class="normal"><a href="#__codelineno-0-282">282</a></span>
-<span class="normal"><a href="#__codelineno-0-283">283</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="nd">@cache</span>
-<a id="__codelineno-0-247" name="__codelineno-0-247"></a><span class="k">def</span><span class="w"> </span><span class="nf">lookup_assembly</span><span class="p">(</span><span class="n">assembly</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AssemblyMetadata</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-248" name="__codelineno-0-248"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the :class:`AssemblyMetadata` for a UCSC (or canonical) assembly name, or ``None``.</span>
-<a id="__codelineno-0-249" name="__codelineno-0-249"></a>
-<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">    Parameters</span>
-<a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="sd">    ----------</span>
-<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">    assembly : str</span>
-<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">        The name to look up, matched against the table&#39;s ``ucsc_name`` and</span>
-<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">        ``assembly_name`` columns.</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a>
-<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">    Returns</span>
-<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">    -------</span>
-<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">    AssemblyMetadata or None</span>
-<a id="__codelineno-0-259" name="__codelineno-0-259"></a><span class="sd">        The row for ``assembly``, or ``None`` when the table does not list it.</span>
-<a id="__codelineno-0-260" name="__codelineno-0-260"></a><span class="sd">        The table is a cross-reference, not an allow-list, so an unlisted</span>
-<a id="__codelineno-0-261" name="__codelineno-0-261"></a><span class="sd">        assembly is legal and its identifiers are simply unknown. A blank cell in</span>
-<a id="__codelineno-0-262" name="__codelineno-0-262"></a><span class="sd">        an optional column reads back as ``None``.</span>
-<a id="__codelineno-0-263" name="__codelineno-0-263"></a>
-<a id="__codelineno-0-264" name="__codelineno-0-264"></a><span class="sd">    Examples</span>
-<a id="__codelineno-0-265" name="__codelineno-0-265"></a><span class="sd">    --------</span>
-<a id="__codelineno-0-266" name="__codelineno-0-266"></a><span class="sd">    &gt;&gt;&gt; lookup_assembly(&quot;hg38&quot;).ncbi_name</span>
-<a id="__codelineno-0-267" name="__codelineno-0-267"></a><span class="sd">    &#39;GRCh38&#39;</span>
-<a id="__codelineno-0-268" name="__codelineno-0-268"></a><span class="sd">    &gt;&gt;&gt; lookup_assembly(&quot;hg38&quot;).source_url</span>
-<a id="__codelineno-0-269" name="__codelineno-0-269"></a><span class="sd">    &#39;https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz&#39;</span>
-<a id="__codelineno-0-270" name="__codelineno-0-270"></a><span class="sd">    &gt;&gt;&gt; lookup_assembly(&quot;no_such_assembly&quot;) is None</span>
-<a id="__codelineno-0-271" name="__codelineno-0-271"></a><span class="sd">    True</span>
-<a id="__codelineno-0-272" name="__codelineno-0-272"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-273" name="__codelineno-0-273"></a>    <span class="n">table</span> <span class="o">=</span> <span class="n">_metadata_table</span><span class="p">()</span>
-<a id="__codelineno-0-274" name="__codelineno-0-274"></a>    <span class="c1"># A blank ``ucsc_name`` reads as NaN and compares equal to nothing, so a row for a</span>
-<a id="__codelineno-0-275" name="__codelineno-0-275"></a>    <span class="c1"># reference UCSC never carried is found by its own name and never by an empty one.</span>
-<a id="__codelineno-0-276" name="__codelineno-0-276"></a>    <span class="n">match</span> <span class="o">=</span> <span class="n">table</span><span class="p">[(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;ucsc_name&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">assembly</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;assembly_name&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">assembly</span><span class="p">)]</span>
-<a id="__codelineno-0-277" name="__codelineno-0-277"></a>    <span class="k">if</span> <span class="n">match</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
-<a id="__codelineno-0-278" name="__codelineno-0-278"></a>        <span class="k">return</span> <span class="kc">None</span>
-<a id="__codelineno-0-279" name="__codelineno-0-279"></a>    <span class="n">row</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-<a id="__codelineno-0-280" name="__codelineno-0-280"></a>    <span class="c1"># Every column is read as text; each field&#39;s declared type parses its own column.</span>
-<a id="__codelineno-0-281" name="__codelineno-0-281"></a>    <span class="k">return</span> <span class="n">AssemblyMetadata</span><span class="p">(</span>
-<a id="__codelineno-0-282" name="__codelineno-0-282"></a>        <span class="o">**</span><span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">_parse_cell</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">_FIELD_TYPES</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">METADATA_FIELDS</span><span class="p">}</span>
-<a id="__codelineno-0-283" name="__codelineno-0-283"></a>    <span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-283">283</a></span>
+<span class="normal"><a href="#__codelineno-0-284">284</a></span>
+<span class="normal"><a href="#__codelineno-0-285">285</a></span>
+<span class="normal"><a href="#__codelineno-0-286">286</a></span>
+<span class="normal"><a href="#__codelineno-0-287">287</a></span>
+<span class="normal"><a href="#__codelineno-0-288">288</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="nd">@cache</span>
+<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="k">def</span><span class="w"> </span><span class="nf">lookup_assembly</span><span class="p">(</span><span class="n">assembly</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AssemblyMetadata</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the :class:`AssemblyMetadata` for a UCSC (or canonical) assembly name, or ``None``.</span>
+<a id="__codelineno-0-254" name="__codelineno-0-254"></a>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a><span class="sd">    Parameters</span>
+<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">    ----------</span>
+<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">    assembly : str</span>
+<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">        The name to look up, matched against the table&#39;s ``ucsc_name`` and</span>
+<a id="__codelineno-0-259" name="__codelineno-0-259"></a><span class="sd">        ``assembly_name`` columns.</span>
+<a id="__codelineno-0-260" name="__codelineno-0-260"></a>
+<a id="__codelineno-0-261" name="__codelineno-0-261"></a><span class="sd">    Returns</span>
+<a id="__codelineno-0-262" name="__codelineno-0-262"></a><span class="sd">    -------</span>
+<a id="__codelineno-0-263" name="__codelineno-0-263"></a><span class="sd">    AssemblyMetadata or None</span>
+<a id="__codelineno-0-264" name="__codelineno-0-264"></a><span class="sd">        The row for ``assembly``, or ``None`` when the table does not list it.</span>
+<a id="__codelineno-0-265" name="__codelineno-0-265"></a><span class="sd">        The table is a cross-reference, not an allow-list, so an unlisted</span>
+<a id="__codelineno-0-266" name="__codelineno-0-266"></a><span class="sd">        assembly is legal and its identifiers are simply unknown. A blank cell in</span>
+<a id="__codelineno-0-267" name="__codelineno-0-267"></a><span class="sd">        an optional column reads back as ``None``.</span>
+<a id="__codelineno-0-268" name="__codelineno-0-268"></a>
+<a id="__codelineno-0-269" name="__codelineno-0-269"></a><span class="sd">    Examples</span>
+<a id="__codelineno-0-270" name="__codelineno-0-270"></a><span class="sd">    --------</span>
+<a id="__codelineno-0-271" name="__codelineno-0-271"></a><span class="sd">    &gt;&gt;&gt; lookup_assembly(&quot;hg38&quot;).ncbi_name</span>
+<a id="__codelineno-0-272" name="__codelineno-0-272"></a><span class="sd">    &#39;GRCh38&#39;</span>
+<a id="__codelineno-0-273" name="__codelineno-0-273"></a><span class="sd">    &gt;&gt;&gt; lookup_assembly(&quot;hg38&quot;).source_url</span>
+<a id="__codelineno-0-274" name="__codelineno-0-274"></a><span class="sd">    &#39;https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz&#39;</span>
+<a id="__codelineno-0-275" name="__codelineno-0-275"></a><span class="sd">    &gt;&gt;&gt; lookup_assembly(&quot;no_such_assembly&quot;) is None</span>
+<a id="__codelineno-0-276" name="__codelineno-0-276"></a><span class="sd">    True</span>
+<a id="__codelineno-0-277" name="__codelineno-0-277"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-278" name="__codelineno-0-278"></a>    <span class="n">table</span> <span class="o">=</span> <span class="n">_metadata_table</span><span class="p">()</span>
+<a id="__codelineno-0-279" name="__codelineno-0-279"></a>    <span class="c1"># A blank ``ucsc_name`` reads as NaN and compares equal to nothing, so a row for a</span>
+<a id="__codelineno-0-280" name="__codelineno-0-280"></a>    <span class="c1"># reference UCSC never carried is found by its own name and never by an empty one.</span>
+<a id="__codelineno-0-281" name="__codelineno-0-281"></a>    <span class="n">match</span> <span class="o">=</span> <span class="n">table</span><span class="p">[(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;ucsc_name&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">assembly</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;assembly_name&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">assembly</span><span class="p">)]</span>
+<a id="__codelineno-0-282" name="__codelineno-0-282"></a>    <span class="k">if</span> <span class="n">match</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+<a id="__codelineno-0-283" name="__codelineno-0-283"></a>        <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-0-284" name="__codelineno-0-284"></a>    <span class="n">row</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-0-285" name="__codelineno-0-285"></a>    <span class="c1"># Every column is read as text; each field&#39;s declared type parses its own column.</span>
+<a id="__codelineno-0-286" name="__codelineno-0-286"></a>    <span class="k">return</span> <span class="n">AssemblyMetadata</span><span class="p">(</span>
+<a id="__codelineno-0-287" name="__codelineno-0-287"></a>        <span class="o">**</span><span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">_parse_cell</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="n">row</span><span class="p">,</span> <span class="n">_FIELD_TYPES</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">METADATA_FIELDS</span><span class="p">}</span>
+<a id="__codelineno-0-288" name="__codelineno-0-288"></a>    <span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -22436,12 +22440,7 @@ annotation is legal — it is registered by path instead of by name.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/genome/metadata.py</code></summary>
-              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-286">286</a></span>
-<span class="normal"><a href="#__codelineno-0-287">287</a></span>
-<span class="normal"><a href="#__codelineno-0-288">288</a></span>
-<span class="normal"><a href="#__codelineno-0-289">289</a></span>
-<span class="normal"><a href="#__codelineno-0-290">290</a></span>
-<span class="normal"><a href="#__codelineno-0-291">291</a></span>
+              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-291">291</a></span>
 <span class="normal"><a href="#__codelineno-0-292">292</a></span>
 <span class="normal"><a href="#__codelineno-0-293">293</a></span>
 <span class="normal"><a href="#__codelineno-0-294">294</a></span>
@@ -22468,39 +22467,44 @@ annotation is legal — it is registered by path instead of by name.</p>
 <span class="normal"><a href="#__codelineno-0-315">315</a></span>
 <span class="normal"><a href="#__codelineno-0-316">316</a></span>
 <span class="normal"><a href="#__codelineno-0-317">317</a></span>
-<span class="normal"><a href="#__codelineno-0-318">318</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-286" name="__codelineno-0-286"></a><span class="k">def</span><span class="w"> </span><span class="nf">lookup_annotation</span><span class="p">(</span><span class="n">assembly</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnnotationMetadata</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-287" name="__codelineno-0-287"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the annotation ``name`` the table lists for ``assembly``, or ``None``.</span>
-<a id="__codelineno-0-288" name="__codelineno-0-288"></a>
-<a id="__codelineno-0-289" name="__codelineno-0-289"></a><span class="sd">    The lookup that makes registering an annotation by name possible: the row it</span>
-<a id="__codelineno-0-290" name="__codelineno-0-290"></a><span class="sd">    returns says where to fetch the GTF and what it must hash to.</span>
-<a id="__codelineno-0-291" name="__codelineno-0-291"></a>
-<a id="__codelineno-0-292" name="__codelineno-0-292"></a><span class="sd">    Parameters</span>
-<a id="__codelineno-0-293" name="__codelineno-0-293"></a><span class="sd">    ----------</span>
-<a id="__codelineno-0-294" name="__codelineno-0-294"></a><span class="sd">    assembly : str</span>
-<a id="__codelineno-0-295" name="__codelineno-0-295"></a><span class="sd">        The assembly the annotation belongs to, matched against the table&#39;s</span>
-<a id="__codelineno-0-296" name="__codelineno-0-296"></a><span class="sd">        ``assembly`` column.</span>
-<a id="__codelineno-0-297" name="__codelineno-0-297"></a><span class="sd">    name : str</span>
-<a id="__codelineno-0-298" name="__codelineno-0-298"></a><span class="sd">        The **Registered name** to look up, e.g. ``&quot;gencode_v50&quot;``.</span>
-<a id="__codelineno-0-299" name="__codelineno-0-299"></a>
-<a id="__codelineno-0-300" name="__codelineno-0-300"></a><span class="sd">    Returns</span>
-<a id="__codelineno-0-301" name="__codelineno-0-301"></a><span class="sd">    -------</span>
-<a id="__codelineno-0-302" name="__codelineno-0-302"></a><span class="sd">    AnnotationMetadata or None</span>
-<a id="__codelineno-0-303" name="__codelineno-0-303"></a><span class="sd">        The row, or ``None`` when the table lists no such annotation for that</span>
-<a id="__codelineno-0-304" name="__codelineno-0-304"></a><span class="sd">        assembly. The table is a cross-reference, not an allow-list, so an unlisted</span>
-<a id="__codelineno-0-305" name="__codelineno-0-305"></a><span class="sd">        annotation is legal — it is registered by path instead of by name.</span>
-<a id="__codelineno-0-306" name="__codelineno-0-306"></a>
-<a id="__codelineno-0-307" name="__codelineno-0-307"></a><span class="sd">    Examples</span>
-<a id="__codelineno-0-308" name="__codelineno-0-308"></a><span class="sd">    --------</span>
-<a id="__codelineno-0-309" name="__codelineno-0-309"></a><span class="sd">    &gt;&gt;&gt; lookup_annotation(&quot;sacCer3&quot;, &quot;ensgene_v101&quot;).provider</span>
-<a id="__codelineno-0-310" name="__codelineno-0-310"></a><span class="sd">    &#39;UCSC&#39;</span>
-<a id="__codelineno-0-311" name="__codelineno-0-311"></a><span class="sd">    &gt;&gt;&gt; lookup_annotation(&quot;sacCer3&quot;, &quot;no_such_annotation&quot;) is None</span>
-<a id="__codelineno-0-312" name="__codelineno-0-312"></a><span class="sd">    True</span>
-<a id="__codelineno-0-313" name="__codelineno-0-313"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-314" name="__codelineno-0-314"></a>    <span class="n">table</span> <span class="o">=</span> <span class="n">_annotation_table</span><span class="p">()</span>
-<a id="__codelineno-0-315" name="__codelineno-0-315"></a>    <span class="n">match</span> <span class="o">=</span> <span class="n">table</span><span class="p">[(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;assembly&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">assembly</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">name</span><span class="p">)]</span>
-<a id="__codelineno-0-316" name="__codelineno-0-316"></a>    <span class="k">if</span> <span class="n">match</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
-<a id="__codelineno-0-317" name="__codelineno-0-317"></a>        <span class="k">return</span> <span class="kc">None</span>
-<a id="__codelineno-0-318" name="__codelineno-0-318"></a>    <span class="k">return</span> <span class="n">_annotation_record</span><span class="p">(</span><span class="n">match</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+<span class="normal"><a href="#__codelineno-0-318">318</a></span>
+<span class="normal"><a href="#__codelineno-0-319">319</a></span>
+<span class="normal"><a href="#__codelineno-0-320">320</a></span>
+<span class="normal"><a href="#__codelineno-0-321">321</a></span>
+<span class="normal"><a href="#__codelineno-0-322">322</a></span>
+<span class="normal"><a href="#__codelineno-0-323">323</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-291" name="__codelineno-0-291"></a><span class="k">def</span><span class="w"> </span><span class="nf">lookup_annotation</span><span class="p">(</span><span class="n">assembly</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AnnotationMetadata</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-292" name="__codelineno-0-292"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the annotation ``name`` the table lists for ``assembly``, or ``None``.</span>
+<a id="__codelineno-0-293" name="__codelineno-0-293"></a>
+<a id="__codelineno-0-294" name="__codelineno-0-294"></a><span class="sd">    The lookup that makes registering an annotation by name possible: the row it</span>
+<a id="__codelineno-0-295" name="__codelineno-0-295"></a><span class="sd">    returns says where to fetch the GTF and what it must hash to.</span>
+<a id="__codelineno-0-296" name="__codelineno-0-296"></a>
+<a id="__codelineno-0-297" name="__codelineno-0-297"></a><span class="sd">    Parameters</span>
+<a id="__codelineno-0-298" name="__codelineno-0-298"></a><span class="sd">    ----------</span>
+<a id="__codelineno-0-299" name="__codelineno-0-299"></a><span class="sd">    assembly : str</span>
+<a id="__codelineno-0-300" name="__codelineno-0-300"></a><span class="sd">        The assembly the annotation belongs to, matched against the table&#39;s</span>
+<a id="__codelineno-0-301" name="__codelineno-0-301"></a><span class="sd">        ``assembly`` column.</span>
+<a id="__codelineno-0-302" name="__codelineno-0-302"></a><span class="sd">    name : str</span>
+<a id="__codelineno-0-303" name="__codelineno-0-303"></a><span class="sd">        The **Registered name** to look up, e.g. ``&quot;gencode_v50&quot;``.</span>
+<a id="__codelineno-0-304" name="__codelineno-0-304"></a>
+<a id="__codelineno-0-305" name="__codelineno-0-305"></a><span class="sd">    Returns</span>
+<a id="__codelineno-0-306" name="__codelineno-0-306"></a><span class="sd">    -------</span>
+<a id="__codelineno-0-307" name="__codelineno-0-307"></a><span class="sd">    AnnotationMetadata or None</span>
+<a id="__codelineno-0-308" name="__codelineno-0-308"></a><span class="sd">        The row, or ``None`` when the table lists no such annotation for that</span>
+<a id="__codelineno-0-309" name="__codelineno-0-309"></a><span class="sd">        assembly. The table is a cross-reference, not an allow-list, so an unlisted</span>
+<a id="__codelineno-0-310" name="__codelineno-0-310"></a><span class="sd">        annotation is legal — it is registered by path instead of by name.</span>
+<a id="__codelineno-0-311" name="__codelineno-0-311"></a>
+<a id="__codelineno-0-312" name="__codelineno-0-312"></a><span class="sd">    Examples</span>
+<a id="__codelineno-0-313" name="__codelineno-0-313"></a><span class="sd">    --------</span>
+<a id="__codelineno-0-314" name="__codelineno-0-314"></a><span class="sd">    &gt;&gt;&gt; lookup_annotation(&quot;sacCer3&quot;, &quot;ensgene_v101&quot;).provider</span>
+<a id="__codelineno-0-315" name="__codelineno-0-315"></a><span class="sd">    &#39;UCSC&#39;</span>
+<a id="__codelineno-0-316" name="__codelineno-0-316"></a><span class="sd">    &gt;&gt;&gt; lookup_annotation(&quot;sacCer3&quot;, &quot;no_such_annotation&quot;) is None</span>
+<a id="__codelineno-0-317" name="__codelineno-0-317"></a><span class="sd">    True</span>
+<a id="__codelineno-0-318" name="__codelineno-0-318"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-319" name="__codelineno-0-319"></a>    <span class="n">table</span> <span class="o">=</span> <span class="n">_annotation_table</span><span class="p">()</span>
+<a id="__codelineno-0-320" name="__codelineno-0-320"></a>    <span class="n">match</span> <span class="o">=</span> <span class="n">table</span><span class="p">[(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;assembly&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">assembly</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">name</span><span class="p">)]</span>
+<a id="__codelineno-0-321" name="__codelineno-0-321"></a>    <span class="k">if</span> <span class="n">match</span><span class="o">.</span><span class="n">empty</span><span class="p">:</span>
+<a id="__codelineno-0-322" name="__codelineno-0-322"></a>        <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-0-323" name="__codelineno-0-323"></a>    <span class="k">return</span> <span class="n">_annotation_record</span><span class="p">(</span><span class="n">match</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -22592,12 +22596,7 @@ nothing for. A fresh list each call, so a caller may sort or filter it.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/genome/metadata.py</code></summary>
-              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-321">321</a></span>
-<span class="normal"><a href="#__codelineno-0-322">322</a></span>
-<span class="normal"><a href="#__codelineno-0-323">323</a></span>
-<span class="normal"><a href="#__codelineno-0-324">324</a></span>
-<span class="normal"><a href="#__codelineno-0-325">325</a></span>
-<span class="normal"><a href="#__codelineno-0-326">326</a></span>
+              <div class="language-python highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-326">326</a></span>
 <span class="normal"><a href="#__codelineno-0-327">327</a></span>
 <span class="normal"><a href="#__codelineno-0-328">328</a></span>
 <span class="normal"><a href="#__codelineno-0-329">329</a></span>
@@ -22618,33 +22617,38 @@ nothing for. A fresh list each call, so a caller may sort or filter it.</p>
 <span class="normal"><a href="#__codelineno-0-344">344</a></span>
 <span class="normal"><a href="#__codelineno-0-345">345</a></span>
 <span class="normal"><a href="#__codelineno-0-346">346</a></span>
-<span class="normal"><a href="#__codelineno-0-347">347</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-321" name="__codelineno-0-321"></a><span class="k">def</span><span class="w"> </span><span class="nf">list_annotation_metadata</span><span class="p">(</span><span class="n">assembly</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">AnnotationMetadata</span><span class="p">]:</span>
-<a id="__codelineno-0-322" name="__codelineno-0-322"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return every annotation the table offers for ``assembly``, in table order.</span>
-<a id="__codelineno-0-323" name="__codelineno-0-323"></a>
-<a id="__codelineno-0-324" name="__codelineno-0-324"></a><span class="sd">    What the lab supports for an assembly — a different question from what is</span>
-<a id="__codelineno-0-325" name="__codelineno-0-325"></a><span class="sd">    registered on this machine, which is :func:`~genome.io.gtf.list_annotations`.</span>
-<a id="__codelineno-0-326" name="__codelineno-0-326"></a>
-<a id="__codelineno-0-327" name="__codelineno-0-327"></a><span class="sd">    Parameters</span>
-<a id="__codelineno-0-328" name="__codelineno-0-328"></a><span class="sd">    ----------</span>
-<a id="__codelineno-0-329" name="__codelineno-0-329"></a><span class="sd">    assembly : str</span>
-<a id="__codelineno-0-330" name="__codelineno-0-330"></a><span class="sd">        The assembly to list, matched against the table&#39;s ``assembly`` column.</span>
+<span class="normal"><a href="#__codelineno-0-347">347</a></span>
+<span class="normal"><a href="#__codelineno-0-348">348</a></span>
+<span class="normal"><a href="#__codelineno-0-349">349</a></span>
+<span class="normal"><a href="#__codelineno-0-350">350</a></span>
+<span class="normal"><a href="#__codelineno-0-351">351</a></span>
+<span class="normal"><a href="#__codelineno-0-352">352</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-326" name="__codelineno-0-326"></a><span class="k">def</span><span class="w"> </span><span class="nf">list_annotation_metadata</span><span class="p">(</span><span class="n">assembly</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">AnnotationMetadata</span><span class="p">]:</span>
+<a id="__codelineno-0-327" name="__codelineno-0-327"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return every annotation the table offers for ``assembly``, in table order.</span>
+<a id="__codelineno-0-328" name="__codelineno-0-328"></a>
+<a id="__codelineno-0-329" name="__codelineno-0-329"></a><span class="sd">    What the lab supports for an assembly — a different question from what is</span>
+<a id="__codelineno-0-330" name="__codelineno-0-330"></a><span class="sd">    registered on this machine, which is :func:`~genome.io.gtf.list_annotations`.</span>
 <a id="__codelineno-0-331" name="__codelineno-0-331"></a>
-<a id="__codelineno-0-332" name="__codelineno-0-332"></a><span class="sd">    Returns</span>
-<a id="__codelineno-0-333" name="__codelineno-0-333"></a><span class="sd">    -------</span>
-<a id="__codelineno-0-334" name="__codelineno-0-334"></a><span class="sd">    list of AnnotationMetadata</span>
-<a id="__codelineno-0-335" name="__codelineno-0-335"></a><span class="sd">        One record per listed annotation; empty for an assembly the table offers</span>
-<a id="__codelineno-0-336" name="__codelineno-0-336"></a><span class="sd">        nothing for. A fresh list each call, so a caller may sort or filter it.</span>
-<a id="__codelineno-0-337" name="__codelineno-0-337"></a>
-<a id="__codelineno-0-338" name="__codelineno-0-338"></a><span class="sd">    Examples</span>
-<a id="__codelineno-0-339" name="__codelineno-0-339"></a><span class="sd">    --------</span>
-<a id="__codelineno-0-340" name="__codelineno-0-340"></a><span class="sd">    &gt;&gt;&gt; [record.name for record in list_annotation_metadata(&quot;sacCer3&quot;)]</span>
-<a id="__codelineno-0-341" name="__codelineno-0-341"></a><span class="sd">    [&#39;ensgene_v101&#39;]</span>
-<a id="__codelineno-0-342" name="__codelineno-0-342"></a><span class="sd">    &gt;&gt;&gt; list_annotation_metadata(&quot;no_such_assembly&quot;)</span>
-<a id="__codelineno-0-343" name="__codelineno-0-343"></a><span class="sd">    []</span>
-<a id="__codelineno-0-344" name="__codelineno-0-344"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-345" name="__codelineno-0-345"></a>    <span class="n">table</span> <span class="o">=</span> <span class="n">_annotation_table</span><span class="p">()</span>
-<a id="__codelineno-0-346" name="__codelineno-0-346"></a>    <span class="n">match</span> <span class="o">=</span> <span class="n">table</span><span class="p">[</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;assembly&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">assembly</span><span class="p">]</span>
-<a id="__codelineno-0-347" name="__codelineno-0-347"></a>    <span class="k">return</span> <span class="p">[</span><span class="n">_annotation_record</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">match</span><span class="o">.</span><span class="n">iterrows</span><span class="p">()]</span>
+<a id="__codelineno-0-332" name="__codelineno-0-332"></a><span class="sd">    Parameters</span>
+<a id="__codelineno-0-333" name="__codelineno-0-333"></a><span class="sd">    ----------</span>
+<a id="__codelineno-0-334" name="__codelineno-0-334"></a><span class="sd">    assembly : str</span>
+<a id="__codelineno-0-335" name="__codelineno-0-335"></a><span class="sd">        The assembly to list, matched against the table&#39;s ``assembly`` column.</span>
+<a id="__codelineno-0-336" name="__codelineno-0-336"></a>
+<a id="__codelineno-0-337" name="__codelineno-0-337"></a><span class="sd">    Returns</span>
+<a id="__codelineno-0-338" name="__codelineno-0-338"></a><span class="sd">    -------</span>
+<a id="__codelineno-0-339" name="__codelineno-0-339"></a><span class="sd">    list of AnnotationMetadata</span>
+<a id="__codelineno-0-340" name="__codelineno-0-340"></a><span class="sd">        One record per listed annotation; empty for an assembly the table offers</span>
+<a id="__codelineno-0-341" name="__codelineno-0-341"></a><span class="sd">        nothing for. A fresh list each call, so a caller may sort or filter it.</span>
+<a id="__codelineno-0-342" name="__codelineno-0-342"></a>
+<a id="__codelineno-0-343" name="__codelineno-0-343"></a><span class="sd">    Examples</span>
+<a id="__codelineno-0-344" name="__codelineno-0-344"></a><span class="sd">    --------</span>
+<a id="__codelineno-0-345" name="__codelineno-0-345"></a><span class="sd">    &gt;&gt;&gt; [record.name for record in list_annotation_metadata(&quot;sacCer3&quot;)]</span>
+<a id="__codelineno-0-346" name="__codelineno-0-346"></a><span class="sd">    [&#39;ensgene_v101&#39;]</span>
+<a id="__codelineno-0-347" name="__codelineno-0-347"></a><span class="sd">    &gt;&gt;&gt; list_annotation_metadata(&quot;no_such_assembly&quot;)</span>
+<a id="__codelineno-0-348" name="__codelineno-0-348"></a><span class="sd">    []</span>
+<a id="__codelineno-0-349" name="__codelineno-0-349"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-350" name="__codelineno-0-350"></a>    <span class="n">table</span> <span class="o">=</span> <span class="n">_annotation_table</span><span class="p">()</span>
+<a id="__codelineno-0-351" name="__codelineno-0-351"></a>    <span class="n">match</span> <span class="o">=</span> <span class="n">table</span><span class="p">[</span><span class="n">table</span><span class="p">[</span><span class="s2">&quot;assembly&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">assembly</span><span class="p">]</span>
+<a id="__codelineno-0-352" name="__codelineno-0-352"></a>    <span class="k">return</span> <span class="p">[</span><span class="n">_annotation_record</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">match</span><span class="o">.</span><span class="n">iterrows</span><span class="p">()]</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
