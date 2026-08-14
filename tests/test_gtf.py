@@ -23,6 +23,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from genome.io import gtf as gtf_module
 from genome.io.completion import (
     RegistrationMismatchError,
     UnfinishedRegistrationError,
@@ -54,6 +55,7 @@ from genome.io.utils import ChecksumMismatchError
 from genome.metadata import AnnotationMetadata
 
 from .conftest import FakeFetch
+from .test_source import _module_level_imports
 
 # A minimal but valid GTF: one gene with a transcript and an exon. Standard
 # gene/transcript features are declared, so the default no-inference path applies.
@@ -1442,3 +1444,29 @@ class TestRegisterAnnotationByPath:
 
         assert payload.name == "WS298"
         assert list(list_annotations(tmp_path)) == ["WS298"]
+
+
+# ---------------------------------------------------------------------------------------
+# The edge this module must not grow back
+# ---------------------------------------------------------------------------------------
+
+
+def test_registering_an_annotation_imports_nothing_that_downloads_an_assembly() -> None:
+    # The cycle, asserted closed. `io.download` imports `io.source` at the top of the
+    # file, `io.chimera` imports `io.gtf`, and `io.gtf` used to import `io.download`
+    # back — once for the annotations subdirectory name, which `io.registration` defines
+    # and the downloader merely re-exports, and once for the package's one fetch step,
+    # which `io.fetch` now holds. Each was a single line, and each grows back the moment
+    # somebody reaches for a name that happens to be importable from the downloader.
+    # Were the edge to return, asking what a chimera is made of would drag the whole
+    # annotation build stack in behind it, and the downloader's module-level import of
+    # the resolution would go back behind a deferred one.
+    forbidden = {"genome.io.download", "genome.io.chimera", "genome.genome"}
+
+    assert _module_level_imports(gtf_module) & forbidden == set()
+
+
+def test_the_annotation_fetch_is_the_packages_one_fetch_step() -> None:
+    # The positive half of the guard above: the edge is gone because the fetch moved to a
+    # module of its own, not because this one started spelling a download itself.
+    assert "genome.io.fetch" in _module_level_imports(gtf_module)

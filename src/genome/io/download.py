@@ -1,10 +1,9 @@
 """Download and cache large genomic files with `pooch <https://www.fatiando.org/pooch/>`_.
 
-I/O boundary module: it reaches out to the network. :func:`fetch_url` is the package's
-single fetch step — every download goes through it and it is the only call site of
-:func:`pooch.retrieve`. :class:`Downloader` binds that step to a cache directory, and
-:class:`UCSCGenomeDownloader` specializes it for reference-genome FASTA files from the
-UCSC golden path. See each for caching, storage layout, and hashing.
+I/O boundary module: it reaches out to the network. The package's single fetch step is
+:func:`genome.io.fetch.fetch_url`, reached through the module so that one rebinding takes
+every download offline; :class:`UCSCGenomeDownloader` drives it for reference-genome
+FASTA files from the UCSC golden path. See it for caching, storage layout, and hashing.
 
 Only the fetching is here. The rest of registering an assembly — the **Assembly dir**
 layout, the working area, placing the FASTA and writing the record — is
@@ -50,7 +49,6 @@ Examples
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -59,8 +57,11 @@ from urllib.parse import urlparse
 import pooch
 import requests
 
+from genome.io import fetch
 from genome.io.completion import RECORD_NAME, CompletionRecord, RegistrationError, read_record
+from genome.io.components import ChimeraDetails, components_status
 from genome.io.fasta import GenomeFiles, prepare_fasta
+from genome.io.fetch import _Processor
 
 # Re-exported, not used here: the **Assembly dir** layout moved to `registration`
 # because the shared registration steps are written in terms of it, and these are the
@@ -71,20 +72,14 @@ from genome.io.registration import AssemblyDir, AssemblyRegistration, assembly_r
 from genome.io.registration import assembly_data_dir as assembly_data_dir
 from genome.io.registration import liulab_data_dir as liulab_data_dir
 from genome.io.source import (
-    ChimeraDetails,
     ComponentSource,
     FetchedSource,
     SeededSource,
-    components_status,
     fetched_source,
     resolve_source,
 )
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import AssemblyMetadata, assembly_metadata
-
-# A pooch post-processor: called with (fname, action, pooch_instance) and
-# returns the path (or paths) to use as the result of the download.
-_Processor = Callable[..., object]
 
 #: URL schemes a source may use, matching the downloaders pooch ships. Anything
 #: else is a local path (or an error, if it carries a scheme we cannot fetch).
@@ -215,8 +210,8 @@ class VerifiedAssembly:
         What answered with ``expected`` — :data:`EXPECTED_FROM_TABLE`,
         :data:`EXPECTED_FROM_RECORD`, or ``None`` when nothing did.
     components : str or None
-        :data:`~genome.io.source.COMPONENTS_UNCHANGED` or
-        :data:`~genome.io.source.COMPONENTS_UNKNOWN` for a chimera, and ``None`` for
+        :data:`~genome.io.components.COMPONENTS_UNCHANGED` or
+        :data:`~genome.io.components.COMPONENTS_UNKNOWN` for a chimera, and ``None`` for
         anything else — including every ``fasta`` checked on its own.
 
     Examples
@@ -306,140 +301,6 @@ def _expected_digest(
     return None, None
 
 
-def fetch_url(
-    url: str,
-    dest_dir: Path,
-    *,
-    known_hash: str | None = None,
-    fname: str | None = None,
-    processor: _Processor | None = None,
-    progressbar: bool = True,
-) -> Path:
-    """Download ``url`` into ``dest_dir`` and return the local path.
-
-    The package's one fetch step: every download it performs goes through here, and
-    this is the only call site of :func:`pooch.retrieve`. pooch picks its transport
-    from the URL scheme, so ``http``, ``https``, ``ftp`` and ``sftp`` all work — the
-    last additionally needs ``paramiko`` installed, which pooch will say for itself.
-    A file already sitting at the destination is reused (verified against
-    ``known_hash`` when one is given) and no network call is made.
-
-    Reach this function through the module, never by importing the name: write
-    ``from genome.io import download`` and call ``download.fetch_url(...)``, so that a
-    single ``monkeypatch.setattr(download, "fetch_url", ...)`` takes every download in
-    the package offline. Callers inside this module call it as a module global for the
-    same reason.
-
-    Parameters
-    ----------
-    url : str
-        The file URL to download, including its scheme.
-    dest_dir : pathlib.Path
-        Directory the file is written into. Created when a download actually happens.
-    known_hash : str, optional
-        Expected hash as ``"<algorithm>:<hexdigest>"`` (e.g. ``"md5:8f3c..."``), or a
-        bare hex digest for sha256. If ``None``, verification is skipped and pooch logs
-        the computed hash so you can pin it next time.
-    fname : str, optional
-        Local file name to save as. Defaults to a hash-prefixed unique name pooch
-        derives from ``url``.
-    processor : callable, optional
-        A pooch post-processor applied after the download, such as
-        :class:`pooch.Decompress` or :class:`pooch.Untar`. Its return value becomes the
-        path returned here.
-    progressbar : bool, default True
-        Show a textual download progress bar (requires ``tqdm``).
-
-    Returns
-    -------
-    pathlib.Path
-        Absolute path to the downloaded (and, if ``processor`` was given, processed)
-        file.
-
-    Raises
-    ------
-    requests.exceptions.HTTPError
-        If an http(s) download fails (e.g. the URL 404s).
-    ValueError
-        If ``known_hash`` is given and the file does not match it, or if no downloader
-        exists for the URL's scheme.
-
-    Examples
-    --------
-    >>> from pathlib import Path
-    >>> from genome.io import download
-    >>> download.fetch_url(                                  # doctest: +SKIP
-    ...     "https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz",
-    ...     Path("/scratch/liulab/genome/sacCer3"),
-    ...     fname="sacCer3.fa.gz",
-    ... )
-    PosixPath('/scratch/liulab/genome/sacCer3/sacCer3.fa.gz')
-    """
-    result = pooch.retrieve(
-        url=url,
-        known_hash=known_hash,
-        fname=fname,
-        path=dest_dir,
-        processor=processor,
-        progressbar=progressbar,
-    )
-    return Path(result)
-
-
-class Downloader:
-    """Download and cache large files via pooch.
-
-    Parameters
-    ----------
-    cache_dir : str or pathlib.Path, optional
-        Directory under which downloads are stored. Defaults to the per-user
-        cache location for the ``genome`` application
-        (``pooch.os_cache("genome")``). The directory is created on first use.
-
-    Attributes
-    ----------
-    cache_dir : pathlib.Path
-        Resolved cache directory used for all downloads.
-
-    Examples
-    --------
-    >>> dl = Downloader()                         # doctest: +SKIP
-    >>> path = dl.fetch("https://example.org/big.bed.gz")   # doctest: +SKIP
-    """
-
-    def __init__(self, cache_dir: str | Path | None = None) -> None:
-        self.cache_dir: Path = Path(pooch.os_cache("genome") if cache_dir is None else cache_dir)
-
-    def fetch(
-        self,
-        url: str,
-        *,
-        known_hash: str | None = None,
-        fname: str | None = None,
-        processor: _Processor | None = None,
-        progressbar: bool = True,
-    ) -> Path:
-        """Download ``url`` into :attr:`cache_dir` and return the local path.
-
-        :func:`fetch_url` bound to this downloader's cache directory — see it for the
-        arguments, the reuse-without-network behaviour, the hashing and what raises.
-
-        Returns
-        -------
-        pathlib.Path
-            Absolute path to the cached (and, if ``processor`` was given, processed)
-            file.
-        """
-        return fetch_url(
-            url,
-            self.cache_dir,
-            known_hash=known_hash,
-            fname=fname,
-            processor=processor,
-            progressbar=progressbar,
-        )
-
-
 class UCSCGenomeDownloader(AssemblyRegistration):
     """Download reference-genome FASTA files from the UCSC golden path.
 
@@ -452,9 +313,10 @@ class UCSCGenomeDownloader(AssemblyRegistration):
     An :class:`~genome.io.registration.AssemblyRegistration` whose FASTA arrives over
     the network: the base owns the assembly's directory and the steps that finish a
     registration in it, and everything added here is about *where the bytes come from*
-    — the URL, the name check, the pinned digest. :class:`Downloader` is a sibling and
-    not a base: it binds :func:`fetch_url` to a cache directory of its own, which is
-    exactly the decision an assembly's directory already made.
+    — the URL, the name check, the pinned digest. The fetch itself is
+    :func:`~genome.io.fetch.fetch_url`, given this assembly's working area: where a
+    download lands is a decision the assembly's directory already made, so nothing here
+    binds it to a cache of its own.
 
     The assembly's metadata row is consulted first: when it pins a source URL that URL
     is fetched instead of the derived golden-path one, and when it pins a sha256 the
@@ -667,8 +529,8 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         ----------
         known_hash : str, optional
             Expected hash of the **downloaded ``.fa.gz``** (checked by pooch, before
-            decompression); see :meth:`Downloader.fetch`. Unrelated to the metadata
-            row's ``sha256``, which covers the unpacked FASTA — see
+            decompression); see :func:`~genome.io.fetch.fetch_url`. Unrelated to the
+            metadata row's ``sha256``, which covers the unpacked FASTA — see
             :meth:`verify_fasta`.
         decompress : bool, default True
             If ``True``, gunzip the download to ``<assembly>.fa`` and return
@@ -697,7 +559,7 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         )
         # The archive is named after the assembly, not after the URL: a pinned source
         # need not be UCSC, so its file name says nothing about which assembly this is.
-        return fetch_url(
+        return fetch.fetch_url(
             source.url,
             self._work_dir,
             known_hash=known_hash,
@@ -756,7 +618,8 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         ----------
         known_hash : str, optional
             Expected hash of the **downloaded ``.fa.gz``** (before decompression);
-            see :meth:`Downloader.fetch`. When ``None``, pooch verifies nothing — which
+            see :func:`~genome.io.fetch.fetch_url`. When ``None``, pooch verifies nothing —
+            which
             is independent of the metadata row's ``sha256`` over the unpacked FASTA,
             always checked here.
         progressbar : bool, default True
@@ -850,7 +713,7 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         URL — handy when the UCSC golden path is unreachable (firewall/proxy) or
         for a custom reference. ``source`` is either a **local filesystem path**
         (copied into the working area) or a **URL** (fetched with
-        :func:`fetch_url`, so http(s), ftp and sftp all work). Gzipped sources
+        :func:`~genome.io.fetch.fetch_url`, so http(s), ftp and sftp all work). Gzipped sources
         (``.gz``) are decompressed. The resulting ``<assembly>.fa`` is then
         indexed/2bit/chrom.sizes-prepared exactly as :meth:`fetch_genome` does, and a
         completion record is written last, recording the source it was given and the
@@ -920,7 +783,7 @@ class UCSCGenomeDownloader(AssemblyRegistration):
     ) -> Path:
         """Place ``source`` at ``<assembly>.fa`` in :attr:`cache_dir` and return that path.
 
-        Copies a local file or fetches a URL through :func:`fetch_url` into the working
+        Copies a local file or fetches a URL through :func:`~genome.io.fetch.fetch_url` into the working
         area, decompresses a ``.gz`` source there, then moves the FASTA into place. A
         fresh existing ``<assembly>.fa`` is reused unless ``overwrite``, which also
         discards any kept download so the source is read again rather than reused.
@@ -939,7 +802,7 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         if _looks_like_url(src):
             if overwrite:
                 downloaded.unlink(missing_ok=True)
-            fetch_url(src, work, fname=name, progressbar=progressbar)
+            fetch.fetch_url(src, work, fname=name, progressbar=progressbar)
         else:
             local_source = Path(src).expanduser()
             if not local_source.is_file():

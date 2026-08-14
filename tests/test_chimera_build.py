@@ -20,7 +20,7 @@ import pytest
 from genome import Genome
 from genome.chimera import ChimeraNamingError, split_suffixed
 from genome.io import chimera as chimera_mod
-from genome.io import download as download_mod
+from genome.io import fetch as fetch_mod
 from genome.io.chimera import ChimeraBuilder, _extend_header, read_chimera_details
 from genome.io.completion import (
     CompletionRecord,
@@ -481,7 +481,7 @@ def test_building_a_chimera_fetches_nothing(
     def refuse(*args: object, **kwargs: object) -> None:
         raise AssertionError("a chimera build fetches nothing")
 
-    monkeypatch.setattr(download_mod, "fetch_url", refuse)
+    monkeypatch.setattr(fetch_mod, "fetch_url", refuse)
 
     assert build_chimera(*CHIMERA_EVERYDAY).components == list(CHIMERA_EVERYDAY)
 

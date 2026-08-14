@@ -224,6 +224,16 @@ preparation is no longer indistinguishable from a finished one.
   line from them, so the same key held two contracts. Flags are now rendered from the caller's
   keywords alone. Records already on disk are not migrated. `Genome.build_star_index`,
   `build_chromap_index` and `get_index` also take `tool=` now, forwarding it to the aligner.
+- **A chimera's completion-record shape is `genome.io.components`, and the one fetch step is
+  `genome.io.fetch`** — split out of `genome.io.source` and `genome.io.download`, which closes the
+  `download → chimera → gtf → download` import cycle. `ChimeraDetails` and friends are no longer
+  importable from `genome.io.chimera` or `genome.io.source`, and `download.fetch_url` is now
+  `fetch.fetch_url` — the patch target for taking a test offline is `genome.io.fetch.fetch_url`.
+- **`ChimeraDetails.from_details` takes the assembly name and refuses a broken record.** It returned
+  `None` both for *not a chimera* and for *this record is malformed*, so a half-written chimera
+  record read back as an ordinary assembly nothing ever checked against its components. Malformed
+  now raises `RegistrationError` naming `genome register <assembly> --force` (ADR-0007); *not a
+  chimera* is still `None`.
 
 ### Removed
 
@@ -257,6 +267,9 @@ preparation is no longer indistinguishable from a finished one.
 - **`genome.io.utils._run` and `_run_to`**, a name-addressed layer that restated
   `ExternalTool.run`/`run_to` and kept a second copy of the freshness branch. Each FASTA
   preparation step now holds its own tool and calls `run_to` on it.
+- **`Downloader`**, the pooch-cache wrapper no caller in the package used.
+  `UCSCGenomeDownloader` deliberately did not subclass it, so nothing moves anywhere: reach
+  `genome.io.fetch.fetch_url` with a directory of your own instead.
 
 ### Fixed
 

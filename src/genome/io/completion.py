@@ -54,8 +54,11 @@ WORK_DIR_NAME = ".work"
 class RegistrationError(RuntimeError):
     """A directory holds a build that cannot be trusted as finished.
 
-    The base of the two broken states a caller must distinguish. Both name the command
-    that repairs them, because a caller who cannot act on the message is left guessing.
+    Raised on its own for a record that contradicts itself — one claiming a shape only
+    this package writes, in a form it never would have — and subclassed for the two
+    states a caller can tell apart by looking at the directory. Every one of them names
+    the command that repairs it, because a caller who cannot act on the message is left
+    guessing.
     """
 
 

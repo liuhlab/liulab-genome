@@ -20,7 +20,7 @@ import pytest
 
 from genome import Genome
 from genome.chimera import split_suffixed
-from genome.io import download as download_mod
+from genome.io import fetch as fetch_mod
 from genome.io import gtf as gtf_mod
 from genome.io.chimera import AmbiguousDefaultAnnotationError, read_chimera_details
 from genome.io.completion import read_record
@@ -461,6 +461,6 @@ def test_building_a_chimera_with_annotations_fetches_nothing(
     def refuse(*args: object, **kwargs: object) -> None:
         raise AssertionError("a chimera build fetches nothing, annotation included")
 
-    monkeypatch.setattr(download_mod, "fetch_url", refuse)
+    monkeypatch.setattr(fetch_mod, "fetch_url", refuse)
 
     assert build_chimera(*CHIMERA_EVERYDAY).annotations == [_EVERYDAY_MERGED]
