@@ -33,10 +33,27 @@ preparation is no longer indistinguishable from a finished one.
   `--no-check-chromosomes`, overrides it, and the record says which annotations were checked.
 - **`Genome.offered_annotations`**, the table's rows for this assembly, answering a different
   question from `Genome.annotations`, which stays "registered on this machine".
+- **`Genome.broken_annotations`**, the complement of `Genome.annotations`: between the two, every
+  directory under `gtf/` is accounted for as registered, broken, or not begun. A half-built
+  annotation is now reported where a reader would look for it — `genome annotations` marks it
+  broken, says what is wrong with it, and prints the command that repairs it — rather than only
+  when re-registering it. It still never stops a genome opening or hides the annotations beside it.
+  `registered` and `broken` are never both true, so `registered` keeps its meaning; the `--json`
+  rows gain `broken`, `problem` and `repair`.
 - **CLI commands**, each emitting `--json` and exiting non-zero on failure: `genome register`,
-  `genome register-annotation`, `genome verify`, `genome table-row` and `genome annotations` —
-  the last listing what the lab offers against what is registered locally, without preparing
-  anything.
+  `genome register-annotation`, `genome register-gtf`, `genome verify`, `genome table-row` and
+  `genome annotations` — the last listing what the lab offers against what is registered locally,
+  without preparing anything.
+- **`genome register-gtf <assembly> <gtf> <name>`**, the shell route for a GTF no table row lists —
+  a collaborator's, a preprint's, one built in-house. It names the assembly rather than a directory,
+  which is what lets it find that assembly's `chrom.sizes` and hold an unlisted GTF to the same
+  chromosome-name check a listed one gets. Nothing is downloaded and no checksum is compared
+  against, since an unlisted GTF has none pinned for it; the record carries the path it came from
+  and the digest of what was placed.
+- **`--infer-genes` and `--infer-transcripts`**, on both registration commands. Off by default,
+  because GENCODE, Ensembl and RefSeq GTFs declare those features already and inferring them is the
+  slow path. They are for a bare exon-level GTF, which otherwise registers as a database of exons
+  and nothing else without saying so.
 - **Test fixtures under `tests/data/`** — real subsampled `sacCer3` bytes, replacing inline fixtures
   for the work that needs real FASTA and GTF content.
 
