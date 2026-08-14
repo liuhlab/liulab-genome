@@ -38,7 +38,7 @@ from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import AnnotationRegistry, BrokenAnnotation, GtfAnnotation
 from genome.io.registration import AssemblyDir
 from genome.io.twobit import TwoBit
-from genome.metadata import AnnotationMetadata, AssemblyMetadata, lookup_assembly
+from genome.metadata import AnnotationMetadata, AssemblyMetadata, assembly_metadata
 from genome.region import Region, parse_region
 from genome.seq import DNA
 
@@ -87,7 +87,7 @@ class Genome(AlignerMixin):
         A complete metadata record, used *instead of* the curated table's row for
         ``assembly``. All-or-nothing: pass a record and every identifier comes
         from it; omit it and every identifier comes from the table — or is
-        ``None`` when the table does not list ``assembly``, which is legal, since
+        unknown when the table does not list ``assembly``, which is legal, since
         the table is a cross-reference rather than an allow-list.
     default_gtf : str, optional
         Name of the annotation to serve as :attr:`default_gtf`, overruling the one the
@@ -100,14 +100,14 @@ class Genome(AlignerMixin):
         The assembly name.
     files : genome.io.fasta.GenomeFiles
         Paths to the prepared FASTA and its derived index/companion files.
-    metadata : genome.metadata.AssemblyMetadata or None
-        The assembly's metadata record — the one passed in, else the curated
-        table's row, else ``None`` for an assembly the table does not list. It is
-        also what says where this assembly's FASTA is fetched from and which
-        checksum it must match. Its fields are read directly off the genome too, as
-        :attr:`assembly_name`, :attr:`species`, :attr:`ucsc_name`,
-        :attr:`ncbi_name`, :attr:`ncbi_assembly_id`, :attr:`ncbi_taxid`,
-        :attr:`source_url` and :attr:`sha256`.
+    metadata : genome.metadata.AssemblyMetadata
+        The assembly's metadata record, and always a record: the one passed in,
+        else the curated table's row, else — for an assembly the table does not
+        list — one carrying the name with every identifier unknown. Read a field
+        off it (``genome.metadata.species``) without asking whether it is there.
+        It is also what says where this assembly's FASTA is fetched from and which
+        checksum it must match. Whether the table lists this assembly at all is a
+        different question, and :func:`~genome.metadata.lookup_assembly`'s.
 
     Raises
     ------
@@ -141,10 +141,14 @@ class Genome(AlignerMixin):
         default_gtf: str | None = None,
     ) -> None:
         self.assembly = assembly
-        self.metadata: AssemblyMetadata | None = (
-            metadata if metadata is not None else lookup_assembly(assembly)
+        # Total: an assembly the table does not list has a record whose fields are
+        # unknown, never no record. The downloader is handed the override alone, because
+        # it asks the other question — whether the table lists this name — and an unknown
+        # record standing in there would answer it wrongly for every name (ADR-0003).
+        self.metadata: AssemblyMetadata = (
+            metadata if metadata is not None else assembly_metadata(assembly)
         )
-        self._downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=self.metadata)
+        self._downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=metadata)
         self._dir: AssemblyDir = self._downloader.dir
         self.files: GenomeFiles = (
             self._downloader.fetch_genome_from(path_or_url, progressbar=progressbar)
@@ -252,57 +256,6 @@ class Genome(AlignerMixin):
         builder = ChimeraBuilder(components, cache_dir)
         builder.build_genome(overwrite=force)
         return cls(builder.assembly, cache_dir=builder.cache_dir, progressbar=False)
-
-    @property
-    def assembly_name(self) -> str | None:
-        """Canonical name of the assembly, or ``None`` when its metadata is unknown."""
-        return self.metadata.assembly_name if self.metadata else None
-
-    @property
-    def species(self) -> str | None:
-        """Species this assembly is a reference for, or ``None`` when unknown."""
-        return self.metadata.species if self.metadata else None
-
-    @property
-    def ucsc_name(self) -> str | None:
-        """UCSC's name for the assembly, or ``None`` when it has none.
-
-        ``None`` covers both an assembly the metadata table does not list and one it
-        lists that UCSC has never carried — the assembly id is a local key and UCSC is
-        only the default source, so a reference can be fully supported here and have no
-        name in that namespace at all (ADR-0003).
-        """
-        return self.metadata.ucsc_name if self.metadata else None
-
-    @property
-    def ncbi_name(self) -> str | None:
-        """NCBI's name for the assembly (e.g. ``"GRCh38"``), or ``None`` when unknown."""
-        return self.metadata.ncbi_name if self.metadata else None
-
-    @property
-    def ncbi_assembly_id(self) -> str | None:
-        """NCBI assembly accession (e.g. ``"GCF_000001405.40"``), or ``None`` when unknown."""
-        return self.metadata.ncbi_assembly_id if self.metadata else None
-
-    @property
-    def ncbi_taxid(self) -> int | None:
-        """NCBI taxonomy id of the species, or ``None`` when unknown."""
-        return self.metadata.ncbi_taxid if self.metadata else None
-
-    @property
-    def source_url(self) -> str | None:
-        """URL this assembly's FASTA is pinned to, or ``None`` when nothing is pinned."""
-        return self.metadata.source_url if self.metadata else None
-
-    @property
-    def sha256(self) -> str | None:
-        """Pinned sha256 of the *unpacked* FASTA, or ``None`` when nothing is pinned.
-
-        The value the metadata records and the download is checked against — not a
-        digest of the files on disk, which :meth:`verify_fasta
-        <genome.io.download.UCSCGenomeDownloader.verify_fasta>` computes.
-        """
-        return self.metadata.sha256 if self.metadata else None
 
     @property
     def default_gtf(self) -> str | None:

@@ -5,9 +5,14 @@ records, for each known reference assembly, its canonical name and the cross-ref
 used to talk about it across databases: species, UCSC name, NCBI name, NCBI assembly
 accession, and NCBI taxonomy id. A row may additionally pin where that assembly's FASTA
 is fetched from and the sha256 of the **unpacked** FASTA it yields, which is what makes
-preparing the assembly reproducible. :func:`lookup_assembly` resolves an assembly name
-(the identifier :class:`~genome.genome.Genome` is built from) to its
-:class:`AssemblyMetadata` record, or ``None`` when the assembly is not in the table.
+preparing the assembly reproducible.
+
+Two accessors, because there are two questions. :func:`assembly_metadata` answers *what
+is known about this assembly* and always answers with a record: the table's row, or one
+carrying the name with every identifier unknown, so nothing downstream guards a missing
+record before reading a field. :func:`lookup_assembly` answers *does the curated table
+list this name*, and only that question needs ``None`` — it is what tells a chimera's
+derived name from a free-form local key on a machine holding neither (ADR-0003).
 
 ``data/annotation_metadata.tsv`` is the same idea one level down: keyed by assembly plus
 the name an annotation is registered under, it says who publishes that annotation, which
@@ -99,6 +104,49 @@ class AssemblyMetadata:
     ncbi_taxid: int | None
     source_url: str | None = None
     sha256: str | None = None
+
+    @classmethod
+    def unknown(cls, assembly_name: str) -> AssemblyMetadata:
+        """Return the record for an assembly the table does not list: the name, and nothing else.
+
+        What *unlisted* looks like as a record rather than as a missing one. Every
+        identifier is genuinely unknown, which a blank cell already means everywhere
+        else, so a caller reads a field and gets ``None`` instead of first asking
+        whether there is a record to read it off. It is exactly the line
+        :func:`format_table_row` emits for an assembly nobody has curated yet.
+
+        The name is the local key the caller asked for, since that is the only
+        identifier an unlisted assembly has — the assembly id is a local key and the
+        table is a cross-reference rather than an allow-list (ADR-0003). This answers
+        *what is known about this assembly*; whether the table lists it at all is
+        :func:`lookup_assembly`'s question and stays a separate one.
+
+        Parameters
+        ----------
+        assembly_name : str
+            The assembly the record is for.
+
+        Returns
+        -------
+        AssemblyMetadata
+            A record carrying ``assembly_name`` with every other field ``None``.
+
+        Examples
+        --------
+        >>> record = AssemblyMetadata.unknown("my_ref")
+        >>> record.assembly_name
+        'my_ref'
+        >>> record.species is None and record.sha256 is None
+        True
+        """
+        return cls(
+            assembly_name=assembly_name,
+            species=None,
+            ucsc_name=None,
+            ncbi_name=None,
+            ncbi_assembly_id=None,
+            ncbi_taxid=None,
+        )
 
 
 #: Each metadata field's declared type, which parses that field's column of the table.
@@ -295,6 +343,45 @@ def lookup_assembly(assembly: str) -> AssemblyMetadata | None:
     return AssemblyMetadata(
         **{name: _parse_cell(name, row, _FIELD_TYPES) for name in METADATA_FIELDS}
     )
+
+
+def assembly_metadata(assembly: str) -> AssemblyMetadata:
+    """Return what is known about ``assembly`` — the table's row, or an unknown record.
+
+    The **total** accessor, and the one to reach for when the question is *what are this
+    assembly's identifiers*: there is always a record, so a caller reads a field rather
+    than a record and then a field. An assembly the table does not list has every
+    identifier ``None`` and its own name, which is what an unlisted assembly knows about
+    itself.
+
+    Deliberately not the same function as :func:`lookup_assembly`, which answers the
+    other question — *does the curated table list this name?* — and keeps its ``None``
+    for it. That answer is what separates a chimera's derived name from a free-form local
+    key on a machine holding neither (ADR-0003, ADR-0008), so it cannot be made total
+    without reading every name as listed.
+
+    Parameters
+    ----------
+    assembly : str
+        The name to look up, matched as :func:`lookup_assembly` matches it.
+
+    Returns
+    -------
+    AssemblyMetadata
+        The table's row for ``assembly``, else
+        :meth:`AssemblyMetadata.unknown(assembly) <AssemblyMetadata.unknown>`.
+
+    Examples
+    --------
+    >>> assembly_metadata("hg38").ncbi_name
+    'GRCh38'
+    >>> assembly_metadata("no_such_assembly").ncbi_name is None
+    True
+    >>> assembly_metadata("no_such_assembly").assembly_name
+    'no_such_assembly'
+    """
+    listed = lookup_assembly(assembly)
+    return listed if listed is not None else AssemblyMetadata.unknown(assembly)
 
 
 def lookup_annotation(assembly: str, name: str) -> AnnotationMetadata | None:
