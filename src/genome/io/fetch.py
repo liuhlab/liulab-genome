@@ -28,7 +28,7 @@ import pooch
 
 # A pooch post-processor: called with (fname, action, pooch_instance) and
 # returns the path (or paths) to use as the result of the download.
-_Processor = Callable[..., object]
+Processor = Callable[..., object]
 
 
 def fetch_url(
@@ -37,7 +37,7 @@ def fetch_url(
     *,
     known_hash: str | None = None,
     fname: str | None = None,
-    processor: _Processor | None = None,
+    processor: Processor | None = None,
     progressbar: bool = True,
 ) -> Path:
     """Download ``url`` into ``dest_dir`` and return the local path.

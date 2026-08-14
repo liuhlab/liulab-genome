@@ -66,7 +66,7 @@ from genome.io import fetch
 from genome.io.completion import RECORD_NAME, RegistrationError, read_record
 from genome.io.components import components_status
 from genome.io.fasta import GenomeFiles, prepare_fasta
-from genome.io.fetch import _Processor
+from genome.io.fetch import Processor
 
 # Re-exported, not used here: the **Assembly dir** layout moved to `registration`
 # because the shared registration steps are written in terms of it, and these are the
@@ -388,7 +388,7 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         source = self._fetched_source()
         if source.derived:
             self.validate_assembly()
-        processor: _Processor | None = (
+        processor: Processor | None = (
             pooch.Decompress(method="gzip", name=f"{self.assembly}.fa") if decompress else None
         )
         # The archive is named after the assembly, not after the URL: a pinned source

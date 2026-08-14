@@ -13,6 +13,11 @@ This is a measurement, not a decision. The decisions it fed are
 [#48](https://github.com/liuhlab/liulab-genome/issues/48), which decided what a chimera changes
 about an index build. Line numbers are against `main` at 0f644e1.
 
+Two names below have since moved, and the measurement is left as it was taken rather than rewritten:
+`_kwargs_to_flags` is now the one renderer `Aligner._flags`, and `Genome.register_gtf` is now
+`genome.annotations.register_path`. What was measured about STAR and chromap is unaffected — the
+numbers came from the tools, not from this package.
+
 ## TL;DR
 
 - **STAR: `genomeSAindexNbases` is computed, `genomeChrBinNbits` is not passed at all.** The repo's

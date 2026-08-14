@@ -31,12 +31,12 @@ substitute for *module*.
   which reference this is, where its files live, and how a locus becomes bases
 - [Annotation](./docs/context/annotation.md) — covers `io/gtf.py` and the GTF registry on `Genome`:
   what a GTF declares over one assembly, and the name it is addressed by
-
-`io/results.py` sits in both: what a registration answers with, for an assembly and for an
-annotation alike. It is the return types the API hands back and the CLI renders, so it carries the
-vocabulary of whichever context asked.
 - [Index](./docs/context/index.md) — covers `aligner/*`: what one external mapper needs built before
   it can map, and how a finished build is told from an abandoned one
+
+`io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
+It is the return types the API hands back and the CLI renders, so it carries the vocabulary of
+whichever context asked.
 
 `cli.py` is covered by no context — the map covers what carries domain vocabulary, not the whole tree.
 
