@@ -131,6 +131,17 @@ preparation is no longer indistinguishable from a finished one.
   not built* marker naming the record, so the vocabulary can run ahead of the implementation without
   reading as an API that exists. No term carries one now: `Chimera`, `Component` and `Merged
   annotation` are all built.
+- **An assembly's annotations are one registry, bound once to that assembly.** Whether an annotation
+  is registered, broken, offered but not begun, or nothing at all used to be assembled from the same
+  three scans in three separate places — as a `Genome` opened, as `genome annotations` reported, and
+  as the error a name nobody registered earned. It is now settled once, and a `Genome` holds one and
+  delegates to it instead of keeping three dictionaries in step by hand. The registry carries the
+  assembly directory it was opened with, so it cannot file an annotation somewhere other than where
+  the caller looking for it is looking.
+- **`Genome.register_gtf` over a directory nothing vouches for now names a command a shell can run**
+  — `genome register-gtf <assembly> <gtf> <name> --force` — rather than the equivalent Python call.
+  A genome knows which assembly it is; only the by-directory `register_gtf`, which does not, still
+  names the call.
 
 ### Removed
 

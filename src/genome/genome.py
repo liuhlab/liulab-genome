@@ -35,24 +35,10 @@ from genome.chimera import ChimeraNamingError, split_suffixed
 from genome.io.chimera import ChimeraBuilder, ChimeraDetails, read_chimera_details
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
-from genome.io.gtf import (
-    AnnotationNotRegisteredError,
-    BrokenAnnotation,
-    GtfAnnotation,
-    default_annotation,
-    fetch_annotation,
-    list_annotations,
-    list_broken_annotations,
-    register_gtf,
-)
+from genome.io.gtf import AnnotationRegistry, BrokenAnnotation, GtfAnnotation
 from genome.io.registration import AssemblyDir
 from genome.io.twobit import TwoBit
-from genome.metadata import (
-    AnnotationMetadata,
-    AssemblyMetadata,
-    list_annotation_metadata,
-    lookup_assembly,
-)
+from genome.metadata import AnnotationMetadata, AssemblyMetadata, lookup_assembly
 from genome.region import Region, parse_region
 from genome.seq import DNA
 
@@ -112,12 +98,6 @@ class Genome(AlignerMixin):
     ----------
     assembly : str
         The assembly name.
-    default_gtf : str or None
-        Name of this genome's **Default annotation**: the ``default_gtf`` argument if
-        one was given, else the annotation the table flags for this assembly, else the
-        sole registered annotation, else ``None``. It names an annotation that may not
-        be registered here, which on a fresh machine is the normal state and not an
-        error.
     files : genome.io.fasta.GenomeFiles
         Paths to the prepared FASTA and its derived index/companion files.
     metadata : genome.metadata.AssemblyMetadata or None
@@ -178,7 +158,14 @@ class Genome(AlignerMixin):
         # it. One small JSON read at open, and both accessors are then answered from
         # memory.
         self._chimera: ChimeraDetails | None = read_chimera_details(self._dir.path)
-        self._set_default_gtf(default_gtf)
+        # Reads the annotation table and lists the `gtf/` subtree both ways; acts on
+        # none of it. Opening a genome must never start a registration — for a human
+        # annotation that is a gigabyte download and a database build running many
+        # minutes — and an annotation it cannot vouch for is recorded to report rather
+        # than raised over, so one broken annotation never costs the genome.
+        self._registry: AnnotationRegistry = AnnotationRegistry(
+            self._dir, chrom_sizes=self.files.chrom_sizes, default=default_gtf
+        )
 
     @classmethod
     def chimera(
@@ -317,24 +304,16 @@ class Genome(AlignerMixin):
         """
         return self.metadata.sha256 if self.metadata else None
 
-    def _set_default_gtf(self, default_gtf: str | None) -> None:
-        """Read the annotation lists and settle which one is the default.
+    @property
+    def default_gtf(self) -> str | None:
+        """Name of this genome's **Default annotation**, or ``None`` when there is none.
 
-        All three are read, none is acted on: the table is looked up and the ``gtf/``
-        subtree is listed both ways, and nothing is fetched, built or created. Opening a
-        genome must never start a registration — for a human annotation that is a
-        gigabyte download and a database build running many minutes — and an annotation
-        it cannot vouch for is recorded to report rather than raised over, so one broken
-        annotation never costs the genome.
+        The ``default_gtf`` argument if one was given, else the annotation the table flags
+        for this assembly, else the sole registered annotation, else ``None``. It names an
+        annotation that may not be registered here, which on a fresh machine is the normal
+        state and not an error — :attr:`default_gtf_path` is where it has to exist.
         """
-        self._annotations: dict[str, GtfAnnotation] = list_annotations(self._dir.path)
-        self._broken: dict[str, BrokenAnnotation] = list_broken_annotations(
-            self._dir.path, self.assembly
-        )
-        self._offered: list[AnnotationMetadata] = list_annotation_metadata(self.assembly)
-        self.default_gtf: str | None = default_annotation(
-            self._offered, self._annotations, explicit=default_gtf
-        )
+        return self._registry.default
 
     @property
     def annotations(self) -> list[str]:
@@ -344,7 +323,7 @@ class Genome(AlignerMixin):
         supports, and :attr:`broken_annotations`, which is what is here and cannot be
         trusted.
         """
-        return list(self._annotations)
+        return self._registry.registered
 
     @property
     def broken_annotations(self) -> list[BrokenAnnotation]:
@@ -365,7 +344,7 @@ class Genome(AlignerMixin):
         >>> [broken.name for broken in sacCer3.broken_annotations]   # doctest: +SKIP
         ['ensgene_v101']
         """
-        return list(self._broken.values())
+        return self._registry.broken
 
     @property
     def offered_annotations(self) -> list[AnnotationMetadata]:
@@ -387,7 +366,7 @@ class Genome(AlignerMixin):
         >>> [record.name for record in sacCer3.offered_annotations]  # doctest: +SKIP
         ['ensgene_v101']
         """
-        return list(self._offered)
+        return self._registry.offered
 
     def register_annotation(
         self,
@@ -456,18 +435,14 @@ class Genome(AlignerMixin):
         >>> sacCer3.register_annotation("ensgene_v101")        # doctest: +SKIP
         GtfAnnotation(name='ensgene_v101', ...)
         """
-        return self._adopt(
-            fetch_annotation(
-                self._dir.path,
-                self.assembly,
-                name,
-                force=force,
-                progressbar=progressbar,
-                metadata=metadata,
-                check_chromosomes=check_chromosomes,
-                disable_infer_genes=disable_infer_genes,
-                disable_infer_transcripts=disable_infer_transcripts,
-            )
+        return self._registry.register(
+            name,
+            force=force,
+            progressbar=progressbar,
+            metadata=metadata,
+            check_chromosomes=check_chromosomes,
+            disable_infer_genes=disable_infer_genes,
+            disable_infer_transcripts=disable_infer_transcripts,
         )
 
     def register_gtf(
@@ -490,36 +465,16 @@ class Genome(AlignerMixin):
         record that says so is written last. If no default GTF is set and this becomes
         the only annotation, it is adopted as :attr:`default_gtf`. ``check_chromosomes``
         is as it is on :meth:`register_annotation`; see
-        :func:`~genome.io.gtf.register_gtf` for the rest.
+        :meth:`~genome.io.gtf.AnnotationRegistry.register_path` for the rest.
         """
-        return self._adopt(
-            register_gtf(
-                self._dir.path,
-                gtf,
-                name,
-                force=force,
-                chrom_sizes=self.chrom_sizes_path,
-                check_chromosomes=check_chromosomes,
-                disable_infer_genes=disable_infer_genes,
-                disable_infer_transcripts=disable_infer_transcripts,
-            )
+        return self._registry.register_path(
+            gtf,
+            name,
+            force=force,
+            check_chromosomes=check_chromosomes,
+            disable_infer_genes=disable_infer_genes,
+            disable_infer_transcripts=disable_infer_transcripts,
         )
-
-    def _adopt(self, annotation: GtfAnnotation) -> GtfAnnotation:
-        """Add a freshly registered annotation to the registry, adopting it if it is alone.
-
-        The sole-registered clause of the default rule, applied the moment it becomes
-        true. A default already decided — the caller's choice, or the table's flag —
-        is never displaced by one being registered.
-
-        Registering over a broken directory is what repairs it, so the name stops being
-        reported as broken here rather than only on the next open.
-        """
-        self._annotations[annotation.name] = annotation
-        self._broken.pop(annotation.name, None)
-        if self.default_gtf is None and len(self._annotations) == 1:
-            self.default_gtf = annotation.name
-        return annotation
 
     def get_gtf_path(self, name: str) -> Path:
         """Return the GTF file path of the annotation registered as ``name``.
@@ -550,15 +505,7 @@ class Genome(AlignerMixin):
         >>> sacCer3.get_gtf_path("ensgene_v101")            # doctest: +SKIP
         PosixPath('/data/genome/sacCer3/gtf/ensgene_v101/ensgene_v101.gtf')
         """
-        if name not in self._annotations:
-            raise AnnotationNotRegisteredError(
-                self.assembly,
-                name,
-                self._annotations,
-                [record.name for record in self._offered],
-                broken=self._broken.get(name),
-            )
-        return self._annotations[name].gtf
+        return self._registry.path(name)
 
     @property
     def default_gtf_path(self) -> Path | None:
@@ -583,9 +530,8 @@ class Genome(AlignerMixin):
         >>> sacCer3.default_gtf_path                        # doctest: +SKIP
         PosixPath('/data/genome/sacCer3/gtf/ensgene_v101/ensgene_v101.gtf')
         """
-        if self.default_gtf is None:
-            return None
-        return self.get_gtf_path(self.default_gtf)
+        default = self._registry.default
+        return None if default is None else self._registry.path(default)
 
     def __repr__(self) -> str:
         """Return e.g. ``Genome('sacCer3', 17 sequences)``."""

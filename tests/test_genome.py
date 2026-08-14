@@ -18,7 +18,12 @@ import pytest
 
 import genome.genome as genome_mod
 from genome import DNA, Genome, Region
-from genome.io.completion import RegistrationMismatchError, read_record, record_path
+from genome.io.completion import (
+    RegistrationMismatchError,
+    UnfinishedRegistrationError,
+    read_record,
+    record_path,
+)
 from genome.io.download import register_assembly
 from genome.io.fasta import prepare_fasta
 from genome.io.gtf import AnnotationNotRegisteredError, annotation_dir, register_gtf
@@ -472,6 +477,25 @@ class TestOfferedAgainstRegistered:
             assert g.broken_annotations == []
             assert g.annotations == ["mine"]
             assert g.get_gtf_path("mine").is_file()
+
+    def test_registering_a_gtf_over_a_broken_directory_names_a_command_not_a_call(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        # A genome knows which assembly it is, so the repair it names is a command a
+        # shell can run — the by-directory form, which knows no assembly name, is the
+        # only one that has to fall back on naming the Python call.
+        directory = annotation_dir(yeast_dir, "mine")
+        directory.mkdir(parents=True)
+        (directory / "mine.db").write_bytes(b"half a database")
+        source = data_dir / "tiny.gtf"
+
+        with (
+            Genome("tiny", cache_dir=yeast_dir) as g,
+            pytest.raises(UnfinishedRegistrationError) as excinfo,
+        ):
+            g.register_gtf(source, "mine")
+
+        assert f"genome register-gtf tiny {source} mine --force" in str(excinfo.value)
 
     def test_a_name_nothing_knows_says_what_is_registered_and_what_is_offered(
         self, prepared_dir: Path
