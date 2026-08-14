@@ -6,10 +6,14 @@ fixture stands in for them and nothing here touches the network.
 
 from __future__ import annotations
 
+import io
+import string
 from dataclasses import asdict
 
 import pandas as pd
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from genome import metadata
 from genome.metadata import (
@@ -23,8 +27,9 @@ from genome.metadata import (
     lookup_assembly,
 )
 
-#: Columns of the assembly table that may be blank — the pinned source and digest fill
+#: Columns a shipped row is allowed to leave blank — the pinned source and digest fill
 #: in over time, and a reference UCSC has never carried has no name in that namespace.
+#: Every identifier column may be blank too; a curated row is expected to fill them.
 _OPTIONAL_FIELDS = ("ucsc_name", "source_url", "sha256")
 
 #: Every assembly the shipped table officially supports.
@@ -165,6 +170,89 @@ def test_format_table_row_renders_the_columns_in_table_order() -> None:
 def test_format_table_row_leaves_unknown_values_blank() -> None:
     row = format_table_row({"assembly_name": "newAsm", "sha256": "abc123"})
     assert row.split("\t") == ["newAsm", "", "", "", "", "", "", "abc123"]
+
+
+# --- a rendered row reads back as itself -------------------------------------
+
+
+#: Spellings the table's reader takes for a blank cell whatever a row meant by them, so
+#: a cell holding one is blank by the reader's own rules rather than a counterexample.
+_BLANK_SPELLINGS = frozenset(
+    {"NA", "N/A", "n/a", "NULL", "null", "None", "NaN", "nan", "-NaN", "-nan"}
+)
+
+#: A filled cell: an identifier, a URL or a digest. Never empty, since an empty cell is
+#: how the table spells unknown, and never carrying a tab, which would split the row.
+_CELLS = st.text(alphabet=string.ascii_letters + string.digits + "._-:/", min_size=1).filter(
+    lambda cell: cell not in _BLANK_SPELLINGS
+)
+
+#: A row with an arbitrary subset of the columns a row may leave blank left blank.
+_RECORDS = st.builds(
+    AssemblyMetadata,
+    assembly_name=_CELLS,
+    species=st.none() | _CELLS,
+    ucsc_name=st.none() | _CELLS,
+    ncbi_name=st.none() | _CELLS,
+    ncbi_assembly_id=st.none() | _CELLS,
+    ncbi_taxid=st.none() | st.integers(min_value=1),
+    source_url=st.none() | _CELLS,
+    sha256=st.none() | _CELLS,
+)
+
+
+def _pasted(line: str) -> pd.DataFrame:
+    """Read a rendered line back the way the shipped table is read.
+
+    Pasting the line into ``data/assembly_metadata.tsv`` is what the register-then-paste
+    flow does, and reading it as text is what makes a blank cell arrive as the NaN pandas
+    reads it as rather than as ``""`` — which is the whole of the bug.
+    """
+    text = "\t".join(METADATA_FIELDS) + "\n" + line + "\n"
+    return pd.read_csv(io.StringIO(text), sep="\t", dtype=str)
+
+
+def _parsed(table: pd.DataFrame) -> AssemblyMetadata:
+    """Build a record from the first row of ``table``, column by declared column."""
+    row = table.iloc[0]
+    return AssemblyMetadata(
+        **{name: metadata._parse_cell(name, row, metadata._FIELD_TYPES) for name in METADATA_FIELDS}
+    )
+
+
+@given(record=_RECORDS)
+def test_a_row_survives_rendering_and_parsing_unchanged(record: AssemblyMetadata) -> None:
+    assert _parsed(_pasted(format_table_row(asdict(record)))) == record
+
+
+def test_a_row_with_every_identifier_blank_reads_back_as_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # What `genome table-row` emits for an assembly the table does not list yet: the
+    # name, the source and the digest, and blanks for everything only a person supplies.
+    # Pasted into the table, it used to give species the string "nan" and raise on taxid.
+    line = format_table_row(
+        {
+            "assembly_name": "newAsm",
+            "source_url": "https://example.invalid/newAsm.fa.gz",
+            "sha256": "0" * 64,
+        }
+    )
+    monkeypatch.setattr(metadata, "_metadata_table", lambda: _pasted(line))
+    metadata.lookup_assembly.cache_clear()
+    try:
+        record = metadata.lookup_assembly("newAsm")
+    finally:
+        # The cache is module-global; leaving the stand-in's row in it would leak.
+        metadata.lookup_assembly.cache_clear()
+
+    assert record is not None
+    assert record.species is None
+    assert record.ucsc_name is None
+    assert record.ncbi_name is None
+    assert record.ncbi_assembly_id is None
+    assert record.ncbi_taxid is None
+    assert record.sha256 == "0" * 64
 
 
 class TestAnnotationTable:

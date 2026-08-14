@@ -54,17 +54,22 @@ class AssemblyMetadata:
     is parsed through these fields, and a complete record is what
     :class:`~genome.genome.Genome` accepts in place of the table's own row.
 
+    Only ``assembly_name`` is required. Every other column may be left blank, and a
+    blank cell reads back as ``None`` rather than as text: the table fills in over
+    time, and a freshly prepared assembly pins its source and digest well before
+    anyone supplies its species, its UCSC and NCBI names or its taxonomy id.
+
     The last two fields are what makes preparing an assembly reproducible.
     ``source_url`` pins where its FASTA is fetched from, so nothing has to be derived
     or guessed; ``sha256`` pins the digest of the **unpacked** FASTA that source
     yields — not of the compressed archive it arrives in, so a copy taken from a
-    mirror or recompressed elsewhere still matches (ADR-0006). Either may be ``None``:
-    the table fills in over time, and a row with no digest is unverified rather than
-    wrong.
+    mirror or recompressed elsewhere still matches (ADR-0006). A row with no digest is
+    unverified rather than wrong.
 
-    ``ucsc_name`` may be ``None`` too, and for the same reason the assembly id is a
-    local key rather than a UCSC one (ADR-0003): the lab supports references UCSC has
-    never carried, and such a row simply has no name in that namespace to give.
+    ``ucsc_name`` is blank permanently rather than pending in some rows, for the same
+    reason the assembly id is a local key rather than a UCSC one (ADR-0003): the lab
+    supports references UCSC has never carried, and such a row simply has no name in
+    that namespace to give.
 
     Examples
     --------
@@ -78,11 +83,11 @@ class AssemblyMetadata:
     """
 
     assembly_name: str
-    species: str
+    species: str | None
     ucsc_name: str | None
-    ncbi_name: str
-    ncbi_assembly_id: str
-    ncbi_taxid: int
+    ncbi_name: str | None
+    ncbi_assembly_id: str | None
+    ncbi_taxid: int | None
     source_url: str | None = None
     sha256: str | None = None
 
