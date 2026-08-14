@@ -30,6 +30,8 @@ from genome.io.completion import (
     work_dir,
 )
 from genome.io.gtf import (
+    AnnotationNotRegisteredError,
+    AnnotationRegistry,
     ChromosomeMismatchError,
     MergeSource,
     _reject_unknown_chromosomes,
@@ -46,6 +48,7 @@ from genome.io.gtf import (
     register_gtf,
     register_merged_gtf,
 )
+from genome.io.registration import AssemblyDir
 from genome.io.utils import ChecksumMismatchError
 from genome.metadata import AnnotationMetadata
 
@@ -687,6 +690,185 @@ class TestAnnotationStatus:
         # A broken one is not a registered one, so it never becomes the sole-registered
         # default either.
         assert payload["default_annotation"] == "healthy"
+
+
+class TestAnnotationRegistry:
+    """One assembly's annotations, and the four states each of them can be in.
+
+    The registry is the one place *registered / broken / offered / not begun* is
+    assembled: everything that used to rebuild that four-way state — a genome opening,
+    the status report, the error a name nobody registered earns — asks this instead.
+    """
+
+    def _registered(self, tmp_path: Path, name: str) -> Path:
+        """Register the fixture GTF under ``name`` and return the source it came from."""
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        register_gtf(tmp_path, source, name)
+        return source
+
+    def test_the_four_states_are_settled_in_one_construction(self, tmp_path: Path) -> None:
+        self._registered(tmp_path, "ensgene_v101")
+        self._registered(tmp_path, "damaged")
+        record_path(annotation_dir(tmp_path, "damaged")).unlink()
+
+        registry = AnnotationRegistry.locate("sacCer3", tmp_path)
+
+        assert registry.registered == ["ensgene_v101"]
+        assert [entry.name for entry in registry.broken] == ["damaged"]
+        assert [record.name for record in registry.offered] == ["ensgene_v101"]
+        assert registry.default == "ensgene_v101"
+
+    def test_it_reads_the_directory_it_was_pointed_at(self, tmp_path: Path) -> None:
+        # The assembly dir travels with the registry rather than being re-derived from
+        # the data root at each question.
+        elsewhere = tmp_path / "elsewhere"
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        register_gtf(elsewhere, source, "mine")
+
+        assert AnnotationRegistry.locate("tiny", elsewhere).registered == ["mine"]
+        assert AnnotationRegistry.locate("tiny", tmp_path).registered == []
+
+    def test_the_path_of_a_registered_annotation_is_its_gtf(self, tmp_path: Path) -> None:
+        self._registered(tmp_path, "mine")
+
+        registry = AnnotationRegistry.locate("tiny", tmp_path)
+
+        assert registry.path("mine") == annotation_dir(tmp_path, "mine") / "mine.gtf"
+
+    def test_a_name_nothing_knows_says_what_is_registered_and_what_is_offered(
+        self, tmp_path: Path
+    ) -> None:
+        registry = AnnotationRegistry.locate("sacCer3", tmp_path)
+
+        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
+            registry.path("no_such_annotation")
+
+        message = str(excinfo.value)
+        assert "no_such_annotation" in message
+        assert "ensgene_v101" in message  # what the table does offer
+
+    def test_the_path_of_a_broken_one_names_its_repair_in_one_hop(self, tmp_path: Path) -> None:
+        # Not the command that would itself raise and demand --force: the one that works.
+        self._registered(tmp_path, "ensgene_v101")
+        record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
+
+        registry = AnnotationRegistry.locate("sacCer3", tmp_path)
+
+        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
+            registry.path("ensgene_v101")
+
+        assert "genome register-annotation sacCer3 ensgene_v101 --force" in str(excinfo.value)
+
+    def test_registering_by_path_adopts_it_without_reading_the_disk_again(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        registry = AnnotationRegistry.locate("tiny", tmp_path)
+        assert registry.registered == []
+
+        annotation = registry.register_path(source, "mine")
+
+        assert registry.registered == ["mine"]
+        assert registry.path("mine") == annotation.gtf
+        assert registry.default == "mine"  # nothing flagged, and it is alone
+
+    def test_registering_by_name_fetches_and_adopts(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        fake_fetch.serve("tiny.gtf.gz")
+        registry = AnnotationRegistry.locate("tiny", tmp_path)
+
+        annotation = registry.register(_NAME, progressbar=False, metadata=_row())
+
+        assert registry.registered == [_NAME]
+        assert registry.path(_NAME) == annotation.gtf
+
+    def test_a_default_already_decided_is_never_displaced_by_a_registration(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        registry = AnnotationRegistry.locate("sacCer3", tmp_path)
+        assert registry.default == "ensgene_v101"  # the table's flag
+
+        registry.register_path(source, "mine")
+
+        assert registry.default == "ensgene_v101"
+
+    def test_an_explicit_default_wins_and_need_not_be_registered(self, tmp_path: Path) -> None:
+        registry = AnnotationRegistry.locate("sacCer3", tmp_path, default="mine")
+
+        assert registry.default == "mine"
+        assert registry.registered == []
+
+    def test_registering_over_a_broken_directory_stops_reporting_it(self, tmp_path: Path) -> None:
+        source = self._registered(tmp_path, "mine")
+        record_path(annotation_dir(tmp_path, "mine")).unlink()
+        registry = AnnotationRegistry.locate("tiny", tmp_path)
+        assert [entry.name for entry in registry.broken] == ["mine"]
+
+        registry.register_path(source, "mine", force=True)
+
+        assert registry.broken == []
+        assert registry.registered == ["mine"]
+
+    def test_addressed_by_assembly_name_a_broken_directory_names_a_command(
+        self, tmp_path: Path
+    ) -> None:
+        # The by-directory `register_gtf` knows no assembly name and can only name the
+        # Python call; a registry always has one, so it names a command a shell can run.
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        directory = annotation_dir(tmp_path, "WS298")
+        directory.mkdir(parents=True)
+        (directory / "WS298.db").write_bytes(b"half a database")
+
+        with pytest.raises(UnfinishedRegistrationError) as excinfo:
+            AnnotationRegistry.locate("tiny", tmp_path).register_path(source, "WS298")
+
+        assert f"genome register-gtf tiny {source} WS298 --force" in str(excinfo.value)
+
+    def test_it_finds_the_assemblys_chrom_sizes_without_being_told(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
+
+        with pytest.raises(ChromosomeMismatchError):
+            AnnotationRegistry.locate("tiny", tmp_path).register_path(
+                data_dir / "ensembl_style.gtf", _NAME
+            )
+
+    def test_a_chrom_sizes_it_is_handed_is_the_one_checked_against(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # What a Genome opened somewhere of its own passes: the chrom.sizes it actually
+        # prepared, rather than the one the layout would name for its assembly.
+        sizes = _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII", assembly="elsewhere")
+
+        with pytest.raises(ChromosomeMismatchError):
+            AnnotationRegistry(
+                AssemblyDir.locate("tiny", tmp_path), chrom_sizes=sizes
+            ).register_path(data_dir / "ensembl_style.gtf", _NAME)
+
+    def test_its_status_is_what_the_status_report_answers(self, tmp_path: Path) -> None:
+        self._registered(tmp_path, "healthy")
+        self._registered(tmp_path, "damaged")
+        record_path(annotation_dir(tmp_path, "damaged")).unlink()
+
+        assert AnnotationRegistry.locate("tiny", tmp_path).status() == annotation_status(
+            "tiny", cache_dir=tmp_path
+        )
+
+    def test_nothing_is_created_by_asking(self, tmp_path: Path) -> None:
+        registry = AnnotationRegistry.locate("sacCer3", tmp_path / "genome" / "sacCer3")
+
+        assert registry.registered == []
+        assert registry.broken == []
+        assert registry.default == "ensgene_v101"
+        assert not (tmp_path / "genome").exists()
 
 
 class TestChromosomeNames:
