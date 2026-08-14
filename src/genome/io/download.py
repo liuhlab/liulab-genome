@@ -80,7 +80,7 @@ from genome.io.source import (
     resolve_source,
 )
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
-from genome.metadata import AssemblyMetadata, lookup_assembly
+from genome.metadata import AssemblyMetadata, assembly_metadata
 
 # A pooch post-processor: called with (fname, action, pooch_instance) and
 # returns the path (or paths) to use as the result of the download.
@@ -274,7 +274,7 @@ def _looks_like_url(source: str) -> bool:
 
 
 def _expected_digest(
-    assembly_dir: AssemblyDir, metadata: AssemblyMetadata | None
+    assembly_dir: AssemblyDir, metadata: AssemblyMetadata
 ) -> tuple[str | None, str | None]:
     """Return the digest this assembly's FASTA is held to, and what supplied it.
 
@@ -297,7 +297,7 @@ def _expected_digest(
         ``"record"`` for the completion record — or ``(None, None)`` when neither pins one
         and there is nothing to check against.
     """
-    pinned = metadata.sha256 if metadata else None
+    pinned = metadata.sha256
     if pinned is not None:
         return pinned, EXPECTED_FROM_TABLE
     record = assembly_dir.read_record()
@@ -475,15 +475,21 @@ class UCSCGenomeDownloader(AssemblyRegistration):
 
     Attributes
     ----------
-    metadata : genome.metadata.AssemblyMetadata or None
-        The record this downloader works from — the one passed in, else the curated
-        table's row, else ``None`` for an assembly the table does not list.
+    metadata : genome.metadata.AssemblyMetadata
+        The record this downloader works from — the one passed in, else what
+        :func:`~genome.metadata.assembly_metadata` knows about ``assembly``. **Total**:
+        an assembly the table does not list has a record whose every identifier is
+        unknown, never no record, so nothing here asks whether there is one before
+        reading a field off it. Whether the table *lists* a name is the other question
+        and is not asked here at all (ADR-0003).
 
     Examples
     --------
     >>> dl = UCSCGenomeDownloader("hg38")
     >>> dl.fasta_url
     'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz'
+    >>> UCSCGenomeDownloader("no_such_assembly").metadata.sha256 is None
+    True
     >>> fasta = dl.fetch_fasta()                  # doctest: +SKIP
     """
 
@@ -497,8 +503,8 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         metadata: AssemblyMetadata | None = None,
     ) -> None:
         super().__init__(assembly, cache_dir)
-        self.metadata: AssemblyMetadata | None = (
-            metadata if metadata is not None else lookup_assembly(assembly)
+        self.metadata: AssemblyMetadata = (
+            metadata if metadata is not None else assembly_metadata(assembly)
         )
 
     @property
@@ -514,7 +520,7 @@ class UCSCGenomeDownloader(AssemblyRegistration):
     @property
     def _expected_sha256(self) -> str | None:
         """The sha256 this assembly's metadata pins for the unpacked FASTA, or ``None``."""
-        return self.metadata.sha256 if self.metadata else None
+        return self.metadata.sha256
 
     def _fetched_source(self) -> FetchedSource:
         """Where this assembly's FASTA is downloaded from, and whether that URL was derived.
@@ -1111,7 +1117,7 @@ def verify_assembly(
     """
     components: str | None = None
     assembly_dir = AssemblyDir.locate(assembly, cache_dir)
-    row = metadata if metadata is not None else lookup_assembly(assembly)
+    row = metadata if metadata is not None else assembly_metadata(assembly)
     if fasta is not None:
         target = Path(fasta).expanduser()
         if not target.is_file():
@@ -1232,13 +1238,12 @@ def assembly_table_row(
     fasta = downloader.fetch_fasta(progressbar=progressbar)
     # Every identifier the row knows, and all of them blank when the table lists no row at
     # all, in which case the name is the only one that does not need a person to supply it.
-    record = downloader.metadata
-    identifiers = record if record is not None else AssemblyMetadata.unknown(assembly)
+    # The downloader's record is total, so there is no absent one to stand in for here.
     # The digest is reported, never enforced: this is the command a maintainer runs
     # *because* the pinned one needs regenerating, so comparing against the stale one
     # would refuse exactly when it is needed. Checking a FASTA against the official row
     # is what verifying an assembly is for.
-    return replace(identifiers, source_url=downloader.fasta_url, sha256=sha256_file(fasta))
+    return replace(downloader.metadata, source_url=downloader.fasta_url, sha256=sha256_file(fasta))
 
 
 if __name__ == "__main__":

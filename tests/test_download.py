@@ -42,6 +42,7 @@ from genome.io.download import (
     verify_assembly,
 )
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
+from genome.io.source import FetchedSource
 from genome.io.utils import ChecksumMismatchError, sha256_file
 from genome.metadata import AssemblyMetadata, format_table_row
 
@@ -425,10 +426,12 @@ def test_a_pinned_source_skips_the_ucsc_name_check(
 def test_an_assembly_with_no_row_still_uses_the_golden_path(
     fake_fetch: FakeFetch, tmp_path: Path, head_recorder: _HeadRecorder, no_native_prepare: None
 ) -> None:
-    # The table is a cross-reference, not an allow-list: no row takes nothing away.
+    # The table is a cross-reference, not an allow-list: no row takes nothing away. What
+    # the downloader holds is total — an unlisted assembly knows its own name and nothing
+    # else — so no step here asks whether there is a record before reading a field off it.
     fake_fetch.serve("tiny.fa.gz")
     dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
-    assert dl.metadata is None
+    assert dl.metadata == AssemblyMetadata.unknown("tiny")
 
     files = dl.fetch_genome()
 
@@ -436,6 +439,22 @@ def test_an_assembly_with_no_row_still_uses_the_golden_path(
     assert fake_fetch.last.url == dl.fasta_url
     assert head_recorder.calls[0]["url"] == dl.assembly_url  # still validated
     assert files.fasta == tmp_path / "tiny.fa"
+
+
+def test_a_total_metadata_record_does_not_make_a_local_key_read_as_a_chimera(
+    tmp_path: Path,
+) -> None:
+    # The two questions stay two. What is *known about* an assembly is total now, so the
+    # downloader reads fields off a record that is always there; whether the curated table
+    # *lists* the name is still answered with `None`, and that is what tells `my_ref` —
+    # one name somebody chose — from a chimera of `my` and `ref` (ADR-0003, ADR-0008).
+    dl = UCSCGenomeDownloader("my_ref", cache_dir=tmp_path)
+
+    assert dl.metadata == AssemblyMetadata.unknown("my_ref")
+    assert dl._source() == FetchedSource(
+        url="https://hgdownload.soe.ucsc.edu/goldenPath/my_ref/bigZips/my_ref.fa.gz",
+        derived=True,
+    )
 
 
 def test_registering_accepts_a_fasta_matching_the_pinned_checksum(
