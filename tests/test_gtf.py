@@ -14,7 +14,6 @@ the shipped table is tested in test_metadata.
 from __future__ import annotations
 
 import gzip
-import json
 from dataclasses import asdict
 from pathlib import Path
 
@@ -35,14 +34,13 @@ from genome.io.gtf import (
     AnnotationNotRegisteredError,
     AnnotationRegistry,
     ChromosomeMismatchError,
+    GtfAnnotation,
     MergeSource,
     _reject_unknown_chromosomes,
     annotation_dir,
     annotation_status,
-    chromosome_check_summary,
     default_annotation,
     discard_merged_annotation,
-    fetch_annotation,
     list_annotations,
     list_broken_annotations,
     register_annotation,
@@ -51,6 +49,7 @@ from genome.io.gtf import (
     register_merged_gtf,
 )
 from genome.io.registration import AssemblyDir
+from genome.io.results import chromosome_check_summary
 from genome.io.utils import ChecksumMismatchError
 from genome.metadata import AnnotationMetadata
 
@@ -108,6 +107,31 @@ def _row(
         url=url,
         sha256=sha256,
         default=default,
+    )
+
+
+def _register_by_name(
+    assembly_dir: Path,
+    assembly: str,
+    name: str,
+    *,
+    force: bool = False,
+    progressbar: bool = True,
+    metadata: AnnotationMetadata | None = None,
+    check_chromosomes: bool = True,
+) -> GtfAnnotation:
+    """Register ``name`` through a registry bound to ``assembly_dir``.
+
+    A registry addressed by directory rather than opened, which is what these tests want:
+    the assembly's ``chrom.sizes`` is found under the directory exactly as an opened
+    assembly's is.
+    """
+    return AnnotationRegistry(AssemblyDir(assembly=assembly, path=assembly_dir)).register(
+        name,
+        force=force,
+        progressbar=progressbar,
+        metadata=metadata,
+        check_chromosomes=check_chromosomes,
     )
 
 
@@ -205,7 +229,7 @@ class TestRegisterByPath:
 
 
 class TestRegisterByName:
-    """``fetch_annotation`` — naming an annotation is enough to have it on disk."""
+    """``AnnotationRegistry.register`` — naming an annotation is enough to have it on disk."""
 
     @pytest.fixture(autouse=True)
     def _serve_the_gtf(self, fake_fetch: FakeFetch) -> FakeFetch:
@@ -215,7 +239,7 @@ class TestRegisterByName:
     def test_it_fetches_verifies_builds_and_records(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
-        annotation = fetch_annotation(
+        annotation = _register_by_name(
             tmp_path,
             "tiny",
             _NAME,
@@ -239,7 +263,7 @@ class TestRegisterByName:
         assert not work_dir(annotation_dir(tmp_path, _NAME)).exists()
 
     def test_the_database_it_builds_answers_queries(self, tmp_path: Path) -> None:
-        annotation = fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
+        annotation = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
 
         database = gffutils.FeatureDB(str(annotation.db))
         try:
@@ -253,7 +277,7 @@ class TestRegisterByName:
         wrong = "0" * 64
 
         with pytest.raises(ChecksumMismatchError) as excinfo:
-            fetch_annotation(
+            _register_by_name(
                 tmp_path, "tiny", _NAME, progressbar=False, metadata=_row(sha256=wrong)
             )
 
@@ -265,7 +289,7 @@ class TestRegisterByName:
         assert read_record(directory) is None
 
     def test_a_row_that_pins_no_digest_records_whatever_arrived(self, tmp_path: Path) -> None:
-        fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
+        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
 
         record = read_record(annotation_dir(tmp_path, _NAME))
         assert record is not None
@@ -277,7 +301,7 @@ class TestRegisterByName:
         fake_fetch.serve("tiny.gtf")
         url = "https://mirror.example.invalid/annotations/tiny.gtf"
 
-        annotation = fetch_annotation(
+        annotation = _register_by_name(
             tmp_path, "tiny", _NAME, progressbar=False, metadata=_row(url=url)
         )
 
@@ -286,7 +310,7 @@ class TestRegisterByName:
     def test_a_name_no_row_lists_says_what_is_offered(self, tmp_path: Path) -> None:
         # Against the shipped table, which lists exactly one annotation for sacCer3.
         with pytest.raises(ValueError, match="no annotation named 'nope'") as excinfo:
-            fetch_annotation(tmp_path, "sacCer3", "nope", progressbar=False)
+            _register_by_name(tmp_path, "sacCer3", "nope", progressbar=False)
 
         assert "ensgene_v101" in str(excinfo.value)
         assert "register_gtf" in str(excinfo.value)
@@ -295,11 +319,11 @@ class TestRegisterByName:
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
         row = _row(sha256=_TINY_GTF_SHA256)
-        first = fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+        first = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
         built_at = first.db.stat().st_mtime_ns
 
         # Silently: `filterwarnings = ["error"]` fails the test on any warning at all.
-        second = fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+        second = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
 
         assert second == first
         assert second.db.stat().st_mtime_ns == built_at  # not rebuilt
@@ -312,24 +336,24 @@ class TestRegisterByName:
         (directory / f"{_NAME}.db").write_bytes(b"half a database")
 
         with pytest.raises(UnfinishedRegistrationError) as excinfo:
-            fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
+            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
 
         assert f"genome register-annotation tiny {_NAME} --force" in str(excinfo.value)
 
     def test_a_record_that_disagrees_with_disk_raises(self, tmp_path: Path) -> None:
         row = _row(sha256=_TINY_GTF_SHA256)
-        annotation = fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+        annotation = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
         annotation.db.write_bytes(b"truncated")
 
         with pytest.raises(RegistrationMismatchError, match="disagrees with its"):
-            fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
 
     def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
         directory = annotation_dir(tmp_path, _NAME)
         directory.mkdir(parents=True)
         (directory / f"{_NAME}.db").write_bytes(b"half a database")
 
-        annotation = fetch_annotation(
+        annotation = _register_by_name(
             tmp_path, "tiny", _NAME, progressbar=False, force=True, metadata=_row()
         )
 
@@ -340,10 +364,10 @@ class TestRegisterByName:
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
         row = _row(sha256=_TINY_GTF_SHA256)
-        fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
         record_path(annotation_dir(tmp_path, _NAME)).unlink()
 
-        fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, force=True, metadata=row)
+        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, force=True, metadata=row)
 
         assert len(fake_fetch.calls) == 1  # the GTF on disk proved itself; nothing refetched
 
@@ -351,16 +375,16 @@ class TestRegisterByName:
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
         row = _row()
-        fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
 
-        fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, force=True, metadata=row)
+        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, force=True, metadata=row)
 
         assert len(fake_fetch.calls) == 2
 
     def test_the_record_carries_gffutils_rather_than_a_tool_version(self, tmp_path: Path) -> None:
         # gffutils is a Python library, not an External tool resolved on PATH, so its
         # version is provenance in details and never a tool version.
-        fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
+        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
 
         record = read_record(annotation_dir(tmp_path, _NAME))
         assert record is not None
@@ -945,7 +969,7 @@ class TestChromosomeNames:
         row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
 
         with pytest.raises(ChromosomeMismatchError):
-            fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
 
         directory = annotation_dir(tmp_path, _NAME)
         assert not (directory / f"{_NAME}.gtf").exists()  # never placed
@@ -954,7 +978,7 @@ class TestChromosomeNames:
 
         # Running it again reports the same problem, not an interrupted registration.
         with pytest.raises(ChromosomeMismatchError):
-            fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
 
     def test_sequences_the_annotation_never_mentions_are_not_an_error(self, tmp_path: Path) -> None:
         # Strict one way only: the GTF names chrI alone, the assembly carries five.
@@ -1037,7 +1061,7 @@ class TestChromosomeNames:
         _write_chrom_sizes(tmp_path, *self._UCSC)
         row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
 
-        annotation = fetch_annotation(
+        annotation = _register_by_name(
             tmp_path, "tiny", _NAME, progressbar=False, metadata=row, check_chromosomes=False
         )
 
@@ -1053,7 +1077,7 @@ class TestChromosomeNames:
         fake_fetch.serve("tiny.gtf.gz")
         _write_chrom_sizes(tmp_path, *self._UCSC)
 
-        fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
+        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
 
         record = read_record(annotation_dir(tmp_path, _NAME))
         assert record is not None
@@ -1070,96 +1094,13 @@ class TestChromosomeNames:
         fake_fetch.serve("ensembl_style.gtf")
         row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
 
-        annotation = fetch_annotation(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+        annotation = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
 
         assert annotation.db.is_file()
         record = read_record(annotation_dir(tmp_path, _NAME))
         assert record is not None
         assert record.details["chromosomes_checked"] is False
         assert record.details["chromosomes_unchecked_because"] == "no-chrom-sizes"
-
-
-class TestReadingBackWhatWasChecked:
-    """``chromosome_check_summary`` — one sentence per state, and never the wrong one.
-
-    The states differ in what a reader should do about them, which is why they are told
-    apart at all: an annotation registered before its assembly is waiting for the
-    assembly, and one whose check the caller stood down is waiting for nothing.
-    """
-
-    _ADVICE = "register the assembly first"
-
-    def test_a_check_that_ran_says_so_rather_than_saying_nothing(self) -> None:
-        # Silence is not how a pass is reported: a surface printing nothing about the
-        # check reads exactly like one printing that it passed.
-        summary = chromosome_check_summary(
-            {"chromosomes_checked": True, "chromosomes_unchecked_because": None}
-        )
-
-        assert "chromosomes checked" in summary
-        assert self._ADVICE not in summary
-
-    def test_nothing_to_check_against_is_the_one_state_that_advises(self) -> None:
-        summary = chromosome_check_summary(
-            {"chromosomes_checked": False, "chromosomes_unchecked_because": "no-chrom-sizes"}
-        )
-
-        assert "chromosomes not checked" in summary
-        assert self._ADVICE in summary
-
-    def test_an_override_is_never_told_to_register_the_assembly(self) -> None:
-        # The bug this fixes: the assembly may well be registered, and the caller turned
-        # the check off on purpose. What is left to say is what the record does not vouch
-        # for, not what to do about it.
-        summary = chromosome_check_summary(
-            {"chromosomes_checked": False, "chromosomes_unchecked_because": "caller-override"}
-        )
-
-        assert "stood down" in summary
-        assert self._ADVICE not in summary
-
-    def test_every_state_reads_as_its_own_sentence(self) -> None:
-        summaries = {
-            chromosome_check_summary(details)
-            for details in (
-                {"chromosomes_checked": True, "chromosomes_unchecked_because": None},
-                {"chromosomes_checked": False, "chromosomes_unchecked_because": "no-chrom-sizes"},
-                {"chromosomes_checked": False, "chromosomes_unchecked_because": "caller-override"},
-                {"chromosomes_checked": False},
-            )
-        }
-
-        assert len(summaries) == 4
-
-    def test_a_record_written_before_the_reason_existed_reads_as_unknown(
-        self, tmp_path: Path, data_dir: Path
-    ) -> None:
-        # The real back-compatibility case, on a record that is on disk: an older version
-        # wrote the bare bool, and which of the two reasons it stood for is not knowable.
-        # It must read as neither, and reading it must not raise.
-        register_gtf(tmp_path, data_dir / "tiny.gtf", _NAME)
-        path = record_path(annotation_dir(tmp_path, _NAME))
-        written = json.loads(path.read_text())
-        written["details"] = {"chromosomes_checked": False}
-        path.write_text(json.dumps(written))
-
-        record = read_record(annotation_dir(tmp_path, _NAME))
-
-        assert record is not None
-        assert record.details == {"chromosomes_checked": False}
-        summary = chromosome_check_summary(record.details)
-        assert "does not say why" in summary
-        assert self._ADVICE not in summary  # nor is it claimed to be the override
-        assert "stood down" not in summary
-
-    def test_a_reason_this_version_has_never_heard_of_reads_as_unknown_too(self) -> None:
-        # Forward as well as backward: a record from a later version claiming some third
-        # reason is one this version cannot report, which is the same as not knowing.
-        summary = chromosome_check_summary(
-            {"chromosomes_checked": False, "chromosomes_unchecked_because": "some-later-reason"}
-        )
-
-        assert "does not say why" in summary
 
 
 @pytest.fixture(scope="session")
