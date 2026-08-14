@@ -54,6 +54,30 @@ preparation is no longer indistinguishable from a finished one.
   because GENCODE, Ensembl and RefSeq GTFs declare those features already and inferring them is the
   slow path. They are for a bare exon-level GTF, which otherwise registers as a database of exons
   and nothing else without saying so.
+- **Chimera assemblies.** `Genome.chimera(worm, bacterium)` concatenates two or more assemblies
+  already prepared on this machine into one reference and hands it back open, so a library carrying
+  reads from more than one organism takes one alignment pass instead of N. Its name is derived from
+  the component names, sorted and joined by `_`, and is never given — `ce11_ecHT115`, whichever
+  order they were listed in — so `genome register ce11_ecHT115` builds the same thing from a shell.
+  Nothing is downloaded: a component this machine has not prepared is named, with the command that
+  prepares it, rather than fetched on the strength of a typed name. Every chromosome
+  is suffixed `<chromosome>__<component>` unconditionally, so a bare name no longer resolves against
+  a chimera and the refusal names the spellings that do. Aligner indexes are built over one exactly
+  as over any other assembly.
+- **`Genome.components` and `Genome.chrom_components`.** The first is the component assembly names,
+  and `None` for an assembly that is not a chimera — the single test of which it is. The second says
+  which component each chromosome came from, as a Series mirroring `chrom_sizes`, and is total: a
+  non-chimera maps every chromosome to its own assembly.
+- **A merged annotation, registered by the chimera's own build.** Each component contributes its
+  default annotation, and the result is addressed by the `+`-join of their names in
+  sorted-component order — `wormbase_ws298+refseq_rs_2025_06_26`. A chimera therefore arrives
+  annotated, and `genome register <chimera> --force` repairs the annotation and the FASTA together.
+  Components that between them contribute nothing leave the chimera with no annotation rather than
+  an empty one.
+- **`ce11_ecHT115` ships as a curated row** — the name, and every other column blank, including the
+  sha256, since a chimera's bytes are derived here from components that are themselves pinned. It
+  carries no annotation row at all. The tables stay a cross-reference and never an allow-list, so a
+  chimera no row lists is still legal.
 - **Test fixtures under `tests/data/`** — real subsampled `sacCer3` bytes, replacing inline fixtures
   for the work that needs real FASTA and GTF content. `tests/data/chimera/` adds four tiny component
   assemblies cut from those same bytes, between them carrying what no shipped assembly can
@@ -103,9 +127,10 @@ preparation is no longer indistinguishable from a finished one.
   account of why the package is built the way it is. `Home`, `Genome`, `Sequences` and `CLI`, plus
   the generated API reference. Design rationale is not repeated on the site: a decision lives in
   `docs/adr/` and is read there.
-- **A glossary term the records settled but the code does not have yet says so.** `Chimera`,
-  `Component` and `Merged annotation` carry a *decided, not built* marker naming the record, so the
-  vocabulary can run ahead of the implementation without reading as an API that exists.
+- **A glossary term the records settled but the code does not have yet says so**, with a *decided,
+  not built* marker naming the record, so the vocabulary can run ahead of the implementation without
+  reading as an API that exists. No term carries one now: `Chimera`, `Component` and `Merged
+  annotation` are all built.
 
 ### Removed
 
@@ -138,6 +163,21 @@ preparation is no longer indistinguishable from a finished one.
   `nan` — or, for a blank taxonomy id, an exception. The row `genome table-row` emits for an
   assembly the table does not list yet leaves the species and the NCBI identifiers blank, so pasting
   that line in is now a working route rather than one that breaks the next lookup.
+- **`genomeChrBinNbits` is computed and passed to STAR.** It was never passed at all, so STAR's
+  default of 18 always held and every sequence was padded up to a whole multiple of 262,144 bases —
+  a ×5.18 inflation of the genome file on an 87-scaffold draft like `ecHT115`, and a silent one,
+  since STAR neither warns on this parameter nor clamps it. It is now sized from the mean sequence
+  length and the read length `sjdb_overhang` implies, and
+  passed even when it lands on 18, so the record says what the build asked for rather than what it
+  left out. Passing it yourself still wins. Measured in
+  `docs/research/aligner-index-params-and-reference-names.md`.
+- **An index record pins the digest of the assembly it was built from.** It recorded the FASTA's
+  path and never its bytes, so re-registering a reference left every index over it still reading as
+  finished — chromap worst of all, whose index file stays byte-identical while the sequence names
+  beneath it change. `details["assembly_sha256"]` is copied from the assembly's own record and
+  compared record to record, with no sequence bytes read; a disagreement names both digests and the
+  rebuild that repairs it. An index built before this change pins nothing, so it reads as *unknown*
+  rather than as wrong and stays unguarded until it is next rebuilt.
 - **Registering with `--no-check-chromosomes` is no longer told to register the assembly first**,
   which it may well have done already. An annotation record now says *why* the names went
   unchecked — `details["chromosomes_unchecked_because"]` is `"caller-override"` or
