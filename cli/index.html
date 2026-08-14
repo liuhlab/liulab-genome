@@ -719,11 +719,15 @@ tool, a failed download, a checksum mismatch, a registration that cannot be trus
 </code></pre></div>
 <h2 id="genome-doctor"><code>genome doctor</code><a class="headerlink" href="#genome-doctor" title="Permanent link">&para;</a></h2>
 <p>Report which native tools are on <code>PATH</code>, and at what versions. Exits <code>1</code> naming the
-install command if one is missing.</p>
+install command if one is missing. A tool that is installed but rejects <code>--version</code> — the
+UCSC binaries do — is listed all the same, since presence is what this answers.</p>
 <div class="language-console highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>genome<span class="w"> </span>doctor
 <a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">samtools: samtools 1.21 ...</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">bedtools: bedtools v2.31.1</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">faToTwoBit: installed; reports no version</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">twoBitInfo: installed; reports no version</span>
 </code></pre></div>
+<p>STAR and chromap are not checked here: they are optional, and each one checks for itself
+when you ask it to build an index.</p>
 <h2 id="genome-register-assembly"><code>genome register &lt;assembly&gt;</code><a class="headerlink" href="#genome-register-assembly" title="Permanent link">&para;</a></h2>
 <p>Prepare an assembly on disk — fetch, verify, index, record — and print where it landed.</p>
 <div class="language-console highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register<span class="w"> </span>sacCer3

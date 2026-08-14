@@ -832,11 +832,16 @@ to the length is valid. Unknown chromosomes and malformed loci raise <code>Value
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">chrom_sizes</span>              <span class="c1"># pandas Series of lengths, indexed by chromosome</span>
 <a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">chrom_sizes</span><span class="p">[</span><span class="s2">&quot;chrIV&quot;</span><span class="p">]</span>     <span class="c1"># 1531933</span>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">files</span>                    <span class="c1"># GenomeFiles: fasta / fai / twobit / chrom_sizes paths</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">source_url</span>               <span class="c1"># where the FASTA came from</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">sha256</span>                   <span class="c1"># digest of the unpacked FASTA (None if unpinned)</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">species</span>         <span class="c1"># &#39;Saccharomyces cerevisiae&#39;</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">ncbi_name</span>       <span class="c1"># &#39;R64-1-1&#39;</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">source_url</span>      <span class="c1"># where the FASTA came from</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">sha256</span>          <span class="c1"># digest of the unpacked FASTA (None if unpinned)</span>
 </code></pre></div>
 <p><code>chrom_sizes</code> is returned as a copy, so mutating it never corrupts the genome's own view.
 <code>twobit_path</code>, <code>fasta_path</code> and <code>chrom_sizes_path</code> are there to hand to other tools.</p>
+<p><code>metadata</code> is always a record, so you read a field off it without checking first. For an
+assembly the curated table does not list, every identifier is <code>None</code> and <code>assembly_name</code>
+is the name you opened — the table is a cross-reference, not an allow-list.</p>
 <h2 id="releasing-the-file-handle">Releasing the file handle<a class="headerlink" href="#releasing-the-file-handle" title="Permanent link">&para;</a></h2>
 <p><code>Genome</code> keeps the <code>.2bit</code> open so repeated queries are fast. Use it as a context manager
 (or call <code>close()</code>) when you want the handle released at a known point:</p>
