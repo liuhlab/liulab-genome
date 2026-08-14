@@ -26,8 +26,8 @@ from genome.external import (
     InstalledTool,
     RecordingTool,
     ToolNotFoundError,
-    _is_fresh,
     doctor,
+    is_fresh,
 )
 from genome.io.fasta import PREPARATION_TOOLS
 
@@ -243,14 +243,14 @@ def test_is_fresh_rules(tmp_path: Path, touch_newer_than: Callable[..., None]) -
     src.write_text("x")
     out = tmp_path / "out"
 
-    assert _is_fresh(out, [src]) is False  # missing output
+    assert is_fresh(out, [src]) is False  # missing output
     out.write_text("")
-    assert _is_fresh(out, [src]) is False  # empty output
+    assert is_fresh(out, [src]) is False  # empty output
     out.write_text("y")
     touch_newer_than(out, src)
-    assert _is_fresh(out, [src]) is True  # non-empty and newer
+    assert is_fresh(out, [src]) is True  # non-empty and newer
     touch_newer_than(src, out)
-    assert _is_fresh(out, [src]) is False  # input regenerated -> stale
+    assert is_fresh(out, [src]) is False  # input regenerated -> stale
 
 
 def test_an_input_that_does_not_exist_is_ignored(tmp_path: Path) -> None:
@@ -259,7 +259,7 @@ def test_an_input_that_does_not_exist_is_ignored(tmp_path: Path) -> None:
     out = tmp_path / "out"
     out.write_text("y")
 
-    assert _is_fresh(out, [tmp_path / "never-existed"]) is True
+    assert is_fresh(out, [tmp_path / "never-existed"]) is True
 
 
 def test_run_to_runs_when_the_output_is_missing(tmp_path: Path) -> None:

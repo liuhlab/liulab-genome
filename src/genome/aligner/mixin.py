@@ -14,8 +14,9 @@ class AlignerMixin:
     """Build aligner genome indexes for a :class:`~genome.genome.Genome`.
 
     Each ``build_<aligner>_index`` method instantiates the corresponding
-    :class:`~genome.aligner.aligner.Aligner`, which checks that the aligner is
-    installed before doing anything. Index files land under
+    :class:`~genome.aligner.aligner.Aligner`. Constructing one runs nothing: the
+    binary is located and asked its version on first use, so a missing aligner
+    raises when a build is asked for and not before. Index files land under
     ``<assembly dir>/index/<aligner>/`` — inside the **Assembly dir** the genome
     was opened in.
     """

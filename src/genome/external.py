@@ -54,13 +54,18 @@ _INSTALLATIONS: dict[str, _Installation] = {
     "twoBitInfo": _Installation("ucsc-twobitinfo"),
     "STAR": _Installation("star", "https://github.com/alexdobin/STAR"),
     "chromap": _Installation("chromap", "https://github.com/haowenz/chromap"),
+    # Known but not required: nothing here shells out to bedtools today, and the rules
+    # name it an **External tool** all the same. Knowing what installs it costs one line
+    # and is what makes the first caller that does reach for it fail with a command
+    # rather than a bare name.
+    "bedtools": _Installation("bedtools", "https://bedtools.readthedocs.io"),
 }
 
 #: The **External tool**s every run of this package needs — the ones that prepare an
 #: assembly, which is the path nothing can avoid. ``genome doctor`` checks exactly these.
 #: STAR and chromap are deliberately absent: they are optional features, and an aligner
-#: checks for its own binary when it is asked to build. So is ``bedtools``, which this
-#: package has never shelled out to.
+#: checks for its own binary when it is asked to build. So is ``bedtools``, which nothing
+#: here shells out to yet — :data:`_INSTALLATIONS` still knows what installs it.
 REQUIRED_TOOLS: tuple[str, ...] = ("samtools", "faToTwoBit", "twoBitInfo")
 
 #: What :func:`doctor` reports for a tool that runs but will not identify itself —
@@ -101,8 +106,8 @@ class ToolCall:
     capture: bool
 
 
-def _is_fresh(output: Path, inputs: Sequence[Path]) -> bool:
-    """Return whether ``output`` is an up-to-date cache built from ``inputs``.
+def is_fresh(output: Path, inputs: Sequence[Path]) -> bool:
+    """Return whether ``output`` is fresh against ``inputs`` — the **Freshness** rule.
 
     Fresh means ``output`` exists, is non-empty, and is at least as new as every
     input — the same staleness rule ``make`` uses. Missing inputs are ignored;
@@ -349,7 +354,7 @@ class ExternalTool(ABC):
         ... )
         PosixPath('hg38.fa.fai')
         """
-        if overwrite or not _is_fresh(output, inputs):
+        if overwrite or not is_fresh(output, inputs):
             self.run(args)
         return output
 

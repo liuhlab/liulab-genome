@@ -86,6 +86,10 @@ preparation is no longer indistinguishable from a finished one.
 
 ### Changed
 
+- **`Genome.default_gtf` is a read-only property.** It was a settable attribute the registration
+  path reassigned as it adopted a sole annotation; the registry now decides it, so a caller that
+  used to assign to it names the annotation at construction —
+  `Genome(assembly, default_gtf=<name>)` — instead.
 - **What an assembly name means is a value now, in a module named for it.** *Where do these bytes
   come from* was answered inline by the downloader, which is why reading a chimera's record needed
   four deferred imports to dodge an import cycle and why three module-level functions reached into
@@ -200,6 +204,11 @@ preparation is no longer indistinguishable from a finished one.
 
 ### Removed
 
+- **Four annotation steps leave the package surface** — `list_annotations`,
+  `list_broken_annotations`, `default_annotation` and `fetch_annotation` are no longer re-exported
+  from `genome.io`, so `from genome.io import fetch_annotation` breaks. Nothing in the package calls
+  any of them by name; what a caller wants from an assembly's annotations is `AnnotationRegistry`,
+  which takes their place in `genome.io`. They stay importable from `genome.io.gtf`.
 - **The eight metadata pass-throughs on `Genome`** — `assembly_name`, `species`, `ucsc_name`,
   `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid`, `source_url` and `sha256`. Each was one line
   guarding a record that is now always there. Read them off the record: `genome.metadata.species`.

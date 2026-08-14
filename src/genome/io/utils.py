@@ -20,7 +20,7 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
-from genome.external import InstalledTool, _is_fresh
+from genome.external import InstalledTool, is_fresh
 
 
 class ChecksumMismatchError(ValueError):
@@ -137,6 +137,6 @@ def _run_to(
     the whole of what this layer shells out through. ``args`` must be written so the tool
     produces ``output``. Returns ``output``; raises as :func:`_run`.
     """
-    if overwrite or not _is_fresh(output, inputs):
+    if overwrite or not is_fresh(output, inputs):
         _run(name, args)
     return output
