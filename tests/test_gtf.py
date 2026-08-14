@@ -36,6 +36,7 @@ from genome.io.gtf import (
     default_annotation,
     fetch_annotation,
     list_annotations,
+    list_broken_annotations,
     register_annotation,
     register_annotation_by_path,
     register_gtf,
@@ -382,6 +383,119 @@ class TestListAnnotations:
         assert list_annotations(tmp_path) == {}
 
 
+class TestListBrokenAnnotations:
+    """The complement of ``list_annotations``: what is on disk and cannot be trusted.
+
+    Every directory under ``gtf/`` is registered, broken, or not begun; this reports
+    the middle one, which is otherwise invisible to anything that lists.
+    """
+
+    def test_a_directory_holding_files_with_no_record_is_broken(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "mine")
+        record_path(annotation_dir(tmp_path, "mine")).unlink()
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert list(broken) == ["mine"]
+        assert broken["mine"].directory == annotation_dir(tmp_path, "mine")
+        assert "holds files but no .completion.json" in broken["mine"].problem
+
+    def test_a_record_that_disagrees_with_disk_is_broken(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        annotation = register_gtf(tmp_path, src, "mine")
+        annotation.db.write_bytes(b"truncated")
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert list(broken) == ["mine"]
+        assert "mine.db" in broken["mine"].problem
+
+    def test_a_finished_annotation_is_not_broken(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "mine")
+
+        assert list_broken_annotations(tmp_path, "tiny") == {}
+
+    def test_an_empty_directory_is_not_broken(self, tmp_path: Path) -> None:
+        # ADR-0007: an absent or empty directory is a fresh registration, not a broken
+        # one. A run interrupted before it downloaded anything must not be reported.
+        annotation_dir(tmp_path, "mine").mkdir(parents=True)
+        work_dir(annotation_dir(tmp_path, "mine")).mkdir()
+
+        assert list_broken_annotations(tmp_path, "tiny") == {}
+
+    def test_an_assembly_with_no_annotations_at_all_answers_empty(self, tmp_path: Path) -> None:
+        assert list_broken_annotations(tmp_path, "sacCer3") == {}
+
+    def test_a_broken_one_leaves_the_others_listed(self, tmp_path: Path) -> None:
+        # The invariant: one broken annotation must not stop the rest being found, and
+        # nothing here raises — reporting is the whole point.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "healthy")
+        register_gtf(tmp_path, src, "damaged")
+        record_path(annotation_dir(tmp_path, "damaged")).unlink()
+
+        assert list(list_annotations(tmp_path)) == ["healthy"]
+        assert list(list_broken_annotations(tmp_path, "tiny")) == ["damaged"]
+
+    def test_a_name_the_table_offers_is_repaired_by_name(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "ensgene_v101")
+        record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
+
+        broken = list_broken_annotations(tmp_path, "sacCer3")
+
+        assert broken["ensgene_v101"].repair == (
+            "genome register-annotation sacCer3 ensgene_v101 --force"
+        )
+        assert broken["ensgene_v101"].repair in broken["ensgene_v101"].problem
+
+    def test_an_unlisted_one_is_repaired_from_the_path_its_record_remembers(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        annotation = register_gtf(tmp_path, src, "mine")
+        annotation.db.write_bytes(b"truncated")
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert broken["mine"].repair == f"genome register-gtf tiny {src} mine --force"
+
+    def test_an_unlisted_one_whose_source_is_unknowable_says_so(self, tmp_path: Path) -> None:
+        # No record survives to say which GTF it was built from, so there is no path to
+        # print: the command is named with the one thing it still needs filled in,
+        # rather than a path that would not run.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "mine")
+        record_path(annotation_dir(tmp_path, "mine")).unlink()
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert broken["mine"].repair == "genome register-gtf tiny <path> mine --force"
+
+    def test_an_unlisted_one_whose_source_is_gone_is_not_named_as_a_command(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        annotation = register_gtf(tmp_path, src, "mine")
+        annotation.db.write_bytes(b"truncated")
+        src.unlink()
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert str(src) not in broken["mine"].repair
+        assert broken["mine"].repair == "genome register-gtf tiny <path> mine --force"
+
+
 class TestDefaultAnnotation:
     """The one rule that decides a default, wherever the question is asked from."""
 
@@ -466,7 +580,67 @@ class TestAnnotationStatus:
         assert isinstance(rows, list)
         assert [(r["name"], r["offered"], r["registered"]) for r in rows] == [("mine", False, True)]
         assert rows[0]["provider"] is None
+        assert rows[0]["broken"] is False
+        assert rows[0]["problem"] is None
         assert payload["default_annotation"] == "mine"  # nothing flagged, and it is alone
+
+    def test_a_broken_offered_annotation_is_reported_as_broken_not_as_absent(
+        self, tmp_path: Path
+    ) -> None:
+        # The bug this closes: half-registered and never-fetched looked identical here.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly_dir = tmp_path / "asm"
+        register_gtf(assembly_dir, src, "ensgene_v101")
+        record_path(annotation_dir(assembly_dir, "ensgene_v101")).unlink()
+
+        payload = annotation_status("sacCer3", cache_dir=assembly_dir)
+
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["offered"], r["registered"], r["broken"]) for r in rows] == [
+            ("ensgene_v101", True, False, True)
+        ]
+        assert rows[0]["repair"] == "genome register-annotation sacCer3 ensgene_v101 --force"
+        assert "holds files but no .completion.json" in str(rows[0]["problem"])
+        assert rows[0]["path"] is None
+
+    def test_a_broken_unlisted_annotation_is_reported_at_all(self, tmp_path: Path) -> None:
+        # No row lists it and no record vouches for it, so nothing used to mention it.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly_dir = tmp_path / "asm"
+        annotation = register_gtf(assembly_dir, src, "mine")
+        annotation.db.write_bytes(b"truncated")
+
+        payload = annotation_status("tiny", cache_dir=assembly_dir)
+
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["offered"], r["registered"], r["broken"]) for r in rows] == [
+            ("mine", False, False, True)
+        ]
+        assert rows[0]["repair"] == f"genome register-gtf tiny {src} mine --force"
+
+    def test_one_broken_annotation_does_not_hide_the_others(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly_dir = tmp_path / "asm"
+        register_gtf(assembly_dir, src, "healthy")
+        register_gtf(assembly_dir, src, "damaged")
+        record_path(annotation_dir(assembly_dir, "damaged")).unlink()
+
+        payload = annotation_status("tiny", cache_dir=assembly_dir)
+
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["registered"], r["broken"]) for r in rows] == [
+            ("damaged", False, True),
+            ("healthy", True, False),
+        ]
+        # A broken one is not a registered one, so it never becomes the sole-registered
+        # default either.
+        assert payload["default_annotation"] == "healthy"
 
 
 class TestChromosomeNames:

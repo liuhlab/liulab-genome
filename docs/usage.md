@@ -157,6 +157,27 @@ The last line names the assembly's [default annotation](aligner.md#the-default-a
 — the one the table flags, else the sole registered one — and, when it is not registered
 here, the command that closes the gap.
 
+An annotation whose directory is here but cannot be trusted — files left by an
+interrupted run, or a record that no longer matches what is on disk — reads as `broken`
+rather than as one nobody has fetched, whether or not any table row lists it. The line
+under it says what is wrong and names the command that repairs it, which is a command
+you can paste:
+
+```console
+$ genome annotations hg38
+annotations for hg38 in /data/liulab_data/genome/hg38
+  gencode_v50  broken                   GENCODE v50
+      /data/liulab_data/genome/hg38/gtf/gencode_v50 holds files but no .completion.json, so a previous run was interrupted before it finished: gencode_v50.db. Nothing here can be trusted as complete. Re-register it with `genome register-annotation hg38 gencode_v50 --force`.
+default: gencode_v50 — broken here; repair it with `genome register-annotation hg38 gencode_v50 --force`
+```
+
+This is where such a thing is discovered, so it is reported and not raised over: the
+exit code is still `0`, and one broken annotation never hides the ones beside it. With
+`--json`, the row carries `broken`, the `problem` and the `repair`. An unlisted one is
+repaired from the GTF it was built from, which its record remembers — and when no record
+survives to say, the command is printed with `<path>` where that file goes rather than a
+path that would not be there.
+
 ### Verifying one
 
 `genome verify` re-reads a FASTA and checks its sha256 against the assembly's pinned

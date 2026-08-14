@@ -35,10 +35,12 @@ from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import (
     AnnotationNotRegisteredError,
+    BrokenAnnotation,
     GtfAnnotation,
     default_annotation,
     fetch_annotation,
     list_annotations,
+    list_broken_annotations,
     register_gtf,
 )
 from genome.io.twobit import TwoBit
@@ -222,14 +224,19 @@ class Genome(AlignerMixin):
         return self.metadata.sha256 if self.metadata else None
 
     def _set_default_gtf(self, default_gtf: str | None) -> None:
-        """Read both annotation lists and settle which one is the default.
+        """Read the annotation lists and settle which one is the default.
 
-        Both are read, neither is acted on: the table is looked up and the ``gtf/``
-        subtree is listed, and nothing is fetched, built or created. Opening a genome
-        must never start a registration — for a human annotation that is a gigabyte
-        download and a database build running many minutes.
+        All three are read, none is acted on: the table is looked up and the ``gtf/``
+        subtree is listed both ways, and nothing is fetched, built or created. Opening a
+        genome must never start a registration — for a human annotation that is a
+        gigabyte download and a database build running many minutes — and an annotation
+        it cannot vouch for is recorded to report rather than raised over, so one broken
+        annotation never costs the genome.
         """
         self._annotations: dict[str, GtfAnnotation] = list_annotations(self._assembly_dir)
+        self._broken: dict[str, BrokenAnnotation] = list_broken_annotations(
+            self._assembly_dir, self.assembly
+        )
         self._offered: list[AnnotationMetadata] = list_annotation_metadata(self.assembly)
         self.default_gtf: str | None = default_annotation(
             self._offered, self._annotations, explicit=default_gtf
@@ -240,9 +247,31 @@ class Genome(AlignerMixin):
         """Names of the GTF annotations registered for this assembly **on this machine**.
 
         What is here, as against :attr:`offered_annotations`, which is what the lab
-        supports.
+        supports, and :attr:`broken_annotations`, which is what is here and cannot be
+        trusted.
         """
         return list(self._annotations)
+
+    @property
+    def broken_annotations(self) -> list[BrokenAnnotation]:
+        """The annotation directories here that cannot be trusted as finished.
+
+        What :attr:`annotations` leaves out. A build killed part-way leaves a database
+        with most of the genes missing, so it is deliberately not registered — but it is
+        also not nothing, and a caller who never re-registers it would otherwise never
+        hear that it is there. Each entry says what is wrong and names the one command
+        that repairs it.
+
+        Reading this raises nothing, whatever state the directory is in: it was settled
+        when the genome opened, which is why one broken annotation never stopped it.
+
+        Examples
+        --------
+        >>> sacCer3 = Genome("sacCer3")                              # doctest: +SKIP
+        >>> [broken.name for broken in sacCer3.broken_annotations]   # doctest: +SKIP
+        ['ensgene_v101']
+        """
+        return list(self._broken.values())
 
     @property
     def offered_annotations(self) -> list[AnnotationMetadata]:
@@ -388,8 +417,12 @@ class Genome(AlignerMixin):
         The sole-registered clause of the default rule, applied the moment it becomes
         true. A default already decided — the caller's choice, or the table's flag —
         is never displaced by one being registered.
+
+        Registering over a broken directory is what repairs it, so the name stops being
+        reported as broken here rather than only on the next open.
         """
         self._annotations[annotation.name] = annotation
+        self._broken.pop(annotation.name, None)
         if self.default_gtf is None and len(self._annotations) == 1:
             self.default_gtf = annotation.name
         return annotation
@@ -411,9 +444,11 @@ class Genome(AlignerMixin):
         ------
         genome.io.gtf.AnnotationNotRegisteredError
             If nothing of that name is registered here. The message says what is
-            registered, and names either the command that registers ``name`` — when the
-            table offers it — or the path-based way in when it does not. It is a
-            :class:`KeyError`.
+            registered, and names the command that closes the gap: the one that
+            registers ``name`` when the table offers it, the path-based way in when it
+            does not, and — when a directory of that name is there but broken — the one
+            that registers it again from scratch, so the command named is one that runs
+            rather than one that raises in turn. It is a :class:`KeyError`.
 
         Examples
         --------
@@ -427,6 +462,7 @@ class Genome(AlignerMixin):
                 name,
                 self._annotations,
                 [record.name for record in self._offered],
+                broken=self._broken.get(name),
             )
         return self._annotations[name].gtf
 
@@ -438,9 +474,9 @@ class Genome(AlignerMixin):
         may name an annotation nobody has registered on this machine — the table's
         choice, on a machine that has not fetched it yet, or one a caller named at
         construction ahead of registering it — and asking for its path is what says so,
-        naming ``genome register-annotation <assembly> <name>``. ``None`` means no
-        default was decided at all, which is a different answer from one that is not
-        registered.
+        naming the command that registers it, or the one that repairs it when a broken
+        directory of that name is there. ``None`` means no default was decided at all,
+        which is a different answer from one that is not registered.
 
         Raises
         ------

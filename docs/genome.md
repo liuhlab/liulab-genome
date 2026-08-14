@@ -217,6 +217,20 @@ fetched and nothing is rebuilt. A directory holding files without a valid record
 raises instead, naming the command that registers that annotation again with
 `--force`, which is also what repairs it.
 
+Opening a genome never raises over one of those, though — one annotation nobody
+can vouch for must not cost you the genome or the annotations beside it. It is
+reported rather than raised over, and each entry says what is wrong and names the
+one command that fixes it:
+
+```python
+sacCer3.broken_annotations           # [BrokenAnnotation(name='ensgene_v101', ...)]
+sacCer3.broken_annotations[0].repair # 'genome register-annotation sacCer3 ensgene_v101 --force'
+```
+
+Asking for a broken annotation by name raises as an unregistered one does, and the
+message quotes that same repair — the command that works, not one that would raise
+in turn and demand `--force`.
+
 Opening a genome never registers anything, whatever the table flags — that would
 be a gigabyte download and a database build inside a constructor someone called to
 fetch one sequence. So `default_gtf` may name an annotation this machine does not

@@ -305,6 +305,13 @@ def list_annotations(
     annotation is named last, with the command that registers it when it is one of the
     ones this machine does not have — which is the ordinary state of a fresh install.
 
+    An annotation whose directory is here but cannot be trusted — files with no record,
+    or a record that disagrees with what is on disk — reads as `broken` rather than as
+    one nobody has fetched, and the line under it says what is wrong and names the
+    command that repairs it. This is where such a thing is discovered, so it is reported
+    and not raised over: exit is still `0`, and one broken annotation never hides the
+    ones beside it.
+
     Nothing is downloaded, prepared or built to answer this, so it works for an assembly
     that has never been registered here.
     """
@@ -328,11 +335,22 @@ def list_annotations(
         provider = f"  {row['provider']} {row['version']}" if row["offered"] else ""
         line = f"  {row['name']!s:<{name_width}}  {_state(row):<{state_width}}{provider}"
         typer.echo(line.rstrip())
+        # Verbatim from the API, which is the same text re-registering it would print:
+        # what is wrong, and the command that fixes it. One wording, two surfaces.
+        if row["broken"]:
+            typer.echo(f"      {row['problem']}")
     typer.echo(_default_line(payload, rows))
 
 
 def _state(row: dict[str, object]) -> str:
-    """Return which of the two questions a row answers: offered, registered, or both."""
+    """Return the state a row is in: registered, broken, or merely offered.
+
+    ``broken`` comes first because it is the one that needs acting on, and because a
+    broken annotation is not registered — no record vouches for it — so reporting it as
+    the absence of one would be true and useless.
+    """
+    if row["broken"]:
+        return "broken"
     if not row["offered"]:
         return "registered, not offered"
     return "registered" if row["registered"] else "offered, not registered"
@@ -343,8 +361,10 @@ def _default_line(payload: dict[str, object], rows: list[dict[str, object]]) -> 
     default = payload["default_annotation"]
     if default is None:
         return "default: (none)"
-    registered = any(row["name"] == default and row["registered"] for row in rows)
-    if registered:
+    row = next((candidate for candidate in rows if candidate["name"] == default), None)
+    if row is not None and row["broken"]:
+        return f"default: {default} — broken here; repair it with `{row['repair']}`"
+    if row is not None and row["registered"]:
         return f"default: {default}"
     return (
         f"default: {default} — not registered here; register it with "

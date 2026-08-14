@@ -16,8 +16,9 @@ from genome import metadata
 from genome.cli import app
 from genome.external import REQUIRED_TOOLS
 from genome.io import download as download_mod
+from genome.io.completion import record_path
 from genome.io.fasta import GenomeFiles
-from genome.io.gtf import register_gtf
+from genome.io.gtf import annotation_dir, register_gtf
 
 from .conftest import FakeFetch
 
@@ -613,6 +614,62 @@ class TestAnnotations:
 
         assert result.exit_code == 0
         assert "tiny" in result.stdout
+
+    def test_a_broken_offered_annotation_reads_as_broken_and_names_its_repair(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # It used to read `offered, not registered` — indistinguishable from one nobody
+        # had ever fetched — and the closing line sent the reader to a command that
+        # would itself raise and demand --force.
+        assembly_dir = tmp_path / "genome" / "hg38"
+        register_gtf(assembly_dir, data_dir / "tiny.gtf", "gencode_v50")
+        record_path(annotation_dir(assembly_dir, "gencode_v50")).unlink()
+
+        result = runner.invoke(app, ["annotations", "hg38"])
+
+        assert result.exit_code == 0
+        assert "offered, not registered" not in result.stdout
+        assert "broken" in result.stdout
+        assert "genome register-annotation hg38 gencode_v50 --force" in result.stdout
+        default_line = next(
+            line for line in result.stdout.splitlines() if line.startswith("default:")
+        )
+        assert "--force" in default_line
+
+    def test_a_broken_unlisted_annotation_is_listed_at_all(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        assembly_dir = tmp_path / "genome" / "hg38"
+        annotation = register_gtf(assembly_dir, data_dir / "tiny.gtf", "mine")
+        annotation.db.write_bytes(b"truncated")
+
+        result = runner.invoke(app, ["annotations", "hg38"])
+
+        assert result.exit_code == 0
+        assert "mine" in result.stdout
+        assert "broken" in result.stdout
+        assert f"genome register-gtf hg38 {data_dir / 'tiny.gtf'} mine --force" in result.stdout
+
+    def test_json_carries_the_broken_state_and_the_repair(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        assembly_dir = tmp_path / "genome" / "hg38"
+        register_gtf(assembly_dir, data_dir / "tiny.gtf", "healthy")
+        annotation = register_gtf(assembly_dir, data_dir / "tiny.gtf", "mine")
+        annotation.db.write_bytes(b"truncated")
+
+        result = runner.invoke(app, ["annotations", "hg38", "--json"])
+
+        assert result.exit_code == 0
+        rows = {row["name"]: row for row in _json.loads(result.stdout)["annotations"]}
+        assert rows["mine"]["broken"] is True
+        assert rows["mine"]["registered"] is False
+        assert rows["mine"]["repair"].endswith("mine --force")
+        assert "mine.db" in rows["mine"]["problem"]
+        # One broken annotation costs neither the exit code nor the ones beside it.
+        assert rows["healthy"]["broken"] is False
+        assert rows["healthy"]["registered"] is True
+        assert rows["gencode_v50"]["broken"] is False
 
 
 class TestTableRow:
