@@ -856,6 +856,7 @@ is built, and the record that says all of it finished is written last:</p>
 <a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">  source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz</span>
 <a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">  sha256  d3f33fbf97deef26e2495f709f1c5bb2e2e1bf1ce71fb80758c2c9de42ad7026</span>
 <a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="go">  files   ensgene_v101.db, ensgene_v101.gtf</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="go">  chromosomes checked — every name the GTF uses is one the assembly carries</span>
 </code></pre></div>
 <p>Running it again on a registered annotation reads the record and downloads nothing. It
 exits <code>1</code> when the table lists no such annotation for that assembly (the message says
@@ -863,7 +864,10 @@ what it does list), when the GTF names chromosomes the assembly does not carry, 
 GTF is not the checksum pinned for it, or when the directory cannot be trusted — a
 half-built database from an interrupted run, say, which <code>--force</code> repairs.</p>
 <p><code>--no-check-chromosomes</code> registers one whose chromosome-name mismatch you have looked at
-and accept; the record says the names went unchecked, so you can tell months later. See
+and accept; the record says the check was stood down, so you can tell months later — and
+tell it apart from an annotation registered before its assembly, which is the other way
+the names go unchecked and the only one there is anything to do about. The last line of
+the output says which happened either way. See
 <a href="../aligner/#the-chromosome-names-have-to-match">The chromosome names have to match</a>.</p>
 <h3 id="registering-a-gtf-the-table-does-not-list">Registering a GTF the table does not list<a class="headerlink" href="#registering-a-gtf-the-table-does-not-list" title="Permanent link">&para;</a></h3>
 <p><code>genome register-gtf</code> is the escape hatch: you say where the file is, and it is placed,
@@ -875,6 +879,7 @@ you give is what addresses it from then on:</p>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="go">  source  /home/you/annotations/sacCer3.WS298.gtf</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="go">  sha256  9e1f0a5c6d2b8e4a1c7f3b0d5a8e2c4f6b9d1e3a7c5f8b2d4e6a0c9f1b3d5e7a</span>
 <a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="go">  files   wormbase_ws298.db, wormbase_ws298.gtf</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="go">  chromosomes checked — every name the GTF uses is one the assembly carries</span>
 </code></pre></div>
 <p>A <code>.gz</code> source is decompressed on the way in. Naming the assembly is what lets the
 chromosome check find its <code>chrom.sizes</code> without being told where it is, so an unlisted

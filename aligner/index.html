@@ -970,18 +970,27 @@ nothing complains, and every query answers nothing while looking healthy.</p>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">g</span><span class="o">.</span><span class="n">register_annotation</span><span class="p">(</span><span class="s2">&quot;gencode_v44&quot;</span><span class="p">,</span> <span class="n">check_chromosomes</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 </code></pre></div>
 <p>Whether the names were actually checked is recorded, so you can tell months
-later:</p>
+later — and so is why not, since the two reasons are not the same news:</p>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">record</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">loads</span><span class="p">((</span><span class="n">g</span><span class="o">.</span><span class="n">get_gtf_path</span><span class="p">(</span><span class="s2">&quot;gencode_v44&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;.completion.json&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">read_text</span><span class="p">())</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;chromosomes_checked&quot;</span><span class="p">]</span>      <span class="c1"># True when they were checked</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;chromosomes_checked&quot;</span><span class="p">]</span>             <span class="c1"># True when they were checked</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">record</span><span class="p">[</span><span class="s2">&quot;details&quot;</span><span class="p">][</span><span class="s2">&quot;chromosomes_unchecked_because&quot;</span><span class="p">]</span>   <span class="c1"># None when they were</span>
 </code></pre></div>
 <p>That flag is <code>False</code> for the override, and also when there was nothing to check
 against — registering an annotation for an assembly that has not been prepared
-yet means no <code>chrom.sizes</code> exists to compare with. <code>register_gtf</code> at module level
-is given a directory and no assembly name, so it cannot find that file on its own:
-pass <code>chrom_sizes=&lt;path&gt;</code> to have the names checked, which is what
-<code>Genome.register_gtf</code> and <code>genome register-gtf</code> — both of which are told the
-assembly — do for you.</p>
+yet means no <code>chrom.sizes</code> exists to compare with. <code>chromosomes_unchecked_because</code>
+is what says which: <code>"caller-override"</code> for the first, <code>"no-chrom-sizes"</code> for the
+second. Only the second is worth acting on, and both registration commands print
+the difference rather than advising you to register an assembly you already have.</p>
+<p>A record written before that field existed carries the bare <code>False</code> and nothing
+else. It stood for either reason and nothing on disk says which, so
+<code>genome.io.chromosome_check_summary(record["details"])</code> — which is what those
+commands print — reads it as <em>unknown</em> rather than guessing, and never raises over
+it.</p>
+<p><code>register_gtf</code> at module level is given a directory and no assembly name, so it
+cannot find that file on its own: pass <code>chrom_sizes=&lt;path&gt;</code> to have the names
+checked, which is what <code>Genome.register_gtf</code> and <code>genome register-gtf</code> — both of
+which are told the assembly — do for you.</p>
 <h3 id="what-the-table-offers-and-what-is-registered-here">What the table offers, and what is registered here<a class="headerlink" href="#what-the-table-offers-and-what-is-registered-here" title="Permanent link">&para;</a></h3>
 <p>These are two questions, and a genome answers them separately — "the lab supports
 it" is not "this machine has it":</p>
