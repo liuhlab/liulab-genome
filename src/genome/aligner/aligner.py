@@ -14,6 +14,11 @@ aligner version and the FASTA consumed, so a directory can be explained months
 later. Reading that record is the only thing that ever answers "is this index
 finished?"; no caller consults an index file's mere existence.
 
+That record also pins the **digest of the assembly it was built from**, copied
+from the assembly's own record one directory up, so an assembly re-registered
+underneath an index stops reading as a finished index. The comparison is record
+against record and reads no sequence bytes.
+
 Only index construction is implemented here; mapping/alignment is out of scope.
 """
 
@@ -32,8 +37,10 @@ from genome.io.completion import (
     RECORD_NAME,
     WORK_DIR_NAME,
     CompletionRecord,
+    RegistrationMismatchError,
     build_record,
     check_registration,
+    read_record,
     record_path,
     write_record,
 )
@@ -41,6 +48,12 @@ from genome.io.download import INDEXES_SUBDIR, assembly_data_dir
 
 if TYPE_CHECKING:
     from genome.genome import Genome
+
+#: ``details`` key under which an index pins the digest of the assembly it was built
+#: from. Named for what it covers — the assembly's bytes, not this directory's, which
+#: the record's own ``files`` sizes already hold it to — because ``details`` is
+#: free-form and is read by a human months later.
+_ASSEMBLY_DIGEST_KEY = "assembly_sha256"
 
 
 class IndexNotBuiltError(RuntimeError):
@@ -131,7 +144,8 @@ class Aligner(ABC):
             interrupted before it finished.
         genome.io.completion.RegistrationMismatchError
             If the record disagrees with what is on disk, naming every file that
-            differs and how.
+            differs and how, or if the assembly was re-registered after this index
+            was built, naming both digests.
         """
         if self._registration() is None:
             raise IndexNotBuiltError(
@@ -190,13 +204,74 @@ class Aligner(ABC):
         the index is finished and agrees with disk, ``None`` when the directory
         is absent or empty, and a raise when it holds something untrustworthy.
 
+        An index that no longer matches the reference it was built from is one of
+        the untrustworthy states, so the record is also held to the assembly's
+        current digest (:meth:`_check_assembly_unchanged`) before it is handed
+        back — a finished index over a rebuilt reference is not a finished index.
+
         Raises
         ------
         genome.io.completion.RegistrationError
-            If the directory holds files without a record, or a record that
-            disagrees with what is on disk.
+            If the directory holds files without a record, a record that
+            disagrees with what is on disk, or a record built from a different
+            reference than the one registered now.
         """
-        return check_registration(self.index_dir, repair=self._build_command(overwrite=True))
+        record = check_registration(self.index_dir, repair=self._build_command(overwrite=True))
+        if record is not None:
+            self._check_assembly_unchanged(record)
+        return record
+
+    def _assembly_digest(self) -> str | None:
+        """Return the digest the assembly's own record pins for its FASTA, or ``None``.
+
+        Read out of the completion record one directory up, never computed here:
+        holding an index to its reference has to stay a string against a string,
+        since hashing a FASTA would make opening an index cost a pass over a whole
+        genome — the very cost a record exists to avoid.
+
+        Returns
+        -------
+        str or None
+            The assembly record's ``sha256``, or ``None`` when the assembly has no
+            record, or has one that pins no digest. Both mean *unknown*.
+        """
+        record = read_record(assembly_data_dir(self.assembly))
+        return None if record is None else record.sha256
+
+    def _check_assembly_unchanged(self, record: CompletionRecord) -> None:
+        """Raise when ``record`` was built from a different reference than is here now.
+
+        The index's own files can be intact while the assembly beneath them was
+        re-registered and its sequences, or its chromosome names, changed —
+        chromap is the plain case, its index storing no sequence names at all, so
+        it stays byte-identical throughout. The two digests are what tells.
+
+        Parameters
+        ----------
+        record : genome.io.completion.CompletionRecord
+            This index's record, already held to the files it claims.
+
+        Raises
+        ------
+        genome.io.completion.RegistrationMismatchError
+            If both sides pin a digest and the two disagree. The message names
+            both digests and the call that rebuilds the index.
+        """
+        built_from = record.details.get(_ASSEMBLY_DIGEST_KEY)
+        current = self._assembly_digest()
+        # An absent digest on either side means unknown, not wrong: an index built
+        # before this was recorded pins none, and an assembly may pin none either.
+        # The same reading tool_versions gives a version that could not be gathered.
+        if built_from is None or current is None or built_from == current:
+            return
+        raise RegistrationMismatchError(
+            f"the {self.name} index in {self.index_dir} was built from a different "
+            f"{self.assembly} than the one registered now: the index pins {built_from}, "
+            f"while {record_path(assembly_data_dir(self.assembly))} now pins {current}. "
+            f"The reference was rebuilt after this index was, so the index no longer "
+            f"matches the sequences — or the chromosome names — it would be mapped "
+            f"against. Rebuild it with `{self._build_command(overwrite=True)}`."
+        )
 
     def _begin_build(self) -> None:
         """Prepare :attr:`index_dir` for a fresh build, discarding any earlier record.
@@ -264,20 +339,31 @@ class Aligner(ABC):
         any earlier would bless a half-built index. It carries the exact command
         and the parameters it ran with, the aligner version and the FASTA
         consumed, so the build can be explained and reproduced later.
+
+        Two things say which reference was indexed, and they answer different
+        questions: ``fasta`` is the path — *which file* — and is provenance, while
+        the assembly's digest is *which bytes*, and is what a later reopening is
+        held to. A digest that could not be read is left out rather than written
+        as null, so an unknown fact is absent here exactly as it is in
+        ``tool_versions``.
         """
+        details: dict[str, Any] = {
+            "aligner": self.name,
+            "binary": self.binary,
+            "assembly": self.assembly,
+            "fasta": str(self._genome.files.fasta),
+            "command": list(command),
+            "parameters": parameters,
+        }
+        digest = self._assembly_digest()
+        if digest is not None:
+            details[_ASSEMBLY_DIGEST_KEY] = digest
         record = build_record(
             self.index_dir,
             kind="index",
             name=self.index_dir.name,
             files=self._claimed_files(),
-            details={
-                "aligner": self.name,
-                "binary": self.binary,
-                "assembly": self.assembly,
-                "fasta": str(self._genome.files.fasta),
-                "command": list(command),
-                "parameters": parameters,
-            },
+            details=details,
         )
         # The version was detected when this aligner was constructed, and the binary
         # that just ran is that same one — asking it again would run it a second time

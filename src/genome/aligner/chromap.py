@@ -109,8 +109,9 @@ class Chromap(Aligner):
         Raises
         ------
         genome.io.completion.RegistrationError
-            If the index directory holds files without a record, or a record that
-            disagrees with them. Pass ``overwrite=True`` to rebuild.
+            If the index directory holds files without a record, a record that
+            disagrees with them, or a record pinning a different assembly digest
+            than the one registered now. Pass ``overwrite=True`` to rebuild.
         RuntimeError
             If chromap exits non-zero.
         """
