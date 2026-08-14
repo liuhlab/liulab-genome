@@ -30,9 +30,8 @@ import genome.external as external_mod
 from genome import Genome
 from genome.aligner.aligner import IndexNotBuiltError
 from genome.aligner.chromap import Chromap
-from genome.aligner.chromap import _kwargs_to_flags as _chromap_kwargs_to_flags
 from genome.aligner.mixin import AlignerMixin, _resolve_aligner
-from genome.aligner.star import STAR, _kwargs_to_flags
+from genome.aligner.star import STAR
 from genome.external import RecordingTool, ToolCall, ToolNotFoundError
 from genome.io.completion import (
     RECORD_NAME,
@@ -250,8 +249,22 @@ def building_run(tools: _Tools) -> list[list[str]]:
 # -- pure logic -------------------------------------------------------------
 
 
-def test_kwargs_to_flags_scalar_and_list() -> None:
-    flags = _kwargs_to_flags({"genomeSAindexNbases": 11, "genomeFastaFiles": ["a.fa", "b.fa"]})
+def test_one_renderer_spells_each_aligners_long_options(
+    stub_star: STAR, stub_chromap: Chromap
+) -> None:
+    # There is one renderer, and the only thing an aligner varies is the character its
+    # long options put between words — declared as a class attribute, not as a body of
+    # its own. Handing both the same keywords is what shows the difference is only that.
+    kwargs = {"min_frag_length": 30, "read_format": ["r1", "bc"]}
+
+    star_flags = ["--min_frag_length", "30", "--read_format", "r1", "bc"]
+    chromap_flags = ["--min-frag-length", "30", "--read-format", "r1", "bc"]
+    assert stub_star._flags(kwargs) == star_flags
+    assert stub_chromap._flags(kwargs) == chromap_flags
+
+
+def test_one_renderer_expands_a_list_value_after_its_flag(stub_star: STAR) -> None:
+    flags = stub_star._flags({"genomeSAindexNbases": 11, "genomeFastaFiles": ["a.fa", "b.fa"]})
     assert flags == ["--genomeSAindexNbases", "11", "--genomeFastaFiles", "a.fa", "b.fa"]
 
 
@@ -460,6 +473,41 @@ def test_the_record_carries_the_exact_command_and_the_parameters(
     assert "genomeSAindexNbases" in parameters
 
 
+def test_star_records_the_knobs_it_spells_itself_and_renders_neither_twice(
+    stub_star: STAR, captured_run: list[list[str]]
+) -> None:
+    # `parameters` is every tuning knob that determined the build — the four STAR writes
+    # under its own flag names included — and the command line is rendered from the
+    # caller's keywords alone. Recording and rendering read the same dict in the old
+    # code; a knob appearing under both spellings is what that confusion looked like.
+    stub_star.index(threads=3, sjdb_overhang=49)
+
+    parameters = _record_of(stub_star).details["parameters"]
+    assert {"threads", "gtf", "sjdb_gtf_file", "sjdb_overhang"} <= set(parameters)
+
+    args = captured_run[0]
+    assert _flag_value(args, "--runThreadN") == "3"
+    assert _flag_value(args, "--sjdbOverhang") == "49"
+    assert not {"--threads", "--gtf", "--sjdb_gtf_file", "--sjdb_overhang"} & set(args)
+
+
+def test_chromap_records_the_knobs_it_spells_itself_and_renders_neither_twice(
+    stub_chromap: Chromap, captured_run: list[list[str]]
+) -> None:
+    # The same contract from the other side: chromap now spells its two minimizer knobs
+    # on the command line and records them, so rendering the recorded dict as well would
+    # emit each flag a second time. `_flag_value` asserts the flag appears exactly once.
+    stub_chromap.index(kmer=20, window=10, min_frag_length=25)
+
+    parameters = _record_of(stub_chromap).details["parameters"]
+    assert parameters == {"kmer": 20, "window": 10, "min_frag_length": 25}
+
+    args = captured_run[0]
+    assert _flag_value(args, "--kmer") == "20"
+    assert _flag_value(args, "--window") == "10"
+    assert _flag_value(args, "--min-frag-length") == "25"
+
+
 def test_the_record_claims_every_file_the_build_left(
     stub_star: STAR, building_run: list[list[str]]
 ) -> None:
@@ -503,6 +551,28 @@ def test_index_is_reused_when_the_record_says_it_finished(
     stub_star.index()  # a valid record -> reused, no rebuild
 
     assert len(building_run) == 1
+
+
+def test_reusing_a_star_index_never_resolves_the_annotation_that_named_it(
+    mixin_genome: Genome, tools: _Tools, tmp_path: Path
+) -> None:
+    # Reuse short-circuits before anything composes a command line, and composing STAR's
+    # is what resolves the annotation — so a finished index is handed back without the
+    # annotation being looked up at all. The template is what could quietly have moved
+    # this: hand `_build` a command line already built and the lookup overtakes the
+    # reuse check, turning a returned path into a raise. It composes lazily so that
+    # cannot happen, and this pins the order from both sides.
+    registered = {"toy": tmp_path / "toy.gtf"}
+    mixin_genome.get_gtf_path = registered.__getitem__  # type: ignore[method-assign]
+
+    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
+
+    registered.clear()
+
+    assert mixin_genome.build_star_index("toy", tool=tools("STAR")) == built
+    assert len(tools.calls) == 1  # reused: STAR was not run a second time
+    # The read-only way in never composed a command line to begin with.
+    assert mixin_genome.get_star_index("toy") == built
 
 
 def test_overwrite_rebuilds_a_finished_index(
@@ -652,18 +722,14 @@ def test_an_explicit_chr_bin_nbits_wins_over_the_computed_one(
 
 
 @pytest.fixture
-def mixin_genome(
-    monkeypatch: pytest.MonkeyPatch, tools: _Tools, data_root: Path, tmp_path: Path
-) -> Genome:
-    """A Genome-like object carrying :class:`AlignerMixin`, with the binaries stood in for.
+def mixin_genome(data_root: Path, tmp_path: Path) -> Genome:
+    """A Genome-like object carrying :class:`AlignerMixin`.
 
-    The one place a patch is still needed: the mixin builds the aligner itself, so there
-    is nowhere to hand it a tool. What is replaced is the fallback an aligner uses when
-    it is given none — one name, for both aligners, rather than a resolution and a
-    version per class.
+    No patch anywhere: the mixin forwards ``tool=`` to the aligner it builds, so a test
+    that wants a recording stand-in hands one to the ``build_*`` call. Constructing an
+    aligner without one still runs nothing, which is why the read-only entry points here
+    need no tool at all.
     """
-    monkeypatch.setattr(aligner_mod, "_default_tool", tools)
-
     stub = _make_genome(tmp_path)
 
     class _MixinGenome(AlignerMixin):
@@ -685,18 +751,38 @@ def test_resolve_aligner_unknown_raises() -> None:
         _resolve_aligner("bowtie")
 
 
-def test_get_index_returns_built_index_path(
-    mixin_genome: Genome, captured_run: list[list[str]]
-) -> None:
-    built = mixin_genome.build_star_index("toy")
+def test_get_index_returns_built_index_path(mixin_genome: Genome, tools: _Tools) -> None:
+    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
     assert mixin_genome.get_index("star", gtf="toy") == built
 
 
-def test_get_star_index_matches_generic_get_index(
-    mixin_genome: Genome, captured_run: list[list[str]]
-) -> None:
-    mixin_genome.build_star_index("toy")
+def test_get_star_index_matches_generic_get_index(mixin_genome: Genome, tools: _Tools) -> None:
+    mixin_genome.build_star_index("toy", tool=tools("STAR"))
     assert mixin_genome.get_star_index("toy") == mixin_genome.get_index("star", gtf="toy")
+
+
+def test_the_mixin_forwards_the_tool_to_the_aligner_it_builds(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # The seam `Aligner.__init__` offers is open the whole way from `Genome`. It used to
+    # be closed here — the mixin built the aligner and handed it nothing — so the only
+    # way to stand a binary in was to patch the fallback out from under it.
+    mixin_genome.build_star_index("toy", tool=tools("STAR"))
+    mixin_genome.build_chromap_index(tool=tools("chromap"))
+
+    assert len(tools.calls) == 2
+    assert "genomeGenerate" in tools.calls[0]
+    assert "--build-index" in tools.calls[1]
+
+
+def test_get_index_takes_a_tool_rather_than_reading_it_as_a_selector(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # `get_index`'s remaining keywords pin down *which* index; `tool` is not one of them
+    # and is spelled out so it cannot be mistaken for one.
+    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
+
+    assert mixin_genome.get_index("star", gtf="toy", tool=tools("STAR")) == built
 
 
 def test_get_index_raises_before_build(mixin_genome: Genome) -> None:
@@ -770,12 +856,6 @@ def test_real_star_index_with_gtf(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 
 # -- pure logic -------------------------------------------------------------
-
-
-def test_chromap_kwargs_to_flags_hyphenates_and_expands_lists() -> None:
-    # chromap's long options are hyphenated, so underscores become hyphens.
-    flags = _chromap_kwargs_to_flags({"min_frag_length": 30, "read_format": ["r1", "bc"]})
-    assert flags == ["--min-frag-length", "30", "--read-format", "r1", "bc"]
 
 
 def test_chromap_index_dir_is_per_assembly(stub_chromap: Chromap) -> None:
@@ -878,16 +958,14 @@ def test_resolve_aligner_includes_chromap() -> None:
     assert _resolve_aligner("CHROMAP") is Chromap
 
 
-def test_build_and_get_chromap_index(mixin_genome: Genome, captured_run: list[list[str]]) -> None:
-    built = mixin_genome.build_chromap_index()
+def test_build_and_get_chromap_index(mixin_genome: Genome, tools: _Tools) -> None:
+    built = mixin_genome.build_chromap_index(tool=tools("chromap"))
     assert mixin_genome.get_index("chromap") == built
     assert built.name == "chromap.index"
 
 
-def test_get_chromap_index_matches_generic_get_index(
-    mixin_genome: Genome, captured_run: list[list[str]]
-) -> None:
-    mixin_genome.build_chromap_index()
+def test_get_chromap_index_matches_generic_get_index(mixin_genome: Genome, tools: _Tools) -> None:
+    mixin_genome.build_chromap_index(tool=tools("chromap"))
     assert mixin_genome.get_chromap_index() == mixin_genome.get_index("chromap")
 
 
@@ -918,6 +996,27 @@ def test_real_chromap_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     record = _record_of(chromap)
     assert record.files["chromap.index"] == out.stat().st_size
     assert record.tool_versions["chromap"] == chromap.version
+
+
+@_needs_chromap
+def test_real_chromap_accepts_the_minimizer_knobs_it_now_spells_itself(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # kmer and window moved out of the rendered keywords and onto the command line, so
+    # a real chromap is what says the two spellings it is given are ones it accepts —
+    # the stubbed tests assert the string and would pass on a flag chromap rejects.
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+    chromap = Chromap(_make_genome(tmp_path))
+
+    out = chromap.index(kmer=17, window=7)
+
+    assert out.is_file()
+    assert out.stat().st_size > 0
+
+    record = _record_of(chromap)
+    assert record.details["parameters"] == {"kmer": 17, "window": 7}
+    assert _flag_value(record.details["command"], "--kmer") == "17"
+    assert _flag_value(record.details["command"], "--window") == "7"
 
 
 # ===========================================================================
