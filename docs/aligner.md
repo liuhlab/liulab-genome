@@ -44,6 +44,12 @@ file is, and it is placed, built and recorded the same way:
 g.register_gtf("path/to/annotation.gtf", name="custom")
 ```
 
+The same from a shell, where the assembly is named rather than opened:
+
+```bash
+$ genome register-gtf sacCer3 path/to/annotation.gtf custom
+```
+
 Each annotation lives in its own directory next to the sequence files:
 
 ```
@@ -65,10 +71,12 @@ A few things to know:
   which is also the repair: it keeps a GTF whose checksum still matches and only
   rebuilds the database.
 - **Gene/transcript inference is off by default** (`disable_infer_genes` /
-  `disable_infer_transcripts` are `True`). Standard annotation GTFs already
+  `disable_infer_transcripts` are `True`; `--infer-genes` / `--infer-transcripts`
+  from a shell, on either registration command). Standard annotation GTFs already
   declare `gene`/`transcript` features, and inferring them is the classic
   gffutils slow path. Enable it (`disable_infer_genes=False`) only for a bare
-  exon-level GTF that lacks those records.
+  exon-level GTF that lacks those records — registered with inference off, one
+  yields a database of exons and nothing else.
 
 ### The chromosome names have to match
 
@@ -86,8 +94,8 @@ g.register_annotation("gencode_v44")
 # An annotation and its assembly must spell chromosomes the same way, and the
 # usual cause is a UCSC-versus-Ensembl mismatch ('chr1' against '1', 'chrM'
 # against 'MtDNA'). The assembly carries: chr1, chr10, ... Register the
-# annotation built for this assembly, or pass check_chromosomes=False to
-# register this one anyway.
+# annotation built for this assembly, or pass check_chromosomes=False —
+# --no-check-chromosomes from a shell — to register this one anyway.
 ```
 
 Three things about it are deliberate:
@@ -104,9 +112,9 @@ Three things about it are deliberate:
   rather than an interrupted registration. The GTF is streamed, never loaded: a
   GENCODE GTF is well over a gigabyte unpacked.
 - **The override is `check_chromosomes=False`**, on `register_annotation`,
-  `register_gtf` and their module-level forms. It is for the case where you have
-  looked at the mismatch and accept it — one unusual contig should not block a
-  legitimate annotation:
+  `register_gtf`, their module-level forms and `--no-check-chromosomes` on either
+  registration command. It is for the case where you have looked at the mismatch
+  and accept it — one unusual contig should not block a legitimate annotation:
 
 ```python
 g.register_annotation("gencode_v44", check_chromosomes=False)
@@ -124,9 +132,10 @@ record["details"]["chromosomes_checked"]      # True when they were checked
 That flag is `False` for the override, and also when there was nothing to check
 against — registering an annotation for an assembly that has not been prepared
 yet means no `chrom.sizes` exists to compare with. `register_gtf` at module level
-is given no assembly name and so cannot find that file on its own: pass
-`chrom_sizes=<path>` to have the names checked, which is what `Genome.register_gtf`
-does for you.
+is given a directory and no assembly name, so it cannot find that file on its own:
+pass `chrom_sizes=<path>` to have the names checked, which is what
+`Genome.register_gtf` and `genome register-gtf` — both of which are told the
+assembly — do for you.
 
 ### What the table offers, and what is registered here
 

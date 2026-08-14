@@ -10,12 +10,14 @@ directory beside the assembly's sequence files::
         .completion.json    # the record saying all of that finished
         .work/              # the disposable working area a fetch downloads into
 
-There are two ways in. :func:`fetch_annotation` takes the **name** the curated annotation
-table lists for this assembly, fetches that row's URL, checks the unpacked GTF against
-the sha256 the row pins (ADR-0006), builds the database and writes the record;
-:func:`register_annotation` is the same thing addressed by assembly name, returning the
-record itself, and is what the CLI drives. :func:`register_gtf` takes a **path** instead
-and is the escape hatch for a GTF no row lists.
+There are two ways in, each in two forms. By **name**: :func:`fetch_annotation` takes the
+name the curated annotation table lists for this assembly, fetches that row's URL, checks
+the unpacked GTF against the sha256 the row pins (ADR-0006), builds the database and
+writes the record. By **path**: :func:`register_gtf` is the escape hatch for a GTF no row
+lists — the caller says where the file is, and it is placed, built and recorded the same
+way. Each has a form addressed by assembly name rather than by directory and answering
+with the record rather than the paths — :func:`register_annotation` and
+:func:`register_annotation_by_path` — and those two are what the CLI drives.
 
 **A GTF belongs to its assembly or to nothing.** Either way in checks that every
 **Chromosome** the GTF names is one the assembly's ``chrom.sizes`` carries, and raises
@@ -34,6 +36,13 @@ record that agrees with disk, re-registering something that already has one retu
 silently, and a directory holding files but no record raises and names its repair
 (ADR-0007).
 
+**Every annotation directory is registered, broken, or not begun**, and the middle one
+has its own listing: :func:`list_broken_annotations`. Registering an annotation raises
+over a directory it cannot trust, but listing must not — one annotation nobody can vouch
+for cannot be allowed to stop a **Genome** opening or hide the annotations beside it — so
+the two lists are reported side by side and each broken one carries the command that
+repairs it.
+
 **What the lab offers and what this machine holds are different questions.** The first is
 the annotation table's to answer (:func:`~genome.metadata.list_annotation_metadata`), the
 second this disk's (:func:`list_annotations`); :func:`annotation_status` sets one against
@@ -51,8 +60,9 @@ Examples
 from __future__ import annotations
 
 import gzip
+import shlex
 import shutil
-from collections.abc import Iterable, Sequence
+from collections.abc import Container, Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import IO, Any
@@ -83,6 +93,11 @@ _GTF_SUBDIR = download.ANNOTATIONS_SUBDIR
 #: How many names an error lists before saying how many it left out. A whole-genome
 #: mismatch offends in the thousands, and a message that long is one nobody reads.
 _MAX_LISTED_NAMES = 10
+
+#: What a repair command puts where a GTF's path belongs when nothing on disk remembers
+#: it. Deliberately not a path: a command naming a file that is not there is one that
+#: fails when it is pasted, which is worse than one visibly asking to be filled in.
+_UNKNOWN_PATH = "<path>"
 
 
 class ChromosomeMismatchError(ValueError):
@@ -134,7 +149,8 @@ class ChromosomeMismatchError(ValueError):
             f"must spell chromosomes the same way, and the usual cause is a UCSC-versus-Ensembl "
             f"mismatch ('chr1' against '1', 'chrM' against 'MtDNA'). The assembly carries: "
             f"{_elide(self.known)}. Register the annotation built for this assembly, or pass "
-            f"check_chromosomes=False to register this one anyway."
+            f"check_chromosomes=False — --no-check-chromosomes from a shell — to register "
+            f"this one anyway."
         )
 
 
@@ -147,6 +163,12 @@ class AnnotationNotRegisteredError(KeyError):
     and only asking for its path raises, naming the command that closes the gap. The
     other way in is a name nothing knows, and the message then says what the table does
     offer and how to register a GTF it does not list.
+
+    A third way in is a directory that is there and cannot be trusted, which is not
+    registered either. The next action is then neither of the above — registering it
+    plainly would itself raise and demand ``--force`` — so ``broken`` carries what
+    :func:`list_broken_annotations` found and the message quotes its repair, which is a
+    command that runs as it stands.
 
     A :class:`KeyError`, because that is what asking a registry for a name it does not
     hold has always been.
@@ -161,6 +183,9 @@ class AnnotationNotRegisteredError(KeyError):
         The names that are registered on this machine.
     offered : iterable of str
         The names the annotation table offers for this assembly.
+    broken : BrokenAnnotation, optional
+        The broken registration filed under ``name``, when that is why there is no path
+        to hand back.
 
     Attributes
     ----------
@@ -172,6 +197,8 @@ class AnnotationNotRegisteredError(KeyError):
         The registered names, as they were passed in.
     offered : tuple of str
         The offered names, as they were passed in.
+    broken : BrokenAnnotation or None
+        The broken registration, or ``None`` when nothing of that name is on disk.
 
     Examples
     --------
@@ -181,13 +208,22 @@ class AnnotationNotRegisteredError(KeyError):
     """
 
     def __init__(
-        self, assembly: str, name: str, registered: Iterable[str], offered: Iterable[str]
+        self,
+        assembly: str,
+        name: str,
+        registered: Iterable[str],
+        offered: Iterable[str],
+        *,
+        broken: BrokenAnnotation | None = None,
     ) -> None:
         self.assembly = assembly
         self.name = name
         self.registered: tuple[str, ...] = tuple(registered)
         self.offered: tuple[str, ...] = tuple(offered)
-        if name in self.offered:
+        self.broken = broken
+        if broken is not None:
+            next_step = f"A broken registration for it is on disk: {broken.problem}"
+        elif name in self.offered:
             next_step = (
                 f"The annotation table offers it for {assembly!r}, so register it with "
                 f"`{_register_command(assembly, name)}`."
@@ -213,6 +249,48 @@ class GtfAnnotation:
     db: Path
 
 
+@dataclass(frozen=True)
+class BrokenAnnotation:
+    """An annotation directory that is there and cannot be trusted as finished.
+
+    What :func:`list_annotations` leaves out, said out loud. It is not a
+    :class:`GtfAnnotation` and carries no file paths, because the whole point is that
+    nothing vouches for the files: what it carries instead is why it cannot be trusted
+    and the one command that makes it trustworthy again.
+
+    Attributes
+    ----------
+    name : str
+        The **Registered name** its directory is filed under.
+    directory : pathlib.Path
+        The annotation directory, whatever state it is in.
+    problem : str
+        What is wrong, in full — which files disagree or which are there with no record
+        — ending in the ``repair`` below. This is
+        :func:`~genome.io.completion.check_registration`'s own message, so re-registering
+        the annotation says exactly what listing it says.
+    repair : str
+        The command that registers it again from scratch.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> broken = BrokenAnnotation(
+    ...     name="mine",
+    ...     directory=Path("/data/genome/hg38/gtf/mine"),
+    ...     problem="... holds files but no .completion.json ...",
+    ...     repair="genome register-gtf hg38 /tmp/mine.gtf mine --force",
+    ... )
+    >>> broken.repair
+    'genome register-gtf hg38 /tmp/mine.gtf mine --force'
+    """
+
+    name: str
+    directory: Path
+    problem: str
+    repair: str
+
+
 def _annotations_root(assembly_dir: Path) -> Path:
     """Return ``<assembly_dir>/gtf``, the parent of every annotation directory."""
     return assembly_dir / _GTF_SUBDIR
@@ -234,6 +312,15 @@ def _register_command(assembly: str, name: str) -> str:
     return f"genome register-annotation {assembly} {name}"
 
 
+def _register_gtf_command(assembly: str, source: str, name: str) -> str:
+    """Return the command that registers the GTF at ``source`` as ``name``.
+
+    ``source`` is rendered by the caller, so a message about a GTF nobody has yet named
+    can say ``<path>`` where one about a real file says the file, shell-quoted.
+    """
+    return f"genome register-gtf {assembly} {source} {name}"
+
+
 def _repair_command(assembly: str, name: str) -> str:
     """Return the command that registers ``name`` again from scratch.
 
@@ -243,13 +330,56 @@ def _repair_command(assembly: str, name: str) -> str:
     return f"{_register_command(assembly, name)} --force"
 
 
-def _path_repair_command(source: Path, name: str) -> str:
-    """Return the call that registers an unlisted GTF again from scratch.
+def _path_repair_call(source: Path, name: str) -> str:
+    """Return the Python call that registers an unlisted GTF again from scratch.
 
-    A GTF no row lists cannot be repaired by name — nothing knows where it came from
-    but the caller who passed the path — so the repair names the call, with the path.
+    Given a directory and no assembly name there is no command to name: the caller who
+    passed the path is the only one who knows which assembly it is for. So the repair
+    names the call instead. Addressed by assembly name, it is a command a shell can run
+    — see :func:`_path_repair_command`.
     """
     return f"register_gtf(<assembly dir>, {str(source)!r}, {name!r}, force=True)"
+
+
+def _path_repair_command(assembly: str, source: str, name: str) -> str:
+    """Return the command that registers the GTF at ``source`` again from scratch.
+
+    ``source`` is rendered by the caller, as :func:`_register_gtf_command` takes it: a
+    file that is there is shell-quoted, and one nothing remembers the path of is
+    :data:`_UNKNOWN_PATH`.
+    """
+    return f"{_register_gtf_command(assembly, source, name)} --force"
+
+
+def _annotation_repair(directory: Path, *, assembly: str, offered: Container[str]) -> str:
+    """Return the command that registers ``directory``'s annotation again from scratch.
+
+    Which route repairs a broken annotation is decided by which route registered it, and
+    the two differ: a listed one is fetched again from the row that lists it, an unlisted
+    one has to be handed the GTF it was built from. The record is what remembers that
+    path — so an annotation whose record is gone, or whose source has since moved, can
+    only name the command with the path left to fill in. That is the honest answer, and
+    the alternative is printing a path that is not there.
+    """
+    name = directory.name
+    if name in offered:
+        return _repair_command(assembly, name)
+    record = read_record(directory)
+    source = Path(record.source_url) if record is not None and record.source_url else None
+    if source is not None and source.is_file():
+        return _path_repair_command(assembly, shlex.quote(str(source)), name)
+    return _path_repair_command(assembly, _UNKNOWN_PATH, name)
+
+
+def _assembly_dir(assembly: str, cache_dir: str | Path | None) -> Path:
+    """Return the assembly directory an assembly-addressed call files into.
+
+    ``cache_dir`` overrides it; otherwise the **Data dir**'s layout decides, which is
+    what makes naming an assembly enough to find everything filed under it.
+    """
+    if cache_dir is not None:
+        return Path(cache_dir).expanduser()
+    return download.assembly_data_dir(assembly)
 
 
 def list_annotations(assembly_dir: Path) -> dict[str, GtfAnnotation]:
@@ -259,8 +389,9 @@ def list_annotations(assembly_dir: Path) -> dict[str, GtfAnnotation]:
     database file exists, which is true of a build killed half-way through as well as of
     a finished one. Anything else in the ``gtf/`` subtree is left out rather than raised
     over: listing is a question about this machine, and one unfinished annotation must
-    not stop a genome from opening. Registering that name again is what reports it as
-    broken.
+    not stop a genome from opening. Left out is not lost —
+    :func:`list_broken_annotations` is where those go, and between the two every
+    directory under ``gtf/`` is accounted for.
 
     Parameters
     ----------
@@ -291,6 +422,59 @@ def list_annotations(assembly_dir: Path) -> dict[str, GtfAnnotation]:
             continue
         annotation = _annotation_files(assembly_dir, directory.name)
         found[annotation.name] = annotation
+    return found
+
+
+def list_broken_annotations(assembly_dir: Path, assembly: str) -> dict[str, BrokenAnnotation]:
+    """Return the annotations under ``assembly_dir`` that cannot be trusted, keyed by name.
+
+    The complement of :func:`list_annotations`. Registering an annotation over a
+    directory like this raises (ADR-0007) and that is right, but a caller who never
+    registers anything would otherwise never hear of it: a half-built annotation read as
+    one nobody had fetched, and one no table row lists did not appear at all. So this
+    reports rather than raises, and each entry carries the command that repairs it.
+
+    A directory that is absent, or empty but for its working area, is a registration
+    nobody has begun and is not broken — the same rule the registration path follows.
+
+    ``assembly`` is needed for more than the message: whether the annotation table lists
+    the name decides which command repairs it, since a listed one is re-fetched by name
+    and an unlisted one has to be handed its GTF again.
+
+    Parameters
+    ----------
+    assembly_dir : pathlib.Path
+        The assembly directory whose ``gtf/`` subtree is inspected.
+    assembly : str
+        The assembly those annotations belong to, e.g. ``"hg38"``.
+
+    Returns
+    -------
+    dict of str to BrokenAnnotation
+        Registered name to what is wrong with it, in directory-name order. Empty when
+        every annotation there is finished, which is the ordinary case.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> list_broken_annotations(Path("/tmp/definitely-not-an-assembly"), "hg38")
+    {}
+    """
+    root = _annotations_root(assembly_dir)
+    if not root.is_dir():
+        return {}
+    offered = {record.name for record in list_annotation_metadata(assembly)}
+    found: dict[str, BrokenAnnotation] = {}
+    for directory in sorted(root.iterdir()):
+        if not directory.is_dir():
+            continue
+        repair = _annotation_repair(directory, assembly=assembly, offered=offered)
+        try:
+            check_registration(directory, repair=repair)
+        except RegistrationError as err:
+            found[directory.name] = BrokenAnnotation(
+                name=directory.name, directory=directory, problem=str(err), repair=repair
+            )
     return found
 
 
@@ -365,6 +549,11 @@ def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> 
     what the lab supports, :func:`list_annotations` says what is on this disk, and every
     row carries which of the two it is. The command behind it is ``genome annotations``.
 
+    A third answer rides along, because this is where a reader would look for it:
+    :func:`list_broken_annotations` says which of the directories on this disk cannot be
+    trusted, and such a row is ``broken`` rather than ``registered``. Nothing raises —
+    reporting a broken annotation is the point, and one of them must not cost the rest.
+
     Nothing is prepared, fetched, built or created to answer it — an assembly with no
     directory at all is the case it most needs to serve, and it answers from the shipped
     table alone.
@@ -382,11 +571,14 @@ def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> 
     dict
         ``assembly``, the ``directory`` inspected, the ``default_annotation`` name (or
         ``None``), and ``annotations``: one row per name, the offered ones in table
-        order followed by anything registered that no row lists. Each row carries the
-        ``name``, whether it is ``offered`` and whether it is ``registered``, the
-        table's ``default`` flag, the row's ``provider``/``version``/``url``/``sha256``
-        (``None`` for an unlisted one), and the ``path`` of the registered GTF (``None``
-        when it is not registered here). Ready to serialize as it is.
+        order followed by anything on this disk that no row lists. Each row carries the
+        ``name``, whether it is ``offered``, whether it is ``registered`` and whether it
+        is ``broken``, the table's ``default`` flag, the row's
+        ``provider``/``version``/``url``/``sha256`` (``None`` for an unlisted one), the
+        ``path`` of the registered GTF (``None`` when it is not registered here), and —
+        for a broken one — the ``problem`` and the ``repair`` command that fixes it
+        (``None`` otherwise). ``registered`` and ``broken`` are never both true: a
+        registration nothing vouches for is not one. Ready to serialize as it is.
 
     Examples
     --------
@@ -394,48 +586,55 @@ def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> 
     >>> payload["default_annotation"]
     'ensgene_v101'
     """
-    assembly_dir = (
-        Path(cache_dir).expanduser()
-        if cache_dir is not None
-        else download.assembly_data_dir(assembly)
-    )
+    assembly_dir = _assembly_dir(assembly, cache_dir)
     offered = list_annotation_metadata(assembly)
     registered = list_annotations(assembly_dir)
+    broken = list_broken_annotations(assembly_dir, assembly)
     rows: list[dict[str, object]] = [
-        {
-            "name": record.name,
-            "offered": True,
-            "registered": record.name in registered,
-            "default": record.default,
-            "provider": record.provider,
-            "version": record.version,
-            "url": record.url,
-            "sha256": record.sha256,
-            "path": str(registered[record.name].gtf) if record.name in registered else None,
-        }
+        _status_row(record.name, table_row=record, registered=registered, broken=broken)
         for record in offered
     ]
     listed = {record.name for record in offered}
     rows.extend(
-        {
-            "name": name,
-            "offered": False,
-            "registered": True,
-            "default": False,
-            "provider": None,
-            "version": None,
-            "url": None,
-            "sha256": None,
-            "path": str(annotation.gtf),
-        }
-        for name, annotation in registered.items()
-        if name not in listed
+        _status_row(name, table_row=None, registered=registered, broken=broken)
+        for name in sorted((registered.keys() | broken.keys()) - listed)
     )
     return {
         "assembly": assembly,
         "directory": str(assembly_dir),
         "default_annotation": default_annotation(offered, registered),
         "annotations": rows,
+    }
+
+
+def _status_row(
+    name: str,
+    *,
+    table_row: AnnotationMetadata | None,
+    registered: dict[str, GtfAnnotation],
+    broken: dict[str, BrokenAnnotation],
+) -> dict[str, object]:
+    """Return one :func:`annotation_status` row, whichever of the three states it is in.
+
+    One shape for all of them, so a reader of the payload never has to ask which keys a
+    row has — a name the table does not list carries the table's columns as ``None``,
+    and one nothing is wrong with carries the broken columns as ``None``.
+    """
+    annotation = registered.get(name)
+    broken_annotation = broken.get(name)
+    return {
+        "name": name,
+        "offered": table_row is not None,
+        "registered": annotation is not None,
+        "broken": broken_annotation is not None,
+        "default": table_row.default if table_row is not None else False,
+        "provider": table_row.provider if table_row is not None else None,
+        "version": table_row.version if table_row is not None else None,
+        "url": table_row.url if table_row is not None else None,
+        "sha256": table_row.sha256 if table_row is not None else None,
+        "path": str(annotation.gtf) if annotation is not None else None,
+        "problem": broken_annotation.problem if broken_annotation is not None else None,
+        "repair": broken_annotation.repair if broken_annotation is not None else None,
     }
 
 
@@ -518,6 +717,37 @@ def register_gtf(
     GtfAnnotation(name='custom', ...)
     """
     source = Path(gtf)
+    return _register_gtf(
+        assembly_dir,
+        source,
+        name,
+        repair=_path_repair_call(source, name),
+        force=force,
+        chrom_sizes=chrom_sizes,
+        check_chromosomes=check_chromosomes,
+        disable_infer_genes=disable_infer_genes,
+        disable_infer_transcripts=disable_infer_transcripts,
+    )
+
+
+def _register_gtf(
+    assembly_dir: Path,
+    source: Path,
+    name: str,
+    *,
+    repair: str,
+    force: bool,
+    chrom_sizes: str | Path | None,
+    check_chromosomes: bool,
+    disable_infer_genes: bool,
+    disable_infer_transcripts: bool,
+) -> GtfAnnotation:
+    """Place, build and record the GTF at ``source``, as :func:`register_gtf` describes.
+
+    ``repair`` is the only thing its two callers differ over: what a broken annotation
+    directory tells the caller to run. Given an assembly name that is a command; given
+    only a directory it can only be the Python call.
+    """
     if not source.is_file():
         raise FileNotFoundError(
             f"GTF file not found: {source}. Pass the path of an existing .gtf or "
@@ -526,7 +756,7 @@ def register_gtf(
 
     annotation = _annotation_files(assembly_dir, name)
     directory = annotation_dir(assembly_dir, name)
-    if _already_registered(directory, force=force, repair=_path_repair_command(source, name)):
+    if _already_registered(directory, force=force, repair=repair):
         return annotation
 
     known = (
@@ -651,7 +881,8 @@ def fetch_annotation(
         raise ValueError(
             f"no annotation named {name!r} is listed for {assembly!r}. Listed for it: "
             f"{offered}. An annotation the table does not list is registered by path "
-            f"instead — Genome.register_gtf(<path>, {name!r})."
+            f"instead — `{_register_gtf_command(assembly, '<path>', name)}`, or "
+            f"Genome.register_gtf(<path>, {name!r}) from Python."
         )
 
     annotation = _annotation_files(assembly_dir, name)
@@ -694,13 +925,17 @@ def register_annotation(
     progressbar: bool = True,
     metadata: AnnotationMetadata | None = None,
     check_chromosomes: bool = True,
+    disable_infer_genes: bool = True,
+    disable_infer_transcripts: bool = True,
 ) -> dict[str, object]:
     """Register ``name`` for ``assembly`` and return the record of what that did.
 
     :func:`fetch_annotation` addressed by assembly name rather than by directory, and
-    answering with the record rather than the paths — the one call the CLI makes, and
-    the one a script makes when it wants to serialize what happened. An annotation that
-    is already registered is returned from its record without fetching anything.
+    answering with the record rather than the paths — the call ``genome
+    register-annotation`` makes, and the one a script makes when it wants to serialize
+    what happened. An annotation that is already registered is returned from its record
+    without fetching anything. :func:`register_annotation_by_path` is the same shape for
+    a GTF the table does not list.
 
     Parameters
     ----------
@@ -720,6 +955,10 @@ def register_annotation(
     check_chromosomes : bool, default True
         Check the GTF's chromosome names against the assembly's. Pass ``False`` to
         register an annotation whose mismatch you have inspected and accept.
+    disable_infer_genes : bool, default True
+        Do not reconstruct ``gene`` features from exon lines.
+    disable_infer_transcripts : bool, default True
+        Do not reconstruct ``transcript`` features from exon lines.
 
     Returns
     -------
@@ -745,11 +984,7 @@ def register_annotation(
     >>> register_annotation("sacCer3", "ensgene_v101")   # doctest: +SKIP
     {'kind': 'annotation', 'name': 'ensgene_v101', 'files': {...}, ...}
     """
-    assembly_dir = (
-        Path(cache_dir).expanduser()
-        if cache_dir is not None
-        else download.assembly_data_dir(assembly)
-    )
+    assembly_dir = _assembly_dir(assembly, cache_dir)
     fetch_annotation(
         assembly_dir,
         assembly,
@@ -758,14 +993,117 @@ def register_annotation(
         progressbar=progressbar,
         metadata=metadata,
         check_chromosomes=check_chromosomes,
+        disable_infer_genes=disable_infer_genes,
+        disable_infer_transcripts=disable_infer_transcripts,
     )
+    return _registration_payload(
+        assembly_dir, assembly=assembly, name=name, repair=_repair_command(assembly, name)
+    )
+
+
+def register_annotation_by_path(
+    assembly: str,
+    gtf: str | Path,
+    name: str,
+    *,
+    force: bool = False,
+    cache_dir: str | Path | None = None,
+    check_chromosomes: bool = True,
+    disable_infer_genes: bool = True,
+    disable_infer_transcripts: bool = True,
+) -> dict[str, object]:
+    """Register the GTF at ``gtf`` for ``assembly`` and return the record of what that did.
+
+    :func:`register_gtf` addressed by assembly name rather than by directory, and
+    answering with the record rather than the paths — the call ``genome register-gtf``
+    makes, and the way a script registers an annotation the curated table does not list
+    and then serializes what happened. :func:`register_annotation` is the same shape for
+    one the table does list.
+
+    Naming the assembly buys the one thing the by-directory form cannot do for itself:
+    its ``chrom.sizes`` is found rather than passed, so an unlisted GTF has its
+    chromosome names checked by default, exactly as a listed one does. An assembly that
+    is not prepared yet has no ``chrom.sizes`` to check against, and the record then says
+    the names went unchecked rather than claiming they passed.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly the annotation belongs to, e.g. ``"hg38"``. Never inferred from the
+        GTF: it says which reference these gene models are for (ADR-0003).
+    gtf : str or pathlib.Path
+        Path to the source GTF, plain or ``.gz``.
+    name : str
+        The **Registered name** to address it by, unique within the assembly.
+    force : bool, default False
+        Register again from scratch, repairing a directory that raises.
+    cache_dir : str or pathlib.Path, optional
+        Override which **assembly** directory the annotation is filed under. Defaults to
+        :func:`assembly_data_dir(assembly) <genome.io.download.assembly_data_dir>`.
+    check_chromosomes : bool, default True
+        Check the GTF's chromosome names against the assembly's. Pass ``False`` to
+        register a GTF whose mismatch you have inspected and accept.
+    disable_infer_genes : bool, default True
+        Do not reconstruct ``gene`` features from exon lines.
+    disable_infer_transcripts : bool, default True
+        Do not reconstruct ``transcript`` features from exon lines.
+
+    Returns
+    -------
+    dict
+        The completion record's own fields plus the ``assembly`` and the ``directory``
+        they live in, exactly as :func:`register_annotation` returns them. The
+        ``source_url`` is the path the GTF was taken from.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``gtf`` is not a file.
+    ChromosomeMismatchError
+        If the GTF names sequences the assembly does not carry.
+    genome.io.completion.RegistrationError
+        If the directory holds a build that cannot be trusted as finished, or (with
+        ``force``) if the run somehow left no record behind.
+
+    Examples
+    --------
+    >>> register_annotation_by_path(                     # doctest: +SKIP
+    ...     "sacCer3", "custom.gtf.gz", "custom"
+    ... )
+    {'kind': 'annotation', 'name': 'custom', 'files': {...}, ...}
+    """
+    assembly_dir = _assembly_dir(assembly, cache_dir)
+    source = Path(gtf)
+    repair = _path_repair_command(assembly, shlex.quote(str(source)), name)
+    _register_gtf(
+        assembly_dir,
+        source,
+        name,
+        repair=repair,
+        force=force,
+        chrom_sizes=assembly_dir / f"{assembly}.chrom.sizes",
+        check_chromosomes=check_chromosomes,
+        disable_infer_genes=disable_infer_genes,
+        disable_infer_transcripts=disable_infer_transcripts,
+    )
+    return _registration_payload(assembly_dir, assembly=assembly, name=name, repair=repair)
+
+
+def _registration_payload(
+    assembly_dir: Path, *, assembly: str, name: str, repair: str
+) -> dict[str, object]:
+    """Return the record a just-registered annotation left, as a serializable payload.
+
+    The record is what registering *produced*, so a registration that reports success
+    and leaves none is a contradiction rather than a missing file, and raises naming the
+    command that does the job again.
+    """
     directory = annotation_dir(assembly_dir, name)
     record = read_record(directory)
     if record is None:
         raise RegistrationError(
             f"{name} was registered for {assembly} in {directory} but no {RECORD_NAME} is "
-            f"there, so nothing can vouch for it. Register it again with "
-            f"`{_repair_command(assembly, name)}`."
+            f"there, so nothing can vouch for it. Register it again with `{repair}`."
         )
     payload: dict[str, object] = dict(asdict(record))
     payload["assembly"] = assembly

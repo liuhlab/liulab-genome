@@ -16,10 +16,10 @@ import pytest
 
 import genome.genome as genome_mod
 from genome import DNA, Genome, Region
-from genome.io.completion import RegistrationMismatchError, read_record
+from genome.io.completion import RegistrationMismatchError, read_record, record_path
 from genome.io.download import register_assembly
 from genome.io.fasta import prepare_fasta
-from genome.io.gtf import AnnotationNotRegisteredError
+from genome.io.gtf import AnnotationNotRegisteredError, annotation_dir, register_gtf
 from genome.metadata import METADATA_FIELDS, AnnotationMetadata, AssemblyMetadata
 
 from .conftest import FakeFetch
@@ -425,6 +425,51 @@ class TestOfferedAgainstRegistered:
             assert sorted(again.annotations) == ["one", "two"]
             assert again.default_gtf is None
             assert again.default_gtf_path is None
+
+    def test_a_broken_annotation_never_stops_the_genome_opening(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        # The invariant: one annotation nobody can trust must not cost the genome, nor
+        # the annotations beside it. It is reported, not raised over.
+        register_gtf(yeast_dir, data_dir / "tiny.gtf", "healthy")
+        register_gtf(yeast_dir, data_dir / "tiny.gtf", "ensgene_v101")
+        record_path(annotation_dir(yeast_dir, "ensgene_v101")).unlink()
+
+        with Genome("sacCer3", cache_dir=yeast_dir) as g:
+            assert g.annotations == ["healthy"]
+            assert [broken.name for broken in g.broken_annotations] == ["ensgene_v101"]
+            assert g.fetch_sequence("chrI:0-4") == DNA("CCAC")
+
+    def test_asking_for_a_broken_annotation_names_its_repair_in_one_hop(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        # Not `genome register-annotation sacCer3 ensgene_v101`, which would itself
+        # raise and demand --force: the command named here is the one that works.
+        register_gtf(yeast_dir, data_dir / "tiny.gtf", "ensgene_v101")
+        record_path(annotation_dir(yeast_dir, "ensgene_v101")).unlink()
+
+        with (
+            Genome("sacCer3", cache_dir=yeast_dir) as g,
+            pytest.raises(AnnotationNotRegisteredError) as excinfo,
+        ):
+            _ = g.default_gtf_path
+
+        assert "genome register-annotation sacCer3 ensgene_v101 --force" in str(excinfo.value)
+
+    def test_repairing_a_broken_annotation_stops_reporting_it(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        register_gtf(yeast_dir, data_dir / "tiny.gtf", "mine")
+        record_path(annotation_dir(yeast_dir, "mine")).unlink()
+
+        with Genome("tiny", cache_dir=yeast_dir) as g:
+            assert [broken.name for broken in g.broken_annotations] == ["mine"]
+
+            g.register_gtf(data_dir / "tiny.gtf", "mine", force=True)
+
+            assert g.broken_annotations == []
+            assert g.annotations == ["mine"]
+            assert g.get_gtf_path("mine").is_file()
 
     def test_a_name_nothing_knows_says_what_is_registered_and_what_is_offered(
         self, prepared_dir: Path

@@ -37,6 +37,7 @@ from genome.io.fasta import (
 )
 from genome.io.gtf import (
     AnnotationNotRegisteredError,
+    BrokenAnnotation,
     ChromosomeMismatchError,
     GtfAnnotation,
     annotation_dir,
@@ -44,7 +45,9 @@ from genome.io.gtf import (
     default_annotation,
     fetch_annotation,
     list_annotations,
+    list_broken_annotations,
     register_annotation,
+    register_annotation_by_path,
     register_gtf,
 )
 from genome.io.twobit import TwoBit
@@ -52,6 +55,7 @@ from genome.io.utils import ChecksumMismatchError, sha256_file
 
 __all__ = [
     "AnnotationNotRegisteredError",
+    "BrokenAnnotation",
     "ChecksumMismatchError",
     "ChromosomeMismatchError",
     "CompletionRecord",
@@ -76,11 +80,13 @@ __all__ = [
     "fasta_to_2bit",
     "fetch_annotation",
     "list_annotations",
+    "list_broken_annotations",
     "liulab_data_dir",
     "prepare_fasta",
     "read_chrom_sizes",
     "read_record",
     "register_annotation",
+    "register_annotation_by_path",
     "register_assembly",
     "register_gtf",
     "sha256_file",

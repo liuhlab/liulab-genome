@@ -36,7 +36,9 @@ from genome.io.gtf import (
     default_annotation,
     fetch_annotation,
     list_annotations,
+    list_broken_annotations,
     register_annotation,
+    register_annotation_by_path,
     register_gtf,
 )
 from genome.io.utils import ChecksumMismatchError
@@ -52,6 +54,18 @@ _GTF = (
             'chrI\ttest\tgene\t1\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
             'chrI\ttest\ttranscript\t1\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
             'chrI\ttest\texon\t1\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
+        ]
+    )
+    + "\n"
+)
+
+# A bare exon-level GTF: exon lines and nothing else, which is what gene/transcript
+# inference exists for. Built with inference off it yields a database of exons alone.
+_BARE_GTF = (
+    "\n".join(
+        [
+            'chrI\ttest\texon\t1\t50\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
+            'chrI\ttest\texon\t60\t100\t.\t+\t.\tgene_id "g1"; transcript_id "t1";',
         ]
     )
     + "\n"
@@ -84,6 +98,15 @@ def _row(
         sha256=sha256,
         default=default,
     )
+
+
+def _feature_types(database_path: Path) -> list[str]:
+    """The kinds of feature a built database holds, with the connection closed behind us."""
+    database = gffutils.FeatureDB(str(database_path))
+    try:
+        return sorted(database.featuretypes())
+    finally:
+        database.conn.close()
 
 
 def _write_chrom_sizes(assembly_dir: Path, *names: str, assembly: str = "tiny") -> Path:
@@ -360,6 +383,119 @@ class TestListAnnotations:
         assert list_annotations(tmp_path) == {}
 
 
+class TestListBrokenAnnotations:
+    """The complement of ``list_annotations``: what is on disk and cannot be trusted.
+
+    Every directory under ``gtf/`` is registered, broken, or not begun; this reports
+    the middle one, which is otherwise invisible to anything that lists.
+    """
+
+    def test_a_directory_holding_files_with_no_record_is_broken(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "mine")
+        record_path(annotation_dir(tmp_path, "mine")).unlink()
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert list(broken) == ["mine"]
+        assert broken["mine"].directory == annotation_dir(tmp_path, "mine")
+        assert "holds files but no .completion.json" in broken["mine"].problem
+
+    def test_a_record_that_disagrees_with_disk_is_broken(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        annotation = register_gtf(tmp_path, src, "mine")
+        annotation.db.write_bytes(b"truncated")
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert list(broken) == ["mine"]
+        assert "mine.db" in broken["mine"].problem
+
+    def test_a_finished_annotation_is_not_broken(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "mine")
+
+        assert list_broken_annotations(tmp_path, "tiny") == {}
+
+    def test_an_empty_directory_is_not_broken(self, tmp_path: Path) -> None:
+        # ADR-0007: an absent or empty directory is a fresh registration, not a broken
+        # one. A run interrupted before it downloaded anything must not be reported.
+        annotation_dir(tmp_path, "mine").mkdir(parents=True)
+        work_dir(annotation_dir(tmp_path, "mine")).mkdir()
+
+        assert list_broken_annotations(tmp_path, "tiny") == {}
+
+    def test_an_assembly_with_no_annotations_at_all_answers_empty(self, tmp_path: Path) -> None:
+        assert list_broken_annotations(tmp_path, "sacCer3") == {}
+
+    def test_a_broken_one_leaves_the_others_listed(self, tmp_path: Path) -> None:
+        # The invariant: one broken annotation must not stop the rest being found, and
+        # nothing here raises — reporting is the whole point.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "healthy")
+        register_gtf(tmp_path, src, "damaged")
+        record_path(annotation_dir(tmp_path, "damaged")).unlink()
+
+        assert list(list_annotations(tmp_path)) == ["healthy"]
+        assert list(list_broken_annotations(tmp_path, "tiny")) == ["damaged"]
+
+    def test_a_name_the_table_offers_is_repaired_by_name(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "ensgene_v101")
+        record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
+
+        broken = list_broken_annotations(tmp_path, "sacCer3")
+
+        assert broken["ensgene_v101"].repair == (
+            "genome register-annotation sacCer3 ensgene_v101 --force"
+        )
+        assert broken["ensgene_v101"].repair in broken["ensgene_v101"].problem
+
+    def test_an_unlisted_one_is_repaired_from_the_path_its_record_remembers(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        annotation = register_gtf(tmp_path, src, "mine")
+        annotation.db.write_bytes(b"truncated")
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert broken["mine"].repair == f"genome register-gtf tiny {src} mine --force"
+
+    def test_an_unlisted_one_whose_source_is_unknowable_says_so(self, tmp_path: Path) -> None:
+        # No record survives to say which GTF it was built from, so there is no path to
+        # print: the command is named with the one thing it still needs filled in,
+        # rather than a path that would not run.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "mine")
+        record_path(annotation_dir(tmp_path, "mine")).unlink()
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert broken["mine"].repair == "genome register-gtf tiny <path> mine --force"
+
+    def test_an_unlisted_one_whose_source_is_gone_is_not_named_as_a_command(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        annotation = register_gtf(tmp_path, src, "mine")
+        annotation.db.write_bytes(b"truncated")
+        src.unlink()
+
+        broken = list_broken_annotations(tmp_path, "tiny")
+
+        assert str(src) not in broken["mine"].repair
+        assert broken["mine"].repair == "genome register-gtf tiny <path> mine --force"
+
+
 class TestDefaultAnnotation:
     """The one rule that decides a default, wherever the question is asked from."""
 
@@ -444,7 +580,67 @@ class TestAnnotationStatus:
         assert isinstance(rows, list)
         assert [(r["name"], r["offered"], r["registered"]) for r in rows] == [("mine", False, True)]
         assert rows[0]["provider"] is None
+        assert rows[0]["broken"] is False
+        assert rows[0]["problem"] is None
         assert payload["default_annotation"] == "mine"  # nothing flagged, and it is alone
+
+    def test_a_broken_offered_annotation_is_reported_as_broken_not_as_absent(
+        self, tmp_path: Path
+    ) -> None:
+        # The bug this closes: half-registered and never-fetched looked identical here.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly_dir = tmp_path / "asm"
+        register_gtf(assembly_dir, src, "ensgene_v101")
+        record_path(annotation_dir(assembly_dir, "ensgene_v101")).unlink()
+
+        payload = annotation_status("sacCer3", cache_dir=assembly_dir)
+
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["offered"], r["registered"], r["broken"]) for r in rows] == [
+            ("ensgene_v101", True, False, True)
+        ]
+        assert rows[0]["repair"] == "genome register-annotation sacCer3 ensgene_v101 --force"
+        assert "holds files but no .completion.json" in str(rows[0]["problem"])
+        assert rows[0]["path"] is None
+
+    def test_a_broken_unlisted_annotation_is_reported_at_all(self, tmp_path: Path) -> None:
+        # No row lists it and no record vouches for it, so nothing used to mention it.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly_dir = tmp_path / "asm"
+        annotation = register_gtf(assembly_dir, src, "mine")
+        annotation.db.write_bytes(b"truncated")
+
+        payload = annotation_status("tiny", cache_dir=assembly_dir)
+
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["offered"], r["registered"], r["broken"]) for r in rows] == [
+            ("mine", False, False, True)
+        ]
+        assert rows[0]["repair"] == f"genome register-gtf tiny {src} mine --force"
+
+    def test_one_broken_annotation_does_not_hide_the_others(self, tmp_path: Path) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly_dir = tmp_path / "asm"
+        register_gtf(assembly_dir, src, "healthy")
+        register_gtf(assembly_dir, src, "damaged")
+        record_path(annotation_dir(assembly_dir, "damaged")).unlink()
+
+        payload = annotation_status("tiny", cache_dir=assembly_dir)
+
+        rows = payload["annotations"]
+        assert isinstance(rows, list)
+        assert [(r["name"], r["registered"], r["broken"]) for r in rows] == [
+            ("damaged", False, True),
+            ("healthy", True, False),
+        ]
+        # A broken one is not a registered one, so it never becomes the sole-registered
+        # default either.
+        assert payload["default_annotation"] == "healthy"
 
 
 class TestChromosomeNames:
@@ -715,3 +911,154 @@ class TestRegisterAnnotation:
         payload = register_annotation("tiny", _NAME, progressbar=False, metadata=_row())
 
         assert payload["directory"] == str(tmp_path / "genome" / "tiny" / "gtf" / _NAME)
+
+    def test_the_inference_knobs_reach_the_database_build(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        # A bare exon-level GTF: with inference left off the database holds exons and
+        # nothing else, so a caller who asks for genes and transcripts must be able to
+        # get them from this way in too.
+        bare = tmp_path / "bare.gtf"
+        bare.write_text(_BARE_GTF)
+        fake_fetch.serve(bare)
+        row = _row(url="https://mirror.example.invalid/annotations/bare.gtf")
+
+        default = register_annotation(
+            "tiny", "exons_only", cache_dir=tmp_path, progressbar=False, metadata=row
+        )
+        inferred = register_annotation(
+            "tiny",
+            "with_genes",
+            cache_dir=tmp_path,
+            progressbar=False,
+            metadata=row,
+            disable_infer_genes=False,
+            disable_infer_transcripts=False,
+        )
+
+        assert default["name"] == "exons_only"
+        assert _feature_types(annotation_dir(tmp_path, "exons_only") / "exons_only.db") == ["exon"]
+        assert inferred["name"] == "with_genes"
+        assert _feature_types(annotation_dir(tmp_path, "with_genes") / "with_genes.db") == [
+            "exon",
+            "gene",
+            "transcript",
+        ]
+
+
+class TestRegisterAnnotationByPath:
+    """``register_annotation_by_path`` — a GTF no row lists, addressed by assembly name."""
+
+    def test_it_returns_the_record_plus_where_it_landed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+
+        payload = register_annotation_by_path("tiny", source, "WS298")
+
+        directory = tmp_path / "genome" / "tiny" / "gtf" / "WS298"
+        assert payload["kind"] == "annotation"
+        assert payload["name"] == "WS298"
+        assert payload["assembly"] == "tiny"
+        assert payload["directory"] == str(directory)
+        assert payload["source_url"] == str(source)
+        assert payload["files"] == {
+            name: (directory / name).stat().st_size for name in ("WS298.gtf", "WS298.db")
+        }
+
+    def test_cache_dir_overrides_which_assembly_directory_it_is_filed_under(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        elsewhere = tmp_path / "elsewhere"
+
+        payload = register_annotation_by_path("tiny", source, "WS298", cache_dir=elsewhere)
+
+        assert payload["directory"] == str(annotation_dir(elsewhere, "WS298"))
+
+    def test_it_finds_the_assembly_chrom_sizes_without_being_told(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # What the by-directory form cannot do: given the assembly's name it knows where
+        # its chrom.sizes is, so an Ensembl-spelled GTF is refused rather than silently
+        # registered unchecked.
+        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
+
+        with pytest.raises(ChromosomeMismatchError):
+            register_annotation_by_path(
+                "tiny", data_dir / "ensembl_style.gtf", _NAME, cache_dir=tmp_path
+            )
+
+    def test_the_override_registers_the_mismatch_anyway_and_the_record_says_so(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
+
+        payload = register_annotation_by_path(
+            "tiny",
+            data_dir / "ensembl_style.gtf",
+            _NAME,
+            cache_dir=tmp_path,
+            check_chromosomes=False,
+        )
+
+        assert payload["details"] == {
+            "gffutils_version": gffutils.__version__,
+            "chromosomes_checked": False,
+        }
+
+    def test_the_inference_knobs_reach_the_database_build(self, tmp_path: Path) -> None:
+        source = tmp_path / "bare.gtf"
+        source.write_text(_BARE_GTF)
+
+        register_annotation_by_path("tiny", source, "exons_only", cache_dir=tmp_path)
+        register_annotation_by_path(
+            "tiny",
+            source,
+            "with_genes",
+            cache_dir=tmp_path,
+            disable_infer_genes=False,
+            disable_infer_transcripts=False,
+        )
+
+        assert _feature_types(annotation_dir(tmp_path, "exons_only") / "exons_only.db") == ["exon"]
+        assert _feature_types(annotation_dir(tmp_path, "with_genes") / "with_genes.db") == [
+            "exon",
+            "gene",
+            "transcript",
+        ]
+
+    def test_a_missing_source_says_what_to_pass(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError, match="GTF file not found"):
+            register_annotation_by_path("tiny", tmp_path / "nope.gtf", "WS298", cache_dir=tmp_path)
+
+    def test_a_broken_directory_names_the_command_that_repairs_it(self, tmp_path: Path) -> None:
+        # Addressed by assembly name, the repair is a command a shell can run — the
+        # by-directory form knows no assembly name and names the Python call instead.
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        directory = annotation_dir(tmp_path, "WS298")
+        directory.mkdir(parents=True)
+        (directory / "WS298.db").write_bytes(b"half a database")
+
+        with pytest.raises(UnfinishedRegistrationError) as excinfo:
+            register_annotation_by_path("tiny", source, "WS298", cache_dir=tmp_path)
+
+        assert f"genome register-gtf tiny {source} WS298 --force" in str(excinfo.value)
+
+    def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        directory = annotation_dir(tmp_path, "WS298")
+        directory.mkdir(parents=True)
+        (directory / "WS298.db").write_bytes(b"half a database")
+
+        payload = register_annotation_by_path(
+            "tiny", source, "WS298", cache_dir=tmp_path, force=True
+        )
+
+        assert payload["name"] == "WS298"
+        assert list(list_annotations(tmp_path)) == ["WS298"]
