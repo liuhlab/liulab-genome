@@ -29,7 +29,9 @@ The curated TSV row keyed by **Assembly** plus **Registered name**, saying who p
 annotation, which release it is, where its **GTF** is fetched from and the sha256 of the *unpacked*
 GTF that source yields, plus whether it is the assembly's **Default annotation**. Naming an
 annotation is enough to register it because the row knows the rest. A cross-reference and never an
-allow-list — an annotation with no row is registered by path instead.
+allow-list — no row means one of three things: the annotation was registered by path, a complete
+record handed in at the call site replaced the row wholesale, or it was derived here rather than
+fetched, which is a **Merged annotation** and leaves a row nothing to say.
 _Avoid_: registry, catalog, manifest; and "the GTF table", which names one of the files rather than
 the annotation
 
@@ -41,6 +43,15 @@ caller who did not choose between several should be asked rather than guessed at
 annotation without locating one, so a default nobody has registered on this machine is the ordinary
 state of a fresh install and only asking for its path is an error.
 _Avoid_: primary, main, active, current
+
+**Merged annotation**:
+The **Annotation** a **Chimera** build derives rather than fetches — a streaming pass over each
+component's own **Default annotation**, registered in the same act that writes the chimera's
+**FASTA**. Its **Registered name** is the `+`-join of those names in sorted-component order,
+`wormbase_ws298+refseq_rs_2025_06_26`, and it carries no **Annotation metadata** row at all, since
+nothing was downloaded for one to describe.
+_Avoid_: combined GTF, concatenated annotation, chimera GTF; and never "the merge", which names the
+pass rather than the annotation it produced
 
 ### Files
 
