@@ -67,7 +67,7 @@ def component(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Compo
         opened.append(genome)
         if annotate:
             assert fixture.gtf is not None
-            genome.register_gtf(fixture.gtf, COMPONENT_ANNOTATION)
+            genome.annotations.register_path(fixture.gtf, COMPONENT_ANNOTATION)
         return genome
 
     yield register
@@ -191,7 +191,7 @@ def test_a_component_annotation_registered_again_underneath_a_chimera_refuses(
     source = CHIMERA_COMPONENTS["tinyCe"].gtf
     assert source is not None
     corrected = _other_gtf(source, tmp_path / "corrected.gtf")
-    worm.register_gtf(corrected, COMPONENT_ANNOTATION, force=True)
+    worm.annotations.register_path(corrected, COMPONENT_ANNOTATION, force=True)
 
     with pytest.raises(RegistrationMismatchError) as excinfo:
         Genome.chimera(worm, yeast)

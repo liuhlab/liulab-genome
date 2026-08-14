@@ -36,10 +36,10 @@ from genome.io.chimera import ChimeraBuilder
 from genome.io.components import ChimeraDetails, read_chimera_details
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
-from genome.io.gtf import AnnotationRegistry, BrokenAnnotation, GtfAnnotation
+from genome.io.gtf import AnnotationRegistry
 from genome.io.registration import AssemblyDir
 from genome.io.twobit import TwoBit
-from genome.metadata import AnnotationMetadata, AssemblyMetadata, assembly_metadata
+from genome.metadata import AssemblyMetadata, assembly_metadata
 from genome.region import Region, parse_region
 from genome.seq import DNA
 
@@ -273,196 +273,30 @@ class Genome(AlignerMixin):
         return self._registry.default
 
     @property
-    def annotations(self) -> list[str]:
-        """Names of the GTF annotations registered for this assembly **on this machine**.
+    def annotations(self) -> AnnotationRegistry:
+        """The assembly's annotations: what is registered, broken, offered, or nothing.
 
-        What is here, as against :attr:`offered_annotations`, which is what the lab
-        supports, and :attr:`broken_annotations`, which is what is here and cannot be
-        trusted.
-        """
-        return self._registry.registered
+        The whole collection surface behind one name. Every question about several
+        annotations is asked of the registry — ``.registered`` for what is on this
+        machine, ``.broken`` for what is here and cannot be trusted, ``.offered`` for
+        what the lab supports, ``.path(name)`` for where one is, ``.register(name)`` and
+        ``.register_path(gtf, name)`` for the two acts that add one. The everyday read is
+        the default annotation, which :attr:`default_gtf` and :attr:`default_gtf_path`
+        answer directly.
 
-    @property
-    def broken_annotations(self) -> list[BrokenAnnotation]:
-        """The annotation directories here that cannot be trusted as finished.
-
-        What :attr:`annotations` leaves out. A build killed part-way leaves a database
-        with most of the genes missing, so it is deliberately not registered — but it is
-        also not nothing, and a caller who never re-registers it would otherwise never
-        hear that it is there. Each entry says what is wrong and names the one command
-        that repairs it.
-
-        Reading this raises nothing, whatever state the directory is in: it was settled
-        when the genome opened, which is why one broken annotation never stopped it.
-
-        Examples
-        --------
-        >>> sacCer3 = Genome("sacCer3")                              # doctest: +SKIP
-        >>> [broken.name for broken in sacCer3.broken_annotations]   # doctest: +SKIP
-        ['ensgene_v101']
-        """
-        return self._registry.broken
-
-    @property
-    def offered_annotations(self) -> list[AnnotationMetadata]:
-        """The annotations the curated table offers for this assembly, in table order.
-
-        What the lab supports for this assembly — each row saying who publishes it,
-        which release it is, where it is fetched from and what it must hash to — as
-        against :attr:`annotations`, which is what is registered here. A row appears
-        whether or not anyone has registered it, and registering one is
-        :meth:`register_annotation`; nothing here reads the disk. Empty for an assembly
-        the table offers nothing for, which is legal: the table is a cross-reference
-        rather than an allow-list (ADR-0003).
-
-        A fresh list each call, so a caller may sort or filter it.
-
-        Examples
-        --------
-        >>> sacCer3 = Genome("sacCer3")                            # doctest: +SKIP
-        >>> [record.name for record in sacCer3.offered_annotations]  # doctest: +SKIP
-        ['ensgene_v101']
-        """
-        return self._registry.offered
-
-    def register_annotation(
-        self,
-        name: str,
-        *,
-        force: bool = False,
-        progressbar: bool = True,
-        metadata: AnnotationMetadata | None = None,
-        check_chromosomes: bool = True,
-        disable_infer_genes: bool = True,
-        disable_infer_transcripts: bool = True,
-    ) -> GtfAnnotation:
-        """Register the annotation this assembly's table row lists as ``name``.
-
-        Naming it is enough: the curated annotation table says where the GTF comes
-        from and what it must hash to. It is fetched, verified against that digest,
-        checked against this assembly's chromosome names, placed under
-        ``<assembly dir>/gtf/<name>/``, built into a gffutils database and recorded. If
-        no default GTF is set and this becomes the only annotation, it is adopted as
-        :attr:`default_gtf`.
-
-        One that is already registered is returned silently — nothing is fetched and
-        nothing is rebuilt — while a directory that cannot be trusted raises and names
-        its repair. See :func:`~genome.io.gtf.fetch_annotation`.
-
-        Parameters
-        ----------
-        name : str
-            The **Registered name** the table lists for this assembly.
-        force : bool, default False
-            Register again from scratch — the repair for a directory that raises.
-        progressbar : bool, default True
-            Show a download progress bar (requires ``tqdm``).
-        metadata : genome.metadata.AnnotationMetadata, optional
-            A complete annotation record, used *instead of* the curated table's row for
-            ``name`` — the same all-or-nothing override the constructor takes for the
-            assembly's own metadata.
-        check_chromosomes : bool, default True
-            Refuse a GTF naming sequences this assembly does not carry, before paying
-            for the database build. Pass ``False`` to register one whose mismatch you
-            have inspected and accept.
-        disable_infer_genes : bool, default True
-            Do not reconstruct ``gene`` features from exon lines.
-        disable_infer_transcripts : bool, default True
-            Do not reconstruct ``transcript`` features from exon lines.
-
-        Returns
-        -------
-        genome.io.gtf.GtfAnnotation
-            The registered annotation's name and its two file paths.
-
-        Raises
-        ------
-        ValueError
-            If the table lists no annotation ``name`` for this assembly.
-        genome.io.gtf.ChromosomeMismatchError
-            If the GTF names sequences this assembly does not carry.
-        genome.io.utils.ChecksumMismatchError
-            If the fetched GTF is not the digest the row pins.
-        genome.io.completion.RegistrationError
-            If the annotation's directory cannot be trusted as finished.
-
-        Examples
-        --------
-        >>> sacCer3 = Genome("sacCer3")                        # doctest: +SKIP
-        >>> sacCer3.register_annotation("ensgene_v101")        # doctest: +SKIP
-        GtfAnnotation(name='ensgene_v101', ...)
-        """
-        return self._registry.register(
-            name,
-            force=force,
-            progressbar=progressbar,
-            metadata=metadata,
-            check_chromosomes=check_chromosomes,
-            disable_infer_genes=disable_infer_genes,
-            disable_infer_transcripts=disable_infer_transcripts,
-        )
-
-    def register_gtf(
-        self,
-        gtf: str | Path,
-        name: str,
-        *,
-        force: bool = False,
-        check_chromosomes: bool = True,
-        disable_infer_genes: bool = True,
-        disable_infer_transcripts: bool = True,
-    ) -> GtfAnnotation:
-        """Register the GTF at ``gtf`` under ``name`` and build its gffutils database.
-
-        The escape hatch for an annotation the curated table does not list —
-        :meth:`register_annotation` is the way in for one it does. Its chromosome names
-        are checked against this genome's own before anything is created, the GTF is
-        placed under ``<assembly dir>/gtf/<name>/`` (a gzipped ``.gz`` source is
-        decompressed automatically), a gffutils database is built beside it, and the
-        record that says so is written last. If no default GTF is set and this becomes
-        the only annotation, it is adopted as :attr:`default_gtf`. ``check_chromosomes``
-        is as it is on :meth:`register_annotation`; see
-        :meth:`~genome.io.gtf.AnnotationRegistry.register_path` for the rest.
-        """
-        return self._registry.register_path(
-            gtf,
-            name,
-            force=force,
-            check_chromosomes=check_chromosomes,
-            disable_infer_genes=disable_infer_genes,
-            disable_infer_transcripts=disable_infer_transcripts,
-        )
-
-    def get_gtf_path(self, name: str) -> Path:
-        """Return the GTF file path of the annotation registered as ``name``.
-
-        Parameters
-        ----------
-        name : str
-            The **Registered name** to resolve.
-
-        Returns
-        -------
-        pathlib.Path
-            Path to the placed ``<name>.gtf``.
-
-        Raises
-        ------
-        genome.io.gtf.AnnotationNotRegisteredError
-            If nothing of that name is registered here. The message says what is
-            registered, and names the command that closes the gap: the one that
-            registers ``name`` when the table offers it, the path-based way in when it
-            does not, and — when a directory of that name is there but broken — the one
-            that registers it again from scratch, so the command named is one that runs
-            rather than one that raises in turn. It is a :class:`KeyError`.
+        It is deliberately **not** a list: a registry settles a four-way state, and
+        iterating or measuring it would silently privilege one of the four. There is no
+        ``len()``, no ``in``, and no iteration — name the set you mean.
 
         Examples
         --------
         >>> sacCer3 = Genome("sacCer3")                     # doctest: +SKIP
-        >>> sacCer3.get_gtf_path("ensgene_v101")            # doctest: +SKIP
-        PosixPath('/data/genome/sacCer3/gtf/ensgene_v101/ensgene_v101.gtf')
+        >>> sacCer3.annotations.registered                  # doctest: +SKIP
+        ['ensgene_v101']
+        >>> [broken.name for broken in sacCer3.annotations.broken]   # doctest: +SKIP
+        []
         """
-        return self._registry.path(name)
+        return self._registry
 
     @property
     def default_gtf_path(self) -> Path | None:

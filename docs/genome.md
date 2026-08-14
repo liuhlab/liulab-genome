@@ -127,24 +127,31 @@ with Genome("sacCer3") as sacCer3:
 
 A genome can carry several annotations, each under a short name. Name one the annotation
 table lists for this assembly and it is fetched, verified, and built into a
-[gffutils](https://gffutils.readthedocs.io/) database beside the assembly's files:
+[gffutils](https://gffutils.readthedocs.io/) database beside the assembly's files.
+Everything about the *collection* of them is `genome.annotations`, one registry object
+rather than a handful of methods on `Genome`:
 
 ```python
-sacCer3.register_annotation("ensgene_v101")   # fetch + verify + build + record
-sacCer3.annotations                           # ['ensgene_v101'] — registered here
-sacCer3.offered_annotations                   # what the table offers for this assembly
-sacCer3.get_gtf_path("ensgene_v101")          # Path to the placed .gtf
-sacCer3.default_gtf                           # the annotation used when you name none
+sacCer3.annotations.register("ensgene_v101")   # fetch + verify + build + record
+sacCer3.annotations.registered                 # ['ensgene_v101'] — registered here
+sacCer3.annotations.offered                    # what the table offers for this assembly
+sacCer3.annotations.broken                     # here, and not to be trusted
+sacCer3.annotations.path("ensgene_v101")       # Path to the placed .gtf
+sacCer3.default_gtf                            # the annotation used when you name none
 ```
 
-`annotations` and `offered_annotations` answer different questions: what this machine
-has, and what the lab supports. `genome annotations <assembly>` prints one against the
-other.
+`registered` and `offered` answer different questions: what this machine has, and what
+the lab supports. `genome annotations <assembly>` prints one against the other.
+
+The registry is deliberately not a list. It settles a four-way state — registered,
+broken, offered, nothing — so there is no `len()`, no `in` and no iterating over it:
+name the set you mean. Note that `if sacCer3.annotations:` is therefore always true and
+asks nothing; `if sacCer3.annotations.registered:` is the question.
 
 For a GTF the table does not list, hand over the path — a `.gz` is decompressed:
 
 ```python
-sacCer3.register_gtf("custom.gtf", name="custom")
+sacCer3.annotations.register_path("custom.gtf", "custom")
 ```
 
 Each annotation gets its own directory, `<assembly dir>/gtf/<name>/`, holding the GTF,
@@ -186,17 +193,19 @@ Two aligners ship, and they differ in whether an annotation is involved:
 
 | Aligner | Maps | Annotation | Index |
 |---------|------|------------|-------|
-| [STAR](https://github.com/alexdobin/STAR) | RNA-seq (splice-aware) | **required** — one index per GTF | `index/star_<gtf>/` — a directory |
+| [STAR](https://github.com/alexdobin/STAR) | RNA-seq (splice-aware) | **one** — the default unless you name another | `index/star_<gtf>/` — a directory |
 | [chromap](https://github.com/haowenz/chromap) | ATAC-seq, ChIP-seq, Hi-C | none | `index/chromap/chromap.index` — one file |
 
 ```python
-sacCer3.build_star_index(gtf="ensgene_v101", threads=8)
+sacCer3.build_star_index(threads=8)                    # against default_gtf
+sacCer3.build_star_index("ensgene_v101", threads=8)    # ...or name one
 sacCer3.build_chromap_index()
 ```
 
-The `gtf` key is required for STAR and becomes part of the index directory name, so
-indexes for different annotations never collide. A finished index is cached and reused;
-pass `overwrite=True` to rebuild.
+The `gtf` key becomes part of the index directory name, so indexes for different
+annotations never collide. Omit it and the **default annotation** is used and names the
+directory; a genome with no default at all raises rather than guessing, naming both ways
+to give it one. A finished index is cached and reused; pass `overwrite=True` to rebuild.
 
 Commonly tuned options are named and everything else is forwarded to the tool as a raw
 flag:
@@ -270,7 +279,7 @@ chimera arrives annotated — and aligner indexes are built over it like any oth
 
 ```python
 chimera.default_gtf                   # 'wormbase_ws298+refseq_rs_2025_06_26'
-chimera.build_star_index(gtf=chimera.default_gtf, threads=8)
+chimera.build_star_index(threads=8)   # against that merged annotation
 ```
 
 Its name is what went into it, so it changes when a component's default annotation does.
@@ -320,7 +329,7 @@ derived files are rebuilt.
 
 An empty or absent directory is not this: that is a fresh registration and proceeds
 normally. A broken *annotation* never blocks opening the genome; it is reported instead,
-in `broken_annotations`, each entry carrying the command that repairs it.
+in `annotations.broken`, each entry carrying the command that repairs it.
 
 To re-check integrity when nothing has raised but you suspect a problem, `genome verify
 <assembly>` re-reads the FASTA and re-computes its digest.

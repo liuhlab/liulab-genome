@@ -277,7 +277,7 @@ def test_an_annotation_registers_against_its_own_component(
     # On its merits: the chromosome check is left standing, which is the point of the
     # names being set-equal.
     genome = chimera_component("tinyCe", with_annotation=True)
-    assert genome.annotations == [COMPONENT_ANNOTATION]
+    assert genome.annotations.registered == [COMPONENT_ANNOTATION]
     assert genome.default_gtf == COMPONENT_ANNOTATION
 
 

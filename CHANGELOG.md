@@ -23,17 +23,17 @@ preparation is no longer indistinguishable from a finished one.
   sha256; a new annotation table lists what each assembly officially supports, with provider,
   version, URL, checksum and a default flag. Seven assemblies are pinned — `hg38`, `hg19`, `mm39`,
   `mm10`, `sacCer3`, `ce11` and `ecHT115` — each with a checksum computed from real bytes.
-- **Registering an annotation by name.** `Genome.register_annotation("gencode_v50")` fetches,
+- **Registering an annotation by name.** `genome.annotations.register("gencode_v50")` fetches,
   verifies, checks chromosome names, builds the database and records it. The path-based
-  `register_gtf` remains for an unlisted GTF.
+  `genome.annotations.register_path(gtf, name)` remains for an unlisted GTF.
 - **A chromosome-name check that runs before the database build**, so a GTF spelled for the wrong
   assembly fails in seconds rather than after many minutes. Every sequence name in the GTF must
   exist in the assembly's `chrom.sizes`; the reverse is not required, since an assembly may carry
   scaffolds an annotation never mentions. `check_chromosomes=False`, or
   `--no-check-chromosomes`, overrides it, and the record says which annotations were checked.
-- **`Genome.offered_annotations`**, the table's rows for this assembly, answering a different
-  question from `Genome.annotations`, which stays "registered on this machine".
-- **`Genome.broken_annotations`**, the complement of `Genome.annotations`: between the two, every
+- **`genome.annotations.offered`**, the table's rows for this assembly, answering a different
+  question from `genome.annotations.registered`, which is "registered on this machine".
+- **`genome.annotations.broken`**, the complement of `.registered`: between the two, every
   directory under `gtf/` is accounted for as registered, broken, or not begun. A half-built
   annotation is now reported where a reader would look for it — `genome annotations` marks it
   broken, says what is wrong with it, and prints the command that repairs it — rather than only
@@ -92,6 +92,8 @@ preparation is no longer indistinguishable from a finished one.
   shipped rows (`assembly_table()`, `annotation_table()`), and `AssemblyMetadata.from_row` /
   `AnnotationMetadata.from_row` build a record from one row — raising `MetadataRowError`, naming the
   column, rather than half-building one. Curating a row no longer means reaching past the API.
+- **`AnnotationRegistry` is a package export** — `from genome import AnnotationRegistry`. It was an
+  `io` internal, and `Genome.annotations` now hands one back, so callers hold one.
 
 ### Changed
 
@@ -189,10 +191,10 @@ preparation is no longer indistinguishable from a finished one.
   delegates to it instead of keeping three dictionaries in step by hand. The registry carries the
   assembly directory it was opened with, so it cannot file an annotation somewhere other than where
   the caller looking for it is looking.
-- **`Genome.register_gtf` over a directory nothing vouches for now names a command a shell can run**
+- **Registering by path over a directory nothing vouches for now names a command a shell can run**
   — `genome register-gtf <assembly> <gtf> <name> --force` — rather than the equivalent Python call.
-  A genome knows which assembly it is; only the by-directory `register_gtf`, which does not, still
-  names the call.
+  Every way in now knows which assembly it is registering for, so there is no route left that has to
+  name a call instead.
 - **`Genome.metadata` is always a record.** It was `AssemblyMetadata | None`, and an assembly the
   curated table does not list got `None` — so every reader guarded a missing record before reading a
   field off it, eight times on `Genome` alone. Unlisted is now a record whose fields are unknown,
@@ -242,6 +244,25 @@ preparation is no longer indistinguishable from a finished one.
 - **A binary is asked its version once per process, not once per build step**, remembered against
   the path it was located at — so a build stops re-probing its tools for provenance that cannot
   change. Recorded versions are unchanged; `genome.external.clear_version_cache()` forgets them.
+- **`Genome.annotations` is the `AnnotationRegistry`, not `list[str]`.** Everything about the
+  *collection* of annotations is now one object — `.registered`, `.broken`, `.offered`,
+  `.path(name)`, `.register(name)`, `.register_path(gtf, name)` — while the default annotation, the
+  everyday read, stays on `Genome` as `default_gtf` and `default_gtf_path`. It is deliberately not a
+  list: a registry settles a four-way state (registered, broken, offered, nothing) and a `__len__`
+  or `__iter__` over any one of them would hide which set is being walked, so there is no `len()`,
+  no `in` and no iteration. **Every stale use therefore fails loudly — except truthiness.** A
+  registry object is always truthy, so `if genome.annotations:` silently flips from *has annotations
+  registered* to *always*. That is this change's one silent break, and the fix is
+  `if genome.annotations.registered:`. Grep for it.
+- **`gtf.register_annotation_by_path` is `gtf.register_gtf`.** Same signature, same
+  `RegisteredAnnotation` return; the mouthful existed only because the name was taken. The module
+  pair now matches the two CLI commands exactly — `gtf.register_annotation(assembly, name)` behind
+  `genome register-annotation`, `gtf.register_gtf(assembly, gtf, name)` behind `genome register-gtf`.
+- **`Genome.build_star_index` defaults its annotation.** `gtf` is optional and falls back to
+  `default_gtf`, so `chimera.build_star_index(threads=8)` is the everyday call rather than
+  `build_star_index(gtf=chimera.default_gtf, threads=8)`. Naming a key explicitly still works and
+  still names `index/star_<gtf>/`. With no default at all it raises `ValueError` naming both fixes.
+  `build_chromap_index` takes no annotation and is unchanged.
 
 ### Removed
 
@@ -280,6 +301,25 @@ preparation is no longer indistinguishable from a finished one.
 - **`Downloader`**, the pooch-cache wrapper no caller in the package used.
   `UCSCGenomeDownloader` deliberately did not subclass it, so nothing moves anywhere: reach
   `genome.io.fetch.fetch_url` with a directory of your own instead.
+- **Five of `Genome`'s eight annotation members.** The registry `Genome.annotations` returns already
+  answered every one of them, so each was a pass-through restating its docstring:
+
+  | Gone from `Genome` | Reached as |
+  |---|---|
+  | `broken_annotations` | `genome.annotations.broken` |
+  | `offered_annotations` | `genome.annotations.offered` |
+  | `register_annotation(name)` | `genome.annotations.register(name)` |
+  | `register_gtf(gtf, name)` | `genome.annotations.register_path(gtf, name)` |
+  | `get_gtf_path(name)` | `genome.annotations.path(name)` |
+
+  `default_gtf`, `default_gtf_path` and `annotations` stay, because the default annotation is the
+  usage and the collection is the rare case.
+- **The directory-addressed `gtf.register_gtf(assembly_dir, gtf, name, …)`**, which had no caller
+  anywhere in the package and was the one registration form that knew no assembly name — so it had
+  to be handed a `chrom_sizes` or check nothing, and could only name a Python call as its repair.
+  Address the assembly instead: `gtf.register_gtf(assembly, gtf, name, cache_dir=…)`, which now
+  carries that name, or `AnnotationRegistry(assembly_dir).register_path(gtf, name)` for a directory
+  you hold.
 
 ### Fixed
 
@@ -327,3 +367,9 @@ keeps an unpacked FASTA whose checksum still matches and rebuilds only the deriv
 Interrupting a *first* registration leaves a directory holding files with no record, which raises
 next time and needs the same forced re-registration. That is the accepted trade-off, chosen over
 silently resuming.
+
+**One code change will not announce itself.** `Genome.annotations` returns a registry rather than a
+list, and a registry object is always truthy, so `if genome.annotations:` keeps running and stops
+meaning anything — it is now true even for an assembly with nothing registered. Every other stale
+use raises. Search your code for `.annotations` in a boolean position and write
+`.annotations.registered` instead.

@@ -44,7 +44,6 @@ from genome.io.gtf import (
     list_annotations,
     list_broken_annotations,
     register_annotation,
-    register_annotation_by_path,
     register_gtf,
     register_merged_gtf,
 )
@@ -135,6 +134,38 @@ def _register_by_name(
     )
 
 
+def _register_by_path(
+    assembly_dir: Path,
+    gtf: str | Path,
+    name: str,
+    *,
+    assembly: str = "tiny",
+    chrom_sizes: str | Path | None = None,
+    force: bool = False,
+    check_chromosomes: bool = True,
+    disable_infer_genes: bool = True,
+    disable_infer_transcripts: bool = True,
+) -> GtfAnnotation:
+    """Register the GTF at ``gtf`` under ``assembly_dir`` through a registry.
+
+    The setup half of most of this module: a registry addressed by directory rather than
+    opened, answering with the paths, which is what a test asserting on files wants. Left
+    to itself it checks against ``<assembly_dir>/<assembly>.chrom.sizes`` — absent in most
+    of these directories, so nothing is checked — and ``chrom_sizes`` names another file
+    where a test has written one somewhere else.
+    """
+    return AnnotationRegistry(
+        AssemblyDir(assembly=assembly, path=assembly_dir), chrom_sizes=chrom_sizes
+    ).register_path(
+        gtf,
+        name,
+        force=force,
+        check_chromosomes=check_chromosomes,
+        disable_infer_genes=disable_infer_genes,
+        disable_infer_transcripts=disable_infer_transcripts,
+    )
+
+
 def _feature_types(database_path: Path) -> list[str]:
     """The kinds of feature a built database holds, with the connection closed behind us."""
     database = gffutils.FeatureDB(str(database_path))
@@ -153,14 +184,19 @@ def _write_chrom_sizes(assembly_dir: Path, *names: str, assembly: str = "tiny") 
 
 
 class TestRegisterByPath:
-    """``register_gtf`` — the escape hatch for a GTF the table does not list."""
+    """``AnnotationRegistry.register_path`` — the way in for a GTF the table does not list.
+
+    Placing, decompressing and rebuilding, asserted on the paths the registry answers
+    with. What a broken directory tells the caller to run is asserted once, over in
+    :class:`TestAnnotationRegistry`, where the assembly name that composes it lives.
+    """
 
     def test_a_plain_gtf_is_copied_built_and_recorded(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly = tmp_path / "asm"
 
-        annotation = register_gtf(assembly, src, "WS298")
+        annotation = _register_by_path(assembly, src, "WS298")
 
         assert annotation.gtf == annotation_dir(assembly, "WS298") / "WS298.gtf"
         assert annotation.gtf.read_text() == _GTF
@@ -180,7 +216,7 @@ class TestRegisterByPath:
             handle.write(_GTF)
         assembly = tmp_path / "asm"
 
-        annotation = register_gtf(assembly, src, "WS298")
+        annotation = _register_by_path(assembly, src, "WS298")
 
         # Stored as a plain .gtf with decompressed contents, and the db builds.
         assert annotation.gtf.suffix == ".gtf"
@@ -190,17 +226,17 @@ class TestRegisterByPath:
 
     def test_a_missing_source_says_what_to_pass(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError, match="GTF file not found"):
-            register_gtf(tmp_path / "asm", tmp_path / "nope.gtf", "X")
+            _register_by_path(tmp_path / "asm", tmp_path / "nope.gtf", "X")
 
     def test_reregistering_a_valid_one_returns_it_without_rebuilding(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly = tmp_path / "asm"
-        first = register_gtf(assembly, src, "WS298")
+        first = _register_by_path(assembly, src, "WS298")
         built_at = first.db.stat().st_mtime_ns
 
         # Silently: `filterwarnings = ["error"]` fails the test on any warning at all.
-        second = register_gtf(assembly, src, "WS298")
+        second = _register_by_path(assembly, src, "WS298")
 
         assert second == first
         assert second.db.stat().st_mtime_ns == built_at
@@ -209,23 +245,12 @@ class TestRegisterByPath:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly = tmp_path / "asm"
-        register_gtf(assembly, src, "WS298")
+        _register_by_path(assembly, src, "WS298")
 
-        annotation = register_gtf(assembly, src, "WS298", force=True)
+        annotation = _register_by_path(assembly, src, "WS298", force=True)
 
         assert annotation.db.is_file()
         assert list(list_annotations(assembly)) == ["WS298"]
-
-    def test_a_directory_without_a_record_raises_naming_its_repair(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        assembly = tmp_path / "asm"
-        directory = annotation_dir(assembly, "WS298")
-        directory.mkdir(parents=True)
-        (directory / "WS298.db").write_bytes(b"half a database")
-
-        with pytest.raises(UnfinishedRegistrationError, match="force=True"):
-            register_gtf(assembly, src, "WS298")
 
 
 class TestRegisterByName:
@@ -313,7 +338,8 @@ class TestRegisterByName:
             _register_by_name(tmp_path, "sacCer3", "nope", progressbar=False)
 
         assert "ensgene_v101" in str(excinfo.value)
-        assert "register_gtf" in str(excinfo.value)
+        assert "register-gtf" in str(excinfo.value)  # the way in for one no row lists
+        assert "register_path" in str(excinfo.value)  # ...and the same from Python
 
     def test_reregistering_a_valid_one_is_a_silent_no_op(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -400,7 +426,7 @@ class TestListAnnotations:
     def test_a_database_without_a_record_is_not_registered(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        register_gtf(tmp_path, src, "finished")
+        _register_by_path(tmp_path, src, "finished")
         halfway = annotation_dir(tmp_path, "halfway")
         halfway.mkdir(parents=True)
         (halfway / "halfway.db").write_bytes(b"half a database")
@@ -410,7 +436,7 @@ class TestListAnnotations:
     def test_a_record_that_disagrees_with_disk_is_not_registered(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        annotation = register_gtf(tmp_path, src, "WS298")
+        annotation = _register_by_path(tmp_path, src, "WS298")
         assert list(list_annotations(tmp_path)) == ["WS298"]
 
         annotation.db.write_bytes(b"truncated")
@@ -450,7 +476,7 @@ class TestDiscardMergedAnnotation:
         # a record showing a merge wrote it is.
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        register_gtf(tmp_path, src, "a+b")
+        _register_by_path(tmp_path, src, "a+b")
 
         assert discard_merged_annotation(tmp_path, "a+b") is False
         assert list(list_annotations(tmp_path)) == ["a+b"]
@@ -469,7 +495,7 @@ class TestListBrokenAnnotations:
     def test_a_directory_holding_files_with_no_record_is_broken(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        register_gtf(tmp_path, src, "mine")
+        _register_by_path(tmp_path, src, "mine")
         record_path(annotation_dir(tmp_path, "mine")).unlink()
 
         broken = list_broken_annotations(tmp_path, "tiny")
@@ -481,7 +507,7 @@ class TestListBrokenAnnotations:
     def test_a_record_that_disagrees_with_disk_is_broken(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        annotation = register_gtf(tmp_path, src, "mine")
+        annotation = _register_by_path(tmp_path, src, "mine")
         annotation.db.write_bytes(b"truncated")
 
         broken = list_broken_annotations(tmp_path, "tiny")
@@ -492,7 +518,7 @@ class TestListBrokenAnnotations:
     def test_a_finished_annotation_is_not_broken(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        register_gtf(tmp_path, src, "mine")
+        _register_by_path(tmp_path, src, "mine")
 
         assert list_broken_annotations(tmp_path, "tiny") == {}
 
@@ -512,8 +538,8 @@ class TestListBrokenAnnotations:
         # nothing here raises — reporting is the whole point.
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        register_gtf(tmp_path, src, "healthy")
-        register_gtf(tmp_path, src, "damaged")
+        _register_by_path(tmp_path, src, "healthy")
+        _register_by_path(tmp_path, src, "damaged")
         record_path(annotation_dir(tmp_path, "damaged")).unlink()
 
         assert list(list_annotations(tmp_path)) == ["healthy"]
@@ -522,7 +548,7 @@ class TestListBrokenAnnotations:
     def test_a_name_the_table_offers_is_repaired_by_name(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        register_gtf(tmp_path, src, "ensgene_v101")
+        _register_by_path(tmp_path, src, "ensgene_v101")
         record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
 
         broken = list_broken_annotations(tmp_path, "sacCer3")
@@ -537,7 +563,7 @@ class TestListBrokenAnnotations:
     ) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        annotation = register_gtf(tmp_path, src, "mine")
+        annotation = _register_by_path(tmp_path, src, "mine")
         annotation.db.write_bytes(b"truncated")
 
         broken = list_broken_annotations(tmp_path, "tiny")
@@ -550,7 +576,7 @@ class TestListBrokenAnnotations:
         # rather than a path that would not run.
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        register_gtf(tmp_path, src, "mine")
+        _register_by_path(tmp_path, src, "mine")
         record_path(annotation_dir(tmp_path, "mine")).unlink()
 
         broken = list_broken_annotations(tmp_path, "tiny")
@@ -562,7 +588,7 @@ class TestListBrokenAnnotations:
     ) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        annotation = register_gtf(tmp_path, src, "mine")
+        annotation = _register_by_path(tmp_path, src, "mine")
         annotation.db.write_bytes(b"truncated")
         src.unlink()
 
@@ -665,7 +691,7 @@ class TestAnnotationStatus:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly_dir = tmp_path / "asm"
-        annotation = register_gtf(assembly_dir, src, "ensgene_v101")
+        annotation = _register_by_path(assembly_dir, src, "ensgene_v101")
 
         payload = annotation_status("sacCer3", cache_dir=assembly_dir)
 
@@ -677,7 +703,7 @@ class TestAnnotationStatus:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly_dir = tmp_path / "asm"
-        register_gtf(assembly_dir, src, "mine")
+        _register_by_path(assembly_dir, src, "mine")
 
         payload = annotation_status("tiny", cache_dir=assembly_dir)
 
@@ -695,7 +721,7 @@ class TestAnnotationStatus:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly_dir = tmp_path / "asm"
-        register_gtf(assembly_dir, src, "ensgene_v101")
+        _register_by_path(assembly_dir, src, "ensgene_v101")
         record_path(annotation_dir(assembly_dir, "ensgene_v101")).unlink()
 
         payload = annotation_status("sacCer3", cache_dir=assembly_dir)
@@ -713,7 +739,7 @@ class TestAnnotationStatus:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly_dir = tmp_path / "asm"
-        annotation = register_gtf(assembly_dir, src, "mine")
+        annotation = _register_by_path(assembly_dir, src, "mine")
         annotation.db.write_bytes(b"truncated")
 
         payload = annotation_status("tiny", cache_dir=assembly_dir)
@@ -728,8 +754,8 @@ class TestAnnotationStatus:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly_dir = tmp_path / "asm"
-        register_gtf(assembly_dir, src, "healthy")
-        register_gtf(assembly_dir, src, "damaged")
+        _register_by_path(assembly_dir, src, "healthy")
+        _register_by_path(assembly_dir, src, "damaged")
         record_path(annotation_dir(assembly_dir, "damaged")).unlink()
 
         payload = annotation_status("tiny", cache_dir=assembly_dir)
@@ -756,7 +782,7 @@ class TestAnnotationRegistry:
         """Register the fixture GTF under ``name`` and return the source it came from."""
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
-        register_gtf(tmp_path, source, name)
+        _register_by_path(tmp_path, source, name)
         return source
 
     def test_the_four_states_are_settled_in_one_construction(self, tmp_path: Path) -> None:
@@ -777,7 +803,7 @@ class TestAnnotationRegistry:
         elsewhere = tmp_path / "elsewhere"
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
-        register_gtf(elsewhere, source, "mine")
+        _register_by_path(elsewhere, source, "mine")
 
         assert AnnotationRegistry.locate("tiny", elsewhere).registered == ["mine"]
         assert AnnotationRegistry.locate("tiny", tmp_path).registered == []
@@ -870,8 +896,8 @@ class TestAnnotationRegistry:
     def test_addressed_by_assembly_name_a_broken_directory_names_a_command(
         self, tmp_path: Path
     ) -> None:
-        # The by-directory `register_gtf` knows no assembly name and can only name the
-        # Python call; a registry always has one, so it names a command a shell can run.
+        # A registry always knows its assembly, so the repair it names is a command a
+        # shell can run rather than a Python call with the assembly left to guess at.
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
         directory = annotation_dir(tmp_path, "WS298")
@@ -940,7 +966,7 @@ class TestChromosomeNames:
         sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
 
         with pytest.raises(ChromosomeMismatchError) as excinfo:
-            register_gtf(tmp_path, data_dir / "ensembl_style.gtf", _NAME, chrom_sizes=sizes)
+            _register_by_path(tmp_path, data_dir / "ensembl_style.gtf", _NAME, chrom_sizes=sizes)
 
         assert excinfo.value.missing == ("I", "II", "III")
         message = str(excinfo.value)
@@ -956,7 +982,7 @@ class TestChromosomeNames:
         sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
 
         with pytest.raises(ChromosomeMismatchError):
-            register_gtf(tmp_path, data_dir / "ensembl_style.gtf", _NAME, chrom_sizes=sizes)
+            _register_by_path(tmp_path, data_dir / "ensembl_style.gtf", _NAME, chrom_sizes=sizes)
 
         assert not annotation_dir(tmp_path, _NAME).exists()
         assert list(tmp_path.rglob("*.db")) == []
@@ -986,7 +1012,7 @@ class TestChromosomeNames:
         source = tmp_path / "one-chromosome.gtf"
         source.write_text(_GTF)
 
-        annotation = register_gtf(tmp_path, source, "WS298", chrom_sizes=sizes)
+        annotation = _register_by_path(tmp_path, source, "WS298", chrom_sizes=sizes)
 
         assert annotation.db.is_file()
         record = read_record(annotation_dir(tmp_path, "WS298"))
@@ -1002,7 +1028,7 @@ class TestChromosomeNames:
         sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
 
         with pytest.raises(ChromosomeMismatchError):
-            register_gtf(tmp_path, source, _NAME, chrom_sizes=sizes)
+            _register_by_path(tmp_path, source, _NAME, chrom_sizes=sizes)
 
         assert not annotation_dir(tmp_path, _NAME).exists()
 
@@ -1015,7 +1041,7 @@ class TestChromosomeNames:
         sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
 
         with pytest.raises(ChromosomeMismatchError) as excinfo:
-            register_gtf(tmp_path, source, _NAME, chrom_sizes=sizes)
+            _register_by_path(tmp_path, source, _NAME, chrom_sizes=sizes)
 
         assert len(excinfo.value.missing) == 25  # every one of them is on the exception
         assert "(and 15 more)" in str(excinfo.value)  # ten of them are in the message
@@ -1025,14 +1051,14 @@ class TestChromosomeNames:
         source = tmp_path / "commented.gtf"
         source.write_text("##description: a header\n#!genome-build tiny\n" + _GTF)
 
-        assert register_gtf(tmp_path, source, "WS298", chrom_sizes=sizes).db.is_file()
+        assert _register_by_path(tmp_path, source, "WS298", chrom_sizes=sizes).db.is_file()
 
     def test_the_override_registers_a_mismatched_gtf_anyway(
         self, tmp_path: Path, data_dir: Path
     ) -> None:
         sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
 
-        annotation = register_gtf(
+        annotation = _register_by_path(
             tmp_path,
             data_dir / "ensembl_style.gtf",
             _NAME,
@@ -1268,8 +1294,8 @@ class TestRegisterAnnotation:
         ]
 
 
-class TestRegisterAnnotationByPath:
-    """``register_annotation_by_path`` — a GTF no row lists, addressed by assembly name."""
+class TestRegisterGtf:
+    """``register_gtf`` — a GTF no row lists, addressed by assembly name."""
 
     def test_it_returns_the_record_plus_where_it_landed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1278,7 +1304,7 @@ class TestRegisterAnnotationByPath:
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
 
-        payload = register_annotation_by_path("tiny", source, "WS298")
+        payload = register_gtf("tiny", source, "WS298")
 
         directory = tmp_path / "genome" / "tiny" / "gtf" / "WS298"
         assert payload.record.kind == "annotation"
@@ -1297,29 +1323,26 @@ class TestRegisterAnnotationByPath:
         source.write_text(_GTF)
         elsewhere = tmp_path / "elsewhere"
 
-        payload = register_annotation_by_path("tiny", source, "WS298", cache_dir=elsewhere)
+        payload = register_gtf("tiny", source, "WS298", cache_dir=elsewhere)
 
         assert payload.directory == annotation_dir(elsewhere, "WS298")
 
     def test_it_finds_the_assembly_chrom_sizes_without_being_told(
         self, tmp_path: Path, data_dir: Path
     ) -> None:
-        # What the by-directory form cannot do: given the assembly's name it knows where
-        # its chrom.sizes is, so an Ensembl-spelled GTF is refused rather than silently
-        # registered unchecked.
+        # Naming the assembly is what says where its chrom.sizes is, so an
+        # Ensembl-spelled GTF is refused rather than silently registered unchecked.
         _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
 
         with pytest.raises(ChromosomeMismatchError):
-            register_annotation_by_path(
-                "tiny", data_dir / "ensembl_style.gtf", _NAME, cache_dir=tmp_path
-            )
+            register_gtf("tiny", data_dir / "ensembl_style.gtf", _NAME, cache_dir=tmp_path)
 
     def test_the_override_registers_the_mismatch_anyway_and_the_record_says_so(
         self, tmp_path: Path, data_dir: Path
     ) -> None:
         _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
 
-        payload = register_annotation_by_path(
+        payload = register_gtf(
             "tiny",
             data_dir / "ensembl_style.gtf",
             _NAME,
@@ -1337,8 +1360,8 @@ class TestRegisterAnnotationByPath:
         source = tmp_path / "bare.gtf"
         source.write_text(_BARE_GTF)
 
-        register_annotation_by_path("tiny", source, "exons_only", cache_dir=tmp_path)
-        register_annotation_by_path(
+        register_gtf("tiny", source, "exons_only", cache_dir=tmp_path)
+        register_gtf(
             "tiny",
             source,
             "with_genes",
@@ -1356,11 +1379,11 @@ class TestRegisterAnnotationByPath:
 
     def test_a_missing_source_says_what_to_pass(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError, match="GTF file not found"):
-            register_annotation_by_path("tiny", tmp_path / "nope.gtf", "WS298", cache_dir=tmp_path)
+            register_gtf("tiny", tmp_path / "nope.gtf", "WS298", cache_dir=tmp_path)
 
     def test_a_broken_directory_names_the_command_that_repairs_it(self, tmp_path: Path) -> None:
-        # Addressed by assembly name, the repair is a command a shell can run — the
-        # by-directory form knows no assembly name and names the Python call instead.
+        # Addressed by assembly name, the repair is a command a shell can run rather
+        # than a Python call with the assembly left to guess at.
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
         directory = annotation_dir(tmp_path, "WS298")
@@ -1368,7 +1391,7 @@ class TestRegisterAnnotationByPath:
         (directory / "WS298.db").write_bytes(b"half a database")
 
         with pytest.raises(UnfinishedRegistrationError) as excinfo:
-            register_annotation_by_path("tiny", source, "WS298", cache_dir=tmp_path)
+            register_gtf("tiny", source, "WS298", cache_dir=tmp_path)
 
         assert f"genome register-gtf tiny {source} WS298 --force" in str(excinfo.value)
 
@@ -1379,9 +1402,7 @@ class TestRegisterAnnotationByPath:
         directory.mkdir(parents=True)
         (directory / "WS298.db").write_bytes(b"half a database")
 
-        payload = register_annotation_by_path(
-            "tiny", source, "WS298", cache_dir=tmp_path, force=True
-        )
+        payload = register_gtf("tiny", source, "WS298", cache_dir=tmp_path, force=True)
 
         assert payload.name == "WS298"
         assert list(list_annotations(tmp_path)) == ["WS298"]

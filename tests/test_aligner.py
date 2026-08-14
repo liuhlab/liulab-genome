@@ -94,7 +94,9 @@ def _make_genome(
     """Return a minimal Genome-like stub backed by a real FASTA + GTF(s) on disk.
 
     ``gtfs`` maps annotation name -> GTF text; each is written to ``tmp_path`` and
-    exposed through a ``get_gtf_path`` matching :meth:`Genome.get_gtf_path`.
+    exposed through an ``annotations`` registry stand-in whose ``path`` matches
+    :meth:`~genome.io.gtf.AnnotationRegistry.path`. ``default_gtf`` is the first of
+    them, as a genome with one registered annotation and no table flag would have it.
 
     ``chrom_sizes`` replaces the single-chromosome default, which is what lets a
     test dictate the *shape* of a reference — how many sequences and how long —
@@ -120,7 +122,8 @@ def _make_genome(
         assembly_dir=AssemblyDir.locate("tiny"),
         files=types.SimpleNamespace(fasta=fasta),
         chrom_sizes=sizes,
-        get_gtf_path=lambda name: gtf_paths[name],
+        annotations=types.SimpleNamespace(path=lambda name: gtf_paths[name]),
+        default_gtf=next(iter(gtf_paths)),
     )
     return cast("Genome", stub)
 
@@ -563,7 +566,9 @@ def test_reusing_a_star_index_never_resolves_the_annotation_that_named_it(
     # reuse check, turning a returned path into a raise. It composes lazily so that
     # cannot happen, and this pins the order from both sides.
     registered = {"toy": tmp_path / "toy.gtf"}
-    mixin_genome.get_gtf_path = registered.__getitem__  # type: ignore[method-assign]
+    mixin_genome.annotations = types.SimpleNamespace(  # type: ignore[misc]
+        path=registered.__getitem__
+    )
 
     built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
 
@@ -736,7 +741,7 @@ def mixin_genome(data_root: Path, tmp_path: Path) -> Genome:
         pass
 
     genome = _MixinGenome()
-    for attr in ("assembly", "assembly_dir", "files", "chrom_sizes", "get_gtf_path"):
+    for attr in ("assembly", "assembly_dir", "files", "chrom_sizes", "annotations", "default_gtf"):
         setattr(genome, attr, getattr(stub, attr))
     return cast("Genome", genome)
 
@@ -759,6 +764,48 @@ def test_get_index_returns_built_index_path(mixin_genome: Genome, tools: _Tools)
 def test_get_star_index_matches_generic_get_index(mixin_genome: Genome, tools: _Tools) -> None:
     mixin_genome.build_star_index("toy", tool=tools("STAR"))
     assert mixin_genome.get_star_index("toy") == mixin_genome.get_index("star", gtf="toy")
+
+
+def test_build_star_index_falls_back_to_the_default_annotation(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # The everyday call: a chimera, and any assembly the table flags one for, already
+    # carries a default, so spelling it out at the call site said nothing the genome did
+    # not already know. The index it names is the same one either way.
+    named = mixin_genome.build_star_index("toy", tool=tools("STAR"))
+
+    defaulted = mixin_genome.build_star_index(tool=tools("STAR"))
+
+    assert mixin_genome.default_gtf == "toy"
+    assert defaulted == named
+    assert defaulted.name == "star_toy"
+    assert len(tools.calls) == 1  # the second call reused the first's finished index
+
+
+def test_build_star_index_with_no_default_names_both_ways_to_supply_one(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # A STAR index is built against one annotation and cannot be built against none, so
+    # the refusal is a ValueError naming the per-call fix and the once-and-for-all one.
+    mixin_genome.default_gtf = None  # type: ignore[misc]
+
+    with pytest.raises(ValueError, match="no default") as excinfo:
+        mixin_genome.build_star_index(tool=tools("STAR"))
+
+    message = str(excinfo.value)
+    assert "build_star_index(gtf=<name>)" in message
+    assert "default_gtf=<name>" in message
+    assert tools.calls == []  # nothing ran
+
+
+def test_build_chromap_index_needs_no_annotation_not_even_a_default(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # The other half of the same rule: chromap carries no annotation at all, so a genome
+    # with no default indexes for it perfectly well.
+    mixin_genome.default_gtf = None  # type: ignore[misc]
+
+    assert mixin_genome.build_chromap_index(tool=tools("chromap")).name == "chromap.index"
 
 
 def test_the_mixin_forwards_the_tool_to_the_aligner_it_builds(
