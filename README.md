@@ -1,13 +1,19 @@
 # liulab-genome
 
-Handling genomic files — metadata management, file processing, feature extraction.
+Reference genomes on disk, ready to query. Name an assembly and it is fetched, prepared
+(`.fai`, `.2bit`, `chrom.sizes`) and answering sequence queries — plus GTF annotations
+registered against it and STAR/chromap indexes built from it.
 
 Import name: `genome`.
 
-## Status
+```python
+from genome import Genome
 
-Early scaffolding. The first real feature (typed biological sequences in `genome.seq`)
-lands in Phase 3.
+sacCer3 = Genome("sacCer3")
+sacCer3.fetch_sequence("chrIV:0-10")   # DNA('ACACCACACC') — 0-based, half-open
+```
+
+Docs: <https://liuhlab.github.io/liulab-genome/>
 
 ## Development
 

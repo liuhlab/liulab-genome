@@ -84,8 +84,19 @@ preparation is no longer indistinguishable from a finished one.
   override on every registration; taking both the FASTA and the annotation from PRJNA13758 WS298
   makes them agree by construction.
 
+- **The documentation site is four pages instead of six**, and each is a tutorial rather than an
+  account of why the package is built the way it is. `Home`, `Genome`, `Sequences` and `CLI`, plus
+  the generated API reference. Design rationale is not repeated on the site: a decision lives in
+  `docs/adr/` and is read there.
+- **A glossary term the records settled but the code does not have yet says so.** `Chimera`,
+  `Component` and `Merged annotation` carry a *decided, not built* marker naming the record, so the
+  vocabulary can run ahead of the implementation without reading as an API that exists.
+
 ### Removed
 
+- **`Usage`, `Genome files` and `Annotations & indexes` are gone as site pages.** What a user needs
+  from them moved into `Genome` and the new `CLI` page; what remained described machinery a caller
+  never invokes directly. Links to those three URLs break.
 - **The compressed download no longer sits beside the unpacked FASTA forever.** Downloads land in a
   disposable working area and the archive is deleted once the record is written. It is kept for the
   duration of a run, so an interrupted job repairs without re-downloading.

@@ -55,7 +55,7 @@ component set, so it identifies the assembly rather than labelling its directory
 _Avoid_: input, custom genome, reference; and `source_url` as the column a recipe lands in — that
 field is typed and read as a URL, so a component list there is a lie the parser cannot catch
 
-**Chimera**:
+**Chimera** _(decided, not built — ADR-0008, ADR-0009)_:
 An **Assembly** whose **FASTA** is concatenated from two or more prepared canonical assemblies
 instead of fetched — its **Component**s, never repeated and never themselves chimeras. Its identity
 is that component set rather than the order it arrived in, so the name derives by sorting the
@@ -67,7 +67,7 @@ test of whether an assembly is one, answering `None` when it is not.
 _Avoid_: hybrid, combined genome, merged genome, multi-species reference; and "concatenated FASTA",
 which names the bytes rather than the assembly they belong to
 
-**Component**:
+**Component** _(decided, not built — ADR-0008)_:
 One prepared canonical **Assembly** a **Chimera** is built from — never a bare FASTA, which is
 registered as an assembly of its own first, and never itself a chimera, so nesting is forbidden by
 the model rather than deferred. Component names are alphanumeric, enforced rather than assumed: that

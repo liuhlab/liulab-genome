@@ -13,6 +13,9 @@ a hypothesis, a test name — use the term as defined, not a synonym an entry li
 concept defined nowhere is a signal either way: usually it is language the project does not use,
 occasionally a real gap worth adding.
 
+**A term marked _(decided, not built — ADR-N)_ names something the record settled and the
+code does not have yet.** Use the word; do not call the API it describes.
+
 **Two vocabularies, and they do not mix.** Domain terms come from these files. Architecture terms —
 module, interface, depth, seam, adapter, leverage, locality — are fixed, and "component", "service",
 "API" and "boundary" are not substitutes for them. One narrowing, not a loophole: "component" is a

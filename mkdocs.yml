@@ -51,11 +51,9 @@ plugins:
 
 nav:
   - Home: index.md
-  - Usage: usage.md
   - Genome: genome.md
   - Sequences: sequences.md
-  - Genome files: genome-files.md
-  - Annotations & indexes: aligner.md
+  - CLI: cli.md
   - API reference: reference.md
 
 # Agent-facing trees live in the repo and stay OUT of the site; this site is the human
