@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from genome import Genome
-from genome.io.chimera import check_components_unchanged
+from genome.io.chimera import COMPONENTS_UNKNOWN, components_status
 from genome.io.completion import (
     RegistrationMismatchError,
     read_record,
@@ -220,7 +220,7 @@ def test_a_component_with_no_record_of_its_own_reads_as_unknown(
     )
     record_path(yeast.fasta_path.parent).unlink()
 
-    check_components_unchanged(chimera.fasta_path.parent, _PAIR)
+    assert components_status(chimera.fasta_path.parent, _PAIR) == COMPONENTS_UNKNOWN
 
 
 def test_a_chimera_that_recorded_no_digest_for_a_component_reads_as_unknown(
@@ -248,7 +248,7 @@ def test_an_assembly_with_no_components_has_nothing_to_compare(
     # comparison has nothing to iterate rather than a question to ask about it.
     yeast = component("tinySc")
 
-    check_components_unchanged(yeast.fasta_path.parent, "tinySc")
+    assert components_status(yeast.fasta_path.parent, "tinySc") is None
 
     record = read_record(yeast.fasta_path.parent)
     assert record is not None

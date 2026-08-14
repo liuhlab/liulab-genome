@@ -23,7 +23,9 @@ A third way in has exactly one caller. :func:`register_merged_gtf` writes the **
 annotation** a **Chimera** build derives from its components' own annotations, inside the
 act that writes the chimera's FASTA (ADR-0008). Nothing is fetched, so its record pins no
 source and no table row describes it; and nothing on disk is ever adopted, so the build
-that owns it writes it every time it runs.
+that owns it writes it every time it runs. Owning it cuts both ways: the merged name is
+derived from what contributed, so a rebuild whose contributors changed writes a *different*
+name, and :func:`discard_merged_annotation` takes the one that build no longer owns.
 
 **A GTF belongs to its assembly or to nothing.** Either way in checks that every
 **Chromosome** the GTF names is one the assembly's ``chrom.sizes`` carries, and raises
@@ -1040,6 +1042,56 @@ def _write_merged_gtf(sources: Sequence[MergeSource], destination: Path, *, sepa
                     output.write(written)
                     digest.update(written)
     return digest.hexdigest()
+
+
+def discard_merged_annotation(assembly_dir: Path, name: str) -> bool:
+    """Remove the **Merged annotation** registered as ``name``, when that is what it is.
+
+    The other half of a chimera build owning its annotation. The merged name is the
+    ``+``-join of the contributing annotations' names, so a rebuild whose contributing set
+    changed registers the merge under a *new* name — and the previous one, which nothing
+    else will ever write again, would otherwise stay registered beside it. Two derived
+    annotations with nothing to choose between them is a chimera whose **Default
+    annotation** is suddenly none, which is how an annotated chimera comes back from a
+    legitimate repair with none at all. So the build removes what it no longer owns, and
+    :meth:`~genome.io.chimera.ChimeraBuilder.build_genome` is the only caller.
+
+    Owning it is **proved, not assumed**: only a directory whose record carries the
+    ``merged_from`` marker a merge writes is removed, so an annotation a caller registered
+    by hand — and a directory nothing vouches for — is left exactly where it is, whatever
+    it is called.
+
+    Parameters
+    ----------
+    assembly_dir : pathlib.Path
+        The chimera's **Assembly dir**, which the annotation is filed under.
+    name : str
+        The **Registered name** to remove, as the previous build's completion record
+        names it.
+
+    Returns
+    -------
+    bool
+        Whether an annotation was removed. ``False`` for a name nothing is registered
+        under, and for one whose record does not show a merge wrote it.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> discard_merged_annotation(Path("/tmp/definitely-not-an-assembly"), "a+b")
+    False
+    """
+    directory = annotation_dir(assembly_dir, name)
+    record = read_record(directory)
+    if record is None or not record.details.get(_MERGED_FROM_KEY):
+        return False
+    shutil.rmtree(directory)
+    # A chimera that merged nothing carries no `gtf/` tree at all, and one whose last
+    # derived annotation has just gone is in exactly that state.
+    root = _annotations_root(assembly_dir)
+    if not any(root.iterdir()):
+        root.rmdir()
+    return True
 
 
 def fetch_annotation(

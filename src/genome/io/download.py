@@ -85,9 +85,11 @@ _URL_SCHEMES = frozenset({"http", "https", "ftp", "sftp"})
 #: What answered *which digest should this FASTA have?* — the assembly's curated
 #: metadata row, or the completion record its own registration wrote. Reported by
 #: :func:`verify_assembly` so that being held to a pin and being held only to what this
-#: machine last produced are never read as the same result.
-_EXPECTED_FROM_TABLE = "table"
-_EXPECTED_FROM_RECORD = "record"
+#: machine last produced are never read as the same result. Public because the CLI keys
+#: its two sentences on them: a surface that spelled the strings again would print the
+#: raw status the day one of these was renamed, rather than failing.
+EXPECTED_FROM_TABLE = "table"
+EXPECTED_FROM_RECORD = "record"
 
 
 def _looks_like_url(source: str) -> bool:
@@ -352,10 +354,10 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
         """
         pinned = self._expected_sha256
         if pinned is not None:
-            return pinned, _EXPECTED_FROM_TABLE
+            return pinned, EXPECTED_FROM_TABLE
         record = read_record(self.cache_dir)
         if record is not None and record.sha256 is not None:
-            return record.sha256, _EXPECTED_FROM_RECORD
+            return record.sha256, EXPECTED_FROM_RECORD
         return None, None
 
     @property
@@ -724,7 +726,7 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
         ('hg38.fa.fai', 'hg38.2bit', 'hg38.chrom.sizes')
         """
         # Deferred for the same cycle :meth:`_chimera_components` explains.
-        from genome.io.chimera import check_components_unchanged
+        from genome.io.chimera import components_status
 
         components = self._chimera_components()
         registered = self._completed_genome(overwrite=overwrite, repair=self._repair_command())
@@ -732,7 +734,8 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
             # Asked of every assembly and answered instantly for one with no components,
             # so that opening a chimera by name is held to what building one is held to —
             # the check used to be reachable only through the builder and the verifier.
-            check_components_unchanged(self.cache_dir, self.assembly)
+            # The refusal is the point here; the answer is for a surface that prints one.
+            components_status(self.cache_dir, self.assembly)
             return registered
         if components is not None:
             return self._build_chimera(components, overwrite=overwrite)

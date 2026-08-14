@@ -306,8 +306,9 @@ def split_suffixed(name: str, separator: str = "__") -> tuple[str, str]:
     When one does, the chimera's record is the authority on its separator and the caller
     passes it. Writing has no such default, on purpose: see :func:`suffixed`.
 
-    The same contract in the form to hand a tool that cannot import this module is what
-    :func:`suffix_pattern` returns.
+    The same contract in the form to hand a tool that cannot import this module is the
+    regex the Assembly glossary publishes, which :func:`_suffix_pattern` generates and a
+    test holds against this function name by name.
 
     Parameters
     ----------
@@ -327,7 +328,7 @@ def split_suffixed(name: str, separator: str = "__") -> tuple[str, str]:
     ChimeraNamingError
         If ``separator`` is not a run of two or more underscores, ``name`` carries no
         component suffix under it, or nothing precedes that suffix — the last of which is
-        what :func:`suffix_pattern` refuses with ``.+``, so the two agree.
+        what the published pattern refuses with ``.+``, so the two agree.
 
     Examples
     --------
@@ -361,13 +362,16 @@ def split_suffixed(name: str, separator: str = "__") -> tuple[str, str]:
     return chromosome, component
 
 
-def suffix_pattern(separator: str = "__") -> str:
-    """Return the published regex that reads a suffixed chromosome name.
+def _suffix_pattern(separator: str = "__") -> str:
+    """Return the regex that reads a suffixed chromosome name, as the docs publish it.
 
-    The same contract :func:`split_suffixed` performs, in the form to hand something that
-    cannot import this module — an awk field split, an R ``sub``, a shell one-liner. It is
-    generated from the separator rather than written down, so a chimera whose components
-    forced a longer run gets its own pattern instead of the two-underscore one.
+    Not a second way to split a name: :func:`split_suffixed` is the one this package
+    performs, and this has no caller in it. What is *published* to something that cannot
+    import this module — an awk field split, an R ``sub``, a shell one-liner — is the
+    literal string the Assembly glossary carries, under the spelling ADR-0009 fixes. This
+    generates that same string from the separator, so a chimera whose components forced a
+    longer run has a pattern too, and so that a test can hold the published regex and the
+    split together on any name at all. That test is what it is here for.
 
     Greedy on the left, so the split falls at the last separator run. **Anchored
     independently at each end**, which is what stops ``I`` from matching inside ``II`` and
@@ -400,10 +404,10 @@ def suffix_pattern(separator: str = "__") -> str:
 
     Examples
     --------
-    >>> suffix_pattern()
+    >>> _suffix_pattern()
     '^(?P<chromosome>.+)__(?P<component>[A-Za-z0-9]+)$'
     >>> import re
-    >>> re.match(suffix_pattern("___"), "NZ_TINY02000001.1___tinyEcDub")["component"]
+    >>> re.match(_suffix_pattern("___"), "NZ_TINY02000001.1___tinyEcDub")["component"]
     'tinyEcDub'
     """
     _check_separator(separator)

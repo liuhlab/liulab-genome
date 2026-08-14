@@ -11,6 +11,7 @@ never the lab's own.
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -358,6 +359,64 @@ def test_force_repairs_the_annotation_as_well_as_the_fasta(
     assert repaired.annotations == [_EVERYDAY_MERGED]
     assert (directory / f"{_EVERYDAY_MERGED}.db").is_file()
     assert repaired.fasta_path.stat().st_mtime_ns != written
+
+
+def test_a_rebuild_whose_contributors_changed_leaves_only_the_annotation_it_wrote(
+    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The merged name is the +-join of what contributed, so a contributing set that
+    # changes across a rebuild changes it — and the build owns both, so the one it no
+    # longer owns goes. Left beside the new one it would be a second annotation with no
+    # default between them, and a chimera that arrived annotated would come back from a
+    # legitimate repair with `default_gtf` of None.
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+    worm = chimera_component("tinyCe", with_annotation=True)
+    yeast = chimera_component("tinySc", with_annotation=True)
+    with Genome.chimera(worm, yeast) as first:
+        assembly_dir = first.fasta_path.parent
+        assert first.default_gtf == "genes+genes"
+
+    gtf = CHIMERA_COMPONENTS["tinyCe"].gtf
+    assert gtf is not None
+    worm.register_gtf(gtf, "genes_again")
+    with (
+        Genome(
+            "tinyCe",
+            cache_dir=worm.fasta_path.parent,
+            progressbar=False,
+            default_gtf="genes_again",
+        ) as renamed,
+        Genome.chimera(renamed, yeast, force=True) as rebuilt,
+    ):
+        assert rebuilt.annotations == ["genes_again+genes"]
+        assert rebuilt.default_gtf == "genes_again+genes"
+
+    # Removed rather than left broken: nothing vouches for it and nothing points at it.
+    assert not annotation_dir(assembly_dir, "genes+genes").exists()
+
+
+def test_a_rebuild_with_nothing_left_to_merge_leaves_no_annotation_at_all(
+    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The same fault at its worst: with nothing to merge, the annotation the previous
+    # build wrote would be the *only* one registered here and therefore the default,
+    # answering queries with gene models this chimera no longer merges from anything.
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+    worm = chimera_component("tinyCe", with_annotation=True)
+    yeast = chimera_component("tinySc")
+    with Genome.chimera(worm, yeast) as first:
+        assembly_dir = first.fasta_path.parent
+        assert first.default_gtf == COMPONENT_ANNOTATION
+
+    shutil.rmtree(annotation_dir(worm.fasta_path.parent, COMPONENT_ANNOTATION))
+    with (
+        Genome("tinyCe", cache_dir=worm.fasta_path.parent, progressbar=False) as bare,
+        Genome.chimera(bare, yeast, force=True) as rebuilt,
+    ):
+        assert rebuilt.annotations == []
+        assert rebuilt.default_gtf is None
+
+    assert not (assembly_dir / "gtf").exists()
 
 
 def test_a_broken_merged_annotation_names_the_command_that_rebuilds_the_chimera(

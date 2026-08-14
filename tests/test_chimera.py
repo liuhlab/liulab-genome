@@ -26,12 +26,12 @@ from hypothesis import strategies as st
 
 from genome.chimera import (
     ChimeraNamingError,
+    _suffix_pattern,
     check_roundtrip,
     derive_name,
     derive_separator,
     split_name,
     split_suffixed,
-    suffix_pattern,
     suffixed,
 )
 
@@ -254,7 +254,7 @@ def test_the_prefix_trap_between_component_names() -> None:
     assert name == "NZ_TINY02000001.1___tinyEcDub"
     assert re.search(f"{separator}tinyEc", name) is not None  # the trap
     assert split_suffixed(name, separator) == ("NZ_TINY02000001.1", "tinyEcDub")
-    match = re.match(suffix_pattern(separator), name)
+    match = re.match(_suffix_pattern(separator), name)
     assert match is not None
     assert match["component"] == "tinyEcDub"
 
@@ -305,7 +305,7 @@ def test_an_illegal_separator_is_refused_at_both_ends(separator: str) -> None:
     with pytest.raises(ChimeraNamingError, match="run of two or more underscores"):
         split_suffixed("I__tinyCe", separator)
     with pytest.raises(ChimeraNamingError, match="run of two or more underscores"):
-        suffix_pattern(separator)
+        _suffix_pattern(separator)
 
 
 def test_a_non_alphanumeric_component_cannot_be_suffixed_onto_anything() -> None:
@@ -329,7 +329,7 @@ def test_a_name_that_is_suffix_and_nothing_else_is_refused(name: str, separator:
     # empty chromosome for both.
     with pytest.raises(ChimeraNamingError, match="suffix and nothing else"):
         split_suffixed(name, separator)
-    assert re.match(suffix_pattern(separator), name) is None
+    assert re.match(_suffix_pattern(separator), name) is None
 
 
 # --------------------------------------------------------------------------------------
@@ -338,11 +338,11 @@ def test_a_name_that_is_suffix_and_nothing_else_is_refused(name: str, separator:
 
 
 def test_the_published_pattern_is_the_documented_one() -> None:
-    assert suffix_pattern() == r"^(?P<chromosome>.+)__(?P<component>[A-Za-z0-9]+)$"
+    assert _suffix_pattern() == r"^(?P<chromosome>.+)__(?P<component>[A-Za-z0-9]+)$"
 
 
 def test_the_published_pattern_is_generated_from_the_separator() -> None:
-    assert suffix_pattern("___") == r"^(?P<chromosome>.+)___(?P<component>[A-Za-z0-9]+)$"
+    assert _suffix_pattern("___") == r"^(?P<chromosome>.+)___(?P<component>[A-Za-z0-9]+)$"
 
 
 @pytest.mark.parametrize("combination", _COMBINATIONS, ids=_ids)
@@ -353,7 +353,7 @@ def test_the_published_pattern_and_the_split_agree_on_every_name(
     # to say exactly what the package does.
     chromosomes = _chromosomes(*combination)
     separator = derive_separator(chromosomes)
-    pattern = suffix_pattern(separator)
+    pattern = _suffix_pattern(separator)
     for component, names in chromosomes.items():
         for chromosome in names:
             match = re.match(pattern, suffixed(chromosome, component, separator))
@@ -447,7 +447,7 @@ def _name_under_a_separator(draw: st.DrawFn) -> tuple[str, str]:
     The separator is one of the pieces the name is built from, because a name drawn from
     letters and lone underscores lands on the shapes the two readers could disagree about
     far too rarely — a whole name that is one separator run and a component, say. No
-    newline in the alphabet: :func:`suffix_pattern` anchors with ``$`` and
+    newline in the alphabet: :func:`_suffix_pattern` anchors with ``$`` and
     :func:`split_suffixed` at the end of the string, so a trailing newline is a documented
     difference between them rather than drift.
     """
@@ -468,7 +468,7 @@ def test_suffixing_then_splitting_is_the_identity(
 def test_the_published_pattern_reads_what_suffixing_wrote(
     chromosome: str, component: str, separator: str
 ) -> None:
-    match = re.match(suffix_pattern(separator), suffixed(chromosome, component, separator))
+    match = re.match(_suffix_pattern(separator), suffixed(chromosome, component, separator))
     assert match is not None
     assert (match["chromosome"], match["component"]) == (chromosome, component)
 
@@ -485,7 +485,7 @@ def test_the_published_pattern_and_the_split_agree_on_any_name_at_all(
     # exists to prevent, and the fixtures cannot show it — the two pinned examples are the
     # whole disagreement class, kept explicit so the property is never left to luck.
     name, separator = pair
-    match = re.match(suffix_pattern(separator), name)
+    match = re.match(_suffix_pattern(separator), name)
     try:
         split = split_suffixed(name, separator)
     except ChimeraNamingError:

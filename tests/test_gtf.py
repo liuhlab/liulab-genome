@@ -31,17 +31,20 @@ from genome.io.completion import (
 )
 from genome.io.gtf import (
     ChromosomeMismatchError,
+    MergeSource,
     _reject_unknown_chromosomes,
     annotation_dir,
     annotation_status,
     chromosome_check_summary,
     default_annotation,
+    discard_merged_annotation,
     fetch_annotation,
     list_annotations,
     list_broken_annotations,
     register_annotation,
     register_annotation_by_path,
     register_gtf,
+    register_merged_gtf,
 )
 from genome.io.utils import ChecksumMismatchError
 from genome.metadata import AnnotationMetadata
@@ -383,6 +386,47 @@ class TestListAnnotations:
         annotation.db.write_bytes(b"truncated")
 
         assert list_annotations(tmp_path) == {}
+
+
+class TestDiscardMergedAnnotation:
+    """What a chimera build removes when its next build merges under another name."""
+
+    def test_a_merged_annotation_goes_and_takes_an_emptied_gtf_tree_with_it(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        assembly = tmp_path / "asm"
+        chrom_sizes = _write_chrom_sizes(assembly, "chrI__tiny")
+        register_merged_gtf(
+            assembly,
+            "a+b",
+            [MergeSource("tiny", "a", src)],
+            separator="__",
+            chrom_sizes=chrom_sizes,
+        )
+
+        assert discard_merged_annotation(assembly, "a+b") is True
+
+        assert list_annotations(assembly) == {}
+        # A chimera that merges nothing carries no gtf/ tree, and one whose last derived
+        # annotation has just gone is in exactly that state.
+        assert not (assembly / "gtf").exists()
+
+    def test_an_annotation_a_caller_registered_by_hand_is_never_removed(
+        self, tmp_path: Path
+    ) -> None:
+        # The name comes from a previous build's record, and a name is not ownership: only
+        # a record showing a merge wrote it is.
+        src = tmp_path / "ann.gtf"
+        src.write_text(_GTF)
+        register_gtf(tmp_path, src, "a+b")
+
+        assert discard_merged_annotation(tmp_path, "a+b") is False
+        assert list(list_annotations(tmp_path)) == ["a+b"]
+
+    def test_a_name_nothing_is_registered_under_is_not_an_error(self, tmp_path: Path) -> None:
+        assert discard_merged_annotation(tmp_path, "a+b") is False
 
 
 class TestListBrokenAnnotations:

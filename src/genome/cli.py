@@ -7,15 +7,17 @@ only translates arguments, dispatches, and chooses an output format.
 from __future__ import annotations
 
 import json as _json
-from pathlib import Path
 
 import typer
 
 from genome import __version__ as _package_version
 from genome.external import ToolNotFoundError
 from genome.external import doctor as _doctor
+from genome.io.chimera import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
+from genome.io.chimera import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
 from genome.io.chimera import ChimeraDetails as _ChimeraDetails
-from genome.io.chimera import read_chimera_details as _read_chimera_details
+from genome.io.download import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
+from genome.io.download import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
 from genome.io.download import assembly_table_row as _assembly_table_row
 from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
@@ -56,9 +58,11 @@ _CHECK_CHROMOSOMES_HELP = (
 #: states and three sentences: the curated row pinned it, this machine's own registration
 #: recorded it, or nothing pinned it at all. One wording covering two of them would report
 #: the weakest result in the words of the strongest. ``{assembly}`` is the name asked about.
+#: Keyed on the constants the API answers with, never on the strings spelled again here:
+#: the render falls back to the raw status, so a re-spelling would print it silently.
 _EXPECTED_SENTENCES: dict[str | None, str] = {
-    "table": "matches the digest the metadata table pins for it",
-    "record": (
+    _EXPECTED_FROM_TABLE: "matches the digest the metadata table pins for it",
+    _EXPECTED_FROM_RECORD: (
         "matches the digest {assembly}'s own registration recorded — the table pins none "
         "for it, so this is what this machine last produced and not an independent pin"
     ),
@@ -70,10 +74,13 @@ _EXPECTED_SENTENCES: dict[str | None, str] = {
 
 #: What the component check proved, one sentence per answer. Both print: a chimera whose
 #: components could not be compared is unproven rather than passed, and a surface that
-#: says nothing in that case says exactly what it says when everything agreed.
+#: says nothing in that case says exactly what it says when everything agreed. Keyed on
+#: the API's own constants, for the reason :data:`_EXPECTED_SENTENCES` is.
 _COMPONENT_SENTENCES: dict[str, str] = {
-    "unchanged": "unchanged — every component is still the one this chimera was built from",
-    "unknown": (
+    _COMPONENTS_UNCHANGED: (
+        "unchanged — every component is still the one this chimera was built from"
+    ),
+    _COMPONENTS_UNKNOWN: (
         "unknown — a digest was missing on one side or the other, so nothing was actually "
         "compared; this is unproven rather than a pass"
     ),
@@ -191,10 +198,11 @@ def register(
     claimed = payload["files"]
     names = sorted(claimed) if isinstance(claimed, dict) else []
     directory = str(payload["directory"])
-    # The record answers whether this is a chimera, as it does everywhere else — read
-    # back from the directory this command has just written, which is what leaves the
-    # `--json` payload exactly as it was: it already carries all of this.
-    chimera = _read_chimera_details(Path(directory))
+    # The record answers whether this is a chimera, as it does everywhere else — and the
+    # payload is that record, so it is read here rather than from disk a second time.
+    # One read, one fact: the two surfaces cannot disagree about what just happened.
+    recorded = payload.get("details")
+    chimera = _ChimeraDetails.from_details(recorded if isinstance(recorded, dict) else {})
     typer.echo(f"registered {payload['assembly']} in {directory}")
     if chimera is None:
         typer.echo(f"  source  {payload['source_url']}")

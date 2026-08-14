@@ -267,6 +267,12 @@ chimera.default_gtf                   # 'wormbase_ws298+refseq_rs_2025_06_26'
 chimera.build_star_index(gtf=chimera.default_gtf, threads=8)
 ```
 
+Its name is what went into it, so it changes when a component's default annotation does.
+Rebuilding — `Genome.chimera(..., force=True)`, or `genome register <name> --force` —
+registers the new one and **removes the one it replaces**, so a chimera never ends up
+carrying two merged annotations with no default between them. An annotation you registered
+by hand is never touched.
+
 ## Regions
 
 `Region` is the shared coordinate type: frozen, validated, 0-based half-open, with an
