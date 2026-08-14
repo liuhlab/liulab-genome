@@ -1,8 +1,9 @@
 """Tests for genome.aligner — the Aligner abstraction, STAR, chromap, and the mixin.
 
 The pure-logic tests stub out the aligner binary (its resolution, version, and the
-subprocess call), so they run anywhere. A couple of integration tests build a real
-index from a toy FASTA + GTF and are skipped when the binary is not on ``PATH``.
+subprocess call), so they run anywhere. A handful of integration tests build a real
+index from a toy FASTA + GTF, and those are the only tests in this suite needing a
+binary the package does not ship: :func:`_needs` is how one says so.
 
 What a finished index is, is asked of its completion record and of nothing else, so
 most of what is worth asserting here — that an unbuilt index raises, that an
@@ -15,9 +16,9 @@ from __future__ import annotations
 import re
 import shutil
 import types
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeVar, cast
 
 import pandas as pd
 import pytest
@@ -44,8 +45,30 @@ from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY
 if TYPE_CHECKING:
     from genome.genome import Genome
 
-_STAR_PRESENT = shutil.which("STAR") is not None
-_CHROMAP_PRESENT = shutil.which("chromap") is not None
+#: What a mark may be applied to. Bounded, so both marks below resolve to the overload
+#: that hands the test function back rather than the one that builds a parametrised mark.
+_Test = TypeVar("_Test", bound=Callable[..., None])
+
+
+def _needs(binary: str) -> Callable[[_Test], _Test]:
+    """Mark a test as needing ``binary``, and skip it when that binary is absent.
+
+    One name applies both halves, because they must never come apart. The ``aligner``
+    marker is what puts a test in the CI lane that installs STAR and chromap and proves
+    they answer before selecting; the skip is what keeps the same test out of the way on
+    a machine that has neither. A test carrying only the skip would sit in the other
+    lane and report green having run nothing, which is the failure the split ends.
+    """
+    skip = pytest.mark.skipif(shutil.which(binary) is None, reason=f"{binary} not on PATH")
+
+    def mark(test: _Test) -> _Test:
+        return pytest.mark.aligner(skip(test))
+
+    return mark
+
+
+_needs_star = _needs("STAR")
+_needs_chromap = _needs("chromap")
 
 # A 10 kb single-chromosome genome — large enough for STAR to index, small
 # enough to build in a second or two.
@@ -572,7 +595,7 @@ def test_get_index_unknown_aligner_raises(mixin_genome: Genome) -> None:
 # -- integration (require a real STAR) --------------------------------------
 
 
-@pytest.mark.skipif(not _STAR_PRESENT, reason="STAR not on PATH")
+@_needs_star
 def test_real_star_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     star = STAR(_make_genome(tmp_path), gtf="toy")
@@ -604,7 +627,7 @@ def test_real_star_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert echoed == ["13"]
 
 
-@pytest.mark.skipif(not _STAR_PRESENT, reason="STAR not on PATH")
+@_needs_star
 def test_real_star_index_with_gtf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     star = STAR(_make_genome(tmp_path), gtf="toy")
@@ -773,7 +796,7 @@ def test_get_chromap_index_raises_before_build(mixin_genome: Genome) -> None:
 # -- integration (require a real chromap) -----------------------------------
 
 
-@pytest.mark.skipif(not _CHROMAP_PRESENT, reason="chromap not on PATH")
+@_needs_chromap
 def test_real_chromap_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     chromap = Chromap(_make_genome(tmp_path))

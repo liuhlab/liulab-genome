@@ -1,8 +1,10 @@
 """Tests for genome.Genome — sequence retrieval over a prepared assembly.
 
-A real tiny assembly is built with the native tools, and the network download is
-replaced by monkeypatching ``UCSCGenomeDownloader.fetch_genome`` to return those
-prebuilt files. The whole module therefore skips when the native tools are absent.
+A real tiny assembly is built with the native tools, so the whole module skips when
+those are absent. Nothing reaches the network by either of two routes: most tests
+monkeypatch ``UCSCGenomeDownloader.fetch_genome`` to hand back the prebuilt files,
+and the registration tests take the whole path for real behind the shared
+``fake_fetch`` fixture, which serves ``tests/data`` in place of a download.
 """
 
 from __future__ import annotations

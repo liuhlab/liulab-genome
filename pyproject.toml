@@ -1,3 +1,5 @@
+# ============================== project ==============================
+
 [project]
 name = "liulab-genome"
 description = "Handling reference genome related tasks."
@@ -37,6 +39,8 @@ Changelog = "https://github.com/lhqing/liulab-genome/blob/main/CHANGELOG.md"
 [project.scripts]
 genome = "genome.cli:app"
 
+# ============================== build ==============================
+
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
@@ -48,17 +52,17 @@ fallback-version = "0.0.0+dev"
 [tool.hatch.build.targets.wheel]
 packages = ["src/genome"]
 
-# -------- pixi --------
+# ============================== pixi ==============================
 
 [tool.pixi.workspace]
 channels = ["conda-forge", "bioconda"]
 platforms = ["osx-arm64", "linux-64", "osx-64"]
 
-# Editable install of this package into every env
 [tool.pixi.pypi-dependencies]
 liulab-genome = { path = ".", editable = true }
 
-# Native runtime deps (shelled out to; never reimplemented)
+# The External tools, shelled out to and never reimplemented, plus the Python libraries
+# the package imports. In every environment: nothing here is optional.
 [tool.pixi.dependencies]
 samtools = "*"
 bedtools = "*"
@@ -69,36 +73,35 @@ pandas = ">=2.1,<3"
 py2bit = ">=1.0.1,<2"
 gffutils = ">=0.14,<0.15"
 
-# Python version feature. One only: the suite runs on 3.13, and the 3.12 floor is
-# held by `ruff target-version` and `pyright pythonVersion`, not by a test lane.
+# One Python, on purpose: the suite runs on 3.13, and the 3.12 floor is held by
+# `ruff target-version` and `pyright pythonVersion`, not by a test lane.
 [tool.pixi.feature.py313.dependencies]
 python = "3.13.*"
 
-# Test feature
 [tool.pixi.feature.test.dependencies]
 pytest = "*"
 pytest-cov = "*"
+pytest-xdist = "*"
 hypothesis = "*"
 
-# Dev tooling feature
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
 pyright = "*"
 pre-commit = "*"
 python-build = "*"
 hatch-vcs = "*"
-ipykernel = "*"   # lets the pixi env back a Jupyter kernel (notebook dev)
+ipykernel = "*"   # backs a Jupyter kernel; see the register-kernel task
 
-# Docs feature
 [tool.pixi.feature.docs.dependencies]
 mkdocs-material = "*"
 mkdocstrings-python = "*"
-ruff = "*"   # used by mkdocstrings to format rendered signatures
+ruff = "*"   # mkdocstrings formats rendered signatures with it
 
-# Optional aligners (bioconda). Deliberately NOT in `default`: installation is
-# only required when Genome.build_<aligner>_index() is called, and the aligner
-# checks for itself at that point. Provision with `pixi add --feature star star`
-# or by selecting the `aligners` environment.
+# THE ALIGNERS ARE THE ONLY BINARIES THIS PACKAGE DOES NOT SHIP WITH ITSELF, and they
+# are here rather than in `[tool.pixi.dependencies]` because installing them is only
+# required when Genome.build_<aligner>_index() is called — the aligner checks for
+# itself at that point. That is also why the tests needing them are a separate lane:
+# an environment without them makes those tests skip, and a skip is green.
 [tool.pixi.feature.star.dependencies]
 star = "*"
 
@@ -116,28 +119,44 @@ lint      = "ruff check ."
 fmt       = "ruff format ."
 fmt-check = "ruff format --check ."
 typecheck = "pyright"
-test      = "pytest"
-test-cov  = "pytest --cov=genome --cov-report=term-missing"
-check     = { depends-on = ["lint", "fmt-check", "typecheck", "test"] }
-# The STAR and chromap integration tests skip themselves when their binary is not
-# on PATH, so running the suite proves nothing about them unless the binaries are
-# known to be there. Ask each tool for its version first: absent, this fails here
-# instead of reporting a green run whose only aligner coverage was three skips.
-# Meant for the `aligners` environment: `pixi run -e aligners test-aligners`.
-test-aligners = "STAR --version && chromap --version && pytest"
-build     = "python -m build"
-docs      = "mkdocs serve"
-# Register THIS env's Python as a Jupyter kernel (idempotent). Run once so a
-# standalone Jupyter Lab can pick the "Python (liulab-genome)" kernel and import
-# genome. Re-run after recreating the env (the kernelspec path changes).
+
+# TWO LANES, AND TOGETHER THEY ARE THE SUITE. `-m aligner` against its negation is total
+# by boolean negation, so no test can fall between them however the marker is applied,
+# and `--strict-markers` refuses one that was invented. `_needs` in tests/test_aligner.py
+# applies the marker and the skip under one name, so a test cannot carry the skip alone
+# and sit in the wrong lane. CI gives each lane a job; `check` runs the first of them.
+#
+# `auto` capped at 8: bare `auto` oversubscribes a big box (3.4 s against 2.8 s here) and
+# a bare 8 oversubscribes a 2-core runner, so `auto` finds the cores and the cap keeps
+# the count where it was measured best. Serial: 5.9 s. See docs/research/.
+test        = "pytest -m 'not aligner' -n auto --maxprocesses 8 --dist=load"
+# Serial, and not capped: three tests, where a worker pool costs more than it saves.
+# `depends-on` precisely BECAUSE pixi runs it sequentially — the binaries are proved to
+# answer before the selection happens. See scripts/require_aligners.sh.
+test-aligner = { cmd = "pytest -m aligner", depends-on = ["require-aligners"] }
+require-aligners = "bash scripts/require_aligners.sh"
+# Everything, aligner tests included — they skip themselves when the binaries are absent.
+test-cov    = "pytest --cov=genome --cov-report=term-missing"
+# Serial on purpose: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
+test-failed = "pytest --lf --new-first -x -q"
+
+# Not `depends-on`: pixi runs those sequentially, which is what this replaces. check.sh
+# runs the four concurrently and prints each one's output whole, in a fixed order.
+check     = "bash scripts/check.sh lint fmt-check typecheck test"
+
+build      = "python -m build"
+docs       = "mkdocs serve"
+docs-build = "mkdocs build --strict"
+# Idempotent. Re-run after recreating the env — the kernelspec path changes.
 register-kernel = "python -m ipykernel install --user --name liulab-genome --display-name \"Python (liulab-genome dev)\""
 
-# -------- tool config (minimal in Phase 1; tightened in Phase 2) --------
+# ============================== ruff ==============================
 
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
 target-version = "py312"
+extend-exclude = [".pixi", "site", "build", "dist"]
 
 [tool.ruff.lint]
 select = [
@@ -152,14 +171,11 @@ select = [
     "PT",   # flake8-pytest-style
     "PTH",  # flake8-use-pathlib
     "N",    # pep8-naming
-    "D",    # pydocstyle (numpy convention configured below)
+    "D",    # pydocstyle (numpy convention, configured below)
     "RUF",  # ruff-specific
 ]
-ignore = [
-    "E501",  # line too long — formatter handles it
-    "D203",  # one-blank-line-before-class (incompatible with D211)
-    "D213",  # multi-line-summary-second-line (incompatible with D212)
-]
+# E501: the formatter owns line length. D203/D213: incompatible with D211/D212.
+ignore = ["E501", "D203", "D213"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
@@ -169,13 +185,10 @@ convention = "numpy"
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = [
-    "D",     # tests don't need full docstrings
-    "S101",  # asserts are the whole point
-]
-"**/__init__.py" = [
-    "D104",  # docstring on package init is optional
-]
+"tests/**" = ["D", "S101"]
+"**/__init__.py" = ["D104"]
+
+# ============================== pyright ==============================
 
 [tool.pyright]
 include = ["src", "tests"]
@@ -187,11 +200,19 @@ typeCheckingMode = "basic"
 useLibraryCodeForTypes = true
 reportMissingTypeStubs = "none"
 
+# ============================== pytest ==============================
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = ["error"]
+# Semantic, not a speed label: what a test needs, never how long it takes.
+markers = [
+    "aligner: needs STAR or chromap — a binary this package does not ship with itself",
+]
+
+# ============================== coverage ==============================
 
 [tool.coverage.run]
 branch = true

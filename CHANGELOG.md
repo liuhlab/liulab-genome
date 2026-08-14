@@ -62,6 +62,21 @@ preparation is no longer indistinguishable from a finished one.
 
 ### Changed
 
+- **The suite is two lanes, and together they are a partition of it.** `-m aligner` selects the three
+  tests that build a real STAR or chromap index; `-m 'not aligner'` selects everything else. The
+  aligner lane used to be the *whole* suite re-run in an environment that also had the binaries,
+  which meant the three tests skipped silently in the other lane and a skip is green. `pixi run
+  test-aligner` now refuses to select until both binaries answer `--version`, so that lane cannot
+  report green having built nothing. `_needs` in `tests/test_aligner.py` applies the marker and the
+  skip under one name, so they cannot come apart.
+- **The suite runs on eight workers and the gate runs its steps concurrently.** `pytest -n auto
+  --maxprocesses 8`: 2.8 s against 5.9 s serial, `auto` finding fewer cores on a small CI runner
+  where the cap does not bind. `pixi run check` moved off a sequential `depends-on` onto
+  `scripts/check.sh`, which runs lint, fmt-check, typecheck and test at once and prints each one's
+  output whole, in a fixed order — 4 s against 9.4 s. Measurements in
+  `docs/research/test-suite-parallelism-2026-08-14.md`.
+- **CI builds the docs inside the lint job** rather than on a runner of its own, `default` already
+  carrying the `docs` feature. Deploying stays in `docs.yml`, the one workflow granted write access.
 - **A broken registration raises instead of being quietly rebuilt or quietly trusted.** Files with no
   record mean an interrupted run; a record that disagrees with disk means something changed behind
   our back. Both raise, naming the file that differs and the command that repairs it. An absent or
@@ -94,6 +109,11 @@ preparation is no longer indistinguishable from a finished one.
 
 ### Removed
 
+- **Four tests that asserted nothing the rest of the suite did not.** The smoke test (every module
+  imports the package, and the CLI's `version` command is tested on its merits); a `bedtools`
+  version check strictly subsumed by `doctor`; and an assertion that `download` re-exports four
+  names `registration` defines, which held the module wiring rather than any behaviour and would
+  have broken on a refactor that changed nothing observable.
 - **`Usage`, `Genome files` and `Annotations & indexes` are gone as site pages.** What a user needs
   from them moved into `Genome` and the new `CLI` page; what remained described machinery a caller
   never invokes directly. Links to those three URLs break.
