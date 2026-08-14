@@ -5,11 +5,7 @@
          <lastmod>2026-08-14</lastmod>
     </url>
     <url>
-         <loc>https://liuhlab.github.io/liulab-genome/aligner/</loc>
-         <lastmod>2026-08-14</lastmod>
-    </url>
-    <url>
-         <loc>https://liuhlab.github.io/liulab-genome/genome-files/</loc>
+         <loc>https://liuhlab.github.io/liulab-genome/cli/</loc>
          <lastmod>2026-08-14</lastmod>
     </url>
     <url>
@@ -22,10 +18,6 @@
     </url>
     <url>
          <loc>https://liuhlab.github.io/liulab-genome/sequences/</loc>
-         <lastmod>2026-08-14</lastmod>
-    </url>
-    <url>
-         <loc>https://liuhlab.github.io/liulab-genome/usage/</loc>
          <lastmod>2026-08-14</lastmod>
     </url>
 </urlset>

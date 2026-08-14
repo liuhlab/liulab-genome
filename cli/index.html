@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://liuhlab.github.io/liulab-genome/sequences/">
+        <link rel="canonical" href="https://liuhlab.github.io/liulab-genome/cli/">
       
       
-        <link rel="prev" href="../genome/">
+        <link rel="prev" href="../sequences/">
       
       
-        <link rel="next" href="../cli/">
+        <link rel="next" href="../reference/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Sequences - liulab-genome</title>
+        <title>CLI - liulab-genome</title>
       
     
     
@@ -90,7 +90,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#sequences" class="md-skip">
+        <a href="#cli" class="md-skip">
           Skip to content
         </a>
       
@@ -126,7 +126,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Sequences
+              CLI
             
           </span>
         </div>
@@ -323,6 +323,33 @@
       
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequences
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
     
   
   
@@ -342,7 +369,7 @@
   <span class="md-ellipsis">
     
   
-    Sequences
+    CLI
   
 
     
@@ -360,7 +387,7 @@
   <span class="md-ellipsis">
     
   
-    Sequences
+    CLI
   
 
     
@@ -386,10 +413,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#construction" class="md-nav__link">
+  <a href="#genome-doctor" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Construction
+        genome doctor
       
     </span>
   </a>
@@ -397,10 +424,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#transforms" class="md-nav__link">
+  <a href="#genome-register-assembly" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Transforms
+        genome register &lt;assembly&gt;
       
     </span>
   </a>
@@ -408,10 +435,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#slicing-stays-typed" class="md-nav__link">
+  <a href="#genome-register-annotation-assembly-name" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Slicing stays typed
+        genome register-annotation &lt;assembly&gt; &lt;name&gt;
       
     </span>
   </a>
@@ -419,10 +446,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#from-the-command-line" class="md-nav__link">
+  <a href="#genome-register-gtf-assembly-path-name" class="md-nav__link">
     <span class="md-ellipsis">
       
-        From the command line
+        genome register-gtf &lt;assembly&gt; &lt;path&gt; &lt;name&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-annotations-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome annotations &lt;assembly&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-verify-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome verify &lt;assembly&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-revcomp-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome revcomp &lt;sequence&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-table-row-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome table-row &lt;assembly&gt;
       
     </span>
   </a>
@@ -433,33 +504,6 @@
   
 </nav>
       
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../cli/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    CLI
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -518,10 +562,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#construction" class="md-nav__link">
+  <a href="#genome-doctor" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Construction
+        genome doctor
       
     </span>
   </a>
@@ -529,10 +573,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#transforms" class="md-nav__link">
+  <a href="#genome-register-assembly" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Transforms
+        genome register &lt;assembly&gt;
       
     </span>
   </a>
@@ -540,10 +584,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#slicing-stays-typed" class="md-nav__link">
+  <a href="#genome-register-annotation-assembly-name" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Slicing stays typed
+        genome register-annotation &lt;assembly&gt; &lt;name&gt;
       
     </span>
   </a>
@@ -551,10 +595,54 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#from-the-command-line" class="md-nav__link">
+  <a href="#genome-register-gtf-assembly-path-name" class="md-nav__link">
     <span class="md-ellipsis">
       
-        From the command line
+        genome register-gtf &lt;assembly&gt; &lt;path&gt; &lt;name&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-annotations-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome annotations &lt;assembly&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-verify-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome verify &lt;assembly&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-revcomp-sequence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome revcomp &lt;sequence&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-table-row-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome table-row &lt;assembly&gt;
       
     </span>
   </a>
@@ -578,7 +666,7 @@
 
 
   
-    <a href="https://github.com/liuhlab/liulab-genome/edit/main/docs/sequences.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+    <a href="https://github.com/liuhlab/liulab-genome/edit/main/docs/cli.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
       
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
     </a>
@@ -586,80 +674,138 @@
   
 
 
-<h1 id="sequences">Sequences<a class="headerlink" href="#sequences" title="Permanent link">&para;</a></h1>
-<p><code>genome.seq</code> gives you three typed wrappers around <code>str</code>:</p>
+<h1 id="cli">CLI<a class="headerlink" href="#cli" title="Permanent link">&para;</a></h1>
+<p>The <code>genome</code> command is a thin wrapper over the Python API — every command calls the same
+function you would call yourself, so a shell and a notebook take one code path.</p>
+<p>Every command takes <code>--json</code> for machine-readable output. Errors go to stderr with a
+non-zero exit code: <code>2</code> for invalid input, <code>1</code> for everything else (a missing native
+tool, a failed download, a checksum mismatch, a registration that cannot be trusted).</p>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>$<span class="w"> </span>genome<span class="w"> </span>--help
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>$<span class="w"> </span>genome<span class="w"> </span>version
+</code></pre></div>
+<h2 id="genome-doctor"><code>genome doctor</code><a class="headerlink" href="#genome-doctor" title="Permanent link">&para;</a></h2>
+<p>Report which native tools are on <code>PATH</code>, and at what versions. Exits <code>1</code> naming the
+install command if one is missing.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>genome<span class="w"> </span>doctor
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">samtools: samtools 1.21 ...</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">bedtools: bedtools v2.31.1</span>
+</code></pre></div>
+<h2 id="genome-register-assembly"><code>genome register &lt;assembly&gt;</code><a class="headerlink" href="#genome-register-assembly" title="Permanent link">&para;</a></h2>
+<p>Prepare an assembly on disk — fetch, verify, index, record — and print where it landed.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register<span class="w"> </span>sacCer3
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">registered sacCer3 in /data/liulab_data/genome/sacCer3</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">  source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">  sha256  6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="go">  files   sacCer3.2bit, sacCer3.chrom.sizes, sacCer3.fa, sacCer3.fa.fai</span>
+</code></pre></div>
+<p>Running it again on a registered assembly downloads nothing.</p>
 <table>
 <thead>
 <tr>
-<th>Class</th>
-<th>Alphabet</th>
-<th>Transforms</th>
+<th>Option</th>
+<th>Effect</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>DNA</code></td>
-<td><code>A C G T</code></td>
-<td><code>complement</code>, <code>reverse_complement</code>, <code>transcribe</code>, <code>gc_content</code></td>
+<td><code>--source PATH_OR_URL</code></td>
+<td>Seed from your own FASTA instead of the pinned source</td>
 </tr>
 <tr>
-<td><code>RNA</code></td>
-<td><code>A C G U</code></td>
-<td><code>complement</code>, <code>reverse_complement</code>, <code>back_transcribe</code>, <code>gc_content</code></td>
-</tr>
-<tr>
-<td><code>Protein</code></td>
-<td>the 20 standard amino acids</td>
-<td><em>(none yet)</em></td>
+<td><code>--force</code></td>
+<td>Register again from scratch — the repair for a directory that raises</td>
 </tr>
 </tbody>
 </table>
-<p>They subclass <code>str</code>, so a <code>DNA</code> <strong>is</strong> a string anywhere a string is expected — and
-<code>Genome.fetch_sequence</code> hands you one, so the transforms are always in reach.</p>
-<h2 id="construction">Construction<a class="headerlink" href="#construction" title="Permanent link">&para;</a></h2>
-<p>The value is stored verbatim, case included. Lower case is soft-masking and means
-something, so it is never normalised away.</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">DNA</span><span class="p">,</span> <span class="n">RNA</span><span class="p">,</span> <span class="n">Protein</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;ATCG&quot;</span><span class="p">)</span>     <span class="c1"># DNA(&#39;ATCG&#39;)</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcG&quot;</span><span class="p">)</span>     <span class="c1"># DNA(&#39;aTcG&#39;)  — case preserved</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>         <span class="c1"># DNA(&#39;&#39;)      — empty is valid</span>
+<p>A directory that cannot be trusted exits <code>1</code> naming the file and the repair:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register<span class="w"> </span>sacCer3
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">error: /data/liulab_data/genome/sacCer3 disagrees with its .completion.json:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">sacCer3.2bit: recorded 3145728 bytes, found 0. Something changed these files after</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">they were registered. Re-register it with `genome register sacCer3 --force`.</span>
 </code></pre></div>
-<p>The alphabet in the table is documentation, not a runtime check: scanning every character
-costs too much on a whole chromosome, so any string is accepted. Reject bad input where it
-enters — the CLI does this for <code>genome revcomp</code>. IUPAC ambiguity codes (<code>N</code>, <code>R</code>, <code>Y</code>, …)
-are out of scope.</p>
-<h2 id="transforms">Transforms<a class="headerlink" href="#transforms" title="Permanent link">&para;</a></h2>
-<p>Each returns a new typed value, case preserved:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcG&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">complement</span><span class="p">()</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">DNA</span><span class="p">(</span><span class="s1">&#39;tAgC&#39;</span><span class="p">)</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcG&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">reverse_complement</span><span class="p">()</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">DNA</span><span class="p">(</span><span class="s1">&#39;CgAt&#39;</span><span class="p">)</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;ATCG&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">transcribe</span><span class="p">()</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">RNA</span><span class="p">(</span><span class="s1">&#39;AUCG&#39;</span><span class="p">)</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">RNA</span><span class="p">(</span><span class="s2">&quot;AUCG&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">back_transcribe</span><span class="p">()</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">DNA</span><span class="p">(</span><span class="s1">&#39;ATCG&#39;</span><span class="p">)</span>
+<p><code>--force</code> keeps an unpacked FASTA whose checksum still matches and rebuilds only the
+derived files; it fetches again when it cannot prove that. Interrupting a <em>first</em>
+registration leaves a directory that needs exactly this.</p>
+<h2 id="genome-register-annotation-assembly-name"><code>genome register-annotation &lt;assembly&gt; &lt;name&gt;</code><a class="headerlink" href="#genome-register-annotation-assembly-name" title="Permanent link">&para;</a></h2>
+<p>Register one of the annotations the table lists for an assembly: fetch, check the
+checksum and the chromosome names, build the gffutils database, record it.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register-annotation<span class="w"> </span>sacCer3<span class="w"> </span>ensgene_v101
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="go">registered ensgene_v101 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/ensgene_v101</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">  source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">  sha256  d3f33fbf97deef26e2495f709f1c5bb2e2e1bf1ce71fb80758c2c9de42ad7026</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="go">  files   ensgene_v101.db, ensgene_v101.gtf</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="go">  chromosomes checked — every name the GTF uses is one the assembly carries</span>
 </code></pre></div>
-<p><code>gc_content</code> is a <code>float</code> in <code>[0.0, 1.0]</code>, counted case-insensitively, and <code>0.0</code> for the
-empty sequence:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcG&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">gc_content</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="mf">0.5</span>
+<h2 id="genome-register-gtf-assembly-path-name"><code>genome register-gtf &lt;assembly&gt; &lt;path&gt; &lt;name&gt;</code><a class="headerlink" href="#genome-register-gtf-assembly-path-name" title="Permanent link">&para;</a></h2>
+<p>The same, for a GTF the table does not list. Nothing is downloaded and no checksum is
+compared against; <code>&lt;name&gt;</code> is what addresses it from then on. A <code>.gz</code> is decompressed.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>genome<span class="w"> </span>register-gtf<span class="w"> </span>sacCer3<span class="w"> </span>~/annotations/sacCer3.WS298.gtf<span class="w"> </span>wormbase_ws298
 </code></pre></div>
-<h2 id="slicing-stays-typed">Slicing stays typed<a class="headerlink" href="#slicing-stays-typed" title="Permanent link">&para;</a></h2>
-<p>Indexing and slicing return the same subclass:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;ATCGATCG&quot;</span><span class="p">)[</span><span class="mi">2</span><span class="p">:</span><span class="mi">5</span><span class="p">]</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">DNA</span><span class="p">(</span><span class="s1">&#39;CGA&#39;</span><span class="p">)</span>
+<p>Both registration commands share these options:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--force</code></td>
+<td>Register again from scratch; also the repair for a broken directory</td>
+</tr>
+<tr>
+<td><code>--no-check-chromosomes</code></td>
+<td>Register a GTF whose chromosome-name mismatch you accept</td>
+</tr>
+<tr>
+<td><code>--infer-genes</code> / <code>--infer-transcripts</code></td>
+<td>Reconstruct those features from exon lines — for a bare exon-level GTF only</td>
+</tr>
+</tbody>
+</table>
+<p>The last line of the output always says whether the chromosome names were checked, and
+if not, why: because you stood the check down, or because the assembly is not registered
+yet and there was no <code>chrom.sizes</code> to check against. Only the second is worth acting on.</p>
+<h2 id="genome-annotations-assembly"><code>genome annotations &lt;assembly&gt;</code><a class="headerlink" href="#genome-annotations-assembly" title="Permanent link">&para;</a></h2>
+<p>What the table offers against what is registered here. Downloads and prepares nothing, so
+it works for an assembly you have never registered.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="gp">$ </span>genome<span class="w"> </span>annotations<span class="w"> </span>hg38
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="go">annotations for hg38 in /data/liulab_data/genome/hg38</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="go">  gencode_v50  offered, not registered  GENCODE v50</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="go">  mine         registered, not offered</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="go">default: gencode_v50 — not registered here; register it with `genome register-annotation hg38 gencode_v50`</span>
 </code></pre></div>
-<p>Nothing else does. Every other inherited <code>str</code> method (<code>upper</code>, <code>lower</code>, <code>replace</code>,
-<code>split</code>, <code>+</code>, …) returns a plain <code>str</code> — wrap it yourself if you want the type back:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">DNA</span><span class="p">(</span><span class="n">DNA</span><span class="p">(</span><span class="s2">&quot;aTcG&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">upper</span><span class="p">())</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">DNA</span><span class="p">(</span><span class="s1">&#39;ATCG&#39;</span><span class="p">)</span>
+<p>An annotation that is here but cannot be trusted reads as <code>broken</code>, with the problem and
+the repair on the line below. Exit stays <code>0</code> — one broken annotation never hides the
+others.</p>
+<h2 id="genome-verify-assembly"><code>genome verify &lt;assembly&gt;</code><a class="headerlink" href="#genome-verify-assembly" title="Permanent link">&para;</a></h2>
+<p>Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is
+the deliberate full-file re-check; registering and reopening go by size alone. Exits <code>1</code>
+on a mismatch.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="gp">$ </span>genome<span class="w"> </span>verify<span class="w"> </span>sacCer3
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="go">/data/liulab_data/genome/sacCer3/sacCer3.fa: sha256 6ff72f07… matches the digest pinned for it</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="gp">$ </span>genome<span class="w"> </span>verify<span class="w"> </span>sacCer3<span class="w"> </span>--fasta<span class="w"> </span>/tmp/from-a-colleague.fa
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="go">error: sha256 mismatch for /tmp/from-a-colleague.fa: expected 6ff72f07…, got 9316629b….</span>
 </code></pre></div>
-<h2 id="from-the-command-line">From the command line<a class="headerlink" href="#from-the-command-line" title="Permanent link">&para;</a></h2>
-<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>aTcG
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">CgAt</span>
+<p><code>--fasta</code> checks any file against the official row — useful for a copy you were handed,
+before you build anything on it.</p>
+<h2 id="genome-revcomp-sequence"><code>genome revcomp &lt;sequence&gt;</code><a class="headerlink" href="#genome-revcomp-sequence" title="Permanent link">&para;</a></h2>
+<p>Reverse-complement a DNA sequence. Case is preserved; a character outside <code>A/C/G/T</code> exits
+<code>2</code> naming it.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>ATCG
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">CGAT</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>aTcG<span class="w"> </span>--json
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="go">{&quot;input&quot;: &quot;aTcG&quot;, &quot;reverse_complement&quot;: &quot;CgAt&quot;}</span>
 </code></pre></div>
-<p>See the <a href="../cli/">CLI</a> page.</p>
+<h2 id="genome-table-row-assembly"><code>genome table-row &lt;assembly&gt;</code><a class="headerlink" href="#genome-table-row-assembly" title="Permanent link">&para;</a></h2>
+<p>Download an assembly, unpack it, hash the unpacked FASTA, and print the line to paste
+into the shipped metadata table — how the checksum column gets filled in. A checksum the
+table already pins is reported, never enforced.</p>
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>$<span class="w"> </span>genome<span class="w"> </span>table-row<span class="w"> </span>sacCer3
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>sacCer3<span class="w"> </span>Saccharomyces<span class="w"> </span>cerevisiae<span class="w">    </span>sacCer3<span class="w"> </span>R64-1-1<span class="w"> </span>GCF_000146045.2<span class="w"> </span><span class="m">559292</span><span class="w">  </span>https://…/sacCer3.fa.gz<span class="w"> </span>6ff72f07…
+</code></pre></div>
 
 
 
