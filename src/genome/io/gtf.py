@@ -19,6 +19,12 @@ way. Each has a form addressed by assembly name rather than by directory and ans
 with the record rather than the paths — :func:`register_annotation` and
 :func:`register_annotation_by_path` — and those two are what the CLI drives.
 
+A third way in has exactly one caller. :func:`register_merged_gtf` writes the **Merged
+annotation** a **Chimera** build derives from its components' own annotations, inside the
+act that writes the chimera's FASTA (ADR-0008). Nothing is fetched, so its record pins no
+source and no table row describes it; and nothing on disk is ever adopted, so the build
+that owns it writes it every time it runs.
+
 **A GTF belongs to its assembly or to nothing.** Either way in checks that every
 **Chromosome** the GTF names is one the assembly's ``chrom.sizes`` carries, and raises
 :class:`ChromosomeMismatchError` when it is not — the Ensembl-versus-UCSC spelling
@@ -60,6 +66,7 @@ Examples
 from __future__ import annotations
 
 import gzip
+import hashlib
 import shlex
 import shutil
 from collections.abc import Container, Iterable, Mapping, Sequence
@@ -70,6 +77,7 @@ from typing import IO, Any
 import gffutils
 import pooch
 
+from genome.chimera import suffixed
 from genome.io import download
 from genome.io.completion import (
     RECORD_NAME,
@@ -83,6 +91,7 @@ from genome.io.completion import (
     write_record,
 )
 from genome.io.fasta import read_chrom_sizes
+from genome.io.registration import assembly_repair_command
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import AnnotationMetadata, list_annotation_metadata, lookup_annotation
 
@@ -98,6 +107,16 @@ _MAX_LISTED_NAMES = 10
 #: it. Deliberately not a path: a command naming a file that is not there is one that
 #: fails when it is pasted, which is worse than one visibly asking to be filled in.
 _UNKNOWN_PATH = "<path>"
+
+#: ``details`` key marking a **Merged annotation**: one entry per contributing component,
+#: naming the component and the annotation of its own that went in. It is what tells a
+#: reader — and :func:`_annotation_repair` — that this annotation was derived here rather
+#: than fetched or handed in by path, so neither of those commands would repair it.
+_MERGED_FROM_KEY = "merged_from"
+
+#: Keys of one entry under :data:`_MERGED_FROM_KEY`.
+_MERGED_COMPONENT_KEY = "component"
+_MERGED_ANNOTATION_KEY = "annotation"
 
 #: What ``details["chromosomes_unchecked_because"]`` says when the caller stood the check
 #: down — ``check_chromosomes=False``, or ``--no-check-chromosomes`` from a shell. There is
@@ -283,6 +302,37 @@ class GtfAnnotation:
 
 
 @dataclass(frozen=True)
+class MergeSource:
+    """One component's contribution to a **Merged annotation**.
+
+    What :func:`register_merged_gtf` needs about a single component: whose sequences the
+    features sit on, which of that component's annotations was taken, and where its GTF
+    is. The component name is not decoration — it is the suffix every seqname the merge
+    writes carries (ADR-0009), so the merged features land on the chimera's own
+    chromosome names.
+
+    Attributes
+    ----------
+    component : str
+        The **Component** assembly name, alphanumeric.
+    annotation : str
+        The **Registered name** of that component's contributing annotation.
+    gtf : pathlib.Path
+        That annotation's placed GTF, read one line at a time and never in full.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> MergeSource("ce11", "wormbase_ws298", Path("/data/ce11.gtf")).component
+    'ce11'
+    """
+
+    component: str
+    annotation: str
+    gtf: Path
+
+
+@dataclass(frozen=True)
 class BrokenAnnotation:
     """An annotation directory that is there and cannot be trusted as finished.
 
@@ -388,16 +438,21 @@ def _annotation_repair(directory: Path, *, assembly: str, offered: Container[str
     """Return the command that registers ``directory``'s annotation again from scratch.
 
     Which route repairs a broken annotation is decided by which route registered it, and
-    the two differ: a listed one is fetched again from the row that lists it, an unlisted
-    one has to be handed the GTF it was built from. The record is what remembers that
-    path — so an annotation whose record is gone, or whose source has since moved, can
-    only name the command with the path left to fill in. That is the honest answer, and
-    the alternative is printing a path that is not there.
+    the three differ. A **Merged annotation** was written by a chimera build and by
+    nothing else, so neither registering it by name nor handing it a GTF would rebuild it:
+    what repairs it is rebuilding the chimera, and its record is asked first because that
+    is the only place the fact is written down. A listed one is fetched again from the row
+    that lists it. An unlisted one has to be handed the GTF it was built from — and the
+    record is what remembers that path, so an annotation whose record is gone, or whose
+    source has since moved, can only name the command with the path left to fill in. That
+    is the honest answer, and the alternative is printing a path that is not there.
     """
     name = directory.name
+    record = read_record(directory)
+    if record is not None and record.details.get(_MERGED_FROM_KEY):
+        return assembly_repair_command(assembly)
     if name in offered:
         return _repair_command(assembly, name)
-    record = read_record(directory)
     source = Path(record.source_url) if record is not None and record.source_url else None
     if source is not None and source.is_file():
         return _path_repair_command(assembly, shlex.quote(str(source)), name)
@@ -822,6 +877,169 @@ def _register_gtf(
         disable_infer_genes=disable_infer_genes,
         disable_infer_transcripts=disable_infer_transcripts,
     )
+
+
+def register_merged_gtf(
+    assembly_dir: Path,
+    name: str,
+    sources: Sequence[MergeSource],
+    *,
+    separator: str,
+    chrom_sizes: str | Path,
+    disable_infer_genes: bool = True,
+    disable_infer_transcripts: bool = True,
+) -> GtfAnnotation:
+    """Write the **Merged annotation** of ``sources`` under ``name`` and build its database.
+
+    The annotation half of a **Chimera** build, called from
+    :meth:`~genome.io.chimera.ChimeraBuilder.build_genome` and from nowhere else. Each
+    source's GTF is streamed a line at a time into one file whose seqnames carry the
+    component suffix the chimera's FASTA already carries (ADR-0009), which is then placed,
+    checked, built and recorded exactly as any other annotation is.
+
+    **No coordinate is converted.** Only the first column of each data line is rewritten;
+    every byte after the first tab — including both position fields, which are 1-based and
+    inclusive as GTF has them — is copied through untouched. The features are the
+    components' own features on the components' own sequences, under a new spelling of the
+    sequence name and nothing else.
+
+    Comment lines are **dropped**, all of them. A ``#!genome-build`` pragma names the
+    single assembly its file was built for, and several of those concatenated would each
+    be false about the chimera; the ordinary ``#`` comment beside them describes a file
+    that no longer exists as such. Nothing else is dropped: a line carrying a tab is a data
+    line and survives, unsorted and in component order.
+
+    The chromosome-name check is **not optional here** and has no argument that stands it
+    down. Everything else in the build derives the chimera's names twice — once for the
+    FASTA and once for this — and the check is the one place those two answers are set
+    against each other, so a merge that misspelled a name raises
+    :class:`ChromosomeMismatchError` rather than registering an annotation that queries
+    empty.
+
+    Nothing on disk is adopted: unlike the other ways in, this one never asks whether the
+    annotation is already registered. It is written by the build that owns it, every time
+    that build runs, which is what makes a stale database impossible to hand back — the
+    name is derived from the contributing annotations, so it changes when they do, but it
+    cannot say *which* components contributed and would otherwise be reusable under a
+    meaning it no longer has.
+
+    Parameters
+    ----------
+    assembly_dir : pathlib.Path
+        The chimera's **Assembly dir**, which this annotation is filed under.
+    name : str
+        The **Registered name** to write it as — derived by the caller from the
+        contributing annotations' names.
+    sources : sequence of MergeSource
+        One entry per contributing component, in the order their sequences are written.
+        Must not be empty: no contributors means no annotation, which the caller decides
+        rather than registering an empty one.
+    separator : str
+        The run of underscores this chimera's chromosome names carry, as
+        :func:`~genome.chimera.derive_separator` gave it.
+    chrom_sizes : str or pathlib.Path
+        The chimera's ``chrom.sizes``, whose names every merged seqname must be among.
+    disable_infer_genes : bool, default True
+        Do not reconstruct ``gene`` features from exon lines.
+    disable_infer_transcripts : bool, default True
+        Do not reconstruct ``transcript`` features from exon lines.
+
+    Returns
+    -------
+    GtfAnnotation
+        The registered annotation's name and its two file paths.
+
+    Raises
+    ------
+    ValueError
+        If ``sources`` is empty.
+    ChromosomeMismatchError
+        If a merged seqname is not one the chimera carries — the merge and the FASTA
+        build disagreeing, which nothing else would catch.
+    genome.chimera.ChimeraNamingError
+        If a component name or the separator does not obey the naming contract.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> register_merged_gtf(                             # doctest: +SKIP
+    ...     Path("/data/genome/ce11_ecHT115"),
+    ...     "wormbase_ws298+refseq_rs_2025_06_26",
+    ...     [MergeSource("ce11", "wormbase_ws298", Path("/data/ce11.gtf"))],
+    ...     separator="__",
+    ...     chrom_sizes=Path("/data/genome/ce11_ecHT115/ce11_ecHT115.chrom.sizes"),
+    ... )
+    GtfAnnotation(name='wormbase_ws298+refseq_rs_2025_06_26', ...)
+    """
+    if not sources:
+        raise ValueError(
+            f"a merged annotation for {assembly_dir.name!r} needs at least one contributing "
+            f"component, got none. A chimera whose components carry no annotation registers "
+            f"none at all rather than an empty one — do not call this with an empty list."
+        )
+    annotation = _annotation_files(assembly_dir, name)
+    known = _assembly_chromosomes(Path(chrom_sizes))
+    # Written into the working area and checked there, so a merge the chimera cannot use
+    # never reaches the annotation directory. Same filesystem, so placing it is a rename.
+    staged = work_dir(annotation_dir(assembly_dir, name)) / annotation.gtf.name
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    digest = _write_merged_gtf(sources, staged, separator=separator)
+    _reject_unknown_chromosomes(staged, known, name=name)
+    staged.replace(annotation.gtf)
+
+    return _build_and_record(
+        annotation,
+        source_url=None,
+        sha256=digest,
+        details={
+            _MERGED_FROM_KEY: [
+                {
+                    _MERGED_COMPONENT_KEY: source.component,
+                    _MERGED_ANNOTATION_KEY: source.annotation,
+                }
+                for source in sources
+            ],
+            **_chromosome_check_details(known, requested=True),
+        },
+        disable_infer_genes=disable_infer_genes,
+        disable_infer_transcripts=disable_infer_transcripts,
+    )
+
+
+def _write_merged_gtf(sources: Sequence[MergeSource], destination: Path, *, separator: str) -> str:
+    """Write ``sources`` into one GTF at ``destination`` and return the sha256 of it.
+
+    One streaming pass per source, a line at a time, hashing what is written as it is
+    written — so a GENCODE-sized annotation is neither held in memory nor read again to
+    produce the digest the record carries. A data line's seqname is **extended** rather
+    than rebuilt: the bytes before the first tab get the suffix appended and every byte
+    after it is copied verbatim, which is why no coordinate is touched. Comment lines and
+    anything carrying no tab — a blank line, a stray fragment — are dropped, since neither
+    names a sequence and a line the chromosome check never saw must not reach the file.
+
+    The suffix is spelled once per source by :func:`~genome.chimera.suffixed`, the same
+    function the FASTA build spells its headers with, rather than assembled here: that is
+    what stops the two halves of one chimera drifting apart about a name.
+    """
+    digest = hashlib.sha256()
+    with destination.open("wb") as output:
+        for source in sources:
+            # suffixed("", …) is exactly the tail every name of this component gains, and
+            # it validates the component and the separator once instead of per line.
+            suffix = suffixed("", source.component, separator).encode()
+            with source.gtf.open("rb") as handle:
+                for line in handle:
+                    if line.startswith(b"#"):
+                        continue
+                    chromosome, tab, rest = line.partition(b"\t")
+                    if not tab:
+                        continue
+                    written = chromosome + suffix + tab + rest
+                    if not written.endswith(b"\n"):
+                        written += b"\n"
+                    output.write(written)
+                    digest.update(written)
+    return digest.hexdigest()
 
 
 def fetch_annotation(
@@ -1347,7 +1565,7 @@ def _fetch_gtf(
 def _build_and_record(
     annotation: GtfAnnotation,
     *,
-    source_url: str,
+    source_url: str | None,
     sha256: str,
     details: dict[str, Any],
     disable_infer_genes: bool,

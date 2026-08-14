@@ -124,6 +124,37 @@ def assembly_data_dir(assembly: str) -> Path:
     return liulab_data_dir() / "genome" / assembly
 
 
+def assembly_repair_command(assembly: str, source: str | Path | None = None) -> str:
+    """Return the command that registers ``assembly`` again from scratch.
+
+    One spelling, wherever it is quoted: a broken **Assembly dir** names it, and so does a
+    **Merged annotation** whose only repair is rebuilding the chimera that wrote it. A
+    seeded assembly carries its own source into it — ``genome register tiny --force``
+    would fetch from the golden path, which is not where such an assembly came from.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to register again.
+    source : str or pathlib.Path, optional
+        Where its FASTA came from, for an assembly that was seeded rather than fetched.
+
+    Returns
+    -------
+    str
+        A command that runs as it stands.
+
+    Examples
+    --------
+    >>> assembly_repair_command("hg38")
+    'genome register hg38 --force'
+    >>> assembly_repair_command("tiny", "/data/my ref.fa")
+    "genome register tiny --force --source '/data/my ref.fa'"
+    """
+    base = f"genome register {assembly} --force"
+    return base if source is None else f"{base} --source {shlex.quote(str(source))}"
+
+
 class AssemblyRegistration:
     """One assembly's directory, and the steps that finish a registration in it.
 
@@ -192,13 +223,11 @@ class AssemblyRegistration:
     def _repair_command(self, source: str | Path | None = None) -> str:
         """Return the command that re-registers this assembly from scratch.
 
-        Quoted verbatim into every error a broken directory raises, so it has to be a
-        command that exists and does the job. A seeded assembly carries its own source
-        into it: ``genome register tiny --force`` would fetch from the golden path,
-        which is not where such an assembly came from.
+        :func:`assembly_repair_command` for this registration's own assembly. Quoted
+        verbatim into every error a broken directory raises, so it has to be a command
+        that exists and does the job.
         """
-        base = f"genome register {self.assembly} --force"
-        return base if source is None else f"{base} --source {shlex.quote(str(source))}"
+        return assembly_repair_command(self.assembly, source)
 
     def _completed_genome(self, *, overwrite: bool, repair: str) -> GenomeFiles | None:
         """Return the prepared GenomeFiles when the record says so, else ``None``.

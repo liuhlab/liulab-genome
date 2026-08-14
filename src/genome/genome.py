@@ -203,7 +203,14 @@ class Genome(AlignerMixin):
 
         Nothing is fetched, and no annotation argument is needed or accepted: each
         component carries its own :attr:`default_gtf`, so a caller's ``(assembly, gtf)``
-        pairs split at the door and the annotation half travels with the components.
+        pairs split at the door and the annotation half travels with the components. Those
+        defaults are **merged in the same act**, registered under the ``+``-join of their
+        names in sorted-component order — so a built chimera arrives annotated and
+        ``force`` repairs the annotation and the FASTA together. A component with no
+        annotation contributes nothing, and components that contribute nothing between
+        them leave the chimera with no annotation rather than an empty one; a component
+        whose default is named but not registered here, or which has several registered
+        and no default, raises before anything is written.
 
         Parameters
         ----------
@@ -228,9 +235,17 @@ class Genome(AlignerMixin):
         genome.chimera.ChimeraNamingError
             If fewer than two components are given, a component repeats, a component's
             name is not alphanumeric, or a component is itself a chimera.
+        genome.io.gtf.AnnotationNotRegisteredError
+            If a component's default annotation is named but not registered here; the
+            message names the command that registers it.
+        genome.io.chimera.AmbiguousDefaultAnnotationError
+            If a component carries several annotations and none is its default; the
+            message names ``default_gtf=``.
         genome.io.completion.RegistrationError
             If the chimera's directory holds a build that cannot be trusted as finished,
             or the FASTA just built does not carry the sequences its components predict.
+        genome.io.gtf.ChromosomeMismatchError
+            If the merged annotation names a sequence the built FASTA does not carry.
         genome.external.ToolNotFoundError
             If ``samtools``, ``faToTwoBit`` or ``twoBitInfo`` are not on ``PATH``.
 
@@ -242,6 +257,8 @@ class Genome(AlignerMixin):
         'ce11_ecHT115'
         >>> chimera["I__ce11:0-10"]                            # doctest: +SKIP
         DNA('GCCTAAGCCT')
+        >>> chimera.default_gtf                                # doctest: +SKIP
+        'wormbase_ws298+refseq_rs_2025_06_26'
         """
         builder = ChimeraBuilder(components, cache_dir)
         builder.build_genome(overwrite=force)

@@ -1,4 +1,4 @@
-"""Writing a chimera's FASTA: its components' bytes, one token per header extended.
+"""Writing a chimera's FASTA and its merged annotation, from its components.
 
 I/O boundary module, and the third kind of **Source** an assembly can have — a recipe,
 *these components*, rather than a URL (ADR-0008). :class:`ChimeraBuilder` is an
@@ -35,6 +35,17 @@ the completion record written: ``source_url`` is ``None`` because nothing was fe
 and ``sha256`` is the digest of the bytes this module just wrote, which is what a later
 verification falls back to.
 
+**The merge is part of the build.** Between those two steps the **Merged annotation** is
+registered, so there is no second surface to remember and ``genome register <chimera>
+--force`` repairs the annotation and the FASTA together. Each component contributes its
+own **Default annotation** and nothing is passed in: a component that has none contributes
+nothing, and no contributors at all means no annotation rather than an empty one — while a
+component naming an annotation nobody registered, or carrying several with no default,
+**raises before a byte is written**, naming what closes the gap. The price, paid
+knowingly, is that every chimera build now pays a ``gffutils`` database build.
+:func:`~genome.io.gtf.register_merged_gtf` does the writing; what is decided here is which
+annotation each component contributes and what the result is called.
+
 Examples
 --------
 >>> from genome.io.chimera import ChimeraBuilder
@@ -63,6 +74,7 @@ from genome.chimera import (
 )
 from genome.io.completion import CompletionRecord, RegistrationError, read_record
 from genome.io.fasta import GenomeFiles, prepare_fasta, read_chrom_sizes
+from genome.io.gtf import GtfAnnotation, MergeSource, register_merged_gtf
 from genome.io.registration import AssemblyRegistration
 
 if TYPE_CHECKING:
@@ -85,10 +97,82 @@ _COMPONENTS_KEY = "components"
 _COMPONENT_NAME_KEY = "name"
 _COMPONENT_DIGEST_KEY = "sha256"
 
+#: …and the two beside them that describe the **Merged annotation**: which of that
+#: component's annotations went into it, and what that annotation's own record pinned.
+#: ``null`` is a component that contributed nothing to a merge that did happen. A build
+#: that registered no merged annotation at all omits both keys instead, exactly as
+#: ``tool_versions`` omits a tool that never answered — an absent key is a fact nobody
+#: gathered, which is not the same as a fact whose answer is *none*.
+_COMPONENT_ANNOTATION_KEY = "annotation"
+_COMPONENT_ANNOTATION_DIGEST_KEY = "annotation_sha256"
+
+#: What joins the contributing annotations' names into the merged one's. Deliberately not
+#: the ``_`` that joins component names into a chimera's own: one name, read left to
+#: right, then says which level each join is at.
+_ANNOTATION_JOIN = "+"
+
 #: A FASTA header split into its first whitespace-delimited token and everything after
 #: it. ``DOTALL`` so the trailing newline lands in the remainder and is written back
 #: unchanged; ASCII ``\S`` because a bytes pattern is ASCII by definition.
 _HEADER_RE = re.compile(rb">(\S*)(.*)", re.DOTALL)
+
+
+class AmbiguousDefaultAnnotationError(ValueError):
+    """A component carries several annotations and nothing says which one a chimera takes.
+
+    A **Component** contributes its own **Default annotation**, and a component with
+    several registered and none flagged by the annotation table has no default at all —
+    which is the ordinary, deliberate answer to *pick one for me* everywhere else in the
+    package, and the one place it cannot stand. Guessing would put a set of gene models
+    into a merged annotation nobody chose, under a name that would look identical to the
+    one the caller meant.
+
+    The message names ``default_gtf=``, which is how a caller says which, and it says so
+    of that component rather than of the chimera: the fix is one argument on one
+    component's constructor.
+
+    A :class:`ValueError` because the component handed in is not one this build can use.
+
+    Examples
+    --------
+    >>> raise AmbiguousDefaultAnnotationError("ce11 carries 2 annotations ...")
+    Traceback (most recent call last):
+    genome.io.chimera.AmbiguousDefaultAnnotationError: ce11 carries 2 annotations ...
+    """
+
+
+@dataclass(frozen=True)
+class ComponentDetails:
+    """What a chimera's completion record says about one of its components.
+
+    One entry of the ``details`` shape :class:`ChimeraBuilder` writes, read back. Every
+    field is a fact about the component *at the time this chimera was built*, taken from
+    that component's own records rather than by rehashing anything — which is what lets a
+    later pass notice a component re-registered underneath the chimera.
+
+    Attributes
+    ----------
+    name : str
+        The **Component** assembly name.
+    sha256 : str or None
+        The digest that component's completion record pinned, or ``None`` when it pinned
+        none — *unknown*, rather than wrong.
+    annotation : str or None
+        The **Registered name** of the annotation it contributed to the **Merged
+        annotation**, or ``None`` when it contributed none.
+    annotation_sha256 : str or None
+        That annotation's own recorded digest, or ``None``.
+
+    Examples
+    --------
+    >>> ComponentDetails("ce11", "1a2b3c", "wormbase_ws298", "4d5e6f").annotation
+    'wormbase_ws298'
+    """
+
+    name: str
+    sha256: str | None
+    annotation: str | None
+    annotation_sha256: str | None
 
 
 @dataclass(frozen=True)
@@ -98,33 +182,36 @@ class ChimeraDetails:
     The reader of the ``details`` shape :class:`ChimeraBuilder` writes, so that nothing
     else has to know its keys. It answers the only question that decides whether an
     assembly is a **Chimera** at runtime — the record, never the metadata row — and
-    carries the two facts a later pass needs: the separator its chromosome names were
-    written with, and what each component hashed to at build time.
+    carries the facts a later pass needs: the separator its chromosome names were written
+    with, and what each component and each contributed annotation was at build time.
 
     Attributes
     ----------
     separator : str
         The run of underscores this chimera's chromosome names carry.
-    component_digests : dict of str to (str or None)
-        Each **Component** assembly name, in the sorted order the chimera's name spells
-        them, mapped to the sha256 its own completion record pinned when this chimera was
-        built. ``None`` for a component whose record pinned none, which reads as
-        *unknown* rather than as *wrong*.
+    component_details : tuple of ComponentDetails
+        One entry per **Component**, in the sorted order the chimera's name spells them.
 
     Examples
     --------
-    >>> details = ChimeraDetails("__", {"ce11": "1a2b3c", "ecHT115": "4d5e6f"})
+    >>> details = ChimeraDetails(
+    ...     "__",
+    ...     (
+    ...         ComponentDetails("ce11", "1a2b3c", "wormbase_ws298", "4d5e6f"),
+    ...         ComponentDetails("ecHT115", "7a8b9c", None, None),
+    ...     ),
+    ... )
     >>> details.components
     ['ce11', 'ecHT115']
     """
 
     separator: str
-    component_digests: dict[str, str | None]
+    component_details: tuple[ComponentDetails, ...]
 
     @property
     def components(self) -> list[str]:
         """The component assembly names, sorted — a fresh list each call."""
-        return list(self.component_digests)
+        return [entry.name for entry in self.component_details]
 
     @classmethod
     def from_record(cls, record: CompletionRecord | None) -> ChimeraDetails | None:
@@ -134,6 +221,9 @@ class ChimeraDetails:
         seeded assembly, an absent record, or one whose ``details`` do not carry the
         shape a chimera build writes. Those read alike on purpose: nothing but a build of
         this package's own writing may make an assembly answer as a chimera.
+
+        The two annotation fields are optional, and a record written by a build that
+        registered no merged annotation carries neither; both then read as ``None``.
 
         Parameters
         ----------
@@ -156,13 +246,19 @@ class ChimeraDetails:
         entries = record.details.get(_COMPONENTS_KEY)
         if not isinstance(separator, str) or not isinstance(entries, list):
             return None
-        digests: dict[str, str | None] = {}
+        components: list[ComponentDetails] = []
         for entry in entries:
             if not isinstance(entry, dict) or not isinstance(entry.get(_COMPONENT_NAME_KEY), str):
                 return None
-            digest = entry.get(_COMPONENT_DIGEST_KEY)
-            digests[entry[_COMPONENT_NAME_KEY]] = digest if isinstance(digest, str) else None
-        return cls(separator=separator, component_digests=digests)
+            components.append(
+                ComponentDetails(
+                    name=entry[_COMPONENT_NAME_KEY],
+                    sha256=_text(entry.get(_COMPONENT_DIGEST_KEY)),
+                    annotation=_text(entry.get(_COMPONENT_ANNOTATION_KEY)),
+                    annotation_sha256=_text(entry.get(_COMPONENT_ANNOTATION_DIGEST_KEY)),
+                )
+            )
+        return cls(separator=separator, component_details=tuple(components))
 
 
 def read_chimera_details(directory: Path) -> ChimeraDetails | None:
@@ -190,6 +286,20 @@ def read_chimera_details(directory: Path) -> ChimeraDetails | None:
     True
     """
     return ChimeraDetails.from_record(read_record(directory))
+
+
+@dataclass(frozen=True)
+class _Contribution:
+    """What one component puts into the **Merged annotation**, settled before any writing.
+
+    ``None`` in place of one of these is a component that contributes nothing, which is
+    an ordinary shape rather than a failure: an assembly may carry sequences no annotation
+    mentions, and the chromosome check is one-directional for exactly that reason.
+    """
+
+    annotation: str
+    gtf: Path
+    sha256: str | None
 
 
 class ChimeraBuilder(AssemblyRegistration):
@@ -263,19 +373,20 @@ class ChimeraBuilder(AssemblyRegistration):
         check_roundtrip(chromosomes, self.separator)
 
     def build_genome(self, *, overwrite: bool = False) -> GenomeFiles:
-        """Write the chimera's FASTA, prepare it, and record that it finished.
+        """Write the chimera's FASTA and its merged annotation, and record that it finished.
 
-        The whole build: concatenate the components' bytes into the working area while
-        hashing them, place the result as ``<assembly>.fa``, derive the ``.fai``,
-        ``.2bit`` and ``chrom.sizes`` with :func:`~genome.io.fasta.prepare_fasta`, check
-        the sequence names and lengths that came back against the ones the components
-        predict, and write the completion record last.
+        The whole build: settle which annotation each component contributes, concatenate
+        the components' bytes into the working area while hashing them, place the result
+        as ``<assembly>.fa``, derive the ``.fai``, ``.2bit`` and ``chrom.sizes`` with
+        :func:`~genome.io.fasta.prepare_fasta`, check the sequence names and lengths that
+        came back against the ones the components predict, register the **Merged
+        annotation**, and write the completion record last.
 
         A chimera whose record says it finished is returned from that record without
-        rewriting anything, exactly as a downloaded assembly is; a directory that cannot
-        be trusted **raises** instead of being rebuilt, naming
-        ``genome register <name> --force`` (ADR-0007). That command is what
-        ``overwrite=True`` is.
+        rewriting anything — the annotation included, since a finished chimera already has
+        the one its build wrote. A directory that cannot be trusted **raises** instead of
+        being rebuilt, naming ``genome register <name> --force`` (ADR-0007). That command
+        is what ``overwrite=True`` is, and it repairs both halves in one pass.
 
         Parameters
         ----------
@@ -291,6 +402,13 @@ class ChimeraBuilder(AssemblyRegistration):
 
         Raises
         ------
+        genome.io.gtf.AnnotationNotRegisteredError
+            If a component's **Default annotation** names something nobody registered on
+            this machine. Raised before anything is written, and the message names the
+            command that registers it.
+        AmbiguousDefaultAnnotationError
+            If a component carries several annotations and none is its default. Likewise
+            before anything is written.
         genome.io.completion.UnfinishedRegistrationError
             If the chimera's directory holds files but no record.
         genome.io.completion.RegistrationMismatchError
@@ -299,6 +417,9 @@ class ChimeraBuilder(AssemblyRegistration):
             If the built ``chrom.sizes`` is not the concatenation the components
             predict. Nothing vouches for the directory in that case — the record is
             written after this check, never before.
+        genome.io.gtf.ChromosomeMismatchError
+            If a merged seqname is not one the built FASTA carries — the two halves of
+            the build disagreeing, which nothing else would catch.
         genome.external.ToolNotFoundError
             If ``samtools``, ``faToTwoBit`` or ``twoBitInfo`` are not on ``PATH``.
         RuntimeError
@@ -312,17 +433,96 @@ class ChimeraBuilder(AssemblyRegistration):
         registered = self._completed_genome(overwrite=overwrite, repair=self._repair_command())
         if registered is not None:
             return registered
+        # Settled here rather than beside the merge, so that a component naming an
+        # annotation this machine has not registered costs nothing: the two refusals below
+        # are a caller's mistake, and finding out after a whole genome had been written
+        # would leave a directory nothing vouches for behind. It is *after* the early
+        # return above on purpose — reopening a finished chimera must not depend on its
+        # components' annotations still being registered.
+        contributions = self._contributions()
         work = self._work_dir
         work.mkdir(parents=True, exist_ok=True)
         staged = work / f"{self.assembly}.fa"
         digest = self._concatenate(staged)
         files = prepare_fasta(self._place_fasta(staged), overwrite=overwrite)
         self._check_built_names(files)
-        # Where the merged annotation lands: every component is here, prepared, with its
-        # own default annotation, and the chimera's own chrom.sizes now exists to check a
-        # merged GTF against. It belongs above the record, whose details describe it.
-        self._record_completion(files, source_url=None, sha256=digest, details=self._details())
+        # The merged annotation lands here: the chimera's own chrom.sizes now exists for
+        # the merge to be checked against, and this is above the record, whose details
+        # describe what the merge did.
+        merged = self._merge_annotation(files, contributions)
+        self._record_completion(
+            files,
+            source_url=None,
+            sha256=digest,
+            details=self._details(contributions, merged=merged is not None),
+        )
         return files
+
+    def _contributions(self) -> dict[str, _Contribution | None]:
+        """Return what each component contributes to the merged annotation, in order.
+
+        Keyed by component assembly name in sorted order, ``None`` for a component that
+        contributes nothing. Nothing is written and nothing is read but records, so this
+        is the cheap half of the build and the right place for it to refuse.
+        """
+        return {component.assembly: self._contribution(component) for component in self.components}
+
+    def _contribution(self, component: Genome) -> _Contribution | None:
+        """Return one component's contribution, or ``None`` when it has none.
+
+        The intention, spelled out. A component's **Default annotation** is whatever that
+        component already decided — an explicit ``default_gtf=``, the annotation table's
+        flag, or the sole registered one — so a chimera needs no annotation argument of
+        its own. Three answers rather than two: the component has one and it is
+        registered here; it has none, and contributes nothing; or it has one in name only,
+        which is a cold machine and raises with the command that fixes it.
+        """
+        if component.default_gtf is None:
+            if component.annotations:
+                raise AmbiguousDefaultAnnotationError(
+                    f"component {component.assembly!r} has {len(component.annotations)} "
+                    f"annotations registered and no default among them: "
+                    f"{', '.join(component.annotations)}. A component contributes its own "
+                    f"default annotation to a chimera's merged one, so this build cannot "
+                    f"tell which set of gene models you meant. Open that component with "
+                    f"Genome({component.assembly!r}, default_gtf=<name>) — naming one of "
+                    f"the above — and build the chimera from it."
+                )
+            return None
+        # Raises AnnotationNotRegisteredError, naming what registers it, when the default
+        # is a name and not yet a file: the same refusal a cold machine gets for a
+        # component it has never prepared, one level down.
+        gtf = component.get_gtf_path(component.default_gtf)
+        record = read_record(gtf.parent)
+        return _Contribution(
+            annotation=component.default_gtf,
+            gtf=gtf,
+            sha256=None if record is None else record.sha256,
+        )
+
+    def _merge_annotation(
+        self, files: GenomeFiles, contributions: dict[str, _Contribution | None]
+    ) -> GtfAnnotation | None:
+        """Register the merged annotation, or return ``None`` when nothing contributed.
+
+        No contributors means **no annotation registered**, rather than an empty one that
+        would answer every query with nothing while looking perfectly healthy — the same
+        reason a GTF whose chromosomes are all unknown is refused rather than kept.
+        """
+        sources = [
+            MergeSource(component=component, annotation=entry.annotation, gtf=entry.gtf)
+            for component, entry in contributions.items()
+            if entry is not None
+        ]
+        if not sources:
+            return None
+        return register_merged_gtf(
+            self.cache_dir,
+            _merged_name(sources),
+            sources,
+            separator=self.separator,
+            chrom_sizes=files.chrom_sizes,
+        )
 
     def _concatenate(self, destination: Path) -> str:
         """Write every component's FASTA to ``destination`` and return the sha256 of it.
@@ -391,33 +591,79 @@ class ChimeraBuilder(AssemblyRegistration):
             f"meant to make this impossible."
         )
 
-    def _details(self) -> dict[str, Any]:
+    def _details(
+        self, contributions: dict[str, _Contribution | None], *, merged: bool
+    ) -> dict[str, Any]:
         """Return what this build records about itself beyond the files it wrote.
 
         The separator its chromosome names carry, and one entry per component. Kept to
         facts a later pass cannot re-derive from the name alone: which spelling was used,
-        and what each component was when this chimera was built.
+        what each component was when this chimera was built, and — when there is a merged
+        annotation — which of each component's annotations went into it.
         """
         return {
             _SEPARATOR_KEY: self.separator,
-            _COMPONENTS_KEY: [self._component_details(c) for c in self.components],
+            _COMPONENTS_KEY: [
+                self._component_details(component, contributions[component.assembly], merged=merged)
+                for component in self.components
+            ],
         }
 
-    def _component_details(self, component: Genome) -> dict[str, Any]:
-        """Return one component's entry: its name, and the digest its own record pins.
+    def _component_details(
+        self, component: Genome, contribution: _Contribution | None, *, merged: bool
+    ) -> dict[str, Any]:
+        """Return one component's entry: what it was, and what it contributed.
 
-        Record to record — the component's completion record already holds the sha256 of
-        its FASTA, so nothing is rehashed here. ``None`` when that component's record
-        pins none, which reads as unknown rather than as wrong.
+        Record to record throughout — the component's completion record already holds the
+        sha256 of its FASTA and its annotation's holds that annotation's, so nothing is
+        rehashed here. ``None`` for a digest a record pinned none of, which reads as
+        unknown rather than as wrong. The two annotation keys are written only when a
+        merged annotation was registered; a build that registered none says nothing about
+        annotations at all rather than writing ``null`` beside every component.
         """
         # The component's own **Assembly dir**, which is where its FASTA sits. Asked of
         # the component rather than derived from its name, since a component may be
         # registered somewhere other than the shared data root.
         record = read_record(component.fasta_path.parent)
-        return {
+        entry: dict[str, Any] = {
             _COMPONENT_NAME_KEY: component.assembly,
             _COMPONENT_DIGEST_KEY: None if record is None else record.sha256,
         }
+        if merged:
+            entry[_COMPONENT_ANNOTATION_KEY] = (
+                None if contribution is None else contribution.annotation
+            )
+            entry[_COMPONENT_ANNOTATION_DIGEST_KEY] = (
+                None if contribution is None else contribution.sha256
+            )
+        return entry
+
+
+def _merged_name(sources: Sequence[MergeSource]) -> str:
+    """Return the **Registered name** the merge of ``sources`` is filed under.
+
+    The contributing annotations' names joined by ``+``, in the sorted-component order the
+    chimera's own name spells — ``wormbase_ws298+refseq_rs_2025_06_26``. Derived, like
+    everything else about a chimera, so it changes the moment any component's default
+    annotation does and a database built from the old set can never be found under it.
+
+    It needs no parse-back: what a merged annotation is made of is recovered from the
+    components, and written down in its own record besides. And it is not asked to carry
+    *which* components contributed — a chimera with a component that contributes nothing
+    spells the same name a different subset would — which is why
+    :func:`~genome.io.gtf.register_merged_gtf` adopts nothing from disk and writes the
+    annotation every time it runs.
+    """
+    return _ANNOTATION_JOIN.join(source.annotation for source in sources)
+
+
+def _text(value: Any) -> str | None:
+    """Return ``value`` when it is a string, else ``None`` — a record field read loosely.
+
+    A record is JSON somebody else's version may have written, so a field that is absent,
+    null or the wrong type all read as *not known*, and none of them raises.
+    """
+    return value if isinstance(value, str) else None
 
 
 def _check_not_nested(components: Sequence[Genome]) -> None:

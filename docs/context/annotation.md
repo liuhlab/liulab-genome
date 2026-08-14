@@ -44,7 +44,7 @@ annotation without locating one, so a default nobody has registered on this mach
 state of a fresh install and only asking for its path is an error.
 _Avoid_: primary, main, active, current
 
-**Merged annotation** _(decided, not built — ADR-0008)_:
+**Merged annotation**:
 The **Annotation** a **Chimera** build derives rather than fetches — a streaming pass over each
 component's own **Default annotation**, registered in the same act that writes the chimera's
 **FASTA**. Its **Registered name** is the `+`-join of those names in sorted-component order,
