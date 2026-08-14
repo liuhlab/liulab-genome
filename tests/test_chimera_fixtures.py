@@ -287,4 +287,4 @@ def test_registering_a_component_reaches_no_network(
     # The autouse guard would raise; this says so deliberately rather than by luck, since
     # a component is seeded from a local path and its name is not a UCSC one.
     genome = chimera_component(CHIMERA_ESCALATION)
-    assert genome.metadata is None
+    assert lookup_assembly(genome.assembly) is None

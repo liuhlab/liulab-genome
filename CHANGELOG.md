@@ -162,8 +162,25 @@ preparation is no longer indistinguishable from a finished one.
   — `genome register-gtf <assembly> <gtf> <name> --force` — rather than the equivalent Python call.
   A genome knows which assembly it is; only the by-directory `register_gtf`, which does not, still
   names the call.
+- **`Genome.metadata` is always a record.** It was `AssemblyMetadata | None`, and an assembly the
+  curated table does not list got `None` — so every reader guarded a missing record before reading a
+  field off it, eight times on `Genome` alone. Unlisted is now a record whose fields are unknown,
+  carrying the assembly's own name and nothing else, which is what a blank cell already means
+  everywhere else in that table. Read `genome.metadata.species` and it is `None` when nobody knows,
+  as before; the guard has nowhere left to live. A record passed to `Genome(metadata=...)` still
+  replaces the row wholesale, and passing none is still optional.
+- **Two accessors on the metadata table, because there are two questions.** The new
+  `assembly_metadata(assembly)` is total and answers *what is known about this assembly*;
+  `lookup_assembly(assembly)` still returns `None` and answers *does the curated table list this
+  name*. Only the second question has a `None` answer — it is what tells a chimera's derived name
+  from a free-form local key on a machine holding neither, so making it total would read `my_ref` as
+  a chimera of `my` and `ref` (ADR-0003, ADR-0008).
 
 ### Removed
+
+- **The eight metadata pass-throughs on `Genome`** — `assembly_name`, `species`, `ucsc_name`,
+  `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid`, `source_url` and `sha256`. Each was one line
+  guarding a record that is now always there. Read them off the record: `genome.metadata.species`.
 
 - **`genome.external.tool_version` and the loose `_resolve` beside it.** Both are `ExternalTool`
   now — `InstalledTool(name).version` and `.path` — and an aligner's `_detect_version` and
