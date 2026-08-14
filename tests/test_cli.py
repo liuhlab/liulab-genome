@@ -15,15 +15,17 @@ from typer.testing import CliRunner
 from genome import metadata
 from genome.cli import app
 from genome.external import REQUIRED_TOOLS
+from genome.external import doctor as doctor_api
 from genome.io import download as download_mod
-from genome.io.completion import record_path
-from genome.io.fasta import GenomeFiles
+from genome.io.completion import read_record, record_path, write_record
+from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.io.gtf import annotation_dir, register_gtf
 
-from .conftest import FakeFetch
+from .conftest import CHIMERA_COMPONENTS, COMPONENT_ANNOTATION, FakeFetch
 
 runner = CliRunner()
 _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
+_PREPARATION_PRESENT = all(shutil.which(t) is not None for t in PREPARATION_TOOLS)
 
 #: sha256 of the committed ``tiny.fa``, which the fake fetch serves as any assembly.
 _TINY_FA_SHA256 = "9316629bab14f9298a043f8b92e1e04a573b12d6a367ccc07c8f8040e5a13981"
@@ -213,6 +215,124 @@ class TestRegister:
         assert _json.loads(result.stdout)["source_url"] == str(data_dir / "tiny.fa.gz")
 
 
+class TestRegisterResolvesTheName:
+    """What a name means, settled by four checks in order — and the two refusals.
+
+    A record already here, then a source the caller named, then a name whose every part
+    is prepared here or listed in the shipped table, then the download that was always
+    the answer. Offline throughout, and the fetch step is recorded rather than merely
+    stubbed: what a refusal is asserted on is that nothing was fetched at all, since
+    turning one mistyped string into a whole-genome download per part is the failure the
+    gate exists to prevent.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _offline(
+        self,
+        fake_fetch: FakeFetch,
+        offline_prepare: None,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_fetch.serve("tiny.fa.gz")
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    def test_a_source_the_caller_named_settles_a_name_that_would_read_as_a_chimera(
+        self, data_dir: Path, fake_fetch: FakeFetch
+    ) -> None:
+        # hg38 and mm10 are both listed, so the name alone reads as two assemblies and
+        # would refuse on a machine holding neither. Saying where the bytes come from is
+        # the caller answering the question, and it is believed.
+        source = data_dir / "tiny.fa.gz"
+
+        result = runner.invoke(app, ["register", "hg38_mm10", "--source", str(source), "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["source_url"] == str(source)
+        assert "components" not in payload["details"]
+        assert fake_fetch.calls == []
+
+    def test_an_existing_record_says_what_to_rebuild_rather_than_the_name(
+        self, data_dir: Path, fake_fetch: FakeFetch
+    ) -> None:
+        # The clause that stops a plain hg38_mm10 seeded years ago from silently becoming
+        # a chimera: it was registered as an ordinary assembly, so that is what --force
+        # registers again.
+        assert (
+            runner.invoke(
+                app, ["register", "hg38_mm10", "--source", str(data_dir / "tiny.fa.gz")]
+            ).exit_code
+            == 0
+        )
+
+        result = runner.invoke(app, ["register", "hg38_mm10", "--force", "--json"])
+
+        assert result.exit_code == 0
+        assert "components" not in _json.loads(result.stdout)["details"]
+        assert fake_fetch.last.url.endswith("hg38_mm10.fa.gz")
+
+    def test_only_a_lost_record_falls_back_to_the_name(
+        self, data_dir: Path, tmp_path: Path
+    ) -> None:
+        # …and with the record gone, the name is all that is left: the same directory now
+        # reads as a chimera of hg38 and mm10, neither of which this machine has.
+        assert (
+            runner.invoke(
+                app, ["register", "hg38_mm10", "--source", str(data_dir / "tiny.fa.gz")]
+            ).exit_code
+            == 0
+        )
+        record_path(tmp_path / "genome" / "hg38_mm10").unlink()
+
+        result = runner.invoke(app, ["register", "hg38_mm10", "--force"])
+
+        assert result.exit_code == 1
+        assert "`genome register hg38`" in _output(result)
+        assert "`genome register mm10`" in _output(result)
+
+    def test_a_mis_ordered_name_is_refused_by_naming_the_canonical_spelling(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # What a --component flag would have bought, bought for less: the components are
+        # in the name, so typing them in the wrong order is detectable.
+        result = runner.invoke(app, ["register", "ecHT115_ce11"])
+
+        assert result.exit_code == 1
+        assert "`genome register ce11_ecHT115`" in _output(result)
+        assert fake_fetch.calls == []
+
+    def test_a_cold_machine_names_the_missing_component_rather_than_downloading(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["register", "ce11_ecHT115"])
+
+        assert result.exit_code == 1
+        assert "`genome register ce11`" in _output(result)
+        assert "`genome register ecHT115`" in _output(result)
+        assert fake_fetch.calls == []
+
+    def test_force_is_not_a_bypass_of_the_gate(self, fake_fetch: FakeFetch) -> None:
+        # It repairs a directory; it does not answer the question of what belongs in one.
+        result = runner.invoke(app, ["register", "ce11_ecHT115", "--force"])
+
+        assert result.exit_code == 1
+        assert "`genome register ce11`" in _output(result)
+        assert fake_fetch.calls == []
+
+    def test_a_name_neither_prepared_nor_listed_is_downloaded_as_it_always_was(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # The whole separation between ce11_ecHT115 and a free-form local key: neither
+        # `my` nor `ref` is an assembly here or in the table, so `my_ref` is one name
+        # somebody chose and the download is the answer it always was (ADR-0003).
+        result = runner.invoke(app, ["register", "my_ref", "--json"])
+
+        assert result.exit_code == 0
+        assert fake_fetch.last.url.endswith("my_ref.fa.gz")
+        assert "components" not in _json.loads(result.stdout)["details"]
+
+
 class TestVerify:
     """``genome verify`` — re-read a FASTA and check it against the official row."""
 
@@ -243,8 +363,14 @@ class TestVerify:
         assert result.exit_code == 0
         payload = _json.loads(result.stdout)
         assert payload["sha256"] == _TINY_FA_SHA256
-        assert payload["expected"] is None  # no row lists "tiny"
-        assert payload["verified"] is False
+        # No row lists "tiny", so what it is held to is the digest its own registration
+        # recorded — the fallback, and the payload says which answered.
+        assert payload["expected"] == _TINY_FA_SHA256
+        assert payload["expected_from"] == "record"
+        assert payload["verified"] is True
+        # An assembly that is not a chimera has no components to be asked about — null,
+        # rather than a status that would read as a check somebody made.
+        assert payload["components"] is None
 
     def test_a_hand_copied_fasta_is_checkable_against_the_official_row(
         self, data_dir: Path
@@ -261,6 +387,87 @@ class TestVerify:
 
         assert result.exit_code == 1
         assert "genome register tiny" in _output(result)
+
+
+class TestWhatAVerifiedDigestWasHeldTo:
+    """Three answers, three sentences — and never one wording covering two of them.
+
+    Being held to the digest the lab pinned, being held to the one this machine last
+    produced, and being held to nothing at all are different results, and a caller who
+    cannot tell them apart reads the weakest as the strongest.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _offline(
+        self,
+        fake_fetch: FakeFetch,
+        offline_prepare: None,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        fake_fetch.serve("tiny.fa.gz")
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    def test_the_row_pinned_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        table = pd.DataFrame(
+            [
+                {
+                    "assembly_name": "tiny",
+                    "species": "Testus minimus",
+                    "ucsc_name": "tiny",
+                    "ncbi_name": "TINY.1",
+                    "ncbi_assembly_id": "GCF_0.0",
+                    "ncbi_taxid": "1",
+                    "source_url": "https://mirror.example.invalid/tiny.fa.gz",
+                    "sha256": _TINY_FA_SHA256,
+                }
+            ],
+            dtype=str,
+        )
+        monkeypatch.setattr(metadata, "_metadata_table", lambda: table)
+        # The lookup is cached module-wide; leaving the stand-in's row in it would leak
+        # into every later test in this worker.
+        metadata.lookup_assembly.cache_clear()
+        try:
+            assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
+            result = runner.invoke(app, ["verify", "tiny"])
+        finally:
+            metadata.lookup_assembly.cache_clear()
+
+        assert result.exit_code == 0
+        assert "matches the digest the metadata table pins for it" in result.stdout
+
+    def test_the_record_pinned_it(self) -> None:
+        assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
+
+        result = runner.invoke(app, ["verify", "tiny"])
+
+        assert result.exit_code == 0
+        assert "own registration recorded" in result.stdout
+        assert "not an independent pin" in result.stdout
+
+    def test_nothing_pinned_it(self, data_dir: Path) -> None:
+        # A FASTA handed over by hand, checked against an assembly whose row pins nothing
+        # and which is not registered here: there is no digest to be held to at all.
+        result = runner.invoke(
+            app, ["verify", "ce11_ecHT115", "--fasta", str(data_dir / "tiny.fa"), "--json"]
+        )
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert (payload["expected"], payload["expected_from"], payload["verified"]) == (
+            None,
+            None,
+            False,
+        )
+        # Nothing is asked about components either: the assembly's own registration is
+        # not what is being verified.
+        assert payload["components"] is None
+
+        human = runner.invoke(app, ["verify", "ce11_ecHT115", "--fasta", str(data_dir / "tiny.fa")])
+
+        assert "nothing to check it against" in human.stdout
+        assert "components" not in human.stdout
 
 
 class TestRegisterAnnotation:
@@ -840,3 +1047,221 @@ class TestTableRow:
         row = result.stdout.strip().split("\t")
         assert row[0] == "sacCer3"
         assert row[-1] == _TINY_FA_SHA256
+
+    def test_a_chimera_is_refused_before_anything_is_downloaded(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # A chimera pins nothing, so this command has no job to do for one. The refusal
+        # describes the row — the name, and every other column blank — rather than
+        # printing a line that would look like one it computed something for.
+        result = runner.invoke(app, ["table-row", "ce11_ecHT115"])
+
+        assert result.exit_code == 1
+        assert "ce11, ecHT115" in _output(result)
+        assert "no sha256" in _output(result)
+        assert "genome verify ce11_ecHT115" in _output(result)
+        assert fake_fetch.calls == []
+
+
+class TestTheSurfacesThatDidNotChange:
+    """``annotations`` and ``doctor`` change nothing at all, asserted line for line.
+
+    Both are pinned to their whole output rather than to a phrase inside it, because
+    "nothing at all" is the claim: a line added to either of them fails here.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _offline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    def test_annotations_prints_exactly_what_it_printed_before(self, tmp_path: Path) -> None:
+        result = runner.invoke(app, ["annotations", "hg38"])
+
+        assert result.exit_code == 0
+        assert result.stdout == (
+            f"annotations for hg38 in {tmp_path / 'genome' / 'hg38'}\n"
+            f"  gencode_v50  offered, not registered  GENCODE v50\n"
+            f"default: gencode_v50 — not registered here; register it with "
+            f"`genome register-annotation hg38 gencode_v50`\n"
+        )
+
+    @pytest.mark.skipif(not _BINARIES_PRESENT, reason="samtools/bedtools not on PATH")
+    def test_doctor_prints_one_line_per_tool_and_nothing_else(self) -> None:
+        result = runner.invoke(app, ["doctor"])
+
+        assert result.exit_code == 0
+        assert result.stdout == "".join(f"{name}: {ver}\n" for name, ver in doctor_api().items())
+
+
+#: The repair every chimera error names. Quoted here so the tests below can assert that a
+#: message carries it and then run exactly it — a message naming a command nobody can
+#: follow is worse than no message.
+_CHIMERA_REPAIR = "genome register tinyCe_tinySc --force"
+
+
+def _corrected_component(destination: Path) -> Path:
+    """Write a valid FASTA carrying tinySc's chromosome names and different bases.
+
+    What re-registering a component looks like: the same sequences by name, not by
+    content, so a chimera built from the old bytes holds a copy of bytes that are no
+    longer anywhere.
+    """
+    destination.write_text(">I\nACGTACGTAC\n>II\nACGTACGTAC\n>III\nACGTACGTAC\n")
+    return destination
+
+
+@pytest.mark.skipif(not _PREPARATION_PRESENT, reason="samtools/faToTwoBit/twoBitInfo not on PATH")
+class TestChimeraFromTheCommandLine:
+    """``genome register <name>`` is the only build spelling, end to end.
+
+    The tiny components are registered through this same command and land under the
+    shared root, which is where a component is looked for by name. Offline by
+    construction — every source is a committed file, and a chimera fetches nothing — but
+    the native tools are real, so what is asserted is what actually got written.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    @staticmethod
+    def _register_components(*names: str, annotate: bool = False) -> None:
+        """Register each named tiny component — and its own annotation when asked."""
+        for name in names:
+            component = CHIMERA_COMPONENTS[name]
+            seeded = runner.invoke(app, ["register", name, "--source", str(component.fasta)])
+            assert seeded.exit_code == 0, _output(seeded)
+            if annotate:
+                gtf = component.gtf
+                assert gtf is not None
+                built = runner.invoke(app, ["register-gtf", name, str(gtf), COMPONENT_ANNOTATION])
+                assert built.exit_code == 0, _output(built)
+
+    def test_naming_a_chimera_builds_it_and_the_report_says_what_it_is_made_of(
+        self, tmp_path: Path
+    ) -> None:
+        # The line that used to read `source None` is the components, and the closing one
+        # names the annotation this same command registered.
+        self._register_components("tinyCe", "tinySc", annotate=True)
+
+        result = runner.invoke(app, ["register", "tinyCe_tinySc"])
+
+        assert result.exit_code == 0, _output(result)
+        assert "  components  tinyCe, tinySc" in result.stdout
+        assert "source" not in result.stdout
+        assert f"  annotation  {COMPONENT_ANNOTATION}+{COMPONENT_ANNOTATION}" in result.stdout
+        assert (tmp_path / "genome" / "tinyCe_tinySc" / "tinyCe_tinySc.fa").is_file()
+
+    def test_a_build_with_nothing_to_merge_says_so_rather_than_saying_nothing(self) -> None:
+        self._register_components("tinyCe", "tinySc")
+
+        result = runner.invoke(app, ["register", "tinyCe_tinySc"])
+
+        assert result.exit_code == 0, _output(result)
+        assert "  annotation  none" in result.stdout
+
+    def test_the_json_payload_is_the_record_untouched(self) -> None:
+        # It already carried the components, which is why nothing was added to it.
+        self._register_components("tinyCe", "tinySc")
+
+        result = runner.invoke(app, ["register", "tinyCe_tinySc", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["source_url"] is None
+        assert [entry["name"] for entry in payload["details"]["components"]] == [
+            "tinyCe",
+            "tinySc",
+        ]
+
+    def test_verify_says_the_components_are_unchanged(self) -> None:
+        self._register_components("tinyCe", "tinySc")
+        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
+
+        payload = _json.loads(runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"]).stdout)
+        human = runner.invoke(app, ["verify", "tinyCe_tinySc"])
+
+        assert payload["components"] == "unchanged"
+        assert "components  unchanged" in human.stdout
+
+    def test_a_component_that_pinned_nothing_reads_as_unknown_rather_than_as_a_pass(
+        self, tmp_path: Path
+    ) -> None:
+        # The line prints either way: a chimera whose components could not be compared is
+        # unproven, and silence would be exactly what a pass looks like.
+        self._register_components("tinyCe", "tinySc")
+        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
+        directory = tmp_path / "genome" / "tinyCe_tinySc"
+        record = read_record(directory)
+        assert record is not None
+        for entry in record.details["components"]:
+            entry["sha256"] = None
+        write_record(directory, record)
+
+        payload = _json.loads(runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"]).stdout)
+        human = runner.invoke(app, ["verify", "tinyCe_tinySc"])
+
+        assert payload["components"] == "unknown"
+        assert human.exit_code == 0
+        assert "components  unknown" in human.stdout
+
+    def test_opening_by_name_catches_a_component_registered_again_underneath(
+        self, tmp_path: Path
+    ) -> None:
+        # The hole this closes: opening by name returned from the chimera's own record,
+        # which vouches for its files and can say nothing about the ones they were
+        # copied from. Only building and verifying used to ask.
+        self._register_components("tinyCe", "tinySc")
+        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
+        corrected = str(_corrected_component(tmp_path / "corrected.fa"))
+        assert (
+            runner.invoke(app, ["register", "tinySc", "--force", "--source", corrected]).exit_code
+            == 0
+        )
+
+        result = runner.invoke(app, ["register", "tinyCe_tinySc"])
+
+        assert result.exit_code == 1
+        assert _CHIMERA_REPAIR in _output(result)
+
+    def test_the_repair_a_chimera_error_names_is_the_command_that_repairs_it(
+        self, tmp_path: Path
+    ) -> None:
+        # Run verbatim, not paraphrased: this command used to route to the downloader and
+        # fail with "Unknown UCSC assembly", so every chimera error quoted a repair nobody
+        # could follow.
+        self._register_components("tinyCe", "tinySc")
+        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
+        corrected = str(_corrected_component(tmp_path / "corrected.fa"))
+        assert (
+            runner.invoke(app, ["register", "tinySc", "--force", "--source", corrected]).exit_code
+            == 0
+        )
+        refused = runner.invoke(app, ["register", "tinyCe_tinySc"])
+        assert _CHIMERA_REPAIR in _output(refused)
+
+        repaired = runner.invoke(app, _CHIMERA_REPAIR.split()[1:])
+
+        assert repaired.exit_code == 0, _output(repaired)
+        # Rebuilt, not merely re-recorded: the corrected component's bases are in it.
+        fasta = (tmp_path / "genome" / "tinyCe_tinySc" / "tinyCe_tinySc.fa").read_text()
+        assert "ACGTACGTAC" in fasta
+        verified = runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"])
+        assert _json.loads(verified.stdout)["components"] == "unchanged"
+
+    def test_a_lost_record_is_rebuilt_from_the_name_by_the_command_it_names(
+        self, tmp_path: Path
+    ) -> None:
+        # The residual a lost record leaves: the name is the only surviving information
+        # about what this directory was, and it is enough.
+        self._register_components("tinyCe", "tinySc")
+        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
+        record_path(tmp_path / "genome" / "tinyCe_tinySc").unlink()
+        refused = runner.invoke(app, ["register", "tinyCe_tinySc"])
+        assert refused.exit_code == 1
+        assert _CHIMERA_REPAIR in _output(refused)
+
+        repaired = runner.invoke(app, _CHIMERA_REPAIR.split()[1:])
+
+        assert repaired.exit_code == 0, _output(repaired)
+        assert "  components  tinyCe, tinySc" in repaired.stdout

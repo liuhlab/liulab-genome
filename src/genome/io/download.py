@@ -12,6 +12,14 @@ layout, the working area, placing the FASTA and writing the record — is
 which knows nothing about where the bytes came from. The layout names it now owns stay
 importable from this module, which is where they used to live.
 
+**What a name means is settled here too**, because this is where both ways in meet:
+:meth:`UCSCGenomeDownloader._chimera_components` decides whether an assembly's FASTA is
+fetched at all or concatenated from components already on this disk, and
+:class:`~genome.io.chimera.ChimeraBuilder` is handed the second case. That is what makes
+``genome register <name>`` one command for every kind of **Source** — and what keeps the
+command line a thin client, since neither the resolution nor its refusals are written
+there.
+
 An assembly listed in the curated metadata table brings its own source URL and, where
 the lab has pinned one, the sha256 of its **unpacked** FASTA. That digest is checked
 after decompression rather than by pooch: pooch hashes the bytes it downloaded, which
@@ -42,7 +50,8 @@ Examples
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlparse
@@ -50,6 +59,7 @@ from urllib.parse import urlparse
 import pooch
 import requests
 
+from genome.chimera import ChimeraNamingError, derive_name, split_name
 from genome.io.completion import RECORD_NAME, RegistrationError, read_record
 from genome.io.fasta import GenomeFiles, prepare_fasta
 
@@ -72,10 +82,40 @@ _Processor = Callable[..., object]
 #: else is a local path (or an error, if it carries a scheme we cannot fetch).
 _URL_SCHEMES = frozenset({"http", "https", "ftp", "sftp"})
 
+#: What answered *which digest should this FASTA have?* — the assembly's curated
+#: metadata row, or the completion record its own registration wrote. Reported by
+#: :func:`verify_assembly` so that being held to a pin and being held only to what this
+#: machine last produced are never read as the same result. Public because the CLI keys
+#: its two sentences on them: a surface that spelled the strings again would print the
+#: raw status the day one of these was renamed, rather than failing.
+EXPECTED_FROM_TABLE = "table"
+EXPECTED_FROM_RECORD = "record"
+
 
 def _looks_like_url(source: str) -> bool:
     """Return whether ``source`` is a fetchable URL rather than a local path."""
     return urlparse(source).scheme.lower() in _URL_SCHEMES
+
+
+def _is_prepared(assembly: str) -> bool:
+    """Whether ``assembly`` is registered under the shared data root, by its record alone.
+
+    By name and not by path, exactly as a chimera's recorded components are found again: a
+    component is addressed by the key it was registered under. A directory holding files
+    but no record is *not* prepared — nothing vouches for it.
+    """
+    return read_record(assembly_data_dir(assembly)) is not None
+
+
+def _could_be_a_component(assembly: str) -> bool:
+    """Whether ``assembly`` names something a chimera could be built from.
+
+    Prepared here, or listed in the curated table. The second clause is what separates a
+    chimera's name from a free-form local key on a machine that holds neither: the shipped
+    row for a chimera's components is why ``ce11_ecHT115`` reads as two assemblies while
+    ``my_ref`` reads as one name somebody chose (ADR-0003).
+    """
+    return _is_prepared(assembly) or lookup_assembly(assembly) is not None
 
 
 def fetch_url(
@@ -290,6 +330,36 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
         """The sha256 this assembly's metadata pins for the unpacked FASTA, or ``None``."""
         return self.metadata.sha256 if self.metadata else None
 
+    def _expected_digest(self) -> tuple[str | None, str | None]:
+        """Return the digest this assembly's FASTA is held to, and what supplied it.
+
+        A **fallback**, and deliberately not a question about what kind of assembly this
+        is: the curated row's pin answers whenever there is one, and otherwise the digest
+        the assembly's own completion record already holds does. The second is the only
+        thing that can answer for an assembly nothing was downloaded for — a chimera pins
+        nothing in the table by design (ADR-0008) — but nothing here asks whether it is
+        one, so any row that pins no digest gets the same treatment.
+
+        For verification alone. Fetching still consults :attr:`_expected_sha256` by
+        itself, because a record's digest is what this machine last produced, and holding
+        a fresh download to it would refuse exactly when an upstream file has legitimately
+        changed — which is the moment re-registering is what a caller wants.
+
+        Returns
+        -------
+        tuple of (str or None, str or None)
+            The digest to expect and where it came from — ``"table"`` for the curated
+            row, ``"record"`` for the completion record — or ``(None, None)`` when
+            neither pins one and there is nothing to check against.
+        """
+        pinned = self._expected_sha256
+        if pinned is not None:
+            return pinned, EXPECTED_FROM_TABLE
+        record = read_record(self.cache_dir)
+        if record is not None and record.sha256 is not None:
+            return record.sha256, EXPECTED_FROM_RECORD
+        return None, None
+
     @property
     def fasta_url(self) -> str:
         """URL of the gzipped whole-genome FASTA — the pinned source, else the golden path.
@@ -462,6 +532,104 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
             progressbar=progressbar,
         )
 
+    def _chimera_components(self) -> tuple[str, ...] | None:
+        """Return the components this assembly is a **Chimera** of, or ``None`` to fetch it.
+
+        What a name resolves to, decided once. Both ways in — :class:`~genome.genome.Genome`
+        and :func:`register_assembly` — funnel through :meth:`fetch_genome`, so writing the
+        resolution under it is what makes the command line a thin client rather than a
+        second place the rule is spelled. Four checks, in this order:
+
+        1. **A record here.** An existing completion record already says what this assembly
+           is, and is believed outright: a chimera's record rebuilds a chimera, and any
+           other record — a plain ``hg38_mm10`` somebody seeded years ago — keeps the
+           assembly whatever it was registered as. Only a record that is *lost* falls
+           through to the name.
+        2. **A source the caller named.** An explicitly seeded assembly is what the caller
+           said it is, so it never reaches this method: ``--source`` is
+           :meth:`fetch_genome_from`, and this belongs to :meth:`fetch_genome`. That route
+           consults the record first as well — a registration already here is returned from
+           it without the source being read again — so the first check stands whichever way
+           in was taken, and the source answers only where there is nothing to believe.
+        3. **The name.** It splits on ``_`` into two or more parts, and every one of them is
+           either prepared here or listed in the curated table. That second clause is the
+           whole separation between ``ce11_ecHT115`` and a free-form local key like
+           ``my_ref`` on a machine holding neither (ADR-0003, ADR-0008).
+        4. **Today's path**, for everything else — ``None``, and the FASTA is fetched from
+           the pinned source or the derived golden-path URL, exactly as it always was.
+
+        Rebuilding from scratch is not one of the checks and never overrules them: what an
+        assembly *is* is not something a repair may change.
+
+        Returns
+        -------
+        tuple of str or None
+            The component assembly names, in the order the name spells them, or ``None``
+            when this assembly's FASTA is fetched rather than concatenated.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the name spells a legal chimera's components in the wrong order. The message
+            names the canonical spelling — a mis-ordered name being detectable is what
+            leaves a ``--component`` flag with nothing left to buy.
+        """
+        # Deferred, as everywhere in this module that reads a chimera: `genome.io.chimera`
+        # reaches back here through `genome.io.gtf`, so a top-level import would cycle.
+        from genome.io.chimera import ChimeraDetails
+
+        record = read_record(self.cache_dir)
+        if record is not None:
+            details = ChimeraDetails.from_record(record)
+            return None if details is None else tuple(details.components)
+        try:
+            candidates = split_name(self.assembly)
+        except ChimeraNamingError:
+            return None
+        if not all(_could_be_a_component(name) for name in candidates):
+            return None
+        canonical = derive_name(candidates)
+        if canonical != self.assembly:
+            raise FileNotFoundError(
+                f"nothing is registered as {self.assembly!r} in {self.cache_dir}, and it is "
+                f"not how a chimera of {', '.join(candidates)} is spelled: a chimera's name "
+                f"is its components sorted, so that one set of components means one "
+                f"directory whatever order they are typed in (ADR-0008). Build it with "
+                f"`genome register {canonical}`."
+            )
+        return candidates
+
+    def _build_chimera(self, components: Sequence[str], *, overwrite: bool) -> GenomeFiles:
+        """Concatenate ``components`` into this assembly, opening each of them to do it.
+
+        The gate on a name that resolves to a chimera: every component must already be
+        prepared here. A machine that is missing one **raises**, naming it and the command
+        that prepares it, rather than turning one mistyped string into a whole-genome
+        download per part — which is the cost of guessing wrong, and the reason the name
+        alone never fetches anything.
+
+        Each component is opened as a :class:`~genome.genome.Genome` and closed again around
+        the build, so a build that raises leaves no ``.2bit`` handle behind.
+        """
+        from genome.genome import Genome
+        from genome.io.chimera import ChimeraBuilder
+
+        missing = [name for name in components if not _is_prepared(name)]
+        if missing:
+            listed = ", ".join(missing)
+            commands = ", ".join(f"`genome register {name}`" for name in missing)
+            raise FileNotFoundError(
+                f"{self.assembly} is a chimera of {', '.join(components)}, and a chimera "
+                f"copies the bytes of components that are already prepared: {listed} is not "
+                f"registered under {liulab_data_dir()}. Nothing was downloaded, because "
+                f"naming a chimera is not a way to ask for its parts. Prepare what is "
+                f"missing with {commands}, then run this again."
+            )
+        with ExitStack() as opened:
+            genomes = [opened.enter_context(Genome(name, progressbar=False)) for name in components]
+            files = ChimeraBuilder(genomes, self.cache_dir).build_genome(overwrite=overwrite)
+        return files
+
     def fetch_genome(
         self,
         *,
@@ -469,7 +637,21 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
         progressbar: bool = True,
         overwrite: bool = False,
     ) -> GenomeFiles:
-        r"""Download and fully prepare the reference genome in one call.
+        r"""Prepare the reference genome in one call — by download, or by concatenation.
+
+        The choke point every way in funnels through, and therefore where a name is
+        resolved: :meth:`_chimera_components` says whether this assembly's FASTA is fetched
+        or built from components already on this disk, and only the first of those is what
+        the rest of this method does. A chimera is handed to
+        :class:`~genome.io.chimera.ChimeraBuilder` instead, which is why ``genome register
+        <name> --force`` is one command for all three kinds of **Source** rather than a
+        download that fails on two of them.
+
+        A finished registration is returned from its record either way, and a chimera's
+        components are checked against their own records as it is handed back — the one
+        failure a digest of this assembly's own bytes cannot show, since a component
+        registered again underneath leaves those bytes untouched and no longer a copy of
+        anything that exists. An assembly with no components pays nothing for the question.
 
         Chains :meth:`fetch_fasta`, :meth:`verify_fasta` and
         :func:`genome.io.fasta.prepare_fasta`: download ``<assembly>.fa.gz`` from the
@@ -518,7 +700,12 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
         genome.io.completion.UnfinishedRegistrationError
             If the assembly directory holds files but no record.
         genome.io.completion.RegistrationMismatchError
-            If its record disagrees with what is on disk.
+            If its record disagrees with what is on disk, or if a component of this
+            chimera was registered again since it was built.
+        FileNotFoundError
+            If the name resolves to a chimera whose components are not all prepared here,
+            or spells them in an order that is not the canonical one. Both messages name
+            the command to run instead.
         requests.exceptions.HTTPError
             If the download fails (e.g. a wrong assembly name 404s).
         ValueError
@@ -538,9 +725,20 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
         >>> files.fai.name, files.twobit.name, files.chrom_sizes.name   # doctest: +SKIP
         ('hg38.fa.fai', 'hg38.2bit', 'hg38.chrom.sizes')
         """
+        # Deferred for the same cycle :meth:`_chimera_components` explains.
+        from genome.io.chimera import components_status
+
+        components = self._chimera_components()
         registered = self._completed_genome(overwrite=overwrite, repair=self._repair_command())
         if registered is not None:
+            # Asked of every assembly and answered instantly for one with no components,
+            # so that opening a chimera by name is held to what building one is held to —
+            # the check used to be reachable only through the builder and the verifier.
+            # The refusal is the point here; the answer is for a surface that prints one.
+            components_status(self.cache_dir, self.assembly)
             return registered
+        if components is not None:
+            return self._build_chimera(components, overwrite=overwrite)
         kept = self._proven_fasta()
         if kept is not None:
             fasta, digest = kept
@@ -695,6 +893,12 @@ def register_assembly(
     keeps an unpacked FASTA it can prove is the pinned one rather than downloading a
     whole genome again.
 
+    **The name is the whole interface**, chimeras included: a name whose parts are a
+    prepared or listed assembly each is concatenated from those components instead of
+    being fetched, so this one call prepares all three kinds of **Source** and ``force``
+    repairs all three. See :meth:`UCSCGenomeDownloader._chimera_components` for the order
+    the checks run in and what each one settles.
+
     Parameters
     ----------
     assembly : str
@@ -725,6 +929,9 @@ def register_assembly(
     genome.io.completion.RegistrationError
         If the directory holds a build that cannot be trusted as finished, or (with
         ``force``) if the run somehow left no record behind.
+    FileNotFoundError
+        If the name resolves to a chimera this machine cannot build — a component that is
+        not prepared here, or the components in an order that is not the canonical one.
     genome.io.utils.ChecksumMismatchError
         If the metadata pins a sha256 and the unpacked FASTA is not it.
     genome.external.ToolNotFoundError
@@ -760,18 +967,31 @@ def verify_assembly(
     cache_dir: str | Path | None = None,
     metadata: AssemblyMetadata | None = None,
 ) -> dict[str, object]:
-    """Re-read a FASTA and check its sha256 against the one ``assembly``'s row pins.
+    """Re-read a FASTA and check its sha256 against the digest expected of it.
 
     The one operation that reads bytes rather than sizes. Registering an assembly and
     reopening it both go by presence and size, which is what makes them instant; this
     is the deliberate re-verification for when integrity is actually in doubt, and it
     costs a full pass over the file.
 
+    What is expected of it comes from the assembly's curated row, and **failing that,
+    from the completion record its own registration wrote** — a fallback rather than a
+    question about what kind of assembly this is (see
+    :meth:`UCSCGenomeDownloader._expected_digest`). ``expected_from`` says which
+    answered, because being held to a pinned digest and being held only to what this
+    machine last produced are different results and a caller must be able to tell them
+    apart.
+
     With no ``fasta`` it verifies the assembly's own registered FASTA, and the
     registration must be intact — a directory that cannot be trusted raises here as it
-    does anywhere else. Point ``fasta`` at any file to check that instead: a copy taken
-    from a mirror or handed over by hand is checkable against the official row before
-    anything is built on it, and nothing needs to be registered first.
+    does anywhere else. Two things are then checked beside the digest, both by reading
+    records rather than bytes: that each component this assembly was built from is still
+    the one it was built from, and that each annotation merged into its own is still the
+    one that was merged. Neither costs an assembly without components anything. Point
+    ``fasta`` at any file to check that instead: a copy taken from a mirror or handed
+    over by hand is checkable before anything is built on it, and nothing needs to be
+    registered first — nothing is then asked about components, since the assembly's own
+    registration is not what is being verified.
 
     Parameters
     ----------
@@ -788,16 +1008,20 @@ def verify_assembly(
     -------
     dict
         ``assembly``, the ``fasta`` that was read, its computed ``sha256``, the
-        ``expected`` digest the row pins (``None`` when it pins none), and
-        ``verified`` — whether there was a pin to check against at all. A digest that
-        disagrees raises rather than reporting ``False``.
+        ``expected`` digest (``None`` when nothing pins one), ``expected_from`` —
+        ``"table"``, ``"record"``, or ``None`` for the same case — ``verified``,
+        whether there was anything to check against at all, and ``components``,
+        ``"unchanged"`` or ``"unknown"`` for a chimera and ``None`` for anything else,
+        including every ``fasta`` checked on its own. A digest that disagrees raises
+        rather than reporting ``False``; components that disagree likewise.
 
     Raises
     ------
     genome.io.utils.ChecksumMismatchError
-        If the row pins a sha256 and the file's digest is a different one.
+        If a digest is expected and the file's is a different one.
     genome.io.completion.RegistrationError
-        If the assembly's directory holds a build that cannot be trusted as finished.
+        If the assembly's directory holds a build that cannot be trusted as finished —
+        including one whose components were registered again underneath it.
     FileNotFoundError
         If there is no file to read — nothing registered for ``assembly``, or no file
         at an explicit ``fasta``.
@@ -809,6 +1033,11 @@ def verify_assembly(
     >>> verify_assembly("sacCer3", fasta="/tmp/copied.fa")  # doctest: +SKIP
     {'assembly': 'sacCer3', 'fasta': '/tmp/copied.fa', ...}
     """
+    # Deferred: `genome.io.chimera` reaches this module through `genome.io.gtf`, so
+    # importing it at the top would be a cycle. Nothing else here needs it.
+    from genome.io.chimera import components_status
+
+    components: str | None = None
     downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=metadata)
     if fasta is not None:
         target = Path(fasta).expanduser()
@@ -828,13 +1057,23 @@ def verify_assembly(
                 f"nothing to verify. Register it with `genome register {assembly}`, or "
                 f"pass the FASTA to check with --fasta."
             )
-    expected = downloader._expected_sha256
+        # Beside the digest, never instead of it: this one reads records rather than
+        # bytes, and answers what a digest of this assembly's own bytes cannot. Its
+        # answer is reported as well as enforced, so that "nothing was comparable" is
+        # never handed back looking like "everything agreed".
+        components = components_status(downloader.cache_dir, assembly)
+    expected, expected_from = downloader._expected_digest()
+    actual = sha256_file(target)
+    if expected is not None and actual != expected:
+        raise ChecksumMismatchError(target, expected, actual)
     return {
         "assembly": assembly,
         "fasta": str(target),
-        "sha256": downloader.verify_fasta(target),
+        "sha256": actual,
         "expected": expected,
+        "expected_from": expected_from,
         "verified": expected is not None,
+        "components": components,
     }
 
 
@@ -877,10 +1116,18 @@ def assembly_table_row(
         :func:`~genome.metadata.format_table_row` for the line to paste into
         ``data/assembly_metadata.tsv``.
 
+    A **Chimera** is **refused before anything is fetched**, because it has no work here to
+    do: its row pins nothing, so there is no digest to compute and no source to record, and
+    the refusal describes that row rather than printing it (ADR-0008).
+
     Raises
     ------
     ValueError
-        If the URL had to be derived and the assembly is unknown to UCSC.
+        If the URL had to be derived and the assembly is unknown to UCSC, or if the name
+        resolves to a chimera, which has no row to compute.
+    FileNotFoundError
+        If the name spells a chimera's components in an order that is not the canonical
+        one; the message names the spelling to use.
 
     Notes
     -----
@@ -898,6 +1145,18 @@ def assembly_table_row(
     'sacCer3\tSaccharomyces cerevisiae\t...\t6ff72f07...'
     """
     downloader = UCSCGenomeDownloader(assembly, cache_dir)
+    components = downloader._chimera_components()
+    if components is not None:
+        raise ValueError(
+            f"{assembly} is a chimera, of {', '.join(components)}, so there is no row for "
+            f"this command to compute and nothing was downloaded. Its row is one line "
+            f"carrying the name and nothing else: no source URL, because nothing is "
+            f"fetched, and no sha256, because a chimera's bytes are derived by this package "
+            f"from components that are themselves pinned, and pinning them again would turn "
+            f"our own concatenation into a contract that fails on every disk (ADR-0008). "
+            f"Build it with `genome register {assembly}` and check it with `genome verify "
+            f"{assembly}`, which compares the components rather than a pin."
+        )
     fasta = downloader.fetch_fasta(progressbar=progressbar)
     record = downloader.metadata
     # Every column the record knows; all blank when the table lists no row at all, in

@@ -55,6 +55,25 @@ they were registered. Re-register it with `genome register sacCer3 --force`.
 derived files; it fetches again when it cannot prove that. Interrupting a *first*
 registration leaves a directory that needs exactly this.
 
+### Naming a chimera builds it
+
+An assembly named after two or more registered assemblies, sorted and joined by `_`, is a
+[chimera](genome.md#chimera-assemblies): it is concatenated from those components, merged
+annotation included, and nothing is downloaded.
+
+```console
+$ genome register ce11_ecHT115
+registered ce11_ecHT115 in /data/liulab_data/genome/ce11_ecHT115
+  components  ce11, ecHT115
+  sha256  0f3d6d5e…
+  files   ce11_ecHT115.2bit, ce11_ecHT115.chrom.sizes, ce11_ecHT115.fa, ce11_ecHT115.fa.fai
+  annotation  wormbase_ws298+refseq_rs_2025_06_26 — the components' own, merged and registered by this build
+```
+
+There is no flag for listing the parts — the name carries them. A component this machine
+has not prepared exits `1` naming the command that prepares it, and components typed in
+the wrong order exit `1` naming the canonical spelling.
+
 ## `genome register-annotation <assembly> <name>`
 
 Register one of the annotations the table lists for an assembly: fetch, check the
@@ -124,6 +143,10 @@ error: sha256 mismatch for /tmp/from-a-colleague.fa: expected 6ff72f07…, got 9
 `--fasta` checks any file against the official row — useful for a copy you were handed,
 before you build anything on it.
 
+A chimera is also checked against its components: the closing line reads `unchanged` or,
+where a digest was missing on one side, `unknown`. A component that is no longer the one
+the chimera was built from exits `1`.
+
 ## `genome revcomp <sequence>`
 
 Reverse-complement a DNA sequence. Case is preserved; a character outside `A/C/G/T` exits
@@ -146,3 +169,6 @@ table already pins is reported, never enforced.
 $ genome table-row sacCer3
 sacCer3	Saccharomyces cerevisiae	sacCer3	R64-1-1	GCF_000146045.2	559292	https://…/sacCer3.fa.gz	6ff72f07…
 ```
+
+A chimera exits `1` before anything is downloaded: its row carries the name and nothing
+else, so there is no row here to compute. Check one with `genome verify` instead.

@@ -225,6 +225,54 @@ Neither aligner is in the default environment — install what you need with `pi
 / `pixi add chromap`, or use the project's `aligners` environment
 (`pixi run -e aligners ...`). A missing binary fails fast with the install command.
 
+## Chimera assemblies
+
+A **chimera** is one reference concatenated from assemblies you have already prepared — a
+worm and the bacterium it eats — so a library carrying reads from both takes one alignment
+pass instead of two.
+
+```python
+chimera = Genome.chimera(Genome("ce11"), Genome("ecHT115"))
+chimera.assembly              # 'ce11_ecHT115'
+```
+
+The name is the component names sorted and joined by `_`, so you never choose it and
+either order builds and reopens the same `ce11_ecHT115`. From a shell, naming it is
+building it — `genome register ce11_ecHT115`. Nothing is downloaded: every component has
+to be registered here already.
+
+Every chromosome carries the component it came from, `<chromosome>__<component>`, and a
+**bare name does not resolve**:
+
+```python
+chimera["I__ce11:0-10"]       # chromosome I of ce11, first ten bases
+chimera["I:0-10"]
+# ValueError: unknown chromosome 'I'; ce11_ecHT115 is a chimera, and every chromosome
+# name in one carries the component it came from, so a bare name never resolves
+# (ADR-0009). It carries 'I' as: I__ce11. Ask for the one you meant.
+```
+
+Two accessors read that split back:
+
+```python
+chimera.components                    # ['ce11', 'ecHT115'] — None for any other assembly
+chimera.chrom_components["I__ce11"]   # 'ce11' — one entry per chromosome
+```
+
+The components' own default annotations are merged and registered by the same build, so a
+chimera arrives annotated — and aligner indexes are built over it like any other assembly:
+
+```python
+chimera.default_gtf                   # 'wormbase_ws298+refseq_rs_2025_06_26'
+chimera.build_star_index(gtf=chimera.default_gtf, threads=8)
+```
+
+Its name is what went into it, so it changes when a component's default annotation does.
+Rebuilding — `Genome.chimera(..., force=True)`, or `genome register <name> --force` —
+registers the new one and **removes the one it replaces**, so a chimera never ends up
+carrying two merged annotations with no default between them. An annotation you registered
+by hand is never touched.
+
 ## Regions
 
 `Region` is the shared coordinate type: frozen, validated, 0-based half-open, with an

@@ -9,6 +9,10 @@
 
 ::: genome.genome
 
+## `genome.chimera`
+
+::: genome.chimera
+
 ## `genome.region`
 
 ::: genome.region
@@ -64,6 +68,10 @@
 ## `genome.io.registration`
 
 ::: genome.io.registration
+
+## `genome.io.chimera`
+
+::: genome.io.chimera
 
 ## `genome.cli`
 

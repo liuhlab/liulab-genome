@@ -16,6 +16,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from genome import metadata
+from genome.chimera import ChimeraNamingError, split_name
 from genome.metadata import (
     ANNOTATION_FIELDS,
     METADATA_FIELDS,
@@ -32,8 +33,32 @@ from genome.metadata import (
 #: Every identifier column may be blank too; a curated row is expected to fill them.
 _OPTIONAL_FIELDS = ("ucsc_name", "source_url", "sha256")
 
-#: Every assembly the shipped table officially supports.
-_SHIPPED_ASSEMBLIES = ("hg38", "hg19", "mm39", "mm10", "sacCer3", "ce11", "ecHT115")
+#: Every assembly the shipped table officially supports, read from the table itself: a
+#: row added without a test to match is then covered by whichever kind it turns out to be
+#: rather than quietly unguarded.
+_SHIPPED_ASSEMBLIES: tuple[str, ...] = tuple(metadata._metadata_table()["assembly_name"])
+
+
+def _is_chimera_row(assembly: str) -> bool:
+    """Whether a shipped row names a chimera — what the row *is*, not which name it has.
+
+    It splits into two or more parts and the table lists every one of them, which is the
+    same test that separates ``ce11_ecHT115`` from a local key someone chose.
+    """
+    try:
+        components = split_name(assembly)
+    except ChimeraNamingError:
+        return False
+    return all(component in _SHIPPED_ASSEMBLIES for component in components)
+
+
+#: The two kinds, because a blank ``sha256`` means opposite things in them: on a
+#: downloaded row nobody has pinned it yet, and on a chimera's pinning one would be a
+#: mistake — its bytes were derived here, not fetched from anywhere.
+_SHIPPED_CHIMERAS: tuple[str, ...] = tuple(filter(_is_chimera_row, _SHIPPED_ASSEMBLIES))
+_SHIPPED_DOWNLOADS: tuple[str, ...] = tuple(
+    assembly for assembly in _SHIPPED_ASSEMBLIES if not _is_chimera_row(assembly)
+)
 
 
 def test_lookup_returns_the_row_for_a_listed_assembly() -> None:
@@ -78,18 +103,51 @@ def test_every_declared_field_is_filled_from_the_table() -> None:
     assert all(getattr(record, field) is not None for field in identifiers)
 
 
-def test_every_shipped_row_pins_a_source_and_a_checksum() -> None:
-    # Every officially supported assembly says where its FASTA comes from and what
-    # that FASTA hashes to. The URL's file name is the source's business, not the
+def test_every_shipped_downloaded_row_pins_a_source_and_a_checksum() -> None:
+    # Every officially supported assembly whose bytes were fetched says where they come
+    # from and what they hash to. The URL's file name is the source's business, not the
     # assembly's — ce11 is pinned to WormBase, whose names carry the bioproject and
     # release rather than the assembly, and ecHT115 to NCBI, which spells it .fna.gz.
-    for assembly in _SHIPPED_ASSEMBLIES:
+    assert _SHIPPED_DOWNLOADS
+    for assembly in _SHIPPED_DOWNLOADS:
         record = lookup_assembly(assembly)
         assert record is not None
         assert record.source_url is not None
         assert record.source_url.endswith(".gz")
         assert record.sha256 is not None
         assert len(record.sha256) == 64
+
+
+def test_a_shipped_chimera_pins_nothing() -> None:
+    # The other meaning of a blank cell: not *nobody got round to it* but *pinning this
+    # would be a mistake*. A chimera's bytes are derived by a pure function from
+    # components that are themselves pinned, so it is proven transitively; a digest here
+    # would turn this package's own concatenation into a contract that fails on every
+    # user's disk instead of in its test suite. Its identifiers are its components' too.
+    assert _SHIPPED_CHIMERAS, "nothing is guarded if the table lists no chimera at all"
+    for assembly in _SHIPPED_CHIMERAS:
+        record = lookup_assembly(assembly)
+        assert record is not None
+        assert record.source_url is None
+        assert record.sha256 is None
+        assert record.species is None
+        assert record.ncbi_taxid is None
+
+
+def test_the_shipped_chimera_row_carries_a_name_and_nothing_else() -> None:
+    # Readable at all only because a blank identifier cell reads back as unknown: a blank
+    # ncbi_taxid used to raise, which is what made this row impossible to ship. It exists
+    # so that a machine holding neither component can still tell this name from a
+    # free-form local key, by splitting it into components the table lists.
+    assert lookup_assembly("ce11_ecHT115") == AssemblyMetadata(
+        assembly_name="ce11_ecHT115",
+        species=None,
+        ucsc_name=None,
+        ncbi_name=None,
+        ncbi_assembly_id=None,
+        ncbi_taxid=None,
+    )
+    assert split_name("ce11_ecHT115") == ("ce11", "ecHT115")
 
 
 def test_an_assembly_ucsc_never_carried_is_looked_up_by_its_own_name() -> None:
@@ -115,9 +173,9 @@ def test_a_pinned_checksum_is_read_back_as_text() -> None:
 
 
 def test_a_blank_optional_cell_reads_back_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    # An unpinned checksum is unverified, not wrong — and never the string "nan".
-    # Every shipped row pins both optional columns today, so the blank-cell path is
-    # exercised against a table stood up for it rather than by leaving a row unpinned.
+    # An unpinned checksum is unverified, not wrong — and never the string "nan". Every
+    # downloaded row pins both optional columns today, and the chimera row's blanks say
+    # something else again, so this path is exercised against a table stood up for it.
     table = pd.DataFrame(
         [
             {
@@ -293,7 +351,7 @@ class TestAnnotationTable:
         assert all(getattr(record, field) is not None for field in ANNOTATION_FIELDS)
 
     def test_every_shipped_annotation_pins_a_url_and_a_checksum(self) -> None:
-        for assembly in _SHIPPED_ASSEMBLIES:
+        for assembly in _SHIPPED_DOWNLOADS:
             listed = list_annotation_metadata(assembly)
             assert listed, f"{assembly} offers no annotation"
             for record in listed:
@@ -302,9 +360,16 @@ class TestAnnotationTable:
                 assert len(record.sha256) == 64
 
     def test_every_shipped_assembly_names_exactly_one_default(self) -> None:
-        for assembly in _SHIPPED_ASSEMBLIES:
+        for assembly in _SHIPPED_DOWNLOADS:
             defaults = [r.name for r in list_annotation_metadata(assembly) if r.default]
             assert len(defaults) == 1
+
+    def test_a_shipped_chimera_offers_no_annotation_row(self) -> None:
+        # A merged annotation is derived from its components' own and fetched from
+        # nowhere, so it has nothing a row could pin: no source, no digest, and a name
+        # that would be computed from the flags in the rows beside it.
+        for assembly in _SHIPPED_CHIMERAS:
+            assert list_annotation_metadata(assembly) == []
 
     def test_listing_an_assembly_returns_what_the_table_offers_it(self) -> None:
         assert [record.name for record in list_annotation_metadata("ce11")] == ["wormbase_ws298"]

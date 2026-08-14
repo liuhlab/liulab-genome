@@ -66,6 +66,15 @@ class AssemblyMetadata:
     mirror or recompressed elsewhere still matches (ADR-0006). A row with no digest is
     unverified rather than wrong.
 
+    A **Chimera**'s row pins neither, and that is deliberate rather than pending: its
+    bytes are not fetched from anywhere, and they are derived by a pure function from
+    components whose own rows are pinned, so it is proven transitively. The table pins
+    what was downloaded; what was derived is pinned by a test, where a change in this
+    package's own concatenation code belongs (ADR-0008). Such a row carries its name and
+    nothing else — its identifiers are its components', reachable through
+    :attr:`~genome.genome.Genome.chrom_components` — and it exists so that a machine
+    holding none of them can still tell a chimera's name from a local key someone chose.
+
     ``ucsc_name`` is blank permanently rather than pending in some rows, for the same
     reason the assembly id is a local key rather than a UCSC one (ADR-0003): the lab
     supports references UCSC has never carried, and such a row simply has no name in
