@@ -103,11 +103,17 @@ class STAR(Aligner):
         ``genomeGenerate`` option may be passed as a keyword argument using its
         STAR name without the leading ``--`` (e.g. ``genomeSAindexNbases=11``);
         for the meaning of those options see the STAR manual / ``STAR --help``.
+        Two of them are sized from the assembly rather than left to STAR's
+        defaults — the suffix-array index size ``genomeSAindexNbases``, from the
+        total sequence length, and the genome-storage bin size
+        ``genomeChrBinNbits``, from the mean sequence length and the read length
+        ``sjdb_overhang`` implies. Passing either one yourself wins.
 
         Parameters
         ----------
         sjdb_overhang : int, default 100
-            ``--sjdbOverhang``: ideally ``read_length - 1``.
+            ``--sjdbOverhang``: ideally ``read_length - 1``, which is also where
+            the computed ``genomeChrBinNbits`` reads the read length back out of.
         threads : int, default 1
             ``--runThreadN``: number of threads to build with.
         overwrite : bool, default False
@@ -143,6 +149,24 @@ class STAR(Aligner):
         if "genomeSAindexNbases" not in kwargs:
             genome_length = int(self._genome.chrom_sizes.sum())
             kwargs["genomeSAindexNbases"] = min(14, max(2, int(math.log2(genome_length) / 2 - 1)))
+
+        # Each sequence is padded up to a whole number of 2^genomeChrBinNbits bases, so a
+        # many-sequence reference left at STAR's default of 18 wastes up to 262,144 bases
+        # per sequence — silently, because STAR neither warns on this one nor clamps it.
+        # Scale it as STAR's manual recommends,
+        #   min(18, log2(max(genomeLength / references, readLength))),
+        # taking the read length back out of sjdb_overhang, which is read_length - 1 by
+        # definition. That inner max is already the floor — a bin shorter than one read
+        # helps nobody — so no separate guard. Passed even when it lands on 18, so the
+        # completion record says what the build asked for rather than what it left out.
+        # Truncated only to agree with the line above: there truncation reproduces STAR's
+        # own C++ where its manual rounds, but for this knob STAR computes nothing at all,
+        # so there is no source to match and the neighbour is the whole argument.
+        if "genomeChrBinNbits" not in kwargs:
+            chrom_sizes = self._genome.chrom_sizes
+            mean_length = float(chrom_sizes.sum()) / len(chrom_sizes)
+            bin_nbits = int(math.log2(max(mean_length, sjdb_overhang + 1)))
+            kwargs["genomeChrBinNbits"] = min(18, bin_nbits)
 
         parameters: dict[str, Any] = {
             "threads": threads,
