@@ -1033,13 +1033,25 @@ registered or not. <code>genome annotations &lt;assembly&gt;</code> prints one a
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">register_gtf</span><span class="p">(</span><span class="s2">&quot;custom.gtf&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;custom&quot;</span><span class="p">)</span>
 <a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">register_gtf</span><span class="p">(</span><span class="s2">&quot;custom.gtf.gz&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;custom&quot;</span><span class="p">)</span>  <span class="c1"># .gz is decompressed for you</span>
 </code></pre></div>
+<p>Both ways in have a shell equivalent, <code>genome register-annotation &lt;assembly&gt;
+&lt;name&gt;</code> and <code>genome register-gtf &lt;assembly&gt; &lt;path&gt; &lt;name&gt;</code>.</p>
 <p>Either way the registration ends with the same record the assembly writes, and
 that record is the only thing that ever says the annotation is finished — never
 the database file's existence, which is equally true of a build killed half-way.
 Re-registering a name whose record is valid returns it silently: nothing is
 fetched and nothing is rebuilt. A directory holding files without a valid record
-raises instead, naming <code>genome register-annotation &lt;assembly&gt; &lt;name&gt; --force</code>,
-which is also what repairs it.</p>
+raises instead, naming the command that registers that annotation again with
+<code>--force</code>, which is also what repairs it.</p>
+<p>Opening a genome never raises over one of those, though — one annotation nobody
+can vouch for must not cost you the genome or the annotations beside it. It is
+reported rather than raised over, and each entry says what is wrong and names the
+one command that fixes it:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">broken_annotations</span>           <span class="c1"># [BrokenAnnotation(name=&#39;ensgene_v101&#39;, ...)]</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">broken_annotations</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">repair</span> <span class="c1"># &#39;genome register-annotation sacCer3 ensgene_v101 --force&#39;</span>
+</code></pre></div>
+<p>Asking for a broken annotation by name raises as an unregistered one does, and the
+message quotes that same repair — the command that works, not one that would raise
+in turn and demand <code>--force</code>.</p>
 <p>Opening a genome never registers anything, whatever the table flags — that would
 be a gigabyte download and a database build inside a constructor someone called to
 fetch one sequence. So <code>default_gtf</code> may name an annotation this machine does not
@@ -1053,25 +1065,25 @@ against a specific GTF). Registration, the default-annotation rules, and
 <p><code>Genome</code> holds the <code>.2bit</code> file open so repeated queries are fast. Use it as a
 context manager (or call <code>close()</code>) when you want the handle released
 deterministically:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="k">with</span> <span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">sacCer3</span><span class="p">:</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="n">seq</span> <span class="o">=</span> <span class="n">sacCer3</span><span class="o">.</span><span class="n">fetch_sequence</span><span class="p">(</span><span class="s2">&quot;chrIV:0-100&quot;</span><span class="p">)</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1"># handle closed here</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">with</span> <span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">sacCer3</span><span class="p">:</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>    <span class="n">seq</span> <span class="o">=</span> <span class="n">sacCer3</span><span class="o">.</span><span class="n">fetch_sequence</span><span class="p">(</span><span class="s2">&quot;chrIV:0-100&quot;</span><span class="p">)</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="c1"># handle closed here</span>
 </code></pre></div>
 <h2 id="regions">Regions<a class="headerlink" href="#regions" title="Permanent link">&para;</a></h2>
 <p><code>genome.region.Region</code> is the shared coordinate primitive that later features
 build on. It is a frozen, validated, 0-based half-open interval with an explicit
 strand:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">Region</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.region</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_region</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">r</span> <span class="o">=</span> <span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>       <span class="c1"># Region(chrom=&#39;chrIV&#39;, start=0, end=10, strand=&#39;.&#39;)</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>                           <span class="c1"># 10</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>                           <span class="c1"># &#39;chrIV:0-10&#39;</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>      <span class="c1"># strand is explicit; never defaulted to &#39;+&#39;</span>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>
-<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrIV:0-10&quot;</span><span class="p">)</span>       <span class="c1"># (&#39;chrIV&#39;, 0, 10)</span>
-<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrIV:1,000-2,000&quot;</span><span class="p">)</span>  <span class="c1"># (&#39;chrIV&#39;, 1000, 2000) — separators tolerated</span>
-<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrM&quot;</span><span class="p">)</span>             <span class="c1"># (&#39;chrM&#39;, None, None) — a bare chromosome name</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">Region</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.region</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_region</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">r</span> <span class="o">=</span> <span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>       <span class="c1"># Region(chrom=&#39;chrIV&#39;, start=0, end=10, strand=&#39;.&#39;)</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>                           <span class="c1"># 10</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>                           <span class="c1"># &#39;chrIV:0-10&#39;</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>      <span class="c1"># strand is explicit; never defaulted to &#39;+&#39;</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrIV:0-10&quot;</span><span class="p">)</span>       <span class="c1"># (&#39;chrIV&#39;, 0, 10)</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrIV:1,000-2,000&quot;</span><span class="p">)</span>  <span class="c1"># (&#39;chrIV&#39;, 1000, 2000) — separators tolerated</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrM&quot;</span><span class="p">)</span>             <span class="c1"># (&#39;chrM&#39;, None, None) — a bare chromosome name</span>
 </code></pre></div>
 <p>Construction enforces the invariants: <code>start &gt;= 0</code>, <code>end &gt;= start</code>, and <code>strand</code>
 in <code>{"+", "-", "."}</code>.</p>
@@ -1079,11 +1091,11 @@ in <code>{"+", "-", "."}</code>.</p>
 <p><code>Genome</code> reads sequence through <code>genome.io.twobit.TwoBit</code>, a thin wrapper over
 <code>py2bit</code> that holds an open 2bit handle. You can use it on its own against any
 <code>.2bit</code> file:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.twobit</span><span class="w"> </span><span class="kn">import</span> <span class="n">TwoBit</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="k">with</span> <span class="n">TwoBit</span><span class="p">(</span><span class="s2">&quot;sacCer3.2bit&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">tb</span><span class="p">:</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>    <span class="n">tb</span><span class="o">.</span><span class="n">chroms</span><span class="p">()</span>                  <span class="c1"># {&#39;chrI&#39;: 230218, ..., &#39;chrM&#39;: 85779}</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>    <span class="n">tb</span><span class="o">.</span><span class="n">sequence</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>  <span class="c1"># &#39;ACACCACACC&#39;  (0-based, half-open)</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.io.twobit</span><span class="w"> </span><span class="kn">import</span> <span class="n">TwoBit</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="k">with</span> <span class="n">TwoBit</span><span class="p">(</span><span class="s2">&quot;sacCer3.2bit&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">tb</span><span class="p">:</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>    <span class="n">tb</span><span class="o">.</span><span class="n">chroms</span><span class="p">()</span>                  <span class="c1"># {&#39;chrI&#39;: 230218, ..., &#39;chrM&#39;: 85779}</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    <span class="n">tb</span><span class="o">.</span><span class="n">sequence</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>  <span class="c1"># &#39;ACACCACACC&#39;  (0-based, half-open)</span>
 </code></pre></div>
 <p>Like <code>Genome</code>, <code>TwoBit.sequence</code> bounds-checks coordinates — an over-long <code>end</code>
 raises a <code>ValueError</code> instead of being silently clamped (py2bit's default).
