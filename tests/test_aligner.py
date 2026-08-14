@@ -40,7 +40,7 @@ from genome.io.completion import (
     read_record,
     write_record,
 )
-from genome.io.download import assembly_data_dir
+from genome.io.registration import AssemblyDir, assembly_data_dir
 
 from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY, ComponentFactory
 
@@ -113,6 +113,10 @@ def _make_genome(
     sizes = pd.Series({"chr1": len(_SEQ)}) if chrom_sizes is None else chrom_sizes
     stub = types.SimpleNamespace(
         assembly="tiny",
+        # Where this genome lives, asked of it rather than re-derived: the stub says so
+        # explicitly, exactly as a real Genome does, so a test that moved the data root
+        # moves the index dir with it.
+        assembly_dir=AssemblyDir.locate("tiny"),
         files=types.SimpleNamespace(fasta=fasta),
         chrom_sizes=sizes,
         get_gtf_path=lambda name: gtf_paths[name],
@@ -247,6 +251,48 @@ def test_distinct_gtf_keys_use_distinct_index_dirs(
     assert star_a.index_dir != star_b.index_dir
     assert star_a.index_dir.name == "star_a"
     assert star_b.index_dir.name == "star_b"
+
+
+def test_the_index_dir_is_the_one_inside_the_genomes_own_assembly_dir(
+    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # An **Index dir** is `<assembly dir>/index/<name>/`, and the assembly dir is the one
+    # this genome was opened in — never one re-derived from the shared data root. A genome
+    # opened somewhere else is the case that tells the two apart, and it is an ordinary
+    # one: every fixture in this suite that registers a component uses it.
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(Chromap, "_detect_version", lambda _self: "0.0-test")
+    genome = chimera_component("tinyCe")
+
+    chromap = Chromap(genome)
+
+    assert chromap.index_dir == genome.fasta_path.parent / "index" / "chromap"
+
+
+def test_an_index_pins_the_digest_of_the_assembly_it_was_opened_from(
+    chimera_component: ComponentFactory,
+    captured_run: list[list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The other half of the same fact, and the one that fails silently. The digest guard
+    # reads the assembly's record out of the assembly dir; re-derive that dir from the
+    # shared root and it reads a record that is not there, so the digest is `None`, the
+    # key is omitted, and a reference rebuilt underneath the index stops being noticed —
+    # a guard that passes without having been exercised.
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(Chromap, "_detect_version", lambda _self: "0.0-test")
+    genome = chimera_component("tinyCe")
+    assembly = read_record(genome.fasta_path.parent)
+    assert assembly is not None
+    assert assembly.sha256 is not None
+
+    chromap = Chromap(genome)
+    chromap.index()
+
+    assert _record_of(chromap).details[_DIGEST_KEY] == assembly.sha256
 
 
 # -- asking for an index that is not there ----------------------------------
@@ -552,7 +598,7 @@ def mixin_genome(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Genome:
         pass
 
     genome = _MixinGenome()
-    for attr in ("assembly", "files", "chrom_sizes", "get_gtf_path"):
+    for attr in ("assembly", "assembly_dir", "files", "chrom_sizes", "get_gtf_path"):
         setattr(genome, attr, getattr(stub, attr))
     return cast("Genome", genome)
 
@@ -1036,11 +1082,11 @@ def everyday_chimera(
 ) -> Iterator[Genome]:
     """The everyday chimera, built for real, with its merged annotation registered.
 
-    ``LIULAB_DATA`` is pointed at the test's own root and the build is then left to
-    place itself under it, rather than sent elsewhere with a ``cache_dir``: an index
-    directory is derived from the assembly directory, and the digest an index pins is
-    read out of the assembly's record in that same place. Split the two and that digest
-    reads as *unknown* — a guard that passes without having been exercised.
+    ``LIULAB_DATA`` is pointed at the test's own root so the components and the chimera
+    land beside each other, which is what a chimera's staleness comparison looks for.
+    Where the *index* goes no longer depends on it: an index dir and the assembly digest
+    it pins both come from the genome's own **Assembly dir**, so a chimera built anywhere
+    indexes into itself.
 
     Skips with :func:`chimera_component` when the preparation tools are absent, so a
     test using this needs no marker of its own beyond the aligner it drives.

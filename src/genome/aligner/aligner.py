@@ -3,8 +3,8 @@
 An :class:`Aligner` wraps one external read-mapper (STAR, chromap, …) and knows
 how to build that aligner's genome index for a :class:`~genome.genome.Genome`.
 The base class owns the cross-aligner plumbing — installation checking, the
-on-disk layout under ``<LIULAB_DATA>/genome/<assembly>/index/<name>/``, and the
-completion record that says a build finished — while each concrete subclass
+on-disk layout at ``<assembly dir>/index/<name>/``, and the completion record
+that says a build finished — while each concrete subclass
 supplies the aligner-specific command and its exposed parameters via
 :meth:`Aligner.index`.
 
@@ -17,7 +17,10 @@ finished?"; no caller consults an index file's mere existence.
 That record also pins the **digest of the assembly it was built from**, copied
 from the assembly's own record one directory up, so an assembly re-registered
 underneath an index stops reading as a finished index. The comparison is record
-against record and reads no sequence bytes.
+against record and reads no sequence bytes. Both the layout and that record are
+asked of the bound genome's :attr:`~genome.genome.Genome.assembly_dir`, never
+re-derived from the **Data dir**: an index belongs inside the assembly it
+indexes, and only the genome knows where it was opened.
 
 Only index construction is implemented here; mapping/alignment is out of scope.
 """
@@ -40,11 +43,9 @@ from genome.io.completion import (
     RegistrationMismatchError,
     build_record,
     check_registration,
-    read_record,
     record_path,
     write_record,
 )
-from genome.io.download import INDEXES_SUBDIR, assembly_data_dir
 
 if TYPE_CHECKING:
     from genome.genome import Genome
@@ -116,9 +117,13 @@ class Aligner(ABC):
     def index_dir(self) -> Path:
         """Directory holding this aligner's index for the assembly.
 
-        ``<LIULAB_DATA>/genome/<assembly>/index/<name>/``.
+        ``<assembly dir>/index/<name>/`` — inside the **Assembly dir** the bound genome
+        was opened in, asked of that genome rather than re-derived from the **Data dir**.
+        The two agree under the ordinary layout and part company for a genome opened
+        somewhere of its own, where re-deriving would put the index beside a different
+        assembly's files and read a completion record that is not there.
         """
-        return assembly_data_dir(self.assembly) / INDEXES_SUBDIR / self.name
+        return self._genome.assembly_dir.index_dir(self.name)
 
     @property
     def index_path(self) -> Path:
@@ -235,7 +240,7 @@ class Aligner(ABC):
             The assembly record's ``sha256``, or ``None`` when the assembly has no
             record, or has one that pins no digest. Both mean *unknown*.
         """
-        record = read_record(assembly_data_dir(self.assembly))
+        record = self._genome.assembly_dir.read_record()
         return None if record is None else record.sha256
 
     def _check_assembly_unchanged(self, record: CompletionRecord) -> None:
@@ -267,7 +272,7 @@ class Aligner(ABC):
         raise RegistrationMismatchError(
             f"the {self.name} index in {self.index_dir} was built from a different "
             f"{self.assembly} than the one registered now: the index pins {built_from}, "
-            f"while {record_path(assembly_data_dir(self.assembly))} now pins {current}. "
+            f"while {self._genome.assembly_dir.record_path} now pins {current}. "
             f"The reference was rebuilt after this index was, so the index no longer "
             f"matches the sequences — or the chromosome names — it would be mapped "
             f"against. Rebuild it with `{self._build_command(overwrite=True)}`."

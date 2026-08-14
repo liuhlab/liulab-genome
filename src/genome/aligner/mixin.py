@@ -16,7 +16,8 @@ class AlignerMixin:
     Each ``build_<aligner>_index`` method instantiates the corresponding
     :class:`~genome.aligner.aligner.Aligner`, which checks that the aligner is
     installed before doing anything. Index files land under
-    ``<LIULAB_DATA>/genome/<assembly>/index/<aligner>/``.
+    ``<assembly dir>/index/<aligner>/`` — inside the **Assembly dir** the genome
+    was opened in.
     """
 
     def build_star_index(self, gtf: str, **kwargs: Any) -> Path:

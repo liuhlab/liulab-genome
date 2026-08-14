@@ -735,7 +735,7 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
             # so that opening a chimera by name is held to what building one is held to —
             # the check used to be reachable only through the builder and the verifier.
             # The refusal is the point here; the answer is for a surface that prints one.
-            components_status(self.cache_dir, self.assembly)
+            components_status(self.dir)
             return registered
         if components is not None:
             return self._build_chimera(components, overwrite=overwrite)
@@ -1061,7 +1061,7 @@ def verify_assembly(
         # bytes, and answers what a digest of this assembly's own bytes cannot. Its
         # answer is reported as well as enforced, so that "nothing was comparable" is
         # never handed back looking like "everything agreed".
-        components = components_status(downloader.cache_dir, assembly)
+        components = components_status(downloader.dir)
     expected, expected_from = downloader._expected_digest()
     actual = sha256_file(target)
     if expected is not None and actual != expected:

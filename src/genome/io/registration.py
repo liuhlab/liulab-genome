@@ -17,6 +17,13 @@ and the subtrees other contexts own — because every one of those steps is expr
 it and it cannot be read from anywhere else without a cycle. The names stay importable
 from :mod:`genome.io.download`, which is where they used to live.
 
+:class:`AssemblyDir` is that layout as a **value**: where an assembly lives is settled
+once, by :meth:`AssemblyDir.locate`, and then carried. A caller holding one — a
+:class:`~genome.genome.Genome`, an :class:`~genome.aligner.aligner.Aligner` asking that
+genome where its index goes — cannot resolve the directory differently from the caller
+that opened it, which is what a free function reading the environment at each call site
+could not promise.
+
 Examples
 --------
 >>> import os
@@ -31,13 +38,17 @@ from __future__ import annotations
 
 import os
 import shlex
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from genome.io.completion import (
+    CompletionRecord,
     build_record,
     check_registration,
     clear_work_dir,
+    read_record,
+    record_path,
     work_dir,
     write_record,
 )
@@ -155,6 +166,153 @@ def assembly_repair_command(assembly: str, source: str | Path | None = None) -> 
     return base if source is None else f"{base} --source {shlex.quote(str(source))}"
 
 
+@dataclass(frozen=True)
+class AssemblyDir:
+    """One **Assembly**'s directory, and everything the layout puts inside it.
+
+    The **Assembly dir** as a value rather than a rule applied again at each call site.
+    Where an assembly lives is decided once — by :meth:`locate`, which is the only
+    implementation of *an explicit directory overrides the* **Data dir** *layout* — and
+    the answer is then carried, so a caller holding one cannot resolve it differently
+    from the caller that opened it. That is not hypothetical: an index derived from the
+    data root rather than from the assembly it indexes lands beside a different
+    assembly's files, and reads a completion record that is not there.
+
+    Every subtree an assembly owns is spelled here, so the layout is legible in one
+    place: the working area, the ``gtf/`` subtree the Annotation context files into, the
+    ``index/`` subtree the Index context files into, and the four **Genome files**.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly name — the key this directory is addressed by, and the name its
+        files carry.
+    path : pathlib.Path
+        The directory itself.
+
+    Examples
+    --------
+    >>> import os
+    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
+    >>> here = AssemblyDir.locate("hg38")
+    >>> here.path
+    PosixPath('/scratch/liulab/genome/hg38')
+    >>> here.index_dir("chromap")
+    PosixPath('/scratch/liulab/genome/hg38/index/chromap')
+    >>> here.sibling("mm39").path
+    PosixPath('/scratch/liulab/genome/mm39')
+    >>> del os.environ["LIULAB_DATA"]
+    """
+
+    assembly: str
+    path: Path
+
+    @classmethod
+    def locate(cls, assembly: str, cache_dir: str | Path | None = None) -> AssemblyDir:
+        """Return where ``assembly`` lives: ``cache_dir`` when given, else the layout's answer.
+
+        The one place the override rule is written. ``cache_dir`` is the directory
+        itself and not a root to file under, which is what lets a caller put one
+        assembly somewhere of its own without inventing a second **Data dir**.
+
+        Parameters
+        ----------
+        assembly : str
+            The assembly to locate.
+        cache_dir : str or pathlib.Path, optional
+            An explicit **Assembly dir**, overriding the layout.
+
+        Returns
+        -------
+        AssemblyDir
+            Where that assembly's files belong. Nothing is created and nothing is read.
+
+        Examples
+        --------
+        >>> AssemblyDir.locate("hg38", "/tmp/elsewhere").path
+        PosixPath('/tmp/elsewhere')
+        """
+        if cache_dir is not None:
+            return cls(assembly=assembly, path=Path(cache_dir).expanduser())
+        return cls(assembly=assembly, path=assembly_data_dir(assembly))
+
+    def sibling(self, assembly: str) -> AssemblyDir:
+        """Return another assembly's **Assembly dir**, found beside this one.
+
+        How an assembly named in a record is found again — a **Chimera**'s components,
+        say. A record carries names and never paths, which is what keeps a registered
+        directory movable, so the name has to be resolved against something: this
+        resolves it against *where the asking assembly is*, rather than against the
+        **Data dir** the process happens to be pointed at. Under the ordinary layout the
+        two agree, since every assembly is a sibling under ``<data dir>/genome/``. They
+        part company exactly when one assembly was placed somewhere of its own, and then
+        beside-me is the answer that finds anything at all.
+
+        Parameters
+        ----------
+        assembly : str
+            The other assembly's name.
+
+        Returns
+        -------
+        AssemblyDir
+            Its directory, beside this one. Nothing is created and nothing is read.
+
+        Examples
+        --------
+        >>> AssemblyDir.locate("ce11_ecHT115", "/data/genome/ce11_ecHT115").sibling("ce11").path
+        PosixPath('/data/genome/ce11')
+        """
+        return AssemblyDir(assembly=assembly, path=self.path.parent / assembly)
+
+    @property
+    def work_dir(self) -> Path:
+        """The disposable working area a build stages in — see :func:`~genome.io.completion.work_dir`."""
+        return work_dir(self.path)
+
+    @property
+    def record_path(self) -> Path:
+        """Where this assembly's **Completion marker** is written, whether or not it exists."""
+        return record_path(self.path)
+
+    def read_record(self) -> CompletionRecord | None:
+        """Return this assembly's completion record, or ``None`` when it has none."""
+        return read_record(self.path)
+
+    @property
+    def annotations_root(self) -> Path:
+        """The ``gtf/`` subtree, parent of every annotation directory."""
+        return self.path / ANNOTATIONS_SUBDIR
+
+    def annotation_dir(self, name: str) -> Path:
+        """Return the directory the annotation registered as ``name`` is filed under."""
+        return self.annotations_root / name
+
+    @property
+    def indexes_root(self) -> Path:
+        """The ``index/`` subtree, parent of every **Index dir**."""
+        return self.path / INDEXES_SUBDIR
+
+    def index_dir(self, name: str) -> Path:
+        """Return the **Index dir** of the index addressed as ``name``."""
+        return self.indexes_root / name
+
+    @property
+    def genome_files(self) -> GenomeFiles:
+        """The four **Genome files** this assembly's preparation produces, existing or not.
+
+        Every way of producing the FASTA materializes it as ``<assembly>.fa`` and derives
+        identically named companions, so one layout describes them all.
+        """
+        fasta = self.path / f"{self.assembly}.fa"
+        return GenomeFiles(
+            fasta=fasta,
+            fai=fasta.with_name(fasta.name + ".fai"),
+            twobit=self.path / f"{self.assembly}.2bit",
+            chrom_sizes=self.path / f"{self.assembly}.chrom.sizes",
+        )
+
+
 class AssemblyRegistration:
     """One assembly's directory, and the steps that finish a registration in it.
 
@@ -194,7 +352,12 @@ class AssemblyRegistration:
 
     def __init__(self, assembly: str, cache_dir: str | Path | None = None) -> None:
         self.assembly = assembly
-        self.cache_dir: Path = Path(assembly_data_dir(assembly) if cache_dir is None else cache_dir)
+        self.dir: AssemblyDir = AssemblyDir.locate(assembly, cache_dir)
+
+    @property
+    def cache_dir(self) -> Path:
+        """The **Assembly dir** this registration fills — :attr:`dir`'s path."""
+        return self.dir.path
 
     @property
     def _work_dir(self) -> Path:
@@ -204,21 +367,11 @@ class AssemblyRegistration:
         FASTA is a rename rather than a copy, and it goes when the assembly does. See
         :func:`~genome.io.completion.work_dir`.
         """
-        return work_dir(self.cache_dir)
+        return self.dir.work_dir
 
     def _expected_genome_files(self) -> GenomeFiles:
-        """Paths the FASTA pipeline produces for this assembly (whether or not they exist).
-
-        Every way of producing the FASTA materializes it as ``<assembly>.fa`` and
-        derives identically named companions, so a single layout describes them all.
-        """
-        fasta = self.cache_dir / f"{self.assembly}.fa"
-        return GenomeFiles(
-            fasta=fasta,
-            fai=fasta.with_name(fasta.name + ".fai"),
-            twobit=self.cache_dir / f"{self.assembly}.2bit",
-            chrom_sizes=self.cache_dir / f"{self.assembly}.chrom.sizes",
-        )
+        """Paths the FASTA pipeline produces for this assembly (whether or not they exist)."""
+        return self.dir.genome_files
 
     def _repair_command(self, source: str | Path | None = None) -> str:
         """Return the command that re-registers this assembly from scratch.

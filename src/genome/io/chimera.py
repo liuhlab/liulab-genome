@@ -108,8 +108,8 @@ from genome.io.gtf import (
     register_merged_gtf,
 )
 from genome.io.registration import (
+    AssemblyDir,
     AssemblyRegistration,
-    assembly_data_dir,
     assembly_repair_command,
 )
 
@@ -389,8 +389,8 @@ def read_chimera_details(directory: Path) -> ChimeraDetails | None:
     return ChimeraDetails.from_record(read_record(directory))
 
 
-def components_status(directory: Path, assembly: str) -> str | None:
-    """Check every component of the assembly in ``directory``, and report the answer.
+def components_status(assembly_dir: AssemblyDir) -> str | None:
+    """Check every component of the assembly in ``assembly_dir``, and report the answer.
 
     The one failure a digest of a chimera's own bytes cannot show. Those bytes are a copy
     of its components', so a component registered again underneath it leaves the chimera
@@ -415,10 +415,10 @@ def components_status(directory: Path, assembly: str) -> str | None:
 
     Parameters
     ----------
-    directory : pathlib.Path
-        The **Assembly dir** the chimera was built in.
-    assembly : str
-        Its assembly name, quoted in the error along with the command that repairs it.
+    assembly_dir : genome.io.registration.AssemblyDir
+        The **Assembly dir** the chimera was built in. It carries the assembly's name,
+        quoted in the error along with the command that repairs it, and it is what each
+        component is found beside.
 
     Returns
     -------
@@ -436,21 +436,21 @@ def components_status(directory: Path, assembly: str) -> str | None:
 
     Examples
     --------
-    >>> from pathlib import Path
-    >>> components_status(Path("/tmp/definitely-not-a-build"), "notAChimera") is None
+    >>> from genome.io.registration import AssemblyDir
+    >>> nowhere = AssemblyDir.locate("notAChimera", "/tmp/definitely-not-a-build")
+    >>> components_status(nowhere) is None
     True
     """
-    details = read_chimera_details(directory)
+    details = read_chimera_details(assembly_dir.path)
     if details is None:
         return None
     compared = [
-        _component_was_compared(entry, assembly=assembly, directory=directory)
-        for entry in details.component_details
+        _component_was_compared(entry, chimera=assembly_dir) for entry in details.component_details
     ]
     return COMPONENTS_UNCHANGED if all(compared) else COMPONENTS_UNKNOWN
 
 
-def _component_was_compared(entry: ComponentDetails, *, assembly: str, directory: Path) -> bool:
+def _component_was_compared(entry: ComponentDetails, *, chimera: AssemblyDir) -> bool:
     """Return whether one component was compared at all — raising unless it is still itself.
 
     Two digests are looked at, the component's FASTA and then the annotation it
@@ -458,11 +458,15 @@ def _component_was_compared(entry: ComponentDetails, *, assembly: str, directory
     ``False``, which is how a caller reporting the outcome says *unknown* rather than
     claiming a pass nobody checked. A comparison that was made and disagreed raises.
 
-    The component is found by name under the shared data root, exactly as an aligner index
-    finds the assembly it was built from: a chimera's record carries component names and
-    no paths, which is what keeps a registered directory movable.
+    The component is found **beside the chimera**, by the name its record carries: a
+    chimera's record holds component names and no paths, which is what keeps a registered
+    directory movable, so the name is resolved against where the chimera itself is rather
+    than against whatever **Data dir** this process is pointed at. Under the ordinary
+    layout those are the same directory.
     """
-    component_dir = assembly_data_dir(entry.name)
+    component_dir = chimera.sibling(entry.name).path
+    assembly = chimera.assembly
+    directory = chimera.path
     record = read_record(component_dir)
     current = None if record is None else record.sha256
     if _disagree(entry.sha256, current):
@@ -673,7 +677,7 @@ class ChimeraBuilder(AssemblyRegistration):
             # answer is asked here — before a stale chimera is handed back as finished.
             # Its refusal is what is wanted; the answer it returns is for a surface to
             # print, and there is none here.
-            components_status(self.cache_dir, self.assembly)
+            components_status(self.dir)
             return registered
         # Settled here rather than beside the merge, so that a component naming an
         # annotation this machine has not registered costs nothing: the two refusals below

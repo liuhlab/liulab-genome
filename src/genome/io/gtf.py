@@ -93,7 +93,7 @@ from genome.io.completion import (
     write_record,
 )
 from genome.io.fasta import read_chrom_sizes
-from genome.io.registration import assembly_repair_command
+from genome.io.registration import AssemblyDir, assembly_repair_command
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import AnnotationMetadata, list_annotation_metadata, lookup_annotation
 
@@ -464,12 +464,11 @@ def _annotation_repair(directory: Path, *, assembly: str, offered: Container[str
 def _assembly_dir(assembly: str, cache_dir: str | Path | None) -> Path:
     """Return the assembly directory an assembly-addressed call files into.
 
-    ``cache_dir`` overrides it; otherwise the **Data dir**'s layout decides, which is
-    what makes naming an assembly enough to find everything filed under it.
+    :meth:`~genome.io.registration.AssemblyDir.locate` is where the override rule
+    lives; this is only the path out of it, which is the shape every function here
+    still takes.
     """
-    if cache_dir is not None:
-        return Path(cache_dir).expanduser()
-    return download.assembly_data_dir(assembly)
+    return AssemblyDir.locate(assembly, cache_dir).path
 
 
 def list_annotations(assembly_dir: Path) -> dict[str, GtfAnnotation]:

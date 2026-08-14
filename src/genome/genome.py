@@ -45,6 +45,7 @@ from genome.io.gtf import (
     list_broken_annotations,
     register_gtf,
 )
+from genome.io.registration import AssemblyDir
 from genome.io.twobit import TwoBit
 from genome.metadata import (
     AnnotationMetadata,
@@ -164,7 +165,7 @@ class Genome(AlignerMixin):
             metadata if metadata is not None else lookup_assembly(assembly)
         )
         self._downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=self.metadata)
-        self._assembly_dir: Path = self._downloader.cache_dir
+        self._dir: AssemblyDir = self._downloader.dir
         self.files: GenomeFiles = (
             self._downloader.fetch_genome_from(path_or_url, progressbar=progressbar)
             if path_or_url is not None
@@ -176,7 +177,7 @@ class Genome(AlignerMixin):
         # it is already on disk by now, since the registration above wrote or confirmed
         # it. One small JSON read at open, and both accessors are then answered from
         # memory.
-        self._chimera: ChimeraDetails | None = read_chimera_details(self._assembly_dir)
+        self._chimera: ChimeraDetails | None = read_chimera_details(self._dir.path)
         self._set_default_gtf(default_gtf)
 
     @classmethod
@@ -326,9 +327,9 @@ class Genome(AlignerMixin):
         it cannot vouch for is recorded to report rather than raised over, so one broken
         annotation never costs the genome.
         """
-        self._annotations: dict[str, GtfAnnotation] = list_annotations(self._assembly_dir)
+        self._annotations: dict[str, GtfAnnotation] = list_annotations(self._dir.path)
         self._broken: dict[str, BrokenAnnotation] = list_broken_annotations(
-            self._assembly_dir, self.assembly
+            self._dir.path, self.assembly
         )
         self._offered: list[AnnotationMetadata] = list_annotation_metadata(self.assembly)
         self.default_gtf: str | None = default_annotation(
@@ -457,7 +458,7 @@ class Genome(AlignerMixin):
         """
         return self._adopt(
             fetch_annotation(
-                self._assembly_dir,
+                self._dir.path,
                 self.assembly,
                 name,
                 force=force,
@@ -493,7 +494,7 @@ class Genome(AlignerMixin):
         """
         return self._adopt(
             register_gtf(
-                self._assembly_dir,
+                self._dir.path,
                 gtf,
                 name,
                 force=force,
@@ -608,6 +609,25 @@ class Genome(AlignerMixin):
     ) -> None:
         """Close the 2bit handle on context-manager exit."""
         self.close()
+
+    @property
+    def assembly_dir(self) -> AssemblyDir:
+        """The **Assembly dir** this genome was opened in, and the layout inside it.
+
+        Where everything tied to this assembly lives — its own files, the ``gtf/``
+        subtree its annotations are filed under, the ``index/`` subtree its indexes are
+        built into. Public because it is what an **Index** is derived from: an index
+        belongs inside the assembly it indexes, and asking the genome is the only way to
+        get the directory this genome was actually opened in rather than the one the
+        **Data dir** layout would name for its assembly.
+
+        Examples
+        --------
+        >>> sacCer3 = Genome("sacCer3")                   # doctest: +SKIP
+        >>> sacCer3.assembly_dir.index_dir("chromap")     # doctest: +SKIP
+        PosixPath('/data/genome/sacCer3/index/chromap')
+        """
+        return self._dir
 
     @property
     def fasta_path(self) -> Path:
