@@ -11,13 +11,13 @@ tuned in practice; every other STAR flag is reachable through ``**kwargs``.
 from __future__ import annotations
 
 import math
-import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from genome.aligner.aligner import Aligner
 
 if TYPE_CHECKING:
+    from genome.external import ExternalTool
     from genome.genome import Genome
 
 
@@ -38,38 +38,22 @@ class STAR(Aligner):
     gtf : str
         Name of a GTF annotation registered on ``genome`` (see
         :meth:`~genome.genome.Genome.register_gtf`).
+    tool : genome.external.ExternalTool, optional
+        As :class:`~genome.aligner.aligner.Aligner`.
     """
 
     name = "star"
     binary = "STAR"
 
-    def __init__(self, genome: Genome, *, gtf: str) -> None:
+    def __init__(self, genome: Genome, *, gtf: str, tool: ExternalTool | None = None) -> None:
         self._gtf_key = gtf
-        super().__init__(genome)
+        super().__init__(genome, tool=tool)
 
     @property
     def index_dir(self) -> Path:
         """Per-annotation genome directory ``.../index/star_<gtf_key>/``."""
         base = super().index_dir
         return base.with_name(f"{base.name}_{self._gtf_key}")
-
-    def install_instructions(self) -> str:
-        """Return how to install STAR (bioconda)."""
-        return (
-            "STAR is not installed. Install it from bioconda, e.g.:\n"
-            "    pixi add star            # into the project environment\n"
-            "See https://github.com/alexdobin/STAR for details."
-        )
-
-    def _detect_version(self) -> str:
-        """Return the version reported by ``STAR --version`` (e.g. ``2.7.11b``)."""
-        result = subprocess.run(
-            [self._executable, "--version"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return (result.stdout or result.stderr).strip()
 
     @property
     def _artifact(self) -> Path:

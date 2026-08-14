@@ -27,7 +27,8 @@ Check the toolchain at any time:
 ```bash
 $ genome doctor
 samtools: samtools 1.21 ...
-bedtools: bedtools v2.31.1
+faToTwoBit: installed; reports no version
+twoBitInfo: installed; reports no version
 ```
 
 ## Quickstart

@@ -86,6 +86,26 @@ preparation is no longer indistinguishable from a finished one.
 
 ### Changed
 
+- **An external tool is one module, not five.** Locating a binary, asking its version, running it,
+  running it only when its output is stale, and saying what installs it were spread across
+  `external.py`, `io/utils.py`, `io/completion.py` and every aligner, with two byte-identical version
+  detectors between STAR and chromap. They are now one `ExternalTool` — `path`, `version`, `run`,
+  `run_to`, `install_instructions` — with two adapters: the one that shells out, and a recording
+  stand-in that runs nothing. Errors, the freshness rule and the version cache are decided once, so
+  the two cannot drift.
+- **An aligner is given its tool instead of making one, and constructing one runs nothing.** The
+  binary was resolved and asked for its version *in the constructor*, which meant a `STAR(...)` could
+  not exist on a machine without STAR and every test had to patch two names to get one. Both are now
+  answered on first use, and a caller may pass the tool to drive.
+- **A missing aligner raises its install instructions rather than printing them to stderr.** The text
+  is the exception's message, so the caller that catches it has what to do; a library writing to a
+  console its caller may not have was never an error message.
+- **`genome doctor` checks the tools the package actually shells out to.** `samtools`, `faToTwoBit`
+  and `twoBitInfo` — the three that prepare an assembly — where it used to check `bedtools`, which
+  nothing here has ever run, and neither of the two UCSC binaries `prepare_fasta` cannot work
+  without. A tool that is installed but rejects `--version`, as those two do, is reported present
+  rather than left out or raised on. `pixi add` commands now name the conda package rather than the
+  binary, so the command in the error is one that works: `ucsc-fatotwobit`, not `faToTwoBit`.
 - **The suite is two lanes, and together they are a partition of it.** `-m aligner` selects the three
   tests that build a real STAR or chromap index; `-m 'not aligner'` selects everything else. The
   aligner lane used to be the *whole* suite re-run in an environment that also had the binaries,
@@ -134,6 +154,9 @@ preparation is no longer indistinguishable from a finished one.
 
 ### Removed
 
+- **`genome.external.tool_version` and the loose `_resolve` beside it.** Both are `ExternalTool`
+  now — `InstalledTool(name).version` and `.path` — and an aligner's `_detect_version` and
+  `install_instructions` are gone with them, the tool answering both.
 - **Four tests that asserted nothing the rest of the suite did not.** The smoke test (every module
   imports the package, and the CLI's `version` command is tested on its merits); a `bedtools`
   version check strictly subsumed by `doctor`; and an assertion that `download` re-exports four
