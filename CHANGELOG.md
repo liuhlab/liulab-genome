@@ -184,7 +184,19 @@ preparation is no longer indistinguishable from a finished one.
   `lookup_assembly(assembly)` still returns `None` and answers *does the curated table list this
   name*. Only the second question has a `None` answer — it is what tells a chimera's derived name
   from a free-form local key on a machine holding neither, so making it total would read `my_ref` as
-  a chimera of `my` and `ref` (ADR-0003, ADR-0008).
+  a chimera of `my` and `ref` (ADR-0003, ADR-0008). The downloader now works from the total one:
+  `UCSCGenomeDownloader.metadata` is an `AssemblyMetadata` rather than `AssemblyMetadata | None`,
+  so the three places that guarded it before reading a field no longer do. Which name the table
+  lists is asked elsewhere and is untouched.
+- **What a registration answers with has a type.** Nine API functions handed back
+  `dict[str, object]`, so the command line — a thin client — re-narrowed every value it read and
+  knew the completion record's key names by heart. They now return frozen records:
+  `RegisteredAssembly`, `VerifiedAssembly`, `RegisteredAnnotation`, `AnnotationStatus` and its
+  `AnnotationStatusRow`, each with an `as_json()` for the `--json` path; `assembly_table_row`
+  returns the `AssemblyMetadata` it was always describing. **The JSON is unchanged, key for key and
+  in the same order**, and so is every key written to `.completion.json` — the types wrap those
+  names and never rename them. A caller that indexed a returned dict reads an attribute instead, or
+  calls `as_json()` for the mapping it had before.
 
 ### Removed
 

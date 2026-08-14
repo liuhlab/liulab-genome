@@ -7,6 +7,7 @@ only translates arguments, dispatches, and chooses an output format.
 from __future__ import annotations
 
 import json as _json
+from dataclasses import asdict as _asdict
 
 import typer
 
@@ -18,11 +19,14 @@ from genome.io.chimera import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
 from genome.io.chimera import ChimeraDetails as _ChimeraDetails
 from genome.io.download import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.io.download import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
+from genome.io.download import VerifiedAssembly as _VerifiedAssembly
 from genome.io.download import assembly_table_row as _assembly_table_row
 from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
+from genome.io.gtf import AnnotationStatus as _AnnotationStatus
+from genome.io.gtf import AnnotationStatusRow as _AnnotationStatusRow
+from genome.io.gtf import RegisteredAnnotation as _RegisteredAnnotation
 from genome.io.gtf import annotation_status as _annotation_status
-from genome.io.gtf import chromosome_check_summary as _chromosome_check_summary
 from genome.io.gtf import register_annotation as _register_annotation
 from genome.io.gtf import register_annotation_by_path as _register_annotation_by_path
 from genome.metadata import format_table_row as _format_table_row
@@ -187,31 +191,28 @@ def register(
     and neither is a way past the checks above.
     """
     try:
-        payload = _register_assembly(assembly, source=source, force=force, progressbar=not json)
+        registered = _register_assembly(assembly, source=source, force=force, progressbar=not json)
     except _ASSEMBLY_ERRORS as err:
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
 
     if json:
-        typer.echo(_json.dumps(payload))
+        typer.echo(_json.dumps(registered.as_json()))
         return
-    claimed = payload["files"]
-    names = sorted(claimed) if isinstance(claimed, dict) else []
-    directory = str(payload["directory"])
-    # The record answers whether this is a chimera, as it does everywhere else — and the
-    # payload is that record, so it is read here rather than from disk a second time.
-    # One read, one fact: the two surfaces cannot disagree about what just happened.
-    recorded = payload.get("details")
-    chimera = _ChimeraDetails.from_details(recorded if isinstance(recorded, dict) else {})
-    typer.echo(f"registered {payload['assembly']} in {directory}")
+    # The record answers whether this is a chimera, as it does everywhere else — and what
+    # the registration answered with carries that record, so the fact is read from it
+    # rather than from disk a second time. One read, one fact: the two surfaces cannot
+    # disagree about what just happened.
+    chimera = registered.chimera
+    typer.echo(f"registered {registered.assembly} in {registered.directory}")
     if chimera is None:
-        typer.echo(f"  source  {payload['source_url']}")
+        typer.echo(f"  source  {registered.source_url}")
     else:
         # A chimera was fetched from nowhere, so the source line would read `None`. What
         # it was made of is the fact that line was reaching for.
         typer.echo(f"  components  {', '.join(chimera.components)}")
-    typer.echo(f"  sha256  {payload['sha256']}")
-    typer.echo(f"  files   {', '.join(names)}")
+    typer.echo(f"  sha256  {registered.sha256}")
+    typer.echo(f"  files   {', '.join(registered.file_names)}")
     if chimera is not None:
         typer.echo(f"  {_merged_annotation_summary(chimera)}")
 
@@ -275,7 +276,7 @@ def register_annotation(
     a record that disagrees with what is on disk. Re-run with `--force` to repair it.
     """
     try:
-        payload = _register_annotation(
+        registered = _register_annotation(
             assembly,
             name,
             force=force,
@@ -288,7 +289,7 @@ def register_annotation(
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
 
-    _report_annotation(payload, json=json)
+    _report_annotation(registered, json=json)
 
 
 @app.command("register-gtf")
@@ -336,7 +337,7 @@ def register_gtf(
     Re-run with `--force` to repair it.
     """
     try:
-        payload = _register_annotation_by_path(
+        registered = _register_annotation_by_path(
             assembly,
             gtf,
             name,
@@ -349,25 +350,22 @@ def register_gtf(
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
 
-    _report_annotation(payload, json=json)
+    _report_annotation(registered, json=json)
 
 
-def _report_annotation(payload: dict[str, object], *, json: bool) -> None:
+def _report_annotation(registered: _RegisteredAnnotation, *, json: bool) -> None:
     """Print a finished annotation registration, as JSON or as the human summary."""
     if json:
-        typer.echo(_json.dumps(payload))
+        typer.echo(_json.dumps(registered.as_json()))
         return
-    claimed = payload["files"]
-    names = sorted(claimed) if isinstance(claimed, dict) else []
-    typer.echo(f"registered {payload['name']} for {payload['assembly']} in {payload['directory']}")
-    typer.echo(f"  source  {payload['source_url']}")
-    typer.echo(f"  sha256  {payload['sha256']}")
-    typer.echo(f"  files   {', '.join(names)}")
+    typer.echo(f"registered {registered.name} for {registered.assembly} in {registered.directory}")
+    typer.echo(f"  source  {registered.source_url}")
+    typer.echo(f"  sha256  {registered.sha256}")
+    typer.echo(f"  files   {', '.join(registered.file_names)}")
     # Whether the names were actually verified is not something to leave implicit, and it
     # is printed whichever way it went: silence would read as a pass. Which sentence that
     # is belongs to the record and to the API that reads it, not to this surface.
-    details = payload.get("details")
-    typer.echo(f"  {_chromosome_check_summary(details if isinstance(details, dict) else {})}")
+    typer.echo(f"  {registered.chromosome_check}")
 
 
 # Named for what it does rather than for the command it serves: ``from __future__ import
@@ -401,53 +399,53 @@ def list_annotations(
         raise typer.Exit(code=1) from err
 
     if json:
-        typer.echo(_json.dumps(payload))
+        typer.echo(_json.dumps(payload.as_json()))
         return
 
-    rows = payload["annotations"] if isinstance(payload["annotations"], list) else []
-    typer.echo(f"annotations for {payload['assembly']} in {payload['directory']}")
+    rows = payload.annotations
+    typer.echo(f"annotations for {payload.assembly} in {payload.directory}")
     if not rows:
         typer.echo("  (the table offers none, and none is registered here)")
-    name_width = max((len(str(row["name"])) for row in rows), default=0)
+    name_width = max((len(row.name) for row in rows), default=0)
     state_width = max((len(_state(row)) for row in rows), default=0)
     for row in rows:
-        provider = f"  {row['provider']} {row['version']}" if row["offered"] else ""
-        line = f"  {row['name']!s:<{name_width}}  {_state(row):<{state_width}}{provider}"
+        provider = f"  {row.provider} {row.version}" if row.offered else ""
+        line = f"  {row.name:<{name_width}}  {_state(row):<{state_width}}{provider}"
         typer.echo(line.rstrip())
         # Verbatim from the API, which is the same text re-registering it would print:
         # what is wrong, and the command that fixes it. One wording, two surfaces.
-        if row["broken"]:
-            typer.echo(f"      {row['problem']}")
-    typer.echo(_default_line(payload, rows))
+        if row.broken:
+            typer.echo(f"      {row.problem}")
+    typer.echo(_default_line(payload))
 
 
-def _state(row: dict[str, object]) -> str:
+def _state(row: _AnnotationStatusRow) -> str:
     """Return the state a row is in: registered, broken, or merely offered.
 
     ``broken`` comes first because it is the one that needs acting on, and because a
     broken annotation is not registered — no record vouches for it — so reporting it as
     the absence of one would be true and useless.
     """
-    if row["broken"]:
+    if row.broken:
         return "broken"
-    if not row["offered"]:
+    if not row.offered:
         return "registered, not offered"
-    return "registered" if row["registered"] else "offered, not registered"
+    return "registered" if row.registered else "offered, not registered"
 
 
-def _default_line(payload: dict[str, object], rows: list[dict[str, object]]) -> str:
+def _default_line(payload: _AnnotationStatus) -> str:
     """Return the closing line naming the default annotation, and how to get it if absent."""
-    default = payload["default_annotation"]
+    default = payload.default_annotation
     if default is None:
         return "default: (none)"
-    row = next((candidate for candidate in rows if candidate["name"] == default), None)
-    if row is not None and row["broken"]:
-        return f"default: {default} — broken here; repair it with `{row['repair']}`"
-    if row is not None and row["registered"]:
+    row = payload.default_row
+    if row is not None and row.broken:
+        return f"default: {default} — broken here; repair it with `{row.repair}`"
+    if row is not None and row.registered:
         return f"default: {default}"
     return (
         f"default: {default} — not registered here; register it with "
-        f"`genome register-annotation {payload['assembly']} {default}`"
+        f"`genome register-annotation {payload.assembly} {default}`"
     )
 
 
@@ -484,26 +482,24 @@ def verify(
     when the assembly's directory cannot be trusted.
     """
     try:
-        payload = _verify_assembly(assembly, fasta=fasta)
+        checked = _verify_assembly(assembly, fasta=fasta)
     except _ASSEMBLY_ERRORS as err:
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
 
     if json:
-        typer.echo(_json.dumps(payload))
+        typer.echo(_json.dumps(checked.as_json()))
         return
-    typer.echo(f"{payload['fasta']}: sha256 {payload['sha256']} {_digest_summary(payload)}")
-    components = payload["components"]
-    if isinstance(components, str):
+    typer.echo(f"{checked.fasta}: sha256 {checked.sha256} {_digest_summary(checked)}")
+    components = checked.components
+    if components is not None:
         typer.echo(f"  components  {_COMPONENT_SENTENCES.get(components, components)}")
 
 
-def _digest_summary(payload: dict[str, object]) -> str:
+def _digest_summary(checked: _VerifiedAssembly) -> str:
     """Return the sentence saying what a verified FASTA's digest was held to."""
-    answered = payload["expected_from"]
-    key = answered if isinstance(answered, str) else None
-    sentence = _EXPECTED_SENTENCES.get(key, _EXPECTED_SENTENCES[None])
-    return sentence.format(assembly=payload["assembly"])
+    sentence = _EXPECTED_SENTENCES.get(checked.expected_from, _EXPECTED_SENTENCES[None])
+    return sentence.format(assembly=checked.assembly)
 
 
 @app.command("table-row")
@@ -531,9 +527,12 @@ def table_row(
     Exits with code 1 if the download fails, or if the assembly named is a chimera.
     """
     try:
-        row = _assembly_table_row(assembly, progressbar=not json)
+        computed = _assembly_table_row(assembly, progressbar=not json)
     except _ASSEMBLY_ERRORS as err:
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
 
+    # One row, rendered two ways: the metadata module owns the column order for both,
+    # since the JSON object and the line to paste carry the same fields.
+    row = _asdict(computed)
     typer.echo(_json.dumps(row) if json else _format_table_row(row))

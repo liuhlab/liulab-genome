@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import gzip
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import gffutils
@@ -579,16 +580,48 @@ class TestAnnotationStatus:
 
         payload = annotation_status("sacCer3")
 
-        assert payload["assembly"] == "sacCer3"
-        assert payload["directory"] == str(tmp_path / "genome" / "sacCer3")
-        assert payload["default_annotation"] == "ensgene_v101"
-        rows = payload["annotations"]
-        assert isinstance(rows, list)
-        assert [(r["name"], r["offered"], r["registered"]) for r in rows] == [
-            ("ensgene_v101", True, False)
-        ]
-        assert rows[0]["provider"] == "UCSC"
-        assert rows[0]["path"] is None
+        assert payload.assembly == "sacCer3"
+        assert payload.directory == tmp_path / "genome" / "sacCer3"
+        assert payload.default_annotation == "ensgene_v101"
+        rows = payload.annotations
+        assert [(r.name, r.offered, r.registered) for r in rows] == [("ensgene_v101", True, False)]
+        assert rows[0].provider == "UCSC"
+        assert rows[0].path is None
+
+    def test_the_payload_it_serializes_is_the_rows_under_their_own_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # `--json` is this report rendered, so a row's fields and the payload's keys are
+        # one spelling: a surface reads attributes and never names a key of its own.
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+        payload = annotation_status("sacCer3")
+
+        assert payload.as_json() == {
+            "assembly": "sacCer3",
+            "directory": str(tmp_path / "genome" / "sacCer3"),
+            "default_annotation": "ensgene_v101",
+            "annotations": [asdict(row) for row in payload.annotations],
+        }
+
+    def test_the_default_annotations_own_row_is_reachable_without_a_search(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # What the closing line of `genome annotations` needs: the default's own state,
+        # so "not registered here" and "broken here" are told apart by the report itself.
+        monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+        offered = annotation_status("sacCer3")
+        nothing = annotation_status("tiny")
+
+        default = offered.default_row
+        assert default is offered.annotations[0]
+        assert default is not None
+        assert not default.registered
+        # No default decided, so no row is about one — the state a fresh unlisted
+        # assembly is in, and not an error.
+        assert nothing.default_annotation is None
+        assert nothing.default_row is None
 
     def test_it_creates_nothing_and_fetches_nothing(
         self, fake_fetch: FakeFetch, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -610,12 +643,9 @@ class TestAnnotationStatus:
 
         payload = annotation_status("sacCer3", cache_dir=assembly_dir)
 
-        rows = payload["annotations"]
-        assert isinstance(rows, list)
-        assert [(r["name"], r["offered"], r["registered"]) for r in rows] == [
-            ("ensgene_v101", True, True)
-        ]
-        assert rows[0]["path"] == str(annotation.gtf)
+        rows = payload.annotations
+        assert [(r.name, r.offered, r.registered) for r in rows] == [("ensgene_v101", True, True)]
+        assert rows[0].path == str(annotation.gtf)
 
     def test_a_registered_annotation_no_row_lists_is_reported_too(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
@@ -625,13 +655,12 @@ class TestAnnotationStatus:
 
         payload = annotation_status("tiny", cache_dir=assembly_dir)
 
-        rows = payload["annotations"]
-        assert isinstance(rows, list)
-        assert [(r["name"], r["offered"], r["registered"]) for r in rows] == [("mine", False, True)]
-        assert rows[0]["provider"] is None
-        assert rows[0]["broken"] is False
-        assert rows[0]["problem"] is None
-        assert payload["default_annotation"] == "mine"  # nothing flagged, and it is alone
+        rows = payload.annotations
+        assert [(r.name, r.offered, r.registered) for r in rows] == [("mine", False, True)]
+        assert rows[0].provider is None
+        assert rows[0].broken is False
+        assert rows[0].problem is None
+        assert payload.default_annotation == "mine"  # nothing flagged, and it is alone
 
     def test_a_broken_offered_annotation_is_reported_as_broken_not_as_absent(
         self, tmp_path: Path
@@ -645,14 +674,13 @@ class TestAnnotationStatus:
 
         payload = annotation_status("sacCer3", cache_dir=assembly_dir)
 
-        rows = payload["annotations"]
-        assert isinstance(rows, list)
-        assert [(r["name"], r["offered"], r["registered"], r["broken"]) for r in rows] == [
+        rows = payload.annotations
+        assert [(r.name, r.offered, r.registered, r.broken) for r in rows] == [
             ("ensgene_v101", True, False, True)
         ]
-        assert rows[0]["repair"] == "genome register-annotation sacCer3 ensgene_v101 --force"
-        assert "holds files but no .completion.json" in str(rows[0]["problem"])
-        assert rows[0]["path"] is None
+        assert rows[0].repair == "genome register-annotation sacCer3 ensgene_v101 --force"
+        assert "holds files but no .completion.json" in str(rows[0].problem)
+        assert rows[0].path is None
 
     def test_a_broken_unlisted_annotation_is_reported_at_all(self, tmp_path: Path) -> None:
         # No row lists it and no record vouches for it, so nothing used to mention it.
@@ -664,12 +692,11 @@ class TestAnnotationStatus:
 
         payload = annotation_status("tiny", cache_dir=assembly_dir)
 
-        rows = payload["annotations"]
-        assert isinstance(rows, list)
-        assert [(r["name"], r["offered"], r["registered"], r["broken"]) for r in rows] == [
+        rows = payload.annotations
+        assert [(r.name, r.offered, r.registered, r.broken) for r in rows] == [
             ("mine", False, False, True)
         ]
-        assert rows[0]["repair"] == f"genome register-gtf tiny {src} mine --force"
+        assert rows[0].repair == f"genome register-gtf tiny {src} mine --force"
 
     def test_one_broken_annotation_does_not_hide_the_others(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
@@ -681,15 +708,14 @@ class TestAnnotationStatus:
 
         payload = annotation_status("tiny", cache_dir=assembly_dir)
 
-        rows = payload["annotations"]
-        assert isinstance(rows, list)
-        assert [(r["name"], r["registered"], r["broken"]) for r in rows] == [
+        rows = payload.annotations
+        assert [(r.name, r.registered, r.broken) for r in rows] == [
             ("damaged", False, True),
             ("healthy", True, False),
         ]
         # A broken one is not a registered one, so it never becomes the sole-registered
         # default either.
-        assert payload["default_annotation"] == "healthy"
+        assert payload.default_annotation == "healthy"
 
 
 class TestAnnotationRegistry:
@@ -1182,16 +1208,51 @@ class TestRegisterAnnotation:
             metadata=_row(sha256=_TINY_GTF_SHA256),
         )
 
-        assert payload["kind"] == "annotation"
-        assert payload["name"] == _NAME
-        assert payload["assembly"] == "tiny"
-        assert payload["directory"] == str(annotation_dir(tmp_path, _NAME))
-        assert payload["source_url"] == _PINNED_URL
-        assert payload["sha256"] == _TINY_GTF_SHA256
+        assert payload.record.kind == "annotation"
+        assert payload.name == _NAME
+        assert payload.assembly == "tiny"
+        assert payload.directory == annotation_dir(tmp_path, _NAME)
+        assert payload.source_url == _PINNED_URL
+        assert payload.sha256 == _TINY_GTF_SHA256
         directory = annotation_dir(tmp_path, _NAME)
-        assert payload["files"] == {
+        assert payload.record.files == {
             name: (directory / name).stat().st_size for name in (f"{_NAME}.gtf", f"{_NAME}.db")
         }
+        assert payload.file_names == [f"{_NAME}.db", f"{_NAME}.gtf"]
+
+    def test_the_payload_it_serializes_is_the_record_plus_where_it_landed(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        # The `--json` payload is the completion record under its own on-disk key names,
+        # with the two facts a record does not hold about itself. A type wraps those
+        # names; it never renames them, because lab directories are read by both.
+        fake_fetch.serve("tiny.gtf.gz")
+
+        payload = register_annotation(
+            "tiny", _NAME, cache_dir=tmp_path, progressbar=False, metadata=_row()
+        )
+
+        assert payload.as_json() == {
+            **asdict(payload.record),
+            "assembly": "tiny",
+            "directory": str(annotation_dir(tmp_path, _NAME)),
+        }
+        assert list(payload.as_json())[-2:] == ["assembly", "directory"]
+
+    def test_what_the_chromosome_check_settled_is_read_off_the_record(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        # The sentence belongs to the record and to the API that reads it, so a surface
+        # printing it names none of the record's fields. Nothing is registered as the
+        # assembly here, so there was no chrom.sizes to check against.
+        fake_fetch.serve("tiny.gtf.gz")
+
+        payload = register_annotation(
+            "tiny", _NAME, cache_dir=tmp_path, progressbar=False, metadata=_row()
+        )
+
+        assert payload.chromosome_check == chromosome_check_summary(payload.record.details)
+        assert "nothing to check against" in payload.chromosome_check
 
     def test_the_chromosome_check_reaches_this_way_in_too(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -1212,7 +1273,7 @@ class TestRegisterAnnotation:
             check_chromosomes=False,
         )
 
-        assert payload["details"] == {
+        assert payload.record.details == {
             "provider": "UCSC",
             "version": "ensGene.v101",
             "gffutils_version": gffutils.__version__,
@@ -1228,7 +1289,7 @@ class TestRegisterAnnotation:
 
         payload = register_annotation("tiny", _NAME, progressbar=False, metadata=_row())
 
-        assert payload["directory"] == str(tmp_path / "genome" / "tiny" / "gtf" / _NAME)
+        assert payload.directory == tmp_path / "genome" / "tiny" / "gtf" / _NAME
 
     def test_the_inference_knobs_reach_the_database_build(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -1254,9 +1315,9 @@ class TestRegisterAnnotation:
             disable_infer_transcripts=False,
         )
 
-        assert default["name"] == "exons_only"
+        assert default.name == "exons_only"
         assert _feature_types(annotation_dir(tmp_path, "exons_only") / "exons_only.db") == ["exon"]
-        assert inferred["name"] == "with_genes"
+        assert inferred.name == "with_genes"
         assert _feature_types(annotation_dir(tmp_path, "with_genes") / "with_genes.db") == [
             "exon",
             "gene",
@@ -1277,12 +1338,12 @@ class TestRegisterAnnotationByPath:
         payload = register_annotation_by_path("tiny", source, "WS298")
 
         directory = tmp_path / "genome" / "tiny" / "gtf" / "WS298"
-        assert payload["kind"] == "annotation"
-        assert payload["name"] == "WS298"
-        assert payload["assembly"] == "tiny"
-        assert payload["directory"] == str(directory)
-        assert payload["source_url"] == str(source)
-        assert payload["files"] == {
+        assert payload.record.kind == "annotation"
+        assert payload.name == "WS298"
+        assert payload.assembly == "tiny"
+        assert payload.directory == directory
+        assert payload.source_url == str(source)
+        assert payload.record.files == {
             name: (directory / name).stat().st_size for name in ("WS298.gtf", "WS298.db")
         }
 
@@ -1295,7 +1356,7 @@ class TestRegisterAnnotationByPath:
 
         payload = register_annotation_by_path("tiny", source, "WS298", cache_dir=elsewhere)
 
-        assert payload["directory"] == str(annotation_dir(elsewhere, "WS298"))
+        assert payload.directory == annotation_dir(elsewhere, "WS298")
 
     def test_it_finds_the_assembly_chrom_sizes_without_being_told(
         self, tmp_path: Path, data_dir: Path
@@ -1323,7 +1384,7 @@ class TestRegisterAnnotationByPath:
             check_chromosomes=False,
         )
 
-        assert payload["details"] == {
+        assert payload.record.details == {
             "gffutils_version": gffutils.__version__,
             "chromosomes_checked": False,
             "chromosomes_unchecked_because": "caller-override",
@@ -1379,5 +1440,5 @@ class TestRegisterAnnotationByPath:
             "tiny", source, "WS298", cache_dir=tmp_path, force=True
         )
 
-        assert payload["name"] == "WS298"
+        assert payload.name == "WS298"
         assert list(list_annotations(tmp_path)) == ["WS298"]

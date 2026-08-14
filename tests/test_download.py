@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -42,8 +42,9 @@ from genome.io.download import (
     verify_assembly,
 )
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
+from genome.io.source import FetchedSource
 from genome.io.utils import ChecksumMismatchError, sha256_file
-from genome.metadata import AssemblyMetadata
+from genome.metadata import AssemblyMetadata, format_table_row
 
 from .conftest import FakeFetch
 
@@ -425,10 +426,12 @@ def test_a_pinned_source_skips_the_ucsc_name_check(
 def test_an_assembly_with_no_row_still_uses_the_golden_path(
     fake_fetch: FakeFetch, tmp_path: Path, head_recorder: _HeadRecorder, no_native_prepare: None
 ) -> None:
-    # The table is a cross-reference, not an allow-list: no row takes nothing away.
+    # The table is a cross-reference, not an allow-list: no row takes nothing away. What
+    # the downloader holds is total — an unlisted assembly knows its own name and nothing
+    # else — so no step here asks whether there is a record before reading a field off it.
     fake_fetch.serve("tiny.fa.gz")
     dl = UCSCGenomeDownloader("tiny", cache_dir=tmp_path)
-    assert dl.metadata is None
+    assert dl.metadata == AssemblyMetadata.unknown("tiny")
 
     files = dl.fetch_genome()
 
@@ -436,6 +439,22 @@ def test_an_assembly_with_no_row_still_uses_the_golden_path(
     assert fake_fetch.last.url == dl.fasta_url
     assert head_recorder.calls[0]["url"] == dl.assembly_url  # still validated
     assert files.fasta == tmp_path / "tiny.fa"
+
+
+def test_a_total_metadata_record_does_not_make_a_local_key_read_as_a_chimera(
+    tmp_path: Path,
+) -> None:
+    # The two questions stay two. What is *known about* an assembly is total now, so the
+    # downloader reads fields off a record that is always there; whether the curated table
+    # *lists* the name is still answered with `None`, and that is what tells `my_ref` —
+    # one name somebody chose — from a chimera of `my` and `ref` (ADR-0003, ADR-0008).
+    dl = UCSCGenomeDownloader("my_ref", cache_dir=tmp_path)
+
+    assert dl.metadata == AssemblyMetadata.unknown("my_ref")
+    assert dl._source() == FetchedSource(
+        url="https://hgdownload.soe.ucsc.edu/goldenPath/my_ref/bigZips/my_ref.fa.gz",
+        derived=True,
+    )
 
 
 def test_registering_accepts_a_fasta_matching_the_pinned_checksum(
@@ -516,9 +535,12 @@ def test_table_row_fills_in_the_computed_checksum(fake_fetch: FakeFetch, tmp_pat
 
     row = assembly_table_row("hg38", cache_dir=tmp_path, progressbar=False)
 
-    assert row["sha256"] == _TINY_FA_SHA256
-    assert row["source_url"] == "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz"
-    assert row["ncbi_name"] == "GRCh38"  # the curated identifiers are carried through
+    assert row.sha256 == _TINY_FA_SHA256
+    assert row.source_url == "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz"
+    assert row.ncbi_name == "GRCh38"  # the curated identifiers are carried through
+    # It is the table's own row type, so the line to paste is the table's own formatting
+    # of it and the columns cannot drift from the ones the table is parsed through.
+    assert format_table_row(asdict(row)).split("\t")[0] == "hg38"
 
 
 def test_table_row_leaves_a_new_assemblys_identifiers_blank(
@@ -528,10 +550,10 @@ def test_table_row_leaves_a_new_assemblys_identifiers_blank(
 
     row = assembly_table_row("newAsm", cache_dir=tmp_path, progressbar=False)
 
-    assert row["assembly_name"] == "newAsm"
-    assert row["species"] is None  # only a person can supply this
-    assert str(row["source_url"]).endswith("/newAsm/bigZips/newAsm.fa.gz")
-    assert row["sha256"] == _TINY_FA_SHA256
+    assert row.assembly_name == "newAsm"
+    assert row.species is None  # only a person can supply this
+    assert str(row.source_url).endswith("/newAsm/bigZips/newAsm.fa.gz")
+    assert row.sha256 == _TINY_FA_SHA256
 
 
 # --- the record a finished registration writes -------------------------------
@@ -812,16 +834,36 @@ def test_register_assembly_reports_what_it_registered(
 ) -> None:
     fake_fetch.serve("tiny.fa.gz")
 
-    payload = register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
+    registered = register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
 
-    assert payload["assembly"] == "tiny"
-    assert payload["directory"] == str(tmp_path)
-    assert payload["sha256"] == _TINY_FA_SHA256
-    assert payload["source_url"] == UCSCGenomeDownloader("tiny").fasta_url
-    assert payload["files"] == {
+    assert registered.assembly == "tiny"
+    assert registered.directory == tmp_path
+    assert registered.sha256 == _TINY_FA_SHA256
+    assert registered.source_url == UCSCGenomeDownloader("tiny").fasta_url
+    assert registered.record.files == {
         name: (tmp_path / name).stat().st_size
         for name in ("tiny.fa", "tiny.fa.fai", "tiny.2bit", "tiny.chrom.sizes")
     }
+    assert registered.file_names == ["tiny.2bit", "tiny.chrom.sizes", "tiny.fa", "tiny.fa.fai"]
+    assert registered.chimera is None  # nothing was concatenated from anything
+
+
+def test_register_assembly_serializes_as_the_record_plus_where_it_landed(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    # The `--json` payload is the completion record under its own on-disk key names, with
+    # the two facts a record does not hold about itself. A type wraps those names; it
+    # never renames them, because lab directories on shared storage are read by both.
+    fake_fetch.serve("tiny.fa.gz")
+
+    registered = register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
+
+    assert registered.as_json() == {
+        **asdict(registered.record),
+        "assembly": "tiny",
+        "directory": str(tmp_path),
+    }
+    assert list(registered.as_json())[-2:] == ["assembly", "directory"]
 
 
 def test_register_assembly_repairs_a_broken_directory_when_forced(
@@ -834,9 +876,9 @@ def test_register_assembly_repairs_a_broken_directory_when_forced(
     with pytest.raises(UnfinishedRegistrationError, match="genome register tiny --force"):
         register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
 
-    payload = register_assembly("tiny", cache_dir=tmp_path, force=True, progressbar=False)
+    registered = register_assembly("tiny", cache_dir=tmp_path, force=True, progressbar=False)
 
-    assert payload["sha256"] == _TINY_FA_SHA256
+    assert registered.sha256 == _TINY_FA_SHA256
 
 
 def test_register_assembly_seeds_from_a_source_when_given_one(
@@ -844,9 +886,9 @@ def test_register_assembly_seeds_from_a_source_when_given_one(
 ) -> None:
     source = data_dir / "tiny.fa.gz"
 
-    payload = register_assembly("tiny", source=source, cache_dir=tmp_path, progressbar=False)
+    registered = register_assembly("tiny", source=source, cache_dir=tmp_path, progressbar=False)
 
-    assert payload["source_url"] == str(source)
+    assert registered.source_url == str(source)
     assert head_recorder.calls == []  # UCSC is never consulted about a seeded assembly
 
 
@@ -859,13 +901,13 @@ def test_verify_assembly_falls_back_to_the_digest_the_record_already_holds(
     fake_fetch.serve("tiny.fa.gz")
     register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
 
-    payload = verify_assembly("tiny", cache_dir=tmp_path)
+    checked = verify_assembly("tiny", cache_dir=tmp_path)
 
-    assert payload["fasta"] == str(tmp_path / "tiny.fa")
-    assert payload["sha256"] == _TINY_FA_SHA256
-    assert payload["expected"] == _TINY_FA_SHA256
-    assert payload["expected_from"] == "record"
-    assert payload["verified"] is True
+    assert checked.fasta == tmp_path / "tiny.fa"
+    assert checked.sha256 == _TINY_FA_SHA256
+    assert checked.expected == _TINY_FA_SHA256
+    assert checked.expected_from == "record"
+    assert checked.verified is True
 
 
 def test_verify_assembly_confirms_a_fasta_that_matches_the_pin(
@@ -875,14 +917,25 @@ def test_verify_assembly_confirms_a_fasta_that_matches_the_pin(
     row = _row(source_url=_PINNED_URL, sha256=_TINY_FA_SHA256)
     register_assembly("tiny", cache_dir=tmp_path, progressbar=False, metadata=row)
 
-    payload = verify_assembly("tiny", cache_dir=tmp_path, metadata=row)
+    checked = verify_assembly("tiny", cache_dir=tmp_path, metadata=row)
 
-    assert payload["verified"] is True
-    assert payload["expected"] == _TINY_FA_SHA256
+    assert checked.verified is True
+    assert checked.expected == _TINY_FA_SHA256
     # The row answered, though the record beside it holds a digest too: a pin is what a
     # digest is held to whenever there is one.
-    assert payload["expected_from"] == "table"
-    assert payload["sha256"] == _TINY_FA_SHA256
+    assert checked.expected_from == "table"
+    assert checked.sha256 == _TINY_FA_SHA256
+    # And the payload a surface serializes is those same answers, `verified` written out
+    # beside the field it is read from.
+    assert checked.as_json() == {
+        "assembly": "tiny",
+        "fasta": str(tmp_path / "tiny.fa"),
+        "sha256": _TINY_FA_SHA256,
+        "expected": _TINY_FA_SHA256,
+        "expected_from": "table",
+        "verified": True,
+        "components": None,
+    }
 
 
 def test_verify_assembly_reports_when_nothing_pins_a_digest_at_all(
@@ -891,12 +944,12 @@ def test_verify_assembly_reports_when_nothing_pins_a_digest_at_all(
     # The third state: no row lists "tiny", and nothing is registered here whose record
     # could answer either. Reported rather than raised — a digest with nothing to compare
     # against is still worth having, which is what `verified` says.
-    payload = verify_assembly("tiny", fasta=data_dir / "tiny.fa", cache_dir=tmp_path)
+    checked = verify_assembly("tiny", fasta=data_dir / "tiny.fa", cache_dir=tmp_path)
 
-    assert payload["sha256"] == _TINY_FA_SHA256
-    assert payload["expected"] is None
-    assert payload["expected_from"] is None
-    assert payload["verified"] is False
+    assert checked.sha256 == _TINY_FA_SHA256
+    assert checked.expected is None
+    assert checked.expected_from is None
+    assert checked.verified is False
 
 
 def test_verify_assembly_catches_a_fasta_changed_behind_its_own_record(
