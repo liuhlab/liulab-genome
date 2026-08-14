@@ -15,7 +15,7 @@ import pooch
 import pytest
 
 from genome.io.completion import UnfinishedRegistrationError, read_record
-from genome.io.download import Downloader, UCSCGenomeDownloader
+from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles
 from genome.io.registration import (
     ANNOTATIONS_SUBDIR,
@@ -40,12 +40,11 @@ def _derive(fasta: Path) -> GenomeFiles:
 
 
 def test_a_registration_defaults_to_the_assemblys_own_directory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path, liulab_data: Path
 ) -> None:
     # Construction moved with the steps: where an assembly's files belong is answered
     # once, so a builder that never downloads cannot answer it differently.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
-    assert AssemblyRegistration("hg38").cache_dir == tmp_path / "genome" / "hg38"
+    assert AssemblyRegistration("hg38").cache_dir == liulab_data / "genome" / "hg38"
     assert AssemblyRegistration("hg38", tmp_path / "elsewhere").cache_dir == tmp_path / "elsewhere"
 
 
@@ -104,26 +103,16 @@ def test_another_contexts_subtree_does_not_make_an_assembly_look_broken(tmp_path
     assert registration._completed_genome(overwrite=False, repair="unused") is None
 
 
-def test_the_downloader_is_a_registration_that_also_fetches(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+def test_the_downloader_is_a_registration_that_also_fetches() -> None:
     dl = UCSCGenomeDownloader("hg38")
 
     assert isinstance(dl, AssemblyRegistration)
-    # And *only* a registration. It used to be a Downloader as well, which gave it a
-    # second answer to "which directory?" that its constructor then had to overrule; the
-    # assembly's own directory is the only one it ever wanted.
-    assert not isinstance(dl, Downloader)
+    # And *only* a registration. It used to inherit a cache directory as well, which gave
+    # it a second answer to "which directory?" that its constructor then had to overrule;
+    # the assembly's own directory is the only one it ever wanted, and pooch's per-user
+    # cache — what the discarded sibling defaulted to — is what it must never be.
     assert dl.cache_dir == assembly_data_dir("hg38")
     assert dl.cache_dir != Path(pooch.os_cache("genome"))
-
-
-def test_the_plain_downloader_still_caches_where_it_always_did(tmp_path: Path) -> None:
-    # The sibling it stopped inheriting from is untouched: fetch_url bound to a cache
-    # directory, defaulting to pooch's per-user one.
-    assert Downloader().cache_dir == Path(pooch.os_cache("genome"))
-    assert Downloader(cache_dir=tmp_path).cache_dir == tmp_path
 
 
 def test_a_directory_answers_whether_it_is_finished_without_a_registration(

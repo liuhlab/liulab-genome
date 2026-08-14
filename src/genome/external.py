@@ -201,9 +201,10 @@ class ExternalTool(ABC):
     def version(self) -> str:
         """The tool's version line, or ``""`` when it will not identify itself.
 
-        Asked once, on first use, and remembered — so recording the version of a tool
-        that just ran costs nothing, and constructing something that holds a tool runs
-        no subprocess at all.
+        Asked on first use and remembered on the object — so recording the version of a
+        tool that just ran costs nothing, and constructing something that holds a tool
+        runs no subprocess at all. :class:`InstalledTool` remembers per binary as well,
+        which is what makes a fresh tool per build step free rather than a subprocess.
 
         An empty string means *the tool ran and declined*: several UCSC binaries reject
         ``--version`` outright. That is a different answer from a tool that is not there,
@@ -320,6 +321,14 @@ class ExternalTool(ABC):
         ``output`` is returned as it stands, so re-preparing an assembly costs a handful
         of ``stat`` calls rather than a second pass over a genome.
 
+        The **Freshness** rule lives here rather than in the callers: it is one rule, and
+        a caller that had to apply it would restate the branch at every step and could
+        drift from what ``overwrite`` means. Running goes back out through :meth:`run`
+        rather than around it to :meth:`_execute`, so a single
+        ``monkeypatch.setattr(ExternalTool, "run", ...)`` catches every invocation this
+        package makes, by either adapter — the property
+        :func:`genome.io.fetch.fetch_url` is spelled for, and for the same reason.
+
         Parameters
         ----------
         args : sequence of str
@@ -382,6 +391,39 @@ class ExternalTool(ABC):
         return text.splitlines()[0] if text else ""
 
 
+#: Every version line a binary has given in this process, keyed by the path it was
+#: located at. A binary's version cannot change under a running process, and a
+#: preparation constructs a fresh tool per step, so preparing one assembly used to ask
+#: each of its three binaries the same question once per step — and a build that prepares
+#: several assemblies multiplied that again, for provenance nothing else reads.
+#:
+#: The key is the **located** path rather than the tool name: a name is only as stable as
+#: ``PATH``, and two directories can each hold a ``samtools``. It is not resolved through
+#: symlinks either — a link is a legitimate binary, and what one does can depend on the
+#: name it was invoked under.
+#:
+#: Only an answer a binary gave is in here. A tool that cannot be located raises before
+#: this is reached, so *missing* is never remembered and a tool installed midway through
+#: a process is found.
+_VERSIONS: dict[str, str] = {}
+
+
+def clear_version_cache() -> None:
+    """Forget every version learned so far, so the next ask reaches the binary again.
+
+    :data:`_VERSIONS` is keyed on a binary's path and lives as long as the process, which
+    is right for a build and wrong for a test suite: a test that puts a stub tool on
+    ``PATH`` must never be answered from what an earlier test learned. The suite clears
+    it around every test — see the autouse fixture in ``tests/conftest.py`` — and so
+    should anything else that swaps a binary out under a long-lived process.
+
+    Examples
+    --------
+    >>> clear_version_cache()
+    """
+    _VERSIONS.clear()
+
+
 class InstalledTool(ExternalTool):
     """The **External tool** as it is installed on this machine.
 
@@ -389,6 +431,10 @@ class InstalledTool(ExternalTool):
     interpreter: in a conda/pixi environment the native tools are installed alongside
     ``python``, so the second lookup still finds them when a script is run with the
     environment's interpreter by absolute path and ``PATH`` therefore lacks its ``bin/``.
+
+    Locating is remembered per object; the version is remembered per *binary*, for the
+    life of the process — see :data:`_VERSIONS` for why the two differ, and
+    :func:`clear_version_cache` for how to forget the second.
 
     Examples
     --------
@@ -407,6 +453,18 @@ class InstalledTool(ExternalTool):
             return str(sibling)
 
         raise ToolNotFoundError(self.install_instructions())
+
+    def _detect_version(self) -> str:
+        """Ask the binary at :attr:`path`, once per process — see :data:`_VERSIONS`.
+
+        Presence, not truthiness: ``""`` is an answer, since several UCSC binaries
+        decline to identify themselves, and reading it as *not asked yet* would re-probe
+        exactly the tools every preparation runs.
+        """
+        path = self.path
+        if path not in _VERSIONS:
+            _VERSIONS[path] = super()._detect_version()
+        return _VERSIONS[path]
 
     def _execute(
         self, args: Sequence[str], *, cwd: Path | None, capture: bool

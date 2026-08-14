@@ -7,9 +7,12 @@ Every command takes `--json` for machine-readable output. Errors go to stderr wi
 non-zero exit code: `2` for invalid input, `1` for everything else (a missing native
 tool, a failed download, a checksum mismatch, a registration that cannot be trusted).
 
-```bash
+```console
 $ genome --help
 $ genome version
+2026.6.0
+$ genome version --json
+{"version": "2026.6.0"}
 ```
 
 ## `genome doctor`
@@ -154,8 +157,10 @@ the chimera was built from exits `1`.
 
 ## `genome revcomp <sequence>`
 
-Reverse-complement a DNA sequence. Case is preserved; a character outside `A/C/G/T` exits
-`2` naming it.
+Reverse-complement a DNA sequence. Case is preserved; a character outside the `DNA`
+alphabet exits `2` naming it. The alphabet is the type's own — `DNA.ALPHABET`, read at the
+boundary rather than spelled again here — so the [`outside_alphabet`](sequences.md#construction)
+you would call yourself is the check this command applies.
 
 ```console
 $ genome revcomp ATCG

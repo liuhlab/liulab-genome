@@ -11,6 +11,7 @@ tuned in practice; every other STAR flag is reachable through ``**kwargs``.
 from __future__ import annotations
 
 import math
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -27,7 +28,7 @@ class STAR(Aligner):
     A STAR index is splice-junction-aware: it is built against one gene
     annotation, so each annotation gets its own *genomeDir*. The bound GTF key
     selects that annotation (its path resolved via
-    :meth:`~genome.genome.Genome.get_gtf_path`) and names the index directory
+    :meth:`~genome.io.gtf.AnnotationRegistry.path`) and names the index directory
     ``star_<gtf_key>``. STAR's index is the *genomeDir* directory itself, so
     :attr:`index_path` returns :attr:`index_dir`.
 
@@ -37,13 +38,16 @@ class STAR(Aligner):
         The genome whose reference FASTA will be indexed.
     gtf : str
         Name of a GTF annotation registered on ``genome`` (see
-        :meth:`~genome.genome.Genome.register_gtf`).
+        :meth:`~genome.io.gtf.AnnotationRegistry.register_path`).
     tool : genome.external.ExternalTool, optional
         As :class:`~genome.aligner.aligner.Aligner`.
     """
 
     name = "star"
     binary = "STAR"
+    # STAR's long options are camel-case words with no separator, so a Python keyword
+    # reaches the command line unchanged.
+    _flag_separator = "_"
 
     def __init__(self, genome: Genome, *, gtf: str, tool: ExternalTool | None = None) -> None:
         self._gtf_key = gtf
@@ -80,7 +84,7 @@ class STAR(Aligner):
         ``overwrite=True``; a directory holding index files that no record
         vouches for raises rather than being silently rebuilt. The annotation GTF
         is resolved from the bound ``gtf`` key via
-        :meth:`~genome.genome.Genome.get_gtf_path` and passed to STAR as
+        :meth:`~genome.io.gtf.AnnotationRegistry.path` and passed to STAR as
         ``--sjdbGTFfile`` for splice-junction-aware indexing.
 
         Only the most commonly tuned options are named below. Any other STAR
@@ -120,14 +124,21 @@ class STAR(Aligner):
         RuntimeError
             If STAR exits non-zero.
         """
-        if not overwrite and self._registration() is not None:
-            return self.index_path
+        compose = partial(self._compose, sjdb_overhang=sjdb_overhang, threads=threads, **kwargs)
+        return self._build(compose, overwrite=overwrite)
 
-        self._begin_build()
+    def _compose(
+        self, *, sjdb_overhang: int, threads: int, **kwargs: Any
+    ) -> tuple[list[str], dict[str, Any]]:
+        """Return the ``genomeGenerate`` command line, and the knobs that determined it.
 
+        Reached only when a build is going to run, which is what keeps resolving the
+        annotation out of the path that reuses a finished index — see
+        :meth:`~genome.aligner.aligner.Aligner._build`.
+        """
         fasta = self._genome.files.fasta
         # STAR runs with the index dir as CWD, so resolve the annotation path.
-        gtf_file = self._genome.get_gtf_path(self._gtf_key).resolve()
+        gtf_file = self._genome.annotations.path(self._gtf_key).resolve()
 
         # STAR requires a reduced suffix-array index size for small genomes:
         #   min(14, log2(genomeLength) / 2 - 1). Default it unless overridden.
@@ -175,23 +186,6 @@ class STAR(Aligner):
             "--sjdbOverhang",
             str(sjdb_overhang),
         ]
-        args += _kwargs_to_flags(kwargs)
+        args += self._flags(kwargs)
 
-        self._run(args)
-        self._record_completion(command=[self.binary, *args], parameters=parameters)
-        return self.index_path
-
-
-def _kwargs_to_flags(kwargs: dict[str, Any]) -> list[str]:
-    """Turn ``{"genomeSAindexNbases": 11}`` into ``["--genomeSAindexNbases", "11"]``.
-
-    List/tuple values become multiple space-separated arguments after the flag.
-    """
-    flags: list[str] = []
-    for key, value in kwargs.items():
-        flag = f"--{key}"
-        if isinstance(value, (list, tuple)):
-            flags += [flag, *(str(item) for item in value)]
-        else:
-            flags += [flag, str(value)]
-    return flags
+        return args, parameters

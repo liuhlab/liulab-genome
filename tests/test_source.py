@@ -17,19 +17,18 @@ from types import ModuleType
 
 import pytest
 
+from genome.io import components as components_module
 from genome.io import download as download_module
 from genome.io import source as source_module
 from genome.io.completion import build_record, write_record
+from genome.io.components import ChimeraDetails, ComponentDetails
 from genome.io.registration import AssemblyDir
 from genome.io.source import (
-    ChimeraDetails,
-    ComponentDetails,
     ComponentSource,
     FetchedSource,
     SeededSource,
     fetched_source,
     is_prepared,
-    merged_annotation_name,
     resolve_source,
 )
 from genome.metadata import AssemblyMetadata
@@ -138,17 +137,16 @@ def test_a_mis_ordered_chimera_name_is_refused_and_told_its_spelling(tmp_path: P
 
 
 def test_only_a_prepared_component_counts_when_the_table_lists_neither(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path, liulab_data: Path
 ) -> None:
     # Neither half is in the shipped table, so nothing but a record of its own can make
     # `tinyCe_tinySc` read as two assemblies rather than as one name somebody chose.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
     here = AssemblyDir.locate("tinyCe_tinySc", tmp_path / "elsewhere")
 
     assert isinstance(resolve_source(here, metadata=None, golden_path_url=_GOLDEN), FetchedSource)
 
     for name in ("tinyCe", "tinySc"):
-        _record_a_genome(tmp_path / "genome" / name, name, None)
+        _record_a_genome(liulab_data / "genome" / name, name, None)
         assert is_prepared(name)
 
     assert resolve_source(here, metadata=None, golden_path_url=_GOLDEN) == ComponentSource(
@@ -208,40 +206,6 @@ def test_a_seeded_source_is_declared_and_never_resolved() -> None:
     assert SeededSource(Path("/data/my ref.fa")).location == Path("/data/my ref.fa")
 
 
-def test_a_merged_annotation_name_is_the_contributors_joined() -> None:
-    # One spelling for the name a merge is written under and the name a record is read
-    # back as, so a rebuild can never look for a database under a name it did not write.
-    contributors = ["wormbase_ws298", "refseq_rs_2025_06_26"]
-    joined = merged_annotation_name(contributors)
-    details = ChimeraDetails(
-        separator="__",
-        component_details=tuple(
-            ComponentDetails(name, None, annotation, None)
-            for name, annotation in zip(("ce11", "ecHT115"), contributors, strict=True)
-        ),
-    )
-
-    assert joined == "wormbase_ws298+refseq_rs_2025_06_26"
-    assert details.merged_annotation == joined
-
-
-def test_the_details_a_build_writes_are_the_details_it_reads_back() -> None:
-    details = ChimeraDetails(
-        separator="___",
-        component_details=(
-            ComponentDetails("ce11", "1a2b", "wormbase_ws298", "3c4d"),
-            ComponentDetails("ecHT115", "5e6f", None, None),
-        ),
-    )
-
-    assert ChimeraDetails.from_details(details.as_details(merged=True)) == details
-    # Without a merge the annotation keys are not written at all, so what reads back says
-    # nothing about annotations rather than saying `null` about them.
-    round_tripped = ChimeraDetails.from_details(details.as_details(merged=False))
-    assert round_tripped is not None
-    assert [entry.annotation for entry in round_tripped.component_details] == [None, None]
-
-
 # ---------------------------------------------------------------------------
 # The layer this module exists to be
 # ---------------------------------------------------------------------------
@@ -254,6 +218,13 @@ def _module_level_imports(module: ModuleType) -> set[str]:
     this is measuring the absence of, so counting one would defeat the purpose. Read
     rather than observed, because importing a submodule loads its package first and
     ``sys.modules`` would then hold half the tree whatever this module itself asked for.
+
+    A ``from x import y`` contributes both ``x`` and ``x.y``, which is what lets a caller
+    tell *holds the module* from *holds the name it exports* — the distinction the fetch
+    step's one patch point rests on (see test_fetch).
+
+    Shared with the guards in test_gtf and test_fetch: the assertions differ per module,
+    the reading of an import does not.
     """
     assert module.__file__ is not None
     imported: set[str] = set()
@@ -275,6 +246,15 @@ def test_resolving_a_name_imports_nothing_that_builds_one() -> None:
     forbidden = {"genome.io.gtf", "genome.io.chimera", "genome.io.download", "genome.genome"}
 
     assert _module_level_imports(source_module) & forbidden == set()
+
+
+def test_resolving_a_name_reads_the_record_half_and_nothing_reads_back() -> None:
+    # The seam the split left, in the one direction it runs. Resolving a name believes an
+    # existing record before it consults the name, so it has to tell a chimera's record
+    # from any other — one call into `components`. Nothing in `components` needs a name
+    # resolved, and an import back would make the two one module again by another route.
+    assert "genome.io.components" in _module_level_imports(source_module)
+    assert "genome.io.source" not in _module_level_imports(components_module)
 
 
 def test_the_downloader_reads_the_resolution_without_deferring_it() -> None:

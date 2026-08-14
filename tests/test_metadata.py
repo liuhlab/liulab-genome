@@ -15,14 +15,16 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from genome import metadata
 from genome.chimera import ChimeraNamingError, split_name
 from genome.metadata import (
     ANNOTATION_FIELDS,
     METADATA_FIELDS,
     AnnotationMetadata,
     AssemblyMetadata,
+    MetadataRowError,
+    annotation_table,
     assembly_metadata,
+    assembly_table,
     format_table_row,
     list_annotation_metadata,
     lookup_annotation,
@@ -37,7 +39,7 @@ _OPTIONAL_FIELDS = ("ucsc_name", "source_url", "sha256")
 #: Every assembly the shipped table officially supports, read from the table itself: a
 #: row added without a test to match is then covered by whichever kind it turns out to be
 #: rather than quietly unguarded.
-_SHIPPED_ASSEMBLIES: tuple[str, ...] = tuple(metadata._metadata_table()["assembly_name"])
+_SHIPPED_ASSEMBLIES: tuple[str, ...] = tuple(record.assembly_name for record in assembly_table())
 
 
 def _is_chimera_row(assembly: str) -> bool:
@@ -134,6 +136,49 @@ def test_the_total_accessor_answers_every_name(name: str) -> None:
     )
 
 
+# --- the table is a parameter, and the shipped one is only its default -------
+
+
+#: A row no shipped table carries, to hand to a lookup in place of the shipped one.
+_TINY = AssemblyMetadata(
+    assembly_name="tiny",
+    species="Testus minimus",
+    ucsc_name="tiny",
+    ncbi_name="TINY.1",
+    ncbi_assembly_id="GCF_0.0",
+    ncbi_taxid=1,
+)
+
+
+def test_a_lookup_reads_the_table_it_is_handed() -> None:
+    # The table is a cross-reference, not an allow-list (ADR-0003), so a caller curating
+    # their own rows is the ordinary case rather than a test's trick.
+    assert lookup_assembly("tiny", table=[_TINY]) == _TINY
+    assert lookup_assembly("hg38", table=[_TINY]) is None
+
+
+def test_the_total_accessor_reads_the_table_it_is_handed() -> None:
+    assert assembly_metadata("tiny", table=[_TINY]) == _TINY
+    assert assembly_metadata("hg38", table=[_TINY]) == AssemblyMetadata.unknown("hg38")
+
+
+def test_an_empty_table_lists_nothing_and_is_not_an_error() -> None:
+    assert lookup_assembly("hg38", table=[]) is None
+    assert assembly_metadata("hg38", table=[]) == AssemblyMetadata.unknown("hg38")
+
+
+def test_the_shipped_tables_are_what_the_lookups_read_by_default() -> None:
+    assert lookup_assembly("hg38") in assembly_table()
+    assert lookup_annotation("sacCer3", "ensgene_v101") in annotation_table()
+
+
+def test_handing_one_lookup_a_table_leaves_the_shipped_one_alone() -> None:
+    # Nothing is installed and nothing is cached: the parameter is read for that call.
+    assert lookup_assembly("tiny", table=[_TINY]) is not None
+    assert lookup_assembly("tiny") is None
+    assert lookup_assembly("hg38") is not None
+
+
 def test_taxid_is_parsed_as_a_python_int() -> None:
     record = lookup_assembly("sacCer3")
     assert record is not None
@@ -227,37 +272,60 @@ def test_a_pinned_checksum_is_read_back_as_text() -> None:
     assert record.sha256 == "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3"
 
 
-def test_a_blank_optional_cell_reads_back_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_blank_optional_cell_reads_back_as_none() -> None:
     # An unpinned checksum is unverified, not wrong — and never the string "nan". Every
     # downloaded row pins both optional columns today, and the chimera row's blanks say
-    # something else again, so this path is exercised against a table stood up for it.
-    table = pd.DataFrame(
-        [
-            {
-                "assembly_name": "unpinned",
-                "species": "Testus minimus",
-                "ucsc_name": "unpinned",
-                "ncbi_name": "TINY.1",
-                "ncbi_assembly_id": "GCF_0.0",
-                "ncbi_taxid": "1",
-                "source_url": "https://example.invalid/unpinned.fa.gz",
-                "sha256": None,
-            }
-        ],
-        dtype=str,
+    # something else again, so this path is exercised against a row stood up for it.
+    record = AssemblyMetadata.from_row(
+        {
+            "assembly_name": "unpinned",
+            "species": "Testus minimus",
+            "ucsc_name": "unpinned",
+            "ncbi_name": "TINY.1",
+            "ncbi_assembly_id": "GCF_0.0",
+            "ncbi_taxid": "1",
+            "source_url": "https://example.invalid/unpinned.fa.gz",
+            "sha256": None,
+        }
     )
-    monkeypatch.setattr(metadata, "_metadata_table", lambda: table)
-    metadata.lookup_assembly.cache_clear()
-    try:
-        record = metadata.lookup_assembly("unpinned")
-    finally:
-        # The cache is module-global; leaving the stand-in's row in it would leak
-        # into every later test.
-        metadata.lookup_assembly.cache_clear()
 
-    assert record is not None
     assert record.source_url == "https://example.invalid/unpinned.fa.gz"
     assert record.sha256 is None
+
+
+def test_a_row_missing_an_optional_column_altogether_reads_it_as_unknown() -> None:
+    # A hand-written row need not carry every column: what it does not say is unknown.
+    record = AssemblyMetadata.from_row({"assembly_name": "sparse"})
+
+    assert record == AssemblyMetadata.unknown("sparse")
+
+
+def test_a_cell_its_column_cannot_read_names_the_column_and_what_it_expected() -> None:
+    with pytest.raises(MetadataRowError, match="ncbi_taxid") as raised:
+        AssemblyMetadata.from_row({"assembly_name": "tiny", "ncbi_taxid": "many"})
+
+    assert "int" in str(raised.value)
+    assert "many" in str(raised.value)
+
+
+def test_a_blank_required_cell_raises_rather_than_reading_as_the_text_nan() -> None:
+    # The other half of what a blank cell means: an optional column reads back unknown,
+    # and a column with no unknown is a malformed row rather than the string "nan".
+    with pytest.raises(MetadataRowError, match="assembly_name") as raised:
+        AssemblyMetadata.from_row({"assembly_name": None, "species": "Testus minimus"})
+
+    assert "blank" in str(raised.value)
+
+
+def test_a_malformed_row_never_yields_a_half_built_record() -> None:
+    # A row whose good columns come first still raises rather than handing back a record
+    # carrying them: a caller gets a record or an error naming the cell, never both.
+    row = {"assembly_name": "tiny", "species": "Testus minimus", "ncbi_taxid": "many"}
+
+    with pytest.raises(MetadataRowError, match="ncbi_taxid") as raised:
+        AssemblyMetadata.from_row(row)
+
+    assert "assembly_name" not in str(raised.value)
 
 
 def test_optional_fields_default_to_none_when_a_record_is_built_by_hand() -> None:
@@ -314,28 +382,29 @@ _RECORDS = st.builds(
 )
 
 
-def _pasted(line: str) -> pd.DataFrame:
+def _pasted(line: str) -> dict[str, object]:
     """Read a rendered line back the way the shipped table is read.
 
     Pasting the line into ``data/assembly_metadata.tsv`` is what the register-then-paste
     flow does, and reading it as text is what makes a blank cell arrive as the NaN pandas
-    reads it as rather than as ``""`` — which is the whole of the bug.
+    reads it as rather than as ``""`` — which is the whole of the bug. Only the reading
+    is stood in for; the row is parsed by :meth:`AssemblyMetadata.from_row` itself.
     """
     text = "\t".join(METADATA_FIELDS) + "\n" + line + "\n"
-    return pd.read_csv(io.StringIO(text), sep="\t", dtype=str)
-
-
-def _parsed(table: pd.DataFrame) -> AssemblyMetadata:
-    """Build a record from the first row of ``table``, column by declared column."""
-    row = table.iloc[0]
-    return AssemblyMetadata(
-        **{name: metadata._parse_cell(name, row, metadata._FIELD_TYPES) for name in METADATA_FIELDS}
-    )
+    frame = pd.read_csv(io.StringIO(text), sep="\t", dtype=str)
+    return dict(frame.iloc[0])
 
 
 @given(record=_RECORDS)
 def test_a_row_survives_rendering_and_parsing_unchanged(record: AssemblyMetadata) -> None:
-    assert _parsed(_pasted(format_table_row(asdict(record)))) == record
+    assert AssemblyMetadata.from_row(_pasted(format_table_row(asdict(record)))) == record
+
+
+@given(record=_RECORDS)
+def test_a_record_is_rebuilt_from_its_own_fields(record: AssemblyMetadata) -> None:
+    # The other direction of the same seam: a record's fields are a row, so a caller
+    # holding one can correct a cell and hand it straight back without rendering it.
+    assert AssemblyMetadata.from_row(asdict(record)) == record
 
 
 @given(name=_CELLS)
@@ -344,12 +413,10 @@ def test_an_unknown_record_survives_rendering_and_parsing_unchanged(name: str) -
     # renders to the line `genome table-row` emits for an assembly nobody has curated —
     # the name, and every other cell blank — and pasting that line back yields it again.
     record = AssemblyMetadata.unknown(name)
-    assert _parsed(_pasted(format_table_row(asdict(record)))) == record
+    assert AssemblyMetadata.from_row(_pasted(format_table_row(asdict(record)))) == record
 
 
-def test_a_row_with_every_identifier_blank_reads_back_as_unknown(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_row_with_every_identifier_blank_reads_back_as_unknown() -> None:
     # What `genome table-row` emits for an assembly the table does not list yet: the
     # name, the source and the digest, and blanks for everything only a person supplies.
     # Pasted into the table, it used to give species the string "nan" and raise on taxid.
@@ -360,13 +427,8 @@ def test_a_row_with_every_identifier_blank_reads_back_as_unknown(
             "sha256": "0" * 64,
         }
     )
-    monkeypatch.setattr(metadata, "_metadata_table", lambda: _pasted(line))
-    metadata.lookup_assembly.cache_clear()
-    try:
-        record = metadata.lookup_assembly("newAsm")
-    finally:
-        # The cache is module-global; leaving the stand-in's row in it would leak.
-        metadata.lookup_assembly.cache_clear()
+
+    record = lookup_assembly("newAsm", table=[AssemblyMetadata.from_row(_pasted(line))])
 
     assert record is not None
     assert record.species is None
@@ -444,36 +506,27 @@ class TestAnnotationTable:
         assert record is not None
         assert record.default is True
 
-    def test_a_blank_flag_reads_as_false_and_a_blank_digest_as_none(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_blank_flag_reads_as_false_and_a_blank_digest_as_none(self) -> None:
         # Every shipped row pins a digest and is its assembly's default, so the blank
-        # cells are exercised against a table stood up for them.
-        table = pd.DataFrame(
-            [
-                {
-                    "assembly": "tiny",
-                    "name": "unpinned",
-                    "provider": "Nobody",
-                    "version": "0",
-                    "url": "https://example.invalid/unpinned.gtf.gz",
-                    "sha256": None,
-                    "default": None,
-                }
-            ],
-            dtype=str,
+        # cells are exercised against a row stood up for them.
+        record = AnnotationMetadata.from_row(
+            {
+                "assembly": "tiny",
+                "name": "unpinned",
+                "provider": "Nobody",
+                "version": "0",
+                "url": "https://example.invalid/unpinned.gtf.gz",
+                "sha256": None,
+                "default": None,
+            }
         )
-        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
 
-        record = lookup_annotation("tiny", "unpinned")
-
-        assert record is not None
         assert record.sha256 is None
         assert record.default is False
 
-    def test_a_flag_nobody_spells_that_way_says_so(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        table = pd.DataFrame(
-            [
+    def test_a_flag_nobody_spells_that_way_says_so(self) -> None:
+        with pytest.raises(MetadataRowError, match="is not a flag"):
+            AnnotationMetadata.from_row(
                 {
                     "assembly": "tiny",
                     "name": "typo",
@@ -483,13 +536,47 @@ class TestAnnotationTable:
                     "sha256": None,
                     "default": "y",
                 }
-            ],
-            dtype=str,
-        )
-        monkeypatch.setattr(metadata, "_annotation_table", lambda: table)
+            )
 
-        with pytest.raises(ValueError, match="is not a flag"):
-            lookup_annotation("tiny", "typo")
+    def test_a_row_with_no_url_at_all_names_the_column_it_wanted(self) -> None:
+        # An annotation row that says where nothing is fetched from is malformed, not an
+        # annotation whose source is unknown: nothing could register from it.
+        with pytest.raises(MetadataRowError, match="url"):
+            AnnotationMetadata.from_row(
+                {"assembly": "tiny", "name": "sourceless", "provider": "Nobody", "version": "0"}
+            )
+
+    def test_a_record_is_rebuilt_from_its_own_fields(self) -> None:
+        record = lookup_annotation("sacCer3", "ensgene_v101")
+        assert record is not None
+        assert AnnotationMetadata.from_row(asdict(record)) == record
+
+    def test_the_lookups_read_the_table_they_are_handed(self) -> None:
+        offered = [
+            AnnotationMetadata(
+                assembly="tiny",
+                name="mine",
+                provider="Nobody",
+                version="0",
+                url="https://example.invalid/mine.gtf.gz",
+                default=True,
+            ),
+            AnnotationMetadata(
+                assembly="other",
+                name="theirs",
+                provider="Nobody",
+                version="0",
+                url="https://example.invalid/theirs.gtf.gz",
+            ),
+        ]
+
+        assert lookup_annotation("tiny", "mine", table=offered) == offered[0]
+        assert lookup_annotation("tiny", "theirs", table=offered) is None
+        assert list_annotation_metadata("tiny", table=offered) == [offered[0]]
+        assert list_annotation_metadata("tiny", table=[]) == []
+        # …and the shipped table is where it was.
+        assert lookup_annotation("tiny", "mine") is None
+        assert lookup_annotation("sacCer3", "ensgene_v101") is not None
 
     def test_optional_fields_default_when_a_record_is_built_by_hand(self) -> None:
         record = AnnotationMetadata(

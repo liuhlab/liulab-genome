@@ -14,21 +14,19 @@ import typer
 from genome import __version__ as _package_version
 from genome.external import ToolNotFoundError
 from genome.external import doctor as _doctor
-from genome.io.chimera import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
-from genome.io.chimera import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
-from genome.io.chimera import ChimeraDetails as _ChimeraDetails
-from genome.io.download import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
-from genome.io.download import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
-from genome.io.download import VerifiedAssembly as _VerifiedAssembly
+from genome.io.components import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
+from genome.io.components import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
+from genome.io.components import ChimeraDetails as _ChimeraDetails
 from genome.io.download import assembly_table_row as _assembly_table_row
 from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
-from genome.io.gtf import AnnotationStatus as _AnnotationStatus
-from genome.io.gtf import AnnotationStatusRow as _AnnotationStatusRow
-from genome.io.gtf import RegisteredAnnotation as _RegisteredAnnotation
 from genome.io.gtf import annotation_status as _annotation_status
 from genome.io.gtf import register_annotation as _register_annotation
-from genome.io.gtf import register_annotation_by_path as _register_annotation_by_path
+from genome.io.gtf import register_gtf as _register_gtf
+from genome.io.results import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
+from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
+from genome.io.results import RegisteredAnnotation as _RegisteredAnnotation
+from genome.io.results import VerifiedAssembly as _VerifiedAssembly
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
 
@@ -94,26 +92,40 @@ app = typer.Typer(help="Tools for handling genomic files.", no_args_is_help=True
 
 
 @app.command()
-def version() -> None:
+def version(
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
     """Print the installed package version."""
+    if json:
+        typer.echo(_json.dumps({"version": _package_version}))
+        return
     typer.echo(_package_version)
 
 
 @app.command()
 def revcomp(
-    sequence: str = typer.Argument(..., help="A DNA sequence over A/C/G/T (case is preserved)."),
+    sequence: str = typer.Argument(
+        ...,
+        # The third place this alphabet used to be spelled by hand, and the one a reader
+        # meets first. Rendered from the type like the check and the error below it.
+        help=f"A DNA sequence over {'/'.join(sorted(DNA.ALPHABET))} (case is preserved).",
+    ),
     json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
 ) -> None:
     """Reverse-complement a DNA sequence.
 
     Exits with code 2 on invalid input.
     """
-    # The DNA constructor no longer validates (too costly on large sequences),
-    # so reject non-A/C/G/T characters here, at the I/O boundary.
-    invalid = sorted({c for c in sequence if c.upper() not in "ACGT"})
+    # The DNA constructor no longer validates (too costly on large sequences), so reject
+    # non-alphabet characters here, at the I/O boundary. Both halves of that ask the type —
+    # which characters offend, and what to call the alphabet they offended against — because
+    # an edge that spells `ACGT` itself is a second copy of `DNA.ALPHABET` that drifts from it
+    # silently.
+    invalid = DNA.outside_alphabet(sequence)
     if invalid:
+        alphabet = "".join(sorted(DNA.ALPHABET))
         typer.echo(
-            f"error: sequence contains characters outside alphabet {{ACGT}}: {invalid!r}",
+            f"error: sequence contains characters outside alphabet {{{alphabet}}}: {invalid!r}",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -337,7 +349,7 @@ def register_gtf(
     Re-run with `--force` to repair it.
     """
     try:
-        registered = _register_annotation_by_path(
+        registered = _register_gtf(
             assembly,
             gtf,
             name,
@@ -393,60 +405,31 @@ def list_annotations(
     that has never been registered here.
     """
     try:
-        payload = _annotation_status(assembly)
+        status = _annotation_status(assembly)
     except _ASSEMBLY_ERRORS as err:
         typer.echo(f"error: {err}", err=True)
         raise typer.Exit(code=1) from err
 
     if json:
-        typer.echo(_json.dumps(payload.as_json()))
+        typer.echo(_json.dumps(status.as_json()))
         return
 
-    rows = payload.annotations
-    typer.echo(f"annotations for {payload.assembly} in {payload.directory}")
+    rows = status.annotations
+    typer.echo(f"annotations for {status.assembly} in {status.directory}")
     if not rows:
         typer.echo("  (the table offers none, and none is registered here)")
+    # Every word below the heading comes off the report: which state a row is in, what is
+    # wrong with a broken one, and the closing line about the default. This chooses the
+    # column widths and nothing else.
     name_width = max((len(row.name) for row in rows), default=0)
-    state_width = max((len(_state(row)) for row in rows), default=0)
+    state_width = max((len(row.state) for row in rows), default=0)
     for row in rows:
         provider = f"  {row.provider} {row.version}" if row.offered else ""
-        line = f"  {row.name:<{name_width}}  {_state(row):<{state_width}}{provider}"
+        line = f"  {row.name:<{name_width}}  {row.state:<{state_width}}{provider}"
         typer.echo(line.rstrip())
-        # Verbatim from the API, which is the same text re-registering it would print:
-        # what is wrong, and the command that fixes it. One wording, two surfaces.
         if row.broken:
             typer.echo(f"      {row.problem}")
-    typer.echo(_default_line(payload))
-
-
-def _state(row: _AnnotationStatusRow) -> str:
-    """Return the state a row is in: registered, broken, or merely offered.
-
-    ``broken`` comes first because it is the one that needs acting on, and because a
-    broken annotation is not registered — no record vouches for it — so reporting it as
-    the absence of one would be true and useless.
-    """
-    if row.broken:
-        return "broken"
-    if not row.offered:
-        return "registered, not offered"
-    return "registered" if row.registered else "offered, not registered"
-
-
-def _default_line(payload: _AnnotationStatus) -> str:
-    """Return the closing line naming the default annotation, and how to get it if absent."""
-    default = payload.default_annotation
-    if default is None:
-        return "default: (none)"
-    row = payload.default_row
-    if row is not None and row.broken:
-        return f"default: {default} — broken here; repair it with `{row.repair}`"
-    if row is not None and row.registered:
-        return f"default: {default}"
-    return (
-        f"default: {default} — not registered here; register it with "
-        f"`genome register-annotation {payload.assembly} {default}`"
-    )
+    typer.echo(status.default_summary)
 
 
 @app.command()

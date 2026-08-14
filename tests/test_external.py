@@ -1,9 +1,10 @@
 """Tests for genome.external — the one module that shells out to a native binary.
 
-Almost nothing here needs a tool installed: a shell script written into ``tmp_path`` is a
-real binary as far as this module is concerned, so resolution, the two run flavours, the
-failure message and the freshness cache are all driven against one. The handful that do
-need the pixi env's own binaries say so and skip cleanly outside it.
+Almost nothing here needs a tool installed: a stub on ``PATH`` is a real binary as far as
+this module is concerned, so resolution, the two run flavours, the failure message and the
+freshness cache are all driven against one — see the ``stub_binary`` fixture for what one
+is and why it is built the way it is. The handful that do need the pixi env's own binaries
+say so and skip cleanly outside it.
 
 ``RecordingTool`` is exercised as the adapter it is — the same base class, only the
 execution replaced — because every aligner test in the suite is standing on it.
@@ -26,26 +27,22 @@ from genome.external import (
     InstalledTool,
     RecordingTool,
     ToolNotFoundError,
+    clear_version_cache,
     doctor,
     is_fresh,
 )
 from genome.io.fasta import PREPARATION_TOOLS
 
+from .conftest import StubBinary
+
 _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
 
 
-def _script(directory: Path, name: str, body: str) -> Path:
-    """Write an executable shell script into ``directory`` and return its path."""
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / name
-    path.write_text(f"#!/bin/sh\n{body}\n")
-    path.chmod(0o755)
-    return path
-
-
 @pytest.fixture
-def on_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[str, str], Path]:
-    """Return a helper that puts a script on ``PATH`` under a chosen tool name.
+def on_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
+) -> Callable[[str, str], Path]:
+    """Return a helper that puts a stub on ``PATH`` under a chosen tool name.
 
     ``PATH`` becomes exactly this directory, and the interpreter is pointed somewhere
     empty, so the tools the pixi env really has cannot answer for a test that never
@@ -56,7 +53,7 @@ def on_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[str, s
     monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
 
     def install(name: str, body: str) -> Path:
-        return _script(bin_dir, name, body)
+        return stub_binary(bin_dir, name, body)
 
     return install
 
@@ -71,13 +68,13 @@ def test_a_tool_on_path_resolves_to_it(on_path: Callable[[str, str], Path]) -> N
 
 
 def test_resolution_falls_back_to_the_interpreters_own_bin(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
 ) -> None:
     # Running the env's interpreter without PATH activated: the normal lookup misses,
     # but the tool sits beside sys.executable (the conda/pixi bin/), so resolution falls
     # back to that directory.
     bin_dir = tmp_path / "bin"
-    written = _script(bin_dir, "faToTwoBit", "exit 0")
+    written = stub_binary(bin_dir, "faToTwoBit", "exit 0")
 
     monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(external.sys, "executable", str(bin_dir / "python"))
@@ -166,6 +163,95 @@ def test_the_version_is_asked_for_once(on_path: Callable[[str, str], Path], tmp_
 
     assert tool.version == tool.version == "samtools 1.21"
     assert tally.read_text() == "x\n"
+
+
+def test_the_version_is_asked_for_once_per_binary_not_once_per_object(
+    on_path: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    # The waste the per-object cache above never reached: a build constructs a fresh tool
+    # for each step, so preparing one assembly asked samtools its version once per step
+    # for an answer that cannot change under a running process.
+    tally = tmp_path / "asked"
+    on_path("samtools", f"echo x >> {tally}; echo 'samtools 1.21'")
+
+    assert InstalledTool("samtools").version == "samtools 1.21"
+    assert InstalledTool("samtools").version == "samtools 1.21"
+
+    assert tally.read_text() == "x\n"
+
+
+def test_a_tool_that_declines_to_identify_itself_is_remembered_as_declining(
+    on_path: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    # "" is an answer rather than a missing one, and it costs the same subprocess to
+    # learn. Remembering on truthiness instead of on presence would re-probe exactly the
+    # two UCSC binaries every preparation runs, which is most of what there was to save.
+    tally = tmp_path / "asked"
+    on_path("faToTwoBit", f"echo x >> {tally}; echo 'nope' >&2; exit 255")
+
+    assert InstalledTool("faToTwoBit").version == ""
+    assert InstalledTool("faToTwoBit").version == ""
+
+    assert tally.read_text() == "x\n"
+
+
+def test_two_binaries_of_the_same_name_each_answer_for_themselves(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
+) -> None:
+    # Why the answer is remembered against the path and not against the name: a name is
+    # only as stable as PATH, and a caller that has just been pointed at another samtools
+    # must get that one's answer rather than the one asked earlier in this process.
+    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
+    old, new = tmp_path / "old", tmp_path / "new"
+    stub_binary(old, "samtools", "echo 'samtools 1.20'")
+    stub_binary(new, "samtools", "echo 'samtools 1.21'")
+
+    monkeypatch.setenv("PATH", str(old))
+    assert InstalledTool("samtools").version == "samtools 1.20"
+
+    monkeypatch.setenv("PATH", str(new))
+    assert InstalledTool("samtools").version == "samtools 1.21"
+
+
+def test_a_tool_that_was_missing_is_found_once_it_is_installed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
+) -> None:
+    # Absence is never remembered. Only an answer a binary actually gave is kept, so
+    # locating stays per object and a tool installed midway through a process is found.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    monkeypatch.setenv("PATH", str(bin_dir))
+    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
+
+    with pytest.raises(ToolNotFoundError):
+        _ = InstalledTool("faToTwoBit").version
+
+    stub_binary(bin_dir, "faToTwoBit", "echo 'faToTwoBit v456'")
+
+    assert InstalledTool("faToTwoBit").version == "faToTwoBit v456"
+
+
+def test_clearing_the_cache_sends_the_next_ask_back_to_the_binary(
+    on_path: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    # The documented way out, and what the suite's autouse fixture calls: without it a
+    # test that stubs a tool could be answered from what another test learned.
+    tally = tmp_path / "asked"
+    on_path("samtools", f"echo x >> {tally}; echo 'samtools 1.21'")
+    assert InstalledTool("samtools").version == "samtools 1.21"
+
+    clear_version_cache()
+
+    assert InstalledTool("samtools").version == "samtools 1.21"
+    assert tally.read_text() == "x\nx\n"
+
+
+def test_a_recording_tool_answers_for_itself_rather_than_from_the_shared_cache() -> None:
+    # The cache belongs to the installed adapter, where the subprocess is. Stand-ins of
+    # one name share a path and report the versions they were each told to all the same —
+    # which every aligner test in the suite is standing on.
+    assert RecordingTool("STAR", version="2.7.11b").version == "2.7.11b"
+    assert RecordingTool("STAR", version="2.7.10a").version == "2.7.10a"
 
 
 # -- running a tool ---------------------------------------------------------
@@ -286,6 +372,22 @@ def test_run_to_skips_the_tool_when_the_output_is_fresh(
 
     assert tool.run_to(["build"], output=out, inputs=[src]) == out
     assert tool.calls == []
+
+
+def test_run_to_reruns_when_an_input_is_newer(
+    tmp_path: Path, touch_newer_than: Callable[..., None]
+) -> None:
+    # The stale case, driven through `run_to` rather than through `is_fresh` alone: an
+    # output that exists is not thereby fresh, and a regenerated input must rebuild it.
+    tool = RecordingTool("samtools")
+    src = tmp_path / "in"
+    src.write_text("x")
+    out = tmp_path / "out"
+    out.write_text("cached")
+    touch_newer_than(src, out)  # input regenerated after the output
+
+    assert tool.run_to(["build"], output=out, inputs=[src]) == out
+    assert [call.args for call in tool.calls] == [("build",)]
 
 
 def test_run_to_overwrite_forces_the_run(

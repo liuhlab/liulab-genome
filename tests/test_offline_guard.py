@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import requests
 
-from genome.io import download as download_mod
+from genome.io import fetch as fetch_mod
 from genome.io.download import UCSCGenomeDownloader
 
 from .conftest import NetworkAccessError
@@ -38,7 +38,7 @@ def test_the_packages_one_fetch_step_is_blocked(tmp_path: Path) -> None:
     # Nothing at the destination, so pooch has to download it — through requests, into
     # the guard. This is what a test that forgot ``fake_fetch`` would hit.
     with pytest.raises(NetworkAccessError, match=r"hg38\.fa\.gz"):
-        download_mod.fetch_url(_URL, tmp_path, fname="hg38.fa.gz", progressbar=False)
+        fetch_mod.fetch_url(_URL, tmp_path, fname="hg38.fa.gz", progressbar=False)
 
 
 def test_the_ucsc_assembly_name_check_is_blocked(tmp_path: Path) -> None:

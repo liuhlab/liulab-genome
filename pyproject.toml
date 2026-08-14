@@ -118,16 +118,18 @@ typecheck = "pyright"
 # Two lanes, and together they are the suite — see AGENTS.md for why they must stay one.
 # The cap: `auto` alone oversubscribes, a bare 8 oversubscribes a small runner.
 # docs/research/test-suite-parallelism-2026-08-14.md
-test        = "pytest -m 'not aligner' -n auto --maxprocesses 8 --dist=load"
+test        = { cmd = "pytest -m 'not aligner' -n auto --maxprocesses 8 --dist=load", depends-on = ["require-tools"] }
 # Serial: three tests. `depends-on` because pixi runs it first, proving the binaries answer.
 test-aligner = { cmd = "pytest -m aligner", depends-on = ["require-aligners"] }
 require-aligners = "bash scripts/require_aligners.sh"
+require-tools    = "bash scripts/require_tools.sh"
 test-cov    = "pytest --cov=genome --cov-report=term-missing"
 # Serial: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
 test-failed = "pytest --lf --new-first -x -q"
 
-# Not `depends-on`: pixi runs those sequentially, which is the thing this replaces.
-check     = "bash scripts/check.sh lint fmt-check typecheck test"
+# The four steps are not `depends-on`: pixi runs those sequentially, which is the thing
+# this replaces. The guard is one — a precondition answers before the gate spends anything.
+check = { cmd = "bash scripts/check.sh lint fmt-check typecheck test", depends-on = ["require-tools"] }
 
 build      = "python -m build"
 docs       = "mkdocs serve"

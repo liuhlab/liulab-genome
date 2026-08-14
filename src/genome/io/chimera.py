@@ -12,9 +12,10 @@ component set, which opens them itself.
 
 What a chimera's **Source** *is* — the recipe read back off its completion record, and
 whether the components it names are still the ones it copied — is
-:mod:`genome.io.source`, which this module writes through and re-exports from. That split
-is what lets the downloader answer *is this name a chimera?* without importing anything
-that builds one.
+:mod:`genome.io.components`, which this module writes through and never re-exports. That
+split is what lets the downloader answer *is this name a chimera?* without importing
+anything that builds one: a caller wanting the details imports them where they are
+written, not from here.
 
 **Nothing here reimplements a tool.** The rule is to shell out, and the burden is
 discharged on evidence rather than waived: no installed tool renames a FASTA header.
@@ -79,7 +80,7 @@ Examples
 Those need two prepared assemblies. What that build wrote down needs nothing, and reads
 back with no disk between:
 
->>> from genome.io.chimera import ChimeraDetails, ComponentDetails
+>>> from genome.io.components import ChimeraDetails, ComponentDetails
 >>> ChimeraDetails("__", (ComponentDetails("tinyCe", None, "genes", None),)).components
 ['tinyCe']
 """
@@ -92,7 +93,7 @@ from collections.abc import Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from genome.chimera import (
     ChimeraNamingError,
@@ -102,6 +103,13 @@ from genome.chimera import (
     suffixed,
 )
 from genome.io.completion import RegistrationError, read_record
+from genome.io.components import (
+    ChimeraDetails,
+    ComponentDetails,
+    components_status,
+    merged_annotation_name,
+    read_chimera_details,
+)
 from genome.io.fasta import GenomeFiles, prepare_fasta, read_chrom_sizes
 from genome.io.gtf import (
     GtfAnnotation,
@@ -110,16 +118,7 @@ from genome.io.gtf import (
     register_merged_gtf,
 )
 from genome.io.registration import AssemblyDir, AssemblyRegistration, liulab_data_dir
-
-# The **Source** half, which is where these are written and read. They stay importable
-# from this module, which is where they used to live and where a caller reaching for
-# "what is this chimera made of" still looks first.
-from genome.io.source import COMPONENTS_UNCHANGED as COMPONENTS_UNCHANGED
-from genome.io.source import COMPONENTS_UNKNOWN as COMPONENTS_UNKNOWN
-from genome.io.source import ChimeraDetails as ChimeraDetails
-from genome.io.source import ComponentDetails as ComponentDetails
-from genome.io.source import components_status, is_prepared, merged_annotation_name
-from genome.io.source import read_chimera_details as read_chimera_details
+from genome.io.source import is_prepared
 
 if TYPE_CHECKING:
     from genome.genome import Genome
@@ -449,11 +448,16 @@ class ChimeraBuilder(AssemblyRegistration):
         which is a cold machine and raises with the command that fixes it.
         """
         if component.default_gtf is None:
-            if component.annotations:
+            # `.registered`, and never the registry itself: a registry object is always
+            # truthy, so asking it directly would take this branch for a component that
+            # has nothing registered at all — which contributes nothing and is not an
+            # ambiguity. The four-way state is named here rather than walked.
+            registered = component.annotations.registered
+            if registered:
                 raise AmbiguousDefaultAnnotationError(
-                    f"component {component.assembly!r} has {len(component.annotations)} "
+                    f"component {component.assembly!r} has {len(registered)} "
                     f"annotations registered and no default among them: "
-                    f"{', '.join(component.annotations)}. A component contributes its own "
+                    f"{', '.join(registered)}. A component contributes its own "
                     f"default annotation to a chimera's merged one, so this build cannot "
                     f"tell which set of gene models you meant. Open that component with "
                     f"Genome({component.assembly!r}, default_gtf=<name>) — naming one of "
@@ -462,8 +466,11 @@ class ChimeraBuilder(AssemblyRegistration):
             return None
         # Raises AnnotationNotRegisteredError, naming what registers it, when the default
         # is a name and not yet a file: the same refusal a cold machine gets for a
-        # component it has never prepared, one level down.
-        gtf = component.get_gtf_path(component.default_gtf)
+        # component it has never prepared, one level down. The composition under its own
+        # name; it answers `None` only for a component with no default at all, which the
+        # branch above has already returned on, so the cast states what that branch knows
+        # rather than re-checking it.
+        gtf = cast("Path", component.default_gtf_path)
         record = read_record(gtf.parent)
         return _Contribution(
             annotation=component.default_gtf,
@@ -598,7 +605,7 @@ class ChimeraBuilder(AssemblyRegistration):
         """Return what this build records about itself beyond the files it wrote.
 
         The separator its chromosome names carry, and one entry per component, in the
-        shape :class:`~genome.io.source.ChimeraDetails` reads back — which is where the
+        shape :class:`~genome.io.components.ChimeraDetails` reads back — which is where the
         keys are spelled, so the writing and the reading cannot drift.
         """
         return ChimeraDetails(
@@ -634,7 +641,7 @@ class ChimeraBuilder(AssemblyRegistration):
 def _merged_name(sources: Sequence[MergeSource]) -> str:
     """Return the **Registered name** the merge of ``sources`` is filed under.
 
-    :func:`~genome.io.source.merged_annotation_name` over what contributed, in the
+    :func:`~genome.io.components.merged_annotation_name` over what contributed, in the
     sorted-component order the chimera's own name spells. The join lives there because a
     record read back has to recover the same name from the same parts.
     """

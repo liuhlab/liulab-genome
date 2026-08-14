@@ -41,10 +41,14 @@ jobs:
       - name: mkdocs build --strict
         run: pixi run -e default docs-build
 
-  # The unit lane: everything that does not need an aligner. `--durations=10` because
-  # what sets a parallel lane's wall is one indivisible test, and no worker count goes
-  # below one test — printing it makes that floor visible in every log. A measurement,
-  # not a gate.
+  # The unit lane: everything that does not need an aligner. It cannot select until
+  # samtools, faToTwoBit and twoBitInfo answer (the verb depends on
+  # scripts/require_tools.sh, which CI inherits rather than spelling a second copy of
+  # which binaries the lane needs) — with those three absent, 136 of its 830 tests skip
+  # themselves and the lane reports green having written no FASTA at all.
+  # `--durations=10` because what sets a parallel lane's wall is one indivisible test,
+  # and no worker count goes below one test — printing it makes that floor visible in
+  # every log. A measurement, not a gate.
   test:
     name: test
     runs-on: ubuntu-latest

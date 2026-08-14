@@ -10,10 +10,11 @@ version, running it and saying what installs it are none of this module's busine
 they belong to :mod:`genome.external`, which every tool in the package goes through.
 
 An index writes the same record as every other build in this package (see
-:mod:`genome.io.completion`), carrying the exact command, the parameters, the
-aligner version and the FASTA consumed, so a directory can be explained months
-later. Reading that record is the only thing that ever answers "is this index
-finished?"; no caller consults an index file's mere existence.
+:mod:`genome.io.completion`), carrying the exact command, every tuning knob that
+determined the build, the aligner version and the FASTA consumed, so a directory
+can be explained months later. Reading that record is the only thing that ever
+answers "is this index finished?"; no caller consults an index file's mere
+existence.
 
 That record also pins the **digest of the assembly it was built from**, copied
 from the assembly's own record one directory up, so an assembly re-registered
@@ -29,7 +30,7 @@ Only index construction is implemented here; mapping/alignment is out of scope.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -56,16 +57,6 @@ if TYPE_CHECKING:
 _ASSEMBLY_DIGEST_KEY = "assembly_sha256"
 
 
-def _default_tool(binary: str) -> ExternalTool:
-    """Return the **External tool** an aligner drives when it is handed none.
-
-    A seam rather than a shortcut: an aligner takes its tool, and this is only what it
-    falls back to. Anyone holding one already — a test with a recording stand-in, a
-    caller pointing at a build of STAR that is not on ``PATH`` — passes it instead.
-    """
-    return InstalledTool(binary)
-
-
 class IndexNotBuiltError(RuntimeError):
     """No index has ever been built where one was asked for.
 
@@ -79,8 +70,11 @@ class Aligner(ABC):
     """Base class for an external aligner that can build a genome index.
 
     Subclasses set the class attributes :attr:`name` (the lowercase identifier
-    used in the index path) and :attr:`binary` (the executable on ``PATH``), and
-    implement :meth:`index`, :attr:`_artifact` and :attr:`_build_arguments`.
+    used in the index path), :attr:`binary` (the executable on ``PATH``) and
+    :attr:`_flag_separator` (how its long options join words), and implement
+    :meth:`index`, :attr:`_artifact` and :attr:`_build_arguments`. An :meth:`index`
+    hands :meth:`_build` a way to compose its command line; :meth:`_build` owns the
+    sequence every build shares and composes only when a build is going to run.
 
     An aligner is *given* its **External tool** rather than making one, and constructing
     it runs nothing at all: the binary is located, and its version asked for, the first
@@ -102,10 +96,15 @@ class Aligner(ABC):
     #: Executable name expected on ``PATH`` (e.g. ``"STAR"``). What installs it, and
     #: where its own documentation is, belong to :mod:`genome.external` and not here.
     binary: str
+    #: What this aligner's long options put between words, which is the whole of how
+    #: one tool's flags differ from another's: ``"_"`` leaves a Python keyword alone
+    #: (STAR's ``genomeSAindexNbases``), ``"-"`` hyphenates it (chromap's
+    #: ``min-frag-length``). Read by :meth:`_flags`, the one renderer.
+    _flag_separator: str
 
     def __init__(self, genome: Genome, *, tool: ExternalTool | None = None) -> None:
         self._genome = genome
-        self._tool: ExternalTool = _default_tool(self.binary) if tool is None else tool
+        self._tool: ExternalTool = InstalledTool(self.binary) if tool is None else tool
 
     # -- identity / layout ---------------------------------------------------
 
@@ -208,6 +207,100 @@ class Aligner(ABC):
         """Build the genome index and return :attr:`index_path`."""
 
     # -- shared helpers for subclasses ---------------------------------------
+
+    def _build(
+        self,
+        compose: Callable[[], tuple[Sequence[str], dict[str, Any]]],
+        *,
+        overwrite: bool,
+    ) -> Path:
+        """Run one index build end to end and return :attr:`index_path`.
+
+        The sequence every aligner shares, so that what an :meth:`index` still writes
+        for itself is only what genuinely differs: its command line, its tuning knobs,
+        and the sizing it computes on the way.
+
+        A finished index is handed back untouched unless ``overwrite`` forces a
+        rebuild, and ``compose`` is reached only past that branch. That is why it is
+        a callable rather than a pair already built: composing STAR's command line
+        resolves the annotation that named the index directory, and reusing an index
+        must not come to depend on that annotation still being registered. Past the
+        branch, the earlier record is dropped *before* anything else, so a rebuild
+        that dies — in the tool or in ``compose`` — leaves a directory that reads as
+        interrupted rather than as finished.
+
+        Parameters
+        ----------
+        compose : callable
+            Called with no arguments, once, and only when a build is going to run.
+            Returns the pair ``(args, parameters)``.
+
+            ``args`` is the complete argument list for :attr:`binary` — the flags this
+            aligner spells itself, followed by :meth:`_flags` over the caller's extra
+            keywords.
+
+            ``parameters`` is every tuning knob that determined this build,
+            caller-supplied and package-computed alike, whether or not ``args`` also
+            spells it under the tool's own flag name. This is what the completion
+            record keeps, and it is never what ``args`` is rendered from: the question
+            the field answers is *what was this index built with*, and a knob this
+            package computed — STAR's ``genomeSAindexNbases`` and
+            ``genomeChrBinNbits`` — is recoverable from a dict key and not from
+            grepping a command string.
+
+            Index records written before that contract was settled hold whichever of
+            the two meanings their aligner had then, and are not migrated: nothing
+            branches on a record's ``details``, which is read only to explain a
+            directory to whoever is looking at it.
+        overwrite : bool
+            Rebuild even over a finished index, and over a directory that cannot be
+            trusted rather than raising on it.
+
+        Returns
+        -------
+        pathlib.Path
+            The built index file or prefix — :attr:`index_path`.
+
+        Raises
+        ------
+        genome.io.completion.RegistrationError
+            If the index directory cannot be trusted and ``overwrite`` is false.
+        genome.external.ToolNotFoundError
+            If the binary is not installed; the message names what installs it.
+        RuntimeError
+            If the tool exits non-zero.
+        """
+        if not overwrite and self._registration() is not None:
+            return self.index_path
+
+        self._begin_build()
+
+        args, parameters = compose()
+        self._run(args)
+        self._record_completion(command=[self.binary, *args], parameters=parameters)
+        return self.index_path
+
+    def _flags(self, kwargs: Mapping[str, Any]) -> list[str]:
+        """Render extra keyword arguments as this aligner's long options.
+
+        The one renderer both aligners use. A keyword becomes ``--`` plus its name with
+        underscores replaced by :attr:`_flag_separator`, so ``{"min_frag_length": 30}``
+        is ``["--min-frag-length", "30"]`` for chromap and ``["--min_frag_length",
+        "30"]`` for STAR. A list or tuple value becomes several arguments after the
+        one flag.
+
+        Only the caller's own keywords are rendered. The knobs an :meth:`index` spells
+        itself are written into ``args`` under the tool's flag name, and are recorded
+        rather than rendered — see :meth:`_build`.
+        """
+        flags: list[str] = []
+        for key, value in kwargs.items():
+            flag = f"--{key.replace('_', self._flag_separator)}"
+            if isinstance(value, (list, tuple)):
+                flags += [flag, *(str(item) for item in value)]
+            else:
+                flags += [flag, str(value)]
+        return flags
 
     def _build_command(self, *, overwrite: bool = False) -> str:
         """Return the :class:`~genome.genome.Genome` call that builds this index.
@@ -355,9 +448,10 @@ class Aligner(ABC):
 
         Called last, after the aligner has written every file it is going to:
         the record is the only thing that says a build finished, so writing it
-        any earlier would bless a half-built index. It carries the exact command
-        and the parameters it ran with, the aligner version and the FASTA
-        consumed, so the build can be explained and reproduced later.
+        any earlier would bless a half-built index. It carries the exact command,
+        the knobs the build was determined by (the contract is :meth:`_build`'s),
+        the aligner version and the FASTA consumed, so the build can be explained
+        and reproduced later.
 
         Two things say which reference was indexed, and they answer different
         questions: ``fasta`` is the path — *which file* — and is provenance, while

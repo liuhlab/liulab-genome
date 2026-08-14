@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import subprocess
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,9 +15,10 @@ import pytest
 import requests
 
 from genome import Genome
-from genome.io import download as download_mod
-from genome.io import utils as utils_mod
+from genome.external import ExternalTool, clear_version_cache
+from genome.io import fetch as fetch_mod
 from genome.io.fasta import PREPARATION_TOOLS
+from genome.io.registration import LIULAB_DATA_ENV, assembly_data_dir
 
 
 class NetworkAccessError(RuntimeError):
@@ -32,7 +34,7 @@ _NETWORK_FAMILIES = frozenset({socket.AF_INET, socket.AF_INET6})
 _OFFLINE_HELP = (
     "No test may reach the network. Serve a download offline with the `fake_fetch` "
     "fixture, which replaces the package's one fetch step "
-    "(genome.io.download.fetch_url) with a copy from tests/data. A code path that "
+    "(genome.io.fetch.fetch_url) with a copy from tests/data. A code path that "
     "also validates an assembly name at UCSC needs `requests.head` stubbed as well — "
     "see `head_recorder` in tests/test_download.py."
 )
@@ -50,32 +52,12 @@ def _address_text(address: Any) -> str:
     return str(address)
 
 
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make reaching the network a failure — in every test, without being asked for.
+def install_network_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make reaching the network raise, for as long as ``monkeypatch`` is in force.
 
-    "No test ever touches the network" is a guarantee only if nothing can slip past
-    it, so this is autouse and cuts in two places:
-
-    - ``requests.Session.request``, which every ``requests`` call funnels through: the
-      ``requests.head`` of the UCSC assembly-name check, and the ``requests.get`` inside
-      pooch's HTTP downloader — so a download a test forgot to replace trips here,
-      naming the URL it was about to pull.
-    - ``socket.socket.connect``/``connect_ex`` for the internet address families, as the
-      backstop under everything that is not ``requests``: pooch's ftp and sftp
-      transports, urllib, a dependency phoning home. ``AF_UNIX`` is local IPC rather
-      than the network, and is left alone.
-
-    ``pooch.retrieve`` is deliberately **not** blocked, though it is the package's only
-    transport: it serves a file already sitting at the destination without any network
-    call, which two tests in test_download exercise for real. Cutting at the transport
-    underneath keeps those honest and still catches every download pooch would actually
-    perform.
-
-    Nothing opts out. A test that needs a download stands one in with ``fake_fetch``; a
-    test that needs the UCSC name check stubs ``requests.head`` itself. Both are
-    installed after this one — an autouse fixture is set up first — so they win for the
-    test that asked, and the guard is back for the one that did not.
+    The guard itself, separated from the fixture that applies it to every test, so that
+    work done *outside* a test — a session-scoped fixture preparing a genome — can be
+    held to the same promise instead of being the one hole in it.
     """
     real_connect = socket.socket.connect
     real_connect_ex = socket.socket.connect_ex
@@ -98,6 +80,55 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(requests.sessions.Session, "request", blocked_request)
     monkeypatch.setattr(socket.socket, "connect", blocked_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", blocked_connect_ex)
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make reaching the network a failure — in every test, without being asked for.
+
+    "No test ever touches the network" is a guarantee only if nothing can slip past
+    it, so this is autouse and :func:`install_network_guard` cuts in two places:
+
+    - ``requests.Session.request``, which every ``requests`` call funnels through: the
+      ``requests.head`` of the UCSC assembly-name check, and the ``requests.get`` inside
+      pooch's HTTP downloader — so a download a test forgot to replace trips here,
+      naming the URL it was about to pull.
+    - ``socket.socket.connect``/``connect_ex`` for the internet address families, as the
+      backstop under everything that is not ``requests``: pooch's ftp and sftp
+      transports, urllib, a dependency phoning home. ``AF_UNIX`` is local IPC rather
+      than the network, and is left alone.
+
+    ``pooch.retrieve`` is deliberately **not** blocked, though it is the package's only
+    transport: it serves a file already sitting at the destination without any network
+    call, which two tests in test_download exercise for real. Cutting at the transport
+    underneath keeps those honest and still catches every download pooch would actually
+    perform.
+
+    Nothing opts out. A test that needs a download stands one in with ``fake_fetch``; a
+    test that needs the UCSC name check stubs ``requests.head`` itself. Both are
+    installed after this one — an autouse fixture is set up first — so they win for the
+    test that asked, and the guard is back for the one that did not.
+    """
+    install_network_guard(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def liulab_data(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point the **Data dir** at this test's own directory — in every test, unasked.
+
+    The one place the root is set. An explicit ``cache_dir`` is honoured everywhere, but
+    a test exercising the *default* layout still has to point the root somewhere, and
+    every such test pointing it somewhere itself is how forty-odd copies of one line
+    happened. It is autouse for the same reason :func:`no_network` is: a test that forgot
+    would write into the lab's real reference data, and "no test ever touches it" is a
+    guarantee only if nothing can slip past.
+
+    Request it to name the root — ``liulab_data / "genome" / "hg38"`` is where that
+    assembly lands — and re-point it with ``monkeypatch.setenv`` in the few tests that
+    are *about* the root: one that wants it unset, empty, or somewhere else again.
+    """
+    monkeypatch.setenv(LIULAB_DATA_ENV, str(tmp_path))
+    return tmp_path
 
 
 #: Committed fixture files — small, subsampled real sacCer3 bytes. See tests/data/README.md.
@@ -123,13 +154,26 @@ def touch_newer_than() -> Callable[..., None]:
 
 @pytest.fixture
 def run_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[str]]]:
-    """Record (and suppress) every ``genome.io.utils._run`` call so caching is observable."""
+    """Record (and suppress) every **External tool** invocation, so caching is observable.
+
+    Patches :meth:`genome.external.ExternalTool.run` — the one method every invocation
+    converges on, since :meth:`~genome.external.ExternalTool.run_to` reaches its binary
+    through ``self.run`` rather than around it. One ``setattr`` on the base class
+    therefore catches every tool driven by any adapter anywhere in the package, which is
+    the property ``fetch_url`` is spelled for on the download side.
+
+    Freshness is left running: ``run_to`` decides whether to call ``run`` before this
+    stub is reached, so an empty list still means *the tool was skipped*.
+    """
     calls: list[tuple[str, list[str]]] = []
 
-    def fake_run(name: str, args: Sequence[str]) -> None:
-        calls.append((name, list(args)))
+    def fake_run(
+        self: ExternalTool, args: Sequence[str], *, cwd: Path | None = None, capture: bool = True
+    ) -> str:
+        calls.append((self.name, list(args)))
+        return ""
 
-    monkeypatch.setattr(utils_mod, "_run", fake_run)
+    monkeypatch.setattr(ExternalTool, "run", fake_run)
     return calls
 
 
@@ -146,7 +190,7 @@ class FetchCall:
 
 
 class FakeFetch:
-    """Offline stand-in for ``genome.io.download.fetch_url``.
+    """Offline stand-in for ``genome.io.fetch.fetch_url``.
 
     Copies a file out of ``tests/data`` instead of downloading it, then applies whatever
     pooch processor the caller passed, so a caller sees the same path shape a real fetch
@@ -214,7 +258,7 @@ class FakeFetch:
 def fake_fetch(monkeypatch: pytest.MonkeyPatch) -> FakeFetch:
     """Replace the package's one fetch step with an offline copy from ``tests/data``.
 
-    Every download in the package goes through ``genome.io.download.fetch_url``, so
+    Every download in the package goes through ``genome.io.fetch.fetch_url``, so
     patching that one name takes the whole package offline. Use this fixture for any
     test whose code path would otherwise download something::
 
@@ -227,7 +271,7 @@ def fake_fetch(monkeypatch: pytest.MonkeyPatch) -> FakeFetch:
     See :class:`FakeFetch` for what it records and how to point it at another fixture.
     """
     fake = FakeFetch()
-    monkeypatch.setattr(download_mod, "fetch_url", fake)
+    monkeypatch.setattr(fetch_mod, "fetch_url", fake)
     return fake
 
 
@@ -353,22 +397,82 @@ class ComponentFactory(Protocol):
     """Registers a tiny component assembly and hands back the opened :class:`Genome`."""
 
     def __call__(self, name: str, *, with_annotation: bool = False) -> Genome:
-        """Register ``name`` — and its annotation when asked — under the test's tmp dir."""
+        """Register ``name`` — and its annotation when asked — under the test's data root."""
         ...
 
 
+class PreparedComponents:
+    """Every tiny component registered once, kept to be copied rather than built again.
+
+    Registering one is three native-tool runs over a few kilobytes, and the suite asks
+    for a hundred and sixty-odd of them — the same four files, every time, from committed bytes that
+    cannot differ. So each ``(name, annotated)`` pair is built at most once and the
+    result is handed out as a *copy*: :meth:`directory` returns a path a caller must
+    never write to, and :meth:`copy_into` is how a test gets one of its own.
+
+    Nothing here is shared *mutable* state. The suite runs under ``--dist=load``, where
+    which test runs beside which changes run to run, so a directory two tests both wrote
+    to would fail in whichever order happened to expose it.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._built: dict[tuple[str, bool], Path] = {}
+
+    def directory(self, name: str, *, with_annotation: bool) -> Path:
+        """Return the prepared tree for ``name``, registering it on first ask. Read-only."""
+        key = (name, with_annotation)
+        if key not in self._built:
+            self._built[key] = self._prepare(name, with_annotation=with_annotation)
+        return self._built[key]
+
+    def copy_into(self, destination: Path, name: str, *, with_annotation: bool) -> None:
+        """Copy the prepared tree for ``name`` to ``destination``, mtimes and all."""
+        shutil.copytree(self.directory(name, with_annotation=with_annotation), destination)
+
+    def _prepare(self, name: str, *, with_annotation: bool) -> Path:
+        component = CHIMERA_COMPONENTS[name]
+        path = self._root / ("annotated" if with_annotation else "plain") / name
+        # The build runs before any test's setup, so the autouse guard is not up yet:
+        # stand one up here rather than leave the one registration nobody watches.
+        with pytest.MonkeyPatch.context() as guard:
+            install_network_guard(guard)
+            genome = Genome(name, path_or_url=component.fasta, cache_dir=path, progressbar=False)
+            try:
+                if with_annotation:
+                    assert component.gtf is not None
+                    genome.annotations.register_path(component.gtf, COMPONENT_ANNOTATION)
+            finally:
+                genome.close()
+        return path
+
+
+@pytest.fixture(scope="session")
+def _prepared_components(tmp_path_factory: pytest.TempPathFactory) -> PreparedComponents:
+    """Return the session's :class:`PreparedComponents`, in a directory no test can reach."""
+    return PreparedComponents(tmp_path_factory.mktemp("prepared-components"))
+
+
 @pytest.fixture
-def chimera_component(tmp_path: Path) -> Iterator[ComponentFactory]:
+def chimera_component(_prepared_components: PreparedComponents) -> Iterator[ComponentFactory]:
     """Return a factory that registers a tiny component assembly and opens it.
 
-    Each component lands in its own directory under ``tmp_path`` and is seeded from its
-    committed FASTA, so registration runs the real native tools and the real record path
-    without reaching the network — which the autouse guard would refuse anyway. Every
-    genome opened is closed at teardown::
+    Each component lands where the layout puts one — ``<data root>/genome/<name>/``, the
+    root being wherever it points when the factory is called, which the :func:`liulab_data`
+    fixture makes this test's own directory. So a chimera built from two of them finds
+    them beside itself, which is what the staleness comparison does and what a test
+    placing each component in a directory of its own would never exercise. Every genome
+    opened is closed at teardown::
 
         def test_something(chimera_component):
             worm = chimera_component("tinyCe", with_annotation=True)
             draft = chimera_component("tinyEc")
+
+    The bytes are a copy of a registration :class:`PreparedComponents` ran once for the
+    whole session, not a fresh build: the same four files either way, and the copy is the
+    only thing a test is ever handed. Asking twice for the same component opens what is
+    there rather than laying the prepared bytes back down over it — so a test that
+    re-registers one underneath a chimera sees the new one, as it would on disk.
 
     Skips when the preparation tools are not on ``PATH``, so a test using this needs no
     skip marker of its own. See ``tests/data/README.md`` for what each one exercises.
@@ -381,22 +485,119 @@ def chimera_component(tmp_path: Path) -> Iterator[ComponentFactory]:
 
     def register(name: str, *, with_annotation: bool = False) -> Genome:
         component = CHIMERA_COMPONENTS[name]
-        genome = Genome(
-            name,
-            path_or_url=component.fasta,
-            cache_dir=tmp_path / name,
-            progressbar=False,
-        )
+        if with_annotation and component.gtf is None:
+            raise ValueError(
+                f"{name} ships no annotation; ask for one of "
+                f"{[c.name for c in CHIMERA_COMPONENTS.values() if c.has_gtf]} instead."
+            )
+        destination = assembly_data_dir(name)
+        if not destination.exists():
+            _prepared_components.copy_into(destination, name, with_annotation=with_annotation)
+        genome = Genome(name, path_or_url=component.fasta, progressbar=False)
         opened.append(genome)
-        if with_annotation:
-            if component.gtf is None:
-                raise ValueError(
-                    f"{name} ships no annotation; ask for one of "
-                    f"{[c.name for c in CHIMERA_COMPONENTS.values() if c.has_gtf]} instead."
-                )
-            genome.register_gtf(component.gtf, COMPONENT_ANNOTATION)
+        if with_annotation and COMPONENT_ANNOTATION not in genome.annotations.registered:
+            assert component.gtf is not None
+            genome.annotations.register_path(component.gtf, COMPONENT_ANNOTATION)
         return genome
 
     yield register
     for genome in opened:
         genome.close()
+
+
+# ---------------------------------------------------------------------------------------
+# Stub binaries
+# ---------------------------------------------------------------------------------------
+
+#: Every stub binary in the suite is a link to this one script, which sources the ``.sh``
+#: written beside the link — so the file that gets *executed* is the same file every time
+#: and only the behaviour beside it changes.
+#:
+#: The indirection buys speed, not style. macOS runs a security check the first time a
+#: newly created executable is exec'd, and it is not cheap: measured on this machine, the
+#: first exec of a freshly written ``#!/bin/sh`` stub costs 200-900ms and swings four-fold
+#: between runs, while a second exec of the same file costs ~6ms. Copying known content to
+#: a new path pays it again, so the check is keyed on the file rather than on what is in
+#: it. A link to a file that has already been through it is ~6ms. One scanned file per
+#: worker, therefore, and the stubs a test installs are free.
+#:
+#: ``$0`` is the path that was exec'd — the link, not its target, and under a shebang the
+#: kernel supplies it whether the caller ran the path directly or the shell found it on
+#: ``PATH`` — so a stub's behaviour is looked up under the tool name the test chose.
+#: Sourcing keeps the positional parameters, so a body reading ``"$@"`` sees the tool's
+#: own arguments.
+_STUB_DISPATCHER = '#!/bin/sh\n. "${0}.sh"\n'
+
+
+class StubBinary(Protocol):
+    """Installs one stub binary into a directory, under a name of the caller's choosing."""
+
+    def __call__(self, bin_dir: Path, name: str, body: str, *, executable: bool = True) -> Path:
+        """Write ``name`` into ``bin_dir`` running ``body``, and return the path to it."""
+        ...
+
+
+@pytest.fixture(scope="session")
+def _stub_dispatcher(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Return the one executable every stub binary links to, exec'd once to warm it."""
+    path = tmp_path_factory.mktemp("stub-dispatcher") / "stub"
+    path.write_text(_STUB_DISPATCHER)
+    path.chmod(0o755)
+    Path(f"{path}.sh").write_text("exit 0\n")
+    # Pay the platform's first-exec check here, once per worker, rather than in whichever
+    # test happened to install a stub first.
+    subprocess.run([str(path)], capture_output=True, check=True)
+    return path
+
+
+@pytest.fixture
+def stub_binary(_stub_dispatcher: Path) -> StubBinary:
+    """Return a helper that installs a stub binary — a shell body under a tool's name.
+
+    A stub is a real binary as far as the package and the lane's guard script are
+    concerned: it is found by ``shutil.which``, exec'd by ``PATH`` lookup, and its exit
+    status and streams are its own. That is what makes it usable for the cases a developed
+    machine cannot produce — a tool that runs and refuses to say what it is, one that
+    resolves but cannot be executed::
+
+        def test_something(tmp_path, stub_binary):
+            stub_binary(tmp_path / "bin", "samtools", "echo 'samtools 1.21'")
+
+    Pass ``executable=False`` for a file the shell can find but not run, which is a real
+    file rather than a link: the shell answers 126 for it and never reaches the body.
+    Installing the same name twice replaces it.
+    """
+
+    def install(bin_dir: Path, name: str, body: str, *, executable: bool = True) -> Path:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        path = bin_dir / name
+        path.unlink(missing_ok=True)
+        if not executable:
+            path.write_text(f"#!/bin/sh\n{body}\n")
+            path.chmod(0o644)
+            return path
+        path.symlink_to(_stub_dispatcher)
+        Path(f"{path}.sh").write_text(f"{body}\n")
+        return path
+
+    return install
+
+
+@pytest.fixture(autouse=True)
+def _forget_tool_versions() -> Iterator[None]:
+    """Empty the process-wide version cache around every test — in every test, unasked.
+
+    ``genome.external`` remembers what each binary answered to ``--version`` for the life
+    of the process, keyed on the path it was located at. That is right for a build and
+    unsafe for a suite: many tests here put a stub tool on ``PATH``, and several point
+    ``PATH`` somewhere else entirely, so an answer that outlived its test could be handed
+    to the next one. Under ``--dist=load`` which test that is changes run to run, so the
+    failure would be an order-dependent one — hence autouse, and hence no opt-out.
+
+    Cleared on the way in as well as on the way out, so a test inherits nothing from
+    whatever ran before it, test or not. The saving this gives up is only the *cross*-test
+    one: within a test the four build steps of a chimera still ask each binary once.
+    """
+    clear_version_cache()
+    yield
+    clear_version_cache()

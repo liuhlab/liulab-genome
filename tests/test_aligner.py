@@ -30,9 +30,8 @@ import genome.external as external_mod
 from genome import Genome
 from genome.aligner.aligner import IndexNotBuiltError
 from genome.aligner.chromap import Chromap
-from genome.aligner.chromap import _kwargs_to_flags as _chromap_kwargs_to_flags
 from genome.aligner.mixin import AlignerMixin, _resolve_aligner
-from genome.aligner.star import STAR, _kwargs_to_flags
+from genome.aligner.star import STAR
 from genome.external import RecordingTool, ToolCall, ToolNotFoundError
 from genome.io.completion import (
     RECORD_NAME,
@@ -95,7 +94,9 @@ def _make_genome(
     """Return a minimal Genome-like stub backed by a real FASTA + GTF(s) on disk.
 
     ``gtfs`` maps annotation name -> GTF text; each is written to ``tmp_path`` and
-    exposed through a ``get_gtf_path`` matching :meth:`Genome.get_gtf_path`.
+    exposed through an ``annotations`` registry stand-in whose ``path`` matches
+    :meth:`~genome.io.gtf.AnnotationRegistry.path`. ``default_gtf`` is the first of
+    them, as a genome with one registered annotation and no table flag would have it.
 
     ``chrom_sizes`` replaces the single-chromosome default, which is what lets a
     test dictate the *shape* of a reference — how many sequences and how long —
@@ -121,7 +122,8 @@ def _make_genome(
         assembly_dir=AssemblyDir.locate("tiny"),
         files=types.SimpleNamespace(fasta=fasta),
         chrom_sizes=sizes,
-        get_gtf_path=lambda name: gtf_paths[name],
+        annotations=types.SimpleNamespace(path=lambda name: gtf_paths[name]),
+        default_gtf=next(iter(gtf_paths)),
     )
     return cast("Genome", stub)
 
@@ -181,14 +183,6 @@ def tools() -> _Tools:
     return _Tools()
 
 
-@pytest.fixture
-def data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Point ``LIULAB_DATA`` at this test's own root, so an index dir lands under it."""
-    root = tmp_path / "data"
-    monkeypatch.setenv("LIULAB_DATA", str(root))
-    return root
-
-
 def _star_over(tools: _Tools, tmp_path: Path, chrom_sizes: pd.Series) -> STAR:
     """A stubbed STAR bound to ``toy`` over a genome of exactly ``chrom_sizes``."""
     return STAR(_make_genome(tmp_path, chrom_sizes=chrom_sizes), gtf="toy", tool=tools("STAR"))
@@ -223,13 +217,13 @@ def _record_of(aligner: aligner_mod.Aligner) -> CompletionRecord:
 
 
 @pytest.fixture
-def stub_star(tools: _Tools, data_root: Path, tmp_path: Path) -> STAR:
+def stub_star(tools: _Tools, tmp_path: Path) -> STAR:
     """A STAR (bound to the ``toy`` annotation) driving a recording tool."""
     return STAR(_make_genome(tmp_path), gtf="toy", tool=tools("STAR"))
 
 
 @pytest.fixture
-def stub_chromap(tools: _Tools, data_root: Path, tmp_path: Path) -> Chromap:
+def stub_chromap(tools: _Tools, tmp_path: Path) -> Chromap:
     """A Chromap driving a recording tool (no annotation — chromap needs none)."""
     return Chromap(_make_genome(tmp_path), tool=tools("chromap"))
 
@@ -250,13 +244,27 @@ def building_run(tools: _Tools) -> list[list[str]]:
 # -- pure logic -------------------------------------------------------------
 
 
-def test_kwargs_to_flags_scalar_and_list() -> None:
-    flags = _kwargs_to_flags({"genomeSAindexNbases": 11, "genomeFastaFiles": ["a.fa", "b.fa"]})
+def test_one_renderer_spells_each_aligners_long_options(
+    stub_star: STAR, stub_chromap: Chromap
+) -> None:
+    # There is one renderer, and the only thing an aligner varies is the character its
+    # long options put between words — declared as a class attribute, not as a body of
+    # its own. Handing both the same keywords is what shows the difference is only that.
+    kwargs = {"min_frag_length": 30, "read_format": ["r1", "bc"]}
+
+    star_flags = ["--min_frag_length", "30", "--read_format", "r1", "bc"]
+    chromap_flags = ["--min-frag-length", "30", "--read-format", "r1", "bc"]
+    assert stub_star._flags(kwargs) == star_flags
+    assert stub_chromap._flags(kwargs) == chromap_flags
+
+
+def test_one_renderer_expands_a_list_value_after_its_flag(stub_star: STAR) -> None:
+    flags = stub_star._flags({"genomeSAindexNbases": 11, "genomeFastaFiles": ["a.fa", "b.fa"]})
     assert flags == ["--genomeSAindexNbases", "11", "--genomeFastaFiles", "a.fa", "b.fa"]
 
 
 def test_constructing_an_aligner_runs_nothing(
-    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Nothing on PATH and no interpreter bin/ either: an aligner that resolved its binary
     # in its constructor could not be built here at all, which is what made every test
@@ -270,7 +278,7 @@ def test_constructing_an_aligner_runs_nothing(
 
 
 def test_a_missing_binary_raises_naming_what_installs_it(
-    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # The instructions travel in the error rather than being printed to stderr on the way
     # past: a library that writes to a console its caller may not have is not an error
@@ -290,7 +298,7 @@ def test_a_missing_binary_raises_naming_what_installs_it(
 
 
 def test_a_missing_chromap_raises_naming_what_installs_it(
-    monkeypatch: pytest.MonkeyPatch, data_root: Path, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(external_mod.sys, "executable", str(tmp_path / "bin" / "python"))
@@ -307,9 +315,7 @@ def test_index_dir_is_per_annotation(stub_star: STAR) -> None:
     assert stub_star.index_dir.parts[-4:] == ("genome", "tiny", "index", "star_toy")
 
 
-def test_distinct_gtf_keys_use_distinct_index_dirs(
-    tools: _Tools, data_root: Path, tmp_path: Path
-) -> None:
+def test_distinct_gtf_keys_use_distinct_index_dirs(tools: _Tools, tmp_path: Path) -> None:
     genome = _make_genome(tmp_path, {"a": _TOY_GTF, "b": _TOY_GTF})
     star_a = STAR(genome, gtf="a", tool=tools("STAR"))
     star_b = STAR(genome, gtf="b", tool=tools("STAR"))
@@ -326,11 +332,11 @@ def test_the_index_dir_is_the_one_inside_the_genomes_own_assembly_dir(
     tmp_path: Path,
 ) -> None:
     # An **Index dir** is `<assembly dir>/index/<name>/`, and the assembly dir is the one
-    # this genome was opened in — never one re-derived from the shared data root. A genome
-    # opened somewhere else is the case that tells the two apart, and it is an ordinary
-    # one: every fixture in this suite that registers a component uses it.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
+    # this genome was opened in — never one re-derived from the shared data root. Moving
+    # the root out from under an already-open genome is the case that tells the two apart:
+    # every other test's genome sits under the root, where the two answers agree.
     genome = chimera_component("tinyCe")
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
 
     chromap = Chromap(genome, tool=tools("chromap"))
 
@@ -348,8 +354,8 @@ def test_an_index_pins_the_digest_of_the_assembly_it_was_opened_from(
     # shared root and it reads a record that is not there, so the digest is `None`, the
     # key is omitted, and a reference rebuilt underneath the index stops being noticed —
     # a guard that passes without having been exercised.
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
     genome = chimera_component("tinyCe")
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
     assembly = read_record(genome.fasta_path.parent)
     assert assembly is not None
     assert assembly.sha256 is not None
@@ -460,6 +466,41 @@ def test_the_record_carries_the_exact_command_and_the_parameters(
     assert "genomeSAindexNbases" in parameters
 
 
+def test_star_records_the_knobs_it_spells_itself_and_renders_neither_twice(
+    stub_star: STAR, captured_run: list[list[str]]
+) -> None:
+    # `parameters` is every tuning knob that determined the build — the four STAR writes
+    # under its own flag names included — and the command line is rendered from the
+    # caller's keywords alone. Recording and rendering read the same dict in the old
+    # code; a knob appearing under both spellings is what that confusion looked like.
+    stub_star.index(threads=3, sjdb_overhang=49)
+
+    parameters = _record_of(stub_star).details["parameters"]
+    assert {"threads", "gtf", "sjdb_gtf_file", "sjdb_overhang"} <= set(parameters)
+
+    args = captured_run[0]
+    assert _flag_value(args, "--runThreadN") == "3"
+    assert _flag_value(args, "--sjdbOverhang") == "49"
+    assert not {"--threads", "--gtf", "--sjdb_gtf_file", "--sjdb_overhang"} & set(args)
+
+
+def test_chromap_records_the_knobs_it_spells_itself_and_renders_neither_twice(
+    stub_chromap: Chromap, captured_run: list[list[str]]
+) -> None:
+    # The same contract from the other side: chromap now spells its two minimizer knobs
+    # on the command line and records them, so rendering the recorded dict as well would
+    # emit each flag a second time. `_flag_value` asserts the flag appears exactly once.
+    stub_chromap.index(kmer=20, window=10, min_frag_length=25)
+
+    parameters = _record_of(stub_chromap).details["parameters"]
+    assert parameters == {"kmer": 20, "window": 10, "min_frag_length": 25}
+
+    args = captured_run[0]
+    assert _flag_value(args, "--kmer") == "20"
+    assert _flag_value(args, "--window") == "10"
+    assert _flag_value(args, "--min-frag-length") == "25"
+
+
 def test_the_record_claims_every_file_the_build_left(
     stub_star: STAR, building_run: list[list[str]]
 ) -> None:
@@ -505,6 +546,30 @@ def test_index_is_reused_when_the_record_says_it_finished(
     assert len(building_run) == 1
 
 
+def test_reusing_a_star_index_never_resolves_the_annotation_that_named_it(
+    mixin_genome: Genome, tools: _Tools, tmp_path: Path
+) -> None:
+    # Reuse short-circuits before anything composes a command line, and composing STAR's
+    # is what resolves the annotation — so a finished index is handed back without the
+    # annotation being looked up at all. The template is what could quietly have moved
+    # this: hand `_build` a command line already built and the lookup overtakes the
+    # reuse check, turning a returned path into a raise. It composes lazily so that
+    # cannot happen, and this pins the order from both sides.
+    registered = {"toy": tmp_path / "toy.gtf"}
+    mixin_genome.annotations = types.SimpleNamespace(  # type: ignore[misc]
+        path=registered.__getitem__
+    )
+
+    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
+
+    registered.clear()
+
+    assert mixin_genome.build_star_index("toy", tool=tools("STAR")) == built
+    assert len(tools.calls) == 1  # reused: STAR was not run a second time
+    # The read-only way in never composed a command line to begin with.
+    assert mixin_genome.get_star_index("toy") == built
+
+
 def test_overwrite_rebuilds_a_finished_index(
     stub_star: STAR, building_run: list[list[str]]
 ) -> None:
@@ -540,7 +605,7 @@ def test_overwrite_rebuilds_over_an_interrupted_build(
 
 
 def test_a_rebuild_that_dies_leaves_nothing_vouching_for_the_directory(
-    stub_star: STAR, tools: _Tools, data_root: Path, tmp_path: Path, building_run: list[list[str]]
+    stub_star: STAR, tools: _Tools, tmp_path: Path, building_run: list[list[str]]
 ) -> None:
     stub_star.index()
 
@@ -588,7 +653,6 @@ def test_index_emits_sjdb_flags_from_bound_gtf(
 )
 def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
     tools: _Tools,
-    data_root: Path,
     tmp_path: Path,
     captured_run: list[list[str]],
     components: tuple[str, ...],
@@ -608,7 +672,7 @@ def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
 
 
 def test_chr_bin_nbits_is_passed_even_when_it_lands_on_stars_own_default(
-    tools: _Tools, data_root: Path, tmp_path: Path, captured_run: list[list[str]]
+    tools: _Tools, tmp_path: Path, captured_run: list[list[str]]
 ) -> None:
     # Two 1 Gb sequences: the recommendation is ~29.9, and the clause is a min, so 18
     # stands. It is still passed, so a record's parameters mean one thing either way.
@@ -622,7 +686,6 @@ def test_chr_bin_nbits_is_passed_even_when_it_lands_on_stars_own_default(
 @pytest.mark.parametrize(("sjdb_overhang", "expected"), [(100, 6), (149, 7)])
 def test_chr_bin_nbits_never_drops_below_one_read(
     tools: _Tools,
-    data_root: Path,
     tmp_path: Path,
     captured_run: list[list[str]],
     sjdb_overhang: int,
@@ -652,25 +715,21 @@ def test_an_explicit_chr_bin_nbits_wins_over_the_computed_one(
 
 
 @pytest.fixture
-def mixin_genome(
-    monkeypatch: pytest.MonkeyPatch, tools: _Tools, data_root: Path, tmp_path: Path
-) -> Genome:
-    """A Genome-like object carrying :class:`AlignerMixin`, with the binaries stood in for.
+def mixin_genome(tmp_path: Path) -> Genome:
+    """A Genome-like object carrying :class:`AlignerMixin`.
 
-    The one place a patch is still needed: the mixin builds the aligner itself, so there
-    is nowhere to hand it a tool. What is replaced is the fallback an aligner uses when
-    it is given none — one name, for both aligners, rather than a resolution and a
-    version per class.
+    No patch anywhere: the mixin forwards ``tool=`` to the aligner it builds, so a test
+    that wants a recording stand-in hands one to the ``build_*`` call. Constructing an
+    aligner without one still runs nothing, which is why the read-only entry points here
+    need no tool at all.
     """
-    monkeypatch.setattr(aligner_mod, "_default_tool", tools)
-
     stub = _make_genome(tmp_path)
 
     class _MixinGenome(AlignerMixin):
         pass
 
     genome = _MixinGenome()
-    for attr in ("assembly", "assembly_dir", "files", "chrom_sizes", "get_gtf_path"):
+    for attr in ("assembly", "assembly_dir", "files", "chrom_sizes", "annotations", "default_gtf"):
         setattr(genome, attr, getattr(stub, attr))
     return cast("Genome", genome)
 
@@ -685,18 +744,80 @@ def test_resolve_aligner_unknown_raises() -> None:
         _resolve_aligner("bowtie")
 
 
-def test_get_index_returns_built_index_path(
-    mixin_genome: Genome, captured_run: list[list[str]]
-) -> None:
-    built = mixin_genome.build_star_index("toy")
+def test_get_index_returns_built_index_path(mixin_genome: Genome, tools: _Tools) -> None:
+    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
     assert mixin_genome.get_index("star", gtf="toy") == built
 
 
-def test_get_star_index_matches_generic_get_index(
-    mixin_genome: Genome, captured_run: list[list[str]]
-) -> None:
-    mixin_genome.build_star_index("toy")
+def test_get_star_index_matches_generic_get_index(mixin_genome: Genome, tools: _Tools) -> None:
+    mixin_genome.build_star_index("toy", tool=tools("STAR"))
     assert mixin_genome.get_star_index("toy") == mixin_genome.get_index("star", gtf="toy")
+
+
+def test_build_star_index_falls_back_to_the_default_annotation(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # The everyday call: a chimera, and any assembly the table flags one for, already
+    # carries a default, so spelling it out at the call site said nothing the genome did
+    # not already know. The index it names is the same one either way.
+    named = mixin_genome.build_star_index("toy", tool=tools("STAR"))
+
+    defaulted = mixin_genome.build_star_index(tool=tools("STAR"))
+
+    assert mixin_genome.default_gtf == "toy"
+    assert defaulted == named
+    assert defaulted.name == "star_toy"
+    assert len(tools.calls) == 1  # the second call reused the first's finished index
+
+
+def test_build_star_index_with_no_default_names_both_ways_to_supply_one(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # A STAR index is built against one annotation and cannot be built against none, so
+    # the refusal is a ValueError naming the per-call fix and the once-and-for-all one.
+    mixin_genome.default_gtf = None  # type: ignore[misc]
+
+    with pytest.raises(ValueError, match="no default") as excinfo:
+        mixin_genome.build_star_index(tool=tools("STAR"))
+
+    message = str(excinfo.value)
+    assert "build_star_index(gtf=<name>)" in message
+    assert "default_gtf=<name>" in message
+    assert tools.calls == []  # nothing ran
+
+
+def test_build_chromap_index_needs_no_annotation_not_even_a_default(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # The other half of the same rule: chromap carries no annotation at all, so a genome
+    # with no default indexes for it perfectly well.
+    mixin_genome.default_gtf = None  # type: ignore[misc]
+
+    assert mixin_genome.build_chromap_index(tool=tools("chromap")).name == "chromap.index"
+
+
+def test_the_mixin_forwards_the_tool_to_the_aligner_it_builds(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # The seam `Aligner.__init__` offers is open the whole way from `Genome`. It used to
+    # be closed here — the mixin built the aligner and handed it nothing — so the only
+    # way to stand a binary in was to patch the fallback out from under it.
+    mixin_genome.build_star_index("toy", tool=tools("STAR"))
+    mixin_genome.build_chromap_index(tool=tools("chromap"))
+
+    assert len(tools.calls) == 2
+    assert "genomeGenerate" in tools.calls[0]
+    assert "--build-index" in tools.calls[1]
+
+
+def test_get_index_takes_a_tool_rather_than_reading_it_as_a_selector(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
+    # `get_index`'s remaining keywords pin down *which* index; `tool` is not one of them
+    # and is spelled out so it cannot be mistaken for one.
+    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
+
+    assert mixin_genome.get_index("star", gtf="toy", tool=tools("STAR")) == built
 
 
 def test_get_index_raises_before_build(mixin_genome: Genome) -> None:
@@ -713,8 +834,7 @@ def test_get_index_unknown_aligner_raises(mixin_genome: Genome) -> None:
 
 
 @_needs_star
-def test_real_star_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+def test_real_star_index_builds(tmp_path: Path) -> None:
     star = STAR(_make_genome(tmp_path), gtf="toy")
 
     out = star.index(threads=2)
@@ -745,8 +865,7 @@ def test_real_star_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
 
 @_needs_star
-def test_real_star_index_with_gtf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+def test_real_star_index_with_gtf(tmp_path: Path) -> None:
     star = STAR(_make_genome(tmp_path), gtf="toy")
 
     out = star.index(sjdb_overhang=49, threads=2)
@@ -770,12 +889,6 @@ def test_real_star_index_with_gtf(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
 
 # -- pure logic -------------------------------------------------------------
-
-
-def test_chromap_kwargs_to_flags_hyphenates_and_expands_lists() -> None:
-    # chromap's long options are hyphenated, so underscores become hyphens.
-    flags = _chromap_kwargs_to_flags({"min_frag_length": 30, "read_format": ["r1", "bc"]})
-    assert flags == ["--min-frag-length", "30", "--read-format", "r1", "bc"]
 
 
 def test_chromap_index_dir_is_per_assembly(stub_chromap: Chromap) -> None:
@@ -878,16 +991,14 @@ def test_resolve_aligner_includes_chromap() -> None:
     assert _resolve_aligner("CHROMAP") is Chromap
 
 
-def test_build_and_get_chromap_index(mixin_genome: Genome, captured_run: list[list[str]]) -> None:
-    built = mixin_genome.build_chromap_index()
+def test_build_and_get_chromap_index(mixin_genome: Genome, tools: _Tools) -> None:
+    built = mixin_genome.build_chromap_index(tool=tools("chromap"))
     assert mixin_genome.get_index("chromap") == built
     assert built.name == "chromap.index"
 
 
-def test_get_chromap_index_matches_generic_get_index(
-    mixin_genome: Genome, captured_run: list[list[str]]
-) -> None:
-    mixin_genome.build_chromap_index()
+def test_get_chromap_index_matches_generic_get_index(mixin_genome: Genome, tools: _Tools) -> None:
+    mixin_genome.build_chromap_index(tool=tools("chromap"))
     assert mixin_genome.get_chromap_index() == mixin_genome.get_index("chromap")
 
 
@@ -900,8 +1011,7 @@ def test_get_chromap_index_raises_before_build(mixin_genome: Genome) -> None:
 
 
 @_needs_chromap
-def test_real_chromap_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+def test_real_chromap_index_builds(tmp_path: Path) -> None:
     chromap = Chromap(_make_genome(tmp_path))
 
     out = chromap.index()
@@ -918,6 +1028,24 @@ def test_real_chromap_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     record = _record_of(chromap)
     assert record.files["chromap.index"] == out.stat().st_size
     assert record.tool_versions["chromap"] == chromap.version
+
+
+@_needs_chromap
+def test_real_chromap_accepts_the_minimizer_knobs_it_now_spells_itself(tmp_path: Path) -> None:
+    # kmer and window moved out of the rendered keywords and onto the command line, so
+    # a real chromap is what says the two spellings it is given are ones it accepts —
+    # the stubbed tests assert the string and would pass on a flag chromap rejects.
+    chromap = Chromap(_make_genome(tmp_path))
+
+    out = chromap.index(kmer=17, window=7)
+
+    assert out.is_file()
+    assert out.stat().st_size > 0
+
+    record = _record_of(chromap)
+    assert record.details["parameters"] == {"kmer": 17, "window": 7}
+    assert _flag_value(record.details["command"], "--kmer") == "17"
+    assert _flag_value(record.details["command"], "--window") == "7"
 
 
 # ===========================================================================
@@ -1135,13 +1263,11 @@ _CHIMERA_GENES = 13
 
 
 @pytest.fixture
-def everyday_chimera(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> Iterator[Genome]:
+def everyday_chimera(chimera_component: ComponentFactory) -> Iterator[Genome]:
     """The everyday chimera, built for real, with its merged annotation registered.
 
-    ``LIULAB_DATA`` is pointed at the test's own root so the components and the chimera
-    land beside each other, which is what a chimera's staleness comparison looks for.
+    The components and the chimera land beside each other under the test's own root,
+    which is what a chimera's staleness comparison looks for.
     Where the *index* goes no longer depends on it: an index dir and the assembly digest
     it pins both come from the genome's own **Assembly dir**, so a chimera built anywhere
     indexes into itself.
@@ -1149,7 +1275,6 @@ def everyday_chimera(
     Skips with :func:`chimera_component` when the preparation tools are absent, so a
     test using this needs no marker of its own beyond the aligner it drives.
     """
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
     components = [chimera_component(name, with_annotation=True) for name in CHIMERA_EVERYDAY]
     with Genome.chimera(*components) as built:
         yield built

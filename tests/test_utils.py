@@ -1,33 +1,25 @@
-"""Tests for genome.io.utils — checksums, and the name-addressed run over an External tool.
+"""Tests for genome.io.utils — checksums and decompression, and nothing that runs a tool.
 
-None of these need the native binaries: ``_run``'s success path is exercised by
-the end-to-end tests in test_fasta, and here ``_run`` is either stubbed (for the
-caching tests, via the ``run_calls`` fixture) or pointed at the interpreter to
-drive its error handling.
-
-What ``_run`` and ``_run_to`` are *over* — resolution, the two run flavours, the failure
-message and the freshness rule — is tested once in test_external, against
-``genome.external``. What is asserted here is only that this layer reaches it.
+None of these need the native binaries, because this module no longer reaches one.
+Running an **External tool** — resolution, the two run flavours, the failure message and
+the freshness rule — is tested once in test_external against ``genome.external``, and
+the preparation steps that drive one are tested in test_fasta.
 """
 
 from __future__ import annotations
 
 import gzip
 import hashlib
-import sys
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from genome.external import ToolNotFoundError
+from genome.io import utils
 from genome.io.utils import (
     ChecksumMismatchError,
     _gunzip,
-    _run,
-    _run_to,
     sha256_file,
 )
 
@@ -97,76 +89,11 @@ def test_gunzip_round_trips(tmp_path: Path) -> None:
     assert dest.read_bytes() == payload
 
 
-def test_run_to_runs_when_output_missing(
-    tmp_path: Path, run_calls: list[tuple[str, list[str]]]
-) -> None:
-    src = tmp_path / "in"
-    src.write_text("x")
-    out = tmp_path / "out"
-
-    result = _run_to("tool", ["build", str(out)], out, [src])
-
-    assert result == out
-    assert run_calls == [("tool", ["build", str(out)])]
-
-
-def test_run_to_skips_when_output_fresh(
-    tmp_path: Path,
-    run_calls: list[tuple[str, list[str]]],
-    touch_newer_than: Callable[..., None],
-) -> None:
-    src = tmp_path / "in"
-    src.write_text("x")
-    out = tmp_path / "out"
-    out.write_text("cached")
-    touch_newer_than(out, src)
-
-    result = _run_to("tool", ["build"], out, [src])
-
-    assert result == out
-    assert run_calls == []  # served from the fresh cache
-
-
-def test_run_to_overwrite_forces_run(
-    tmp_path: Path,
-    run_calls: list[tuple[str, list[str]]],
-    touch_newer_than: Callable[..., None],
-) -> None:
-    src = tmp_path / "in"
-    src.write_text("x")
-    out = tmp_path / "out"
-    out.write_text("cached")
-    touch_newer_than(out, src)
-
-    _run_to("tool", ["build"], out, [src], overwrite=True)
-
-    assert run_calls == [("tool", ["build"])]
-
-
-def test_run_to_reruns_when_input_is_newer(
-    tmp_path: Path,
-    run_calls: list[tuple[str, list[str]]],
-    touch_newer_than: Callable[..., None],
-) -> None:
-    src = tmp_path / "in"
-    src.write_text("x")
-    out = tmp_path / "out"
-    out.write_text("cached")
-    touch_newer_than(src, out)  # input regenerated after the output
-
-    _run_to("tool", ["build"], out, [src])
-
-    assert run_calls == [("tool", ["build"])]
-
-
-def test_run_raises_when_tool_missing() -> None:
-    with pytest.raises(ToolNotFoundError, match="pixi add"):
-        _run("definitely-not-a-real-tool-xyz", [])
-
-
-def test_run_wraps_nonzero_exit_in_runtime_error() -> None:
-    # Name the interpreter as the tool — an absolute path resolves as itself — and run a
-    # snippet that fails with known stderr; _run captures, so that stderr must reach the
-    # RuntimeError rather than being swallowed.
-    with pytest.raises(RuntimeError, match="boom"):
-        _run(sys.executable, ["-c", "import sys; sys.stderr.write('boom'); sys.exit(1)"])
+def test_this_layer_carries_no_run_of_its_own() -> None:
+    # The fold, asserted. `_run` and `_run_to` were two lines each over
+    # `ExternalTool.run`/`run_to` — a name-addressed restatement that existed so a test
+    # could patch a module global, and that kept a second copy of the freshness branch
+    # in a module whose subject is checksums. `io/fasta` holds the tool now, so the copy
+    # is gone; this keeps the layer from growing back.
+    assert not hasattr(utils, "_run")
+    assert not hasattr(utils, "_run_to")

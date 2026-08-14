@@ -13,6 +13,7 @@ through ``**kwargs``.
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +39,9 @@ class Chromap(Aligner):
 
     name = "chromap"
     binary = "chromap"
+    # chromap's long options are hyphenated, so a Python keyword's underscores become
+    # hyphens on the way to the command line.
+    _flag_separator = "-"
 
     @property
     def _artifact(self) -> Path:
@@ -98,19 +102,18 @@ class Chromap(Aligner):
         RuntimeError
             If chromap exits non-zero.
         """
-        if not overwrite and self._registration() is not None:
-            return self.index_path
+        compose = partial(self._compose, kmer=kmer, window=window, **kwargs)
+        return self._build(compose, overwrite=overwrite)
 
-        self._begin_build()
+    def _compose(
+        self, *, kmer: int | None, window: int | None, **kwargs: Any
+    ) -> tuple[list[str], dict[str, Any]]:
+        """Return the ``--build-index`` command line, and the knobs that determined it.
 
+        Reached only when a build is going to run — see
+        :meth:`~genome.aligner.aligner.Aligner._build`.
+        """
         fasta = self._genome.files.fasta
-
-        parameters: dict[str, Any] = {}
-        if kmer is not None:
-            parameters["kmer"] = kmer
-        if window is not None:
-            parameters["window"] = window
-        parameters.update(kwargs)
 
         args: list[str] = [
             "--build-index",
@@ -119,25 +122,19 @@ class Chromap(Aligner):
             "--output",
             str(self._artifact),
         ]
-        args += _kwargs_to_flags(parameters)
 
-        self._run(args)
-        self._record_completion(command=[self.binary, *args], parameters=parameters)
-        return self.index_path
+        # The two named knobs are spelled here and recorded below, rather than rendered
+        # out of what is recorded: chromap has no default of this package's choosing, so
+        # each reaches the command line only when the caller asked for it.
+        parameters: dict[str, Any] = {}
+        if kmer is not None:
+            parameters["kmer"] = kmer
+            args += ["--kmer", str(kmer)]
+        if window is not None:
+            parameters["window"] = window
+            args += ["--window", str(window)]
+        parameters.update(kwargs)
 
+        args += self._flags(kwargs)
 
-def _kwargs_to_flags(kwargs: dict[str, Any]) -> list[str]:
-    """Turn ``{"min_frag_length": 30}`` into ``["--min-frag-length", "30"]``.
-
-    chromap's long options are hyphenated, so underscores in keyword names become
-    hyphens. List/tuple values become multiple space-separated arguments after the
-    flag.
-    """
-    flags: list[str] = []
-    for key, value in kwargs.items():
-        flag = f"--{key.replace('_', '-')}"
-        if isinstance(value, (list, tuple)):
-            flags += [flag, *(str(item) for item in value)]
-        else:
-            flags += [flag, str(value)]
-    return flags
+        return args, parameters

@@ -27,12 +27,16 @@ substitute for *module*.
 - [Sequence](./docs/context/sequence.md) — covers `seq.py`: bases as a typed string, and the
   transforms that keep the type
 - [Assembly](./docs/context/assembly.md) — covers `genome.py`, `metadata.py`, `external.py`,
-  `chimera.py`, `io/{source,chimera,download,registration,fasta,twobit,utils}.py`: which reference
-  this is, where its files live, and how a locus becomes bases
+  `chimera.py`, `io/{source,components,fetch,chimera,download,registration,fasta,twobit,utils}.py`:
+  which reference this is, where its files live, and how a locus becomes bases
 - [Annotation](./docs/context/annotation.md) — covers `io/gtf.py` and the GTF registry on `Genome`:
   what a GTF declares over one assembly, and the name it is addressed by
 - [Index](./docs/context/index.md) — covers `aligner/*`: what one external mapper needs built before
   it can map, and how a finished build is told from an abandoned one
+
+`io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
+It is the return types the API hands back and the CLI renders, so it carries the vocabulary of
+whichever context asked.
 
 `cli.py` is covered by no context — the map covers what carries domain vocabulary, not the whole tree.
 
