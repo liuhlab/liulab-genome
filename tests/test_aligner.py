@@ -37,6 +37,8 @@ from genome.io.completion import (
     read_record,
 )
 
+from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY
+
 if TYPE_CHECKING:
     from genome.genome import Genome
 
@@ -59,11 +61,20 @@ _TOY_GTF = (
 _RETIRED_FILES = (".success", "star.index.json", "chromap.index.json")
 
 
-def _make_genome(tmp_path: Path, gtfs: dict[str, str] | None = None) -> Genome:
+def _make_genome(
+    tmp_path: Path,
+    gtfs: dict[str, str] | None = None,
+    chrom_sizes: pd.Series | None = None,
+) -> Genome:
     """Return a minimal Genome-like stub backed by a real FASTA + GTF(s) on disk.
 
     ``gtfs`` maps annotation name -> GTF text; each is written to ``tmp_path`` and
     exposed through a ``get_gtf_path`` matching :meth:`Genome.get_gtf_path`.
+
+    ``chrom_sizes`` replaces the single-chromosome default, which is what lets a
+    test dictate the *shape* of a reference — how many sequences and how long —
+    without writing one, since the index parameters STAR is given are computed
+    from those lengths and from nothing else.
     """
     fasta = tmp_path / "tiny.fa"
     fasta.write_text(">chr1\n" + _SEQ + "\n")
@@ -75,13 +86,43 @@ def _make_genome(tmp_path: Path, gtfs: dict[str, str] | None = None) -> Genome:
         path.write_text(content)
         gtf_paths[name] = path
 
+    sizes = pd.Series({"chr1": len(_SEQ)}) if chrom_sizes is None else chrom_sizes
     stub = types.SimpleNamespace(
         assembly="tiny",
         files=types.SimpleNamespace(fasta=fasta),
-        chrom_sizes=pd.Series({"chr1": len(_SEQ)}),
+        chrom_sizes=sizes,
         get_gtf_path=lambda name: gtf_paths[name],
     )
     return cast("Genome", stub)
+
+
+def _star_over(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, chrom_sizes: pd.Series) -> STAR:
+    """A stubbed STAR bound to ``toy`` over a genome of exactly ``chrom_sizes``."""
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(STAR, "_detect_version", lambda _self: "0.0-test")
+    return STAR(_make_genome(tmp_path, chrom_sizes=chrom_sizes), gtf="toy")
+
+
+def _shape_of(*components: str) -> pd.Series:
+    """The ``chrom_sizes`` of a genome shaped like those tiny components together.
+
+    Only the sequence count and the total length reach the parameters under test, so
+    the names here are placeholders — what a chimera calls its sequences is the naming
+    contract's business, not this one's.
+    """
+    lengths = [
+        length
+        for component in components
+        for length in CHIMERA_COMPONENTS[component].lengths.values()
+    ]
+    return pd.Series(lengths, index=[f"seq{i}" for i in range(len(lengths))])
+
+
+def _flag_value(args: Sequence[str], flag: str) -> str:
+    """The single value ``flag`` was given in ``args``, asserting it was given once."""
+    assert list(args).count(flag) == 1, f"{flag} appears {list(args).count(flag)}x in {args}"
+    return args[list(args).index(flag) + 1]
 
 
 def _record_of(aligner: aligner_mod.Aligner) -> CompletionRecord:
@@ -399,6 +440,77 @@ def test_index_emits_sjdb_flags_from_bound_gtf(
     assert parameters["sjdb_overhang"] == 49
 
 
+# -- index parameters computed from the reference's shape -------------------
+
+
+@pytest.mark.parametrize(
+    ("components", "sequences", "total", "expected"),
+    [
+        (CHIMERA_EVERYDAY, 9, 22_750, 11),
+        (("tinyCe",), 3, 7_150, 11),
+    ],
+    ids=["everyday-chimera", "one-component"],
+)
+def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_run: list[list[str]],
+    components: tuple[str, ...],
+    sequences: int,
+    total: int,
+    expected: int,
+) -> None:
+    # The shapes being asked about, spelled out so the expected value is readable.
+    sizes = _shape_of(*components)
+    assert (len(sizes), int(sizes.sum())) == (sequences, total)
+
+    star = _star_over(monkeypatch, tmp_path, sizes)
+    star.index()
+
+    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == str(expected)
+    assert _record_of(star).details["parameters"]["genomeChrBinNbits"] == expected
+
+
+def test_chr_bin_nbits_is_passed_even_when_it_lands_on_stars_own_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, captured_run: list[list[str]]
+) -> None:
+    # Two 1 Gb sequences: the recommendation is ~29.9, and the clause is a min, so 18
+    # stands. It is still passed, so a record's parameters mean one thing either way.
+    star = _star_over(monkeypatch, tmp_path, pd.Series({"chr1": 10**9, "chr2": 10**9}))
+    star.index()
+
+    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == "18"
+    assert _record_of(star).details["parameters"]["genomeChrBinNbits"] == 18
+
+
+@pytest.mark.parametrize(("sjdb_overhang", "expected"), [(100, 6), (149, 7)])
+def test_chr_bin_nbits_never_drops_below_one_read(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    captured_run: list[list[str]],
+    sjdb_overhang: int,
+    expected: int,
+) -> None:
+    # 40 scaffolds of 50 bp: the average sequence is far shorter than a read, so the
+    # read length is what the bin is sized from. log2(101) -> 6 and log2(150) -> 7,
+    # never the 5 that log2(50) would give — the read length being sjdb_overhang + 1.
+    star = _star_over(monkeypatch, tmp_path, pd.Series({f"scaffold{i}": 50 for i in range(40)}))
+    star.index(sjdb_overhang=sjdb_overhang)
+
+    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == str(expected)
+    assert _record_of(star).details["parameters"]["genomeChrBinNbits"] == expected
+
+
+def test_an_explicit_chr_bin_nbits_wins_over_the_computed_one(
+    stub_star: STAR, captured_run: list[list[str]]
+) -> None:
+    # This genome would compute 13; what the caller asked for is what STAR is given.
+    stub_star.index(genomeChrBinNbits=16)
+
+    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == "16"
+    assert _record_of(stub_star).details["parameters"]["genomeChrBinNbits"] == 16
+
+
 # -- mixin: build/get index entry points ------------------------------------
 
 
@@ -476,6 +588,18 @@ def test_real_star_index_builds(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     record = _record_of(star)
     assert {"SA", "SAindex", "Genome"} <= set(record.files)
     assert record.tool_versions["STAR"] == star.version
+
+    # The command a real STAR is given carries the bin size computed for this
+    # fixture's shape — 10 kb in one sequence asks for 2^13, not STAR's 2^18 — and
+    # a real STAR accepts it, which is what the stubbed tests cannot show.
+    assert record.details["parameters"]["genomeChrBinNbits"] == 13
+    assert _flag_value(record.details["command"], "--genomeChrBinNbits") == "13"
+    echoed = [
+        line.split("\t")[1]
+        for line in (out / "genomeParameters.txt").read_text().splitlines()
+        if line.startswith("genomeChrBinNbits\t")
+    ]
+    assert echoed == ["13"]
 
 
 @pytest.mark.skipif(not _STAR_PRESENT, reason="STAR not on PATH")

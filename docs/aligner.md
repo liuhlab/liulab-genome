@@ -236,15 +236,19 @@ g.build_star_index(
 ```
 
 - **`sjdb_overhang`** (default `100`) — set to `read_length - 1` for best
-  splice-junction sensitivity.
+  splice-junction sensitivity. It is also the only read length the index build
+  knows, so the bin size below is scaled against it.
 - **`threads`** (default `1`) — build threads.
 - **`overwrite`** (default `False`) — a finished index is **cached and reused**;
   pass `overwrite=True` to force a rebuild, and to rebuild over a directory that
   cannot be trusted (see below).
 - **arbitrary STAR flags** — pass any `genomeGenerate` option by its STAR name
-  without the leading `--` (e.g. `genomeSAindexNbases=11`). For small genomes the
-  suffix-array index size (`genomeSAindexNbases`) is auto-reduced unless you set
-  it yourself.
+  without the leading `--` (e.g. `genomeSAindexNbases=11`). Two of them are sized
+  from the assembly instead of being left to STAR's defaults, unless you set them
+  yourself: the suffix-array index size (`genomeSAindexNbases`), reduced for a
+  small genome, and the genome-storage bin size (`genomeChrBinNbits`), reduced
+  for a reference of many short sequences — where STAR's default pads every
+  sequence to a multiple of 262,144 bases and says nothing about it.
 
 The call returns the path to the built genome directory:
 
