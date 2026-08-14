@@ -1,0 +1,17 @@
+I	ensGene.v101	transcript	207	2309	.	-	.	gene_id "YBL111C"; transcript_id "YBL111C_mRNA";  gene_name "YBL111C";
+I	ensGene.v101	exon	207	1416	.	-	.	gene_id "YBL111C"; transcript_id "YBL111C_mRNA"; exon_number "2"; exon_id "YBL111C_mRNA.2"; gene_name "YBL111C";
+I	ensGene.v101	CDS	210	1416	.	-	1	gene_id "YBL111C"; transcript_id "YBL111C_mRNA"; exon_number "2"; exon_id "YBL111C_mRNA.2"; gene_name "YBL111C";
+I	ensGene.v101	exon	1516	2309	.	-	.	gene_id "YBL111C"; transcript_id "YBL111C_mRNA"; exon_number "1"; exon_id "YBL111C_mRNA.1"; gene_name "YBL111C";
+I	ensGene.v101	CDS	1516	2309	.	-	0	gene_id "YBL111C"; transcript_id "YBL111C_mRNA"; exon_number "1"; exon_id "YBL111C_mRNA.1"; gene_name "YBL111C";
+I	ensGene.v101	start_codon	2307	2309	.	-	0	gene_id "YBL111C"; transcript_id "YBL111C_mRNA"; exon_number "1"; exon_id "YBL111C_mRNA.1"; gene_name "YBL111C";
+I	ensGene.v101	stop_codon	207	209	.	-	0	gene_id "YBL111C"; transcript_id "YBL111C_mRNA"; exon_number "2"; exon_id "YBL111C_mRNA.2"; gene_name "YBL111C";
+II	ensGene.v101	transcript	179	2026	.	-	.	gene_id "YCL073C"; transcript_id "YCL073C_mRNA";  gene_name "YCL073C";
+II	ensGene.v101	exon	179	2026	.	-	.	gene_id "YCL073C"; transcript_id "YCL073C_mRNA"; exon_number "1"; exon_id "YCL073C_mRNA.1"; gene_name "YCL073C";
+II	ensGene.v101	CDS	182	2026	.	-	0	gene_id "YCL073C"; transcript_id "YCL073C_mRNA"; exon_number "1"; exon_id "YCL073C_mRNA.1"; gene_name "YCL073C";
+II	ensGene.v101	start_codon	2024	2026	.	-	0	gene_id "YCL073C"; transcript_id "YCL073C_mRNA"; exon_number "1"; exon_id "YCL073C_mRNA.1"; gene_name "YCL073C";
+II	ensGene.v101	stop_codon	179	181	.	-	0	gene_id "YCL073C"; transcript_id "YCL073C_mRNA"; exon_number "1"; exon_id "YCL073C_mRNA.1"; gene_name "YCL073C";
+MtDNA	ensGene.v101	transcript	335	2116	.	-	.	gene_id "YAL067C"; transcript_id "YAL067C_mRNA";  gene_name "YAL067C";
+MtDNA	ensGene.v101	exon	335	2116	.	-	.	gene_id "YAL067C"; transcript_id "YAL067C_mRNA"; exon_number "1"; exon_id "YAL067C_mRNA.1"; gene_name "YAL067C";
+MtDNA	ensGene.v101	CDS	338	2116	.	-	0	gene_id "YAL067C"; transcript_id "YAL067C_mRNA"; exon_number "1"; exon_id "YAL067C_mRNA.1"; gene_name "YAL067C";
+MtDNA	ensGene.v101	start_codon	2114	2116	.	-	0	gene_id "YAL067C"; transcript_id "YAL067C_mRNA"; exon_number "1"; exon_id "YAL067C_mRNA.1"; gene_name "YAL067C";
+MtDNA	ensGene.v101	stop_codon	335	337	.	-	0	gene_id "YAL067C"; transcript_id "YAL067C_mRNA"; exon_number "1"; exon_id "YAL067C_mRNA.1"; gene_name "YAL067C";

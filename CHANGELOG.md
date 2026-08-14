@@ -55,7 +55,10 @@ preparation is no longer indistinguishable from a finished one.
   slow path. They are for a bare exon-level GTF, which otherwise registers as a database of exons
   and nothing else without saying so.
 - **Test fixtures under `tests/data/`** — real subsampled `sacCer3` bytes, replacing inline fixtures
-  for the work that needs real FASTA and GTF content.
+  for the work that needs real FASTA and GTF content. `tests/data/chimera/` adds four tiny component
+  assemblies cut from those same bytes, between them carrying what no shipped assembly can
+  demonstrate: a chromosome-name collision, a name that is a strict prefix of another, names already
+  holding an underscore, and one holding a doubled underscore.
 
 ### Changed
 
