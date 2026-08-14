@@ -69,6 +69,10 @@
 
 ::: genome.io.gtf
 
+## `genome.io.results`
+
+::: genome.io.results
+
 ## `genome.io.twobit`
 
 ::: genome.io.twobit

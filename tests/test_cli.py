@@ -1054,12 +1054,59 @@ class TestTheSurfacesThatDidNotChange:
     """``annotations`` and ``doctor`` change nothing at all, asserted line for line.
 
     Both are pinned to their whole output rather than to a phrase inside it, because
-    "nothing at all" is the claim: a line added to either of them fails here.
+    "nothing at all" is the claim: a line added to either of them fails here. The
+    ``--json`` half is pinned the same way and for a stronger reason: a script parses it
+    positionally as often as by key, so a reordered key is a break nobody would see.
     """
 
     @pytest.fixture(autouse=True)
     def _offline(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("LIULAB_DATA", str(tmp_path))
+
+    def test_annotations_json_is_the_same_keys_in_the_same_order(self) -> None:
+        result = runner.invoke(app, ["annotations", "hg38", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert list(payload) == ["assembly", "directory", "default_annotation", "annotations"]
+        assert [list(row) for row in payload["annotations"]] == [
+            [
+                "name",
+                "offered",
+                "registered",
+                "broken",
+                "default",
+                "provider",
+                "version",
+                "url",
+                "sha256",
+                "path",
+                "problem",
+                "repair",
+            ]
+        ]
+
+    def test_register_gtf_json_is_the_record_then_the_two_facts_it_lacks(
+        self, data_dir: Path
+    ) -> None:
+        result = runner.invoke(
+            app, ["register-gtf", "tiny", str(data_dir / "tiny.gtf"), "mine", "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert list(_json.loads(result.stdout)) == [
+            "kind",
+            "name",
+            "files",
+            "source_url",
+            "sha256",
+            "tool_versions",
+            "package_version",
+            "completed_at",
+            "details",
+            "assembly",
+            "directory",
+        ]
 
     def test_annotations_prints_exactly_what_it_printed_before(self, tmp_path: Path) -> None:
         result = runner.invoke(app, ["annotations", "hg38"])

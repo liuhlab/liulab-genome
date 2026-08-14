@@ -234,6 +234,11 @@ preparation is no longer indistinguishable from a finished one.
   record read back as an ordinary assembly nothing ever checked against its components. Malformed
   now raises `RegistrationError` naming `genome register <assembly> --force` (ADR-0007); *not a
   chimera* is still `None`.
+- **The five records a registration answers with are `genome.io.results`** — moved whole out of
+  `io/gtf.py` and `io/download.py` with `chromosome_check_summary` and the `EXPECTED_FROM_*`
+  constants, and re-exported from `genome.io` as before. The JSON is unchanged, key for key and in
+  order; `AnnotationStatusRow.state` and `AnnotationStatus.default_summary` are new, being the two
+  sentences the command line used to derive for itself.
 
 ### Removed
 
@@ -241,7 +246,9 @@ preparation is no longer indistinguishable from a finished one.
   `list_broken_annotations`, `default_annotation` and `fetch_annotation` are no longer re-exported
   from `genome.io`, so `from genome.io import fetch_annotation` breaks. Nothing in the package calls
   any of them by name; what a caller wants from an assembly's annotations is `AnnotationRegistry`,
-  which takes their place in `genome.io`. They stay importable from `genome.io.gtf`.
+  which takes their place in `genome.io`. The first three stay importable from `genome.io.gtf`;
+  `fetch_annotation` is gone altogether, having become one line of delegation to
+  `AnnotationRegistry.register`.
 - **The eight metadata pass-throughs on `Genome`** — `assembly_name`, `species`, `ucsc_name`,
   `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid`, `source_url` and `sha256`. Each was one line
   guarding a record that is now always there. Read them off the record: `genome.metadata.species`.

@@ -18,16 +18,19 @@ one. Everything that needs the four-way state asks a registry rather than assemb
 again: a :class:`~genome.genome.Genome` holds one for its lifetime, and each
 assembly-addressed function here builds one for the length of the call.
 
-There are two ways to add an annotation, each in two forms. By **name**:
-:meth:`AnnotationRegistry.register` takes the name the curated annotation table lists for
-this assembly, fetches that row's URL, checks the unpacked GTF against the sha256 the row
-pins (ADR-0006), builds the database and writes the record; :func:`fetch_annotation` is it
-addressed by directory. By **path**: :meth:`AnnotationRegistry.register_path` is the escape
-hatch for a GTF no row lists — the caller says where the file is, and it is placed, built
-and recorded the same way; :func:`register_gtf` is it addressed by directory, which is the
-one form that knows no assembly name and so names a Python call where the rest name a
-command. :func:`register_annotation` and :func:`register_annotation_by_path` are the two
-that answer with the record rather than the paths, and those are what the CLI drives.
+There are two ways to add an annotation. By **name**: :meth:`AnnotationRegistry.register`
+takes the name the curated annotation table lists for this assembly, fetches that row's
+URL, checks the unpacked GTF against the sha256 the row pins (ADR-0006), builds the
+database and writes the record. By **path**: :meth:`AnnotationRegistry.register_path` is
+the escape hatch for a GTF no row lists — the caller says where the file is, and it is
+placed, built and recorded the same way; :func:`register_gtf` is that second one addressed
+by directory, which is the one form that knows no assembly name and so names a Python call
+where the rest name a command. :func:`register_annotation` and
+:func:`register_annotation_by_path` are the pair addressed by assembly name that answer
+with the record rather than the paths, and those are what the CLI drives. What they answer
+*with* — :class:`~genome.io.results.RegisteredAnnotation`, and the two shapes
+:meth:`AnnotationRegistry.status` reports in — is :mod:`genome.io.results`, so this module
+changes when registering changes and not when the shape of an answer does.
 
 A third way in has exactly one caller. :func:`register_merged_gtf` writes the **Merged
 annotation** a **Chimera** build derives from its components' own annotations, inside the
@@ -82,8 +85,8 @@ import gzip
 import hashlib
 import shlex
 import shutil
-from collections.abc import Container, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Container, Iterable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
 
@@ -94,7 +97,6 @@ from genome.chimera import suffixed
 from genome.io import fetch
 from genome.io.completion import (
     RECORD_NAME,
-    CompletionRecord,
     RegistrationError,
     build_record,
     check_registration,
@@ -106,6 +108,14 @@ from genome.io.completion import (
 )
 from genome.io.fasta import read_chrom_sizes
 from genome.io.registration import ANNOTATIONS_SUBDIR, AssemblyDir, assembly_repair_command
+from genome.io.results import (
+    UNCHECKED_CALLER_OVERRIDE,
+    UNCHECKED_NO_CHROM_SIZES,
+    AnnotationStatus,
+    AnnotationStatusRow,
+    RegisteredAnnotation,
+    annotation_register_command,
+)
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import AnnotationMetadata, list_annotation_metadata, lookup_annotation
 
@@ -131,39 +141,6 @@ _MERGED_FROM_KEY = "merged_from"
 #: Keys of one entry under :data:`_MERGED_FROM_KEY`.
 _MERGED_COMPONENT_KEY = "component"
 _MERGED_ANNOTATION_KEY = "annotation"
-
-#: What ``details["chromosomes_unchecked_because"]`` says when the caller stood the check
-#: down — ``check_chromosomes=False``, or ``--no-check-chromosomes`` from a shell. There is
-#: no advice to give about it: the assembly may be registered and the names deliberately
-#: accepted, so all a surface can say is what the record therefore does not vouch for.
-_CALLER_OVERRIDE = "caller-override"
-
-#: …and when the check was asked for but had nothing to run against, the assembly having
-#: no ``chrom.sizes`` yet. Registering the assembly is what makes the check possible, so
-#: this is the one of the two states where saying so is useful advice rather than noise.
-_NO_CHROM_SIZES = "no-chrom-sizes"
-
-#: What each state of the chromosome check reads as, one sentence apiece — including the
-#: one where it ran and passed, since a surface that says nothing about it reads as a pass.
-#: Keyed by ``details["chromosomes_unchecked_because"]``; ``None`` is the check that ran.
-_CHECK_SUMMARIES = {
-    None: "chromosomes checked — every name the GTF uses is one the assembly carries",
-    _NO_CHROM_SIZES: (
-        "chromosomes not checked — nothing to check against; register the assembly first "
-        "to verify them"
-    ),
-    _CALLER_OVERRIDE: (
-        "chromosomes not checked — the check was stood down, so the record does not vouch "
-        "for the names"
-    ),
-}
-
-#: What a record written before the reason was recorded reads as. Its bare ``False`` was
-#: written for either reason and nothing on disk says which, so it is reported as neither.
-_UNKNOWN_REASON_SUMMARY = (
-    "chromosomes not checked — this record does not say why, so whether the names match "
-    "the assembly is unknown"
-)
 
 
 class ChromosomeMismatchError(ValueError):
@@ -292,7 +269,7 @@ class AnnotationNotRegisteredError(KeyError):
         elif name in self.offered:
             next_step = (
                 f"The annotation table offers it for {assembly!r}, so register it with "
-                f"`{_register_command(assembly, name)}`."
+                f"`{annotation_register_command(assembly, name)}`."
             )
         else:
             next_step = (
@@ -388,252 +365,6 @@ class BrokenAnnotation:
     repair: str
 
 
-@dataclass(frozen=True)
-class RegisteredAnnotation:
-    """What registering one annotation produced: its record, and where that landed.
-
-    :func:`register_annotation`'s answer and :func:`register_annotation_by_path`'s — what
-    ``genome register-annotation`` and ``genome register-gtf`` print, and what their
-    ``--json`` serializes. A :class:`GtfAnnotation` says where an annotation's two files
-    are; this says what the run that wrote them did, which is the **Completion marker**
-    itself, carried whole. Every question a surface then asks — the digest, the source,
-    the files claimed, whether the chromosome names were actually checked — is answered
-    from that one record rather than by reading the directory again.
-
-    Attributes
-    ----------
-    assembly : str
-        The **Assembly** the annotation belongs to. It is not in the record, which names
-        the annotation rather than what it annotates.
-    directory : pathlib.Path
-        The annotation's own directory, ``<assembly dir>/gtf/<name>/``.
-    record : genome.io.completion.CompletionRecord
-        The record the registration wrote, read back.
-
-    Examples
-    --------
-    >>> from pathlib import Path
-    >>> from genome.io.completion import CompletionRecord
-    >>> registered = RegisteredAnnotation(
-    ...     assembly="hg38",
-    ...     directory=Path("/data/genome/hg38/gtf/gencode_v50"),
-    ...     record=CompletionRecord(
-    ...         kind="annotation",
-    ...         name="gencode_v50",
-    ...         files={"gencode_v50.gtf": 12, "gencode_v50.db": 34},
-    ...         source_url="https://example.org/gencode_v50.gtf.gz",
-    ...         sha256="1a2b3c",
-    ...         tool_versions={},
-    ...         package_version="2026.8.0",
-    ...         completed_at="2026-08-12T09:00:00+00:00",
-    ...         details={"chromosomes_checked": True},
-    ...     ),
-    ... )
-    >>> registered.name, registered.file_names
-    ('gencode_v50', ['gencode_v50.db', 'gencode_v50.gtf'])
-    >>> print(registered.chromosome_check)
-    chromosomes checked — every name the GTF uses is one the assembly carries
-    """
-
-    assembly: str
-    directory: Path
-    record: CompletionRecord
-
-    @property
-    def name(self) -> str:
-        """The **Registered name** it is addressed by — the record's own name."""
-        return self.record.name
-
-    @property
-    def source_url(self) -> str | None:
-        """The URL fetched, or the path a GTF was handed over at; ``None`` for a merge."""
-        return self.record.source_url
-
-    @property
-    def sha256(self) -> str | None:
-        """Digest of the placed GTF, or ``None`` when none was computed."""
-        return self.record.sha256
-
-    @property
-    def file_names(self) -> list[str]:
-        """Every file the record claims, sorted — a fresh list each call."""
-        return sorted(self.record.files)
-
-    @property
-    def chromosome_check(self) -> str:
-        """The one line saying what the chromosome-name check settled for this annotation.
-
-        :func:`chromosome_check_summary` over the record this registration wrote, so the
-        surface that prints it never reads the record's own keys. Always a sentence:
-        silence would read as a pass.
-        """
-        return chromosome_check_summary(self.record.details)
-
-    def as_json(self) -> dict[str, Any]:
-        """Return this registration as the payload ``--json`` serializes.
-
-        The record's own fields under the record's own names, then the ``assembly`` it
-        belongs to and the ``directory`` it landed in — the two facts a record does not
-        hold about itself. The names are the ones written on disk and are never respelled
-        here.
-
-        Returns
-        -------
-        dict
-            The record's fields, followed by ``assembly`` and ``directory``.
-        """
-        return {**asdict(self.record), "assembly": self.assembly, "directory": str(self.directory)}
-
-
-@dataclass(frozen=True)
-class AnnotationStatusRow:
-    """One annotation, in whichever of its states it is: offered, registered, broken.
-
-    One shape for all of them, so a reader never has to ask which fields a row has — a
-    name the table does not list carries the table's columns as ``None``, and one nothing
-    is wrong with carries the broken columns as ``None``. :attr:`registered` and
-    :attr:`broken` are never both true: a registration nothing vouches for is not one.
-
-    Attributes
-    ----------
-    name : str
-        The **Registered name** this row is about.
-    offered : bool
-        Whether the annotation table lists it for this assembly.
-    registered : bool
-        Whether a record here vouches for it.
-    broken : bool
-        Whether its directory is here and cannot be trusted.
-    default : bool
-        The table's own default flag, ``False`` for a name no row lists.
-    provider : str or None
-        Who publishes it, from the table's row; ``None`` for an unlisted one.
-    version : str or None
-        The provider's release identifier; ``None`` for an unlisted one.
-    url : str or None
-        Where the table says its GTF is fetched from; ``None`` for an unlisted one.
-    sha256 : str or None
-        The digest the table pins; ``None`` when it pins none, and for an unlisted one.
-    path : str or None
-        The registered GTF's path, or ``None`` when it is not registered here.
-    problem : str or None
-        What is wrong, when :attr:`broken`; ``None`` otherwise.
-    repair : str or None
-        The command that registers it again from scratch, when :attr:`broken`.
-
-    Examples
-    --------
-    >>> row = AnnotationStatusRow(
-    ...     name="gencode_v50",
-    ...     offered=True,
-    ...     registered=False,
-    ...     broken=False,
-    ...     default=True,
-    ...     provider="GENCODE",
-    ...     version="v50",
-    ...     url="https://example.org/gencode_v50.gtf.gz",
-    ...     sha256=None,
-    ...     path=None,
-    ...     problem=None,
-    ...     repair=None,
-    ... )
-    >>> row.as_json()["offered"]
-    True
-    """
-
-    name: str
-    offered: bool
-    registered: bool
-    broken: bool
-    default: bool
-    provider: str | None
-    version: str | None
-    url: str | None
-    sha256: str | None
-    path: str | None
-    problem: str | None
-    repair: str | None
-
-    def as_json(self) -> dict[str, Any]:
-        """Return this row as ``--json`` serializes it: every attribute above, in order.
-
-        Returns
-        -------
-        dict
-            The row's fields, under their own names.
-        """
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class AnnotationStatus:
-    """What one assembly's table offers, set against what is registered on this machine.
-
-    :meth:`AnnotationRegistry.status`'s answer, and what ``genome annotations`` prints.
-    Two questions joined for one reader, with a third riding along because this is where
-    anyone would look for it: a directory that cannot be trusted is ``broken`` rather than
-    registered, and reporting one is the point — nothing here raises.
-
-    Attributes
-    ----------
-    assembly : str
-        The **Assembly** reported on.
-    directory : pathlib.Path
-        Its **Assembly dir**, whether or not anything is there.
-    default_annotation : str or None
-        The **Default annotation**'s name, or ``None`` when nothing decides one. It may
-        name one nobody has registered here, which is a fresh machine's ordinary state.
-    annotations : tuple of AnnotationStatusRow
-        One row per name: the offered ones in table order, then anything on this disk
-        that no row lists.
-
-    Examples
-    --------
-    >>> from pathlib import Path
-    >>> status = AnnotationStatus(
-    ...     assembly="hg38",
-    ...     directory=Path("/data/genome/hg38"),
-    ...     default_annotation=None,
-    ...     annotations=(),
-    ... )
-    >>> status.default_row is None
-    True
-    >>> status.as_json()["directory"]
-    '/data/genome/hg38'
-    """
-
-    assembly: str
-    directory: Path
-    default_annotation: str | None
-    annotations: tuple[AnnotationStatusRow, ...]
-
-    @property
-    def default_row(self) -> AnnotationStatusRow | None:
-        """The **Default annotation**'s own row, or ``None`` when no row is about it.
-
-        ``None`` covers both of the ways that happens, and a caller wanting to tell them
-        apart reads :attr:`default_annotation` beside this: nothing decided a default, or
-        one is decided and the table lists it under a name this disk knows nothing about.
-        """
-        return next((row for row in self.annotations if row.name == self.default_annotation), None)
-
-    def as_json(self) -> dict[str, Any]:
-        """Return this report as the payload ``--json`` serializes.
-
-        Returns
-        -------
-        dict
-            ``assembly``, the ``directory`` as text, the ``default_annotation`` name, and
-            ``annotations`` as a list of :meth:`AnnotationStatusRow.as_json` rows.
-        """
-        return {
-            "assembly": self.assembly,
-            "directory": str(self.directory),
-            "default_annotation": self.default_annotation,
-            "annotations": [row.as_json() for row in self.annotations],
-        }
-
-
 def _annotations_root(assembly_dir: Path) -> Path:
     """Return ``<assembly_dir>/gtf``, the parent of every annotation directory."""
     return assembly_dir / _GTF_SUBDIR
@@ -648,11 +379,6 @@ def _annotation_files(assembly_dir: Path, name: str) -> GtfAnnotation:
     """Resolve the GTF + database paths for ``name`` (without checking existence)."""
     directory = annotation_dir(assembly_dir, name)
     return GtfAnnotation(name=name, gtf=directory / f"{name}.gtf", db=directory / f"{name}.db")
-
-
-def _register_command(assembly: str, name: str) -> str:
-    """Return the command that registers ``name`` for ``assembly``."""
-    return f"genome register-annotation {assembly} {name}"
 
 
 def _register_gtf_command(assembly: str, source: str, name: str) -> str:
@@ -670,7 +396,7 @@ def _repair_command(assembly: str, name: str) -> str:
     Quoted verbatim into every error a broken annotation directory raises, so it has to
     be a command that exists and does the job.
     """
-    return f"{_register_command(assembly, name)} --force"
+    return f"{annotation_register_command(assembly, name)} --force"
 
 
 def _path_repair_call(source: Path, name: str) -> str:
@@ -1728,70 +1454,6 @@ def discard_merged_annotation(assembly_dir: Path, name: str) -> bool:
     return True
 
 
-def fetch_annotation(
-    assembly_dir: Path,
-    assembly: str,
-    name: str,
-    *,
-    force: bool = False,
-    progressbar: bool = True,
-    metadata: AnnotationMetadata | None = None,
-    check_chromosomes: bool = True,
-    disable_infer_genes: bool = True,
-    disable_infer_transcripts: bool = True,
-) -> GtfAnnotation:
-    """Register the annotation the table lists for ``assembly`` as ``name``.
-
-    :meth:`AnnotationRegistry.register` for an assembly given as a name and a directory
-    rather than opened — see it for what registering does, what is checked and when this
-    raises. The two agree about where the ``chrom.sizes`` is, since an assembly prepared
-    in its own directory keeps it at ``<assembly_dir>/<assembly>.chrom.sizes``.
-
-    Parameters
-    ----------
-    assembly_dir : pathlib.Path
-        The assembly directory this annotation is filed under.
-    assembly : str
-        The assembly whose table row is looked up, e.g. ``"hg38"``.
-    name : str
-        The **Registered name** the table lists, e.g. ``"gencode_v50"``.
-    force : bool, default False
-        Register again from scratch, repairing a directory that raises.
-    progressbar : bool, default True
-        Show a download progress bar (requires ``tqdm``).
-    metadata : genome.metadata.AnnotationMetadata, optional
-        A complete annotation record to use *instead of* the curated table's row.
-    check_chromosomes : bool, default True
-        Check the GTF's chromosome names against the assembly's.
-    disable_infer_genes : bool, default True
-        Do not reconstruct ``gene`` features from exon lines.
-    disable_infer_transcripts : bool, default True
-        Do not reconstruct ``transcript`` features from exon lines.
-
-    Returns
-    -------
-    GtfAnnotation
-        The registered annotation's name and its two file paths.
-
-    Examples
-    --------
-    >>> from pathlib import Path
-    >>> fetch_annotation(                                # doctest: +SKIP
-    ...     Path("/data/genome/sacCer3"), "sacCer3", "ensgene_v101"
-    ... )
-    GtfAnnotation(name='ensgene_v101', ...)
-    """
-    return AnnotationRegistry(AssemblyDir(assembly=assembly, path=assembly_dir)).register(
-        name,
-        force=force,
-        progressbar=progressbar,
-        metadata=metadata,
-        check_chromosomes=check_chromosomes,
-        disable_infer_genes=disable_infer_genes,
-        disable_infer_transcripts=disable_infer_transcripts,
-    )
-
-
 def register_annotation(
     assembly: str,
     name: str,
@@ -1871,7 +1533,7 @@ def register_annotation(
         disable_infer_genes=disable_infer_genes,
         disable_infer_transcripts=disable_infer_transcripts,
     )
-    return _registration_payload(
+    return _registered_annotation(
         annotation, assembly=assembly, repair=_repair_command(assembly, name)
     )
 
@@ -1958,61 +1620,11 @@ def register_annotation_by_path(
         disable_infer_genes=disable_infer_genes,
         disable_infer_transcripts=disable_infer_transcripts,
     )
-    return _registration_payload(
+    return _registered_annotation(
         annotation,
         assembly=assembly,
         repair=_path_repair_command(assembly, shlex.quote(str(source)), name),
     )
-
-
-def chromosome_check_summary(details: Mapping[str, Any]) -> str:
-    """Return the one line a surface prints about an annotation's chromosome-name check.
-
-    Four states, four sentences, and one of them is always returned: the check ran and
-    passed; it had nothing to run against, and registering the assembly is what fixes
-    that; the caller stood it down, which is not something to advise about; or the record
-    does not say which, and none of the three may be claimed. Silence is not a fifth
-    state — a surface that prints nothing about the check reads as one that passed.
-
-    ``details`` is a registration record's ``details``; a caller holding what a
-    registration answered with asks :attr:`RegisteredAnnotation.chromosome_check` instead
-    and never spells the two fields. Those are ``chromosomes_checked`` — the check ran and
-    the GTF's names were all the assembly's — and ``chromosomes_unchecked_because``, which
-    says which of the two reasons it did not, and is ``None`` when it did.
-
-    A record written before the second field existed carries a bare
-    ``chromosomes_checked: false`` that was written for either reason, and nothing on disk
-    says which. It reads as *unknown* rather than as either one, and rather than raising:
-    the reason is a fact that was never gathered, which is what an absent entry in
-    ``tool_versions`` means too.
-
-    Parameters
-    ----------
-    details : mapping of str to object
-        A registration record's ``details``. Anything else it holds is ignored, and a
-        mapping holding neither field reads as unknown.
-
-    Returns
-    -------
-    str
-        One sentence, with no trailing punctuation and no leading indent — the caller
-        decides how to set it.
-
-    Examples
-    --------
-    >>> chromosome_check_summary({"chromosomes_checked": True})
-    'chromosomes checked — every name the GTF uses is one the assembly carries'
-    >>> print(chromosome_check_summary({"chromosomes_unchecked_because": "caller-override"}))
-    chromosomes not checked — the check was stood down, so the record does not vouch for the names
-    """
-    if details.get("chromosomes_checked") is True:
-        return _CHECK_SUMMARIES[None]
-    # Anything else — the field absent, or a reason a later version writes and this one
-    # has never heard of — is a reason that cannot be reported, which is the unknown.
-    because = details.get("chromosomes_unchecked_because")
-    if isinstance(because, str) and because in _CHECK_SUMMARIES:
-        return _CHECK_SUMMARIES[because]
-    return _UNKNOWN_REASON_SUMMARY
 
 
 def _chromosome_check_details(known: frozenset[str] | None, *, requested: bool) -> dict[str, Any]:
@@ -2026,14 +1638,16 @@ def _chromosome_check_details(known: frozenset[str] | None, *, requested: bool) 
         return {"chromosomes_checked": True, "chromosomes_unchecked_because": None}
     return {
         "chromosomes_checked": False,
-        "chromosomes_unchecked_because": _NO_CHROM_SIZES if requested else _CALLER_OVERRIDE,
+        "chromosomes_unchecked_because": (
+            UNCHECKED_NO_CHROM_SIZES if requested else UNCHECKED_CALLER_OVERRIDE
+        ),
     }
 
 
-def _registration_payload(
+def _registered_annotation(
     annotation: GtfAnnotation, *, assembly: str, repair: str
 ) -> RegisteredAnnotation:
-    """Return the record a just-registered annotation left, as the value both ways in answer with.
+    """Return the :class:`~genome.io.results.RegisteredAnnotation` a just-finished run left.
 
     The record is what registering *produced*, so a registration that reports success
     and leaves none is a contradiction rather than a missing file, and raises naming the
