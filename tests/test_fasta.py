@@ -3,9 +3,9 @@
 The end-to-end tests need the native binaries (samtools, faToTwoBit,
 twoBitInfo); they run inside the pixi env and skip cleanly outside it. The
 input-validation and caching-wiring tests need no binaries and always run
-(``genome.io.utils._run`` is stubbed via the ``run_calls`` fixture). The cache
-freshness logic itself is unit-tested in test_utils; here we only assert that
-the public functions wire the right output paths and inputs into it.
+(``ExternalTool.run`` is stubbed via the ``run_calls`` fixture). The freshness
+rule itself is unit-tested in test_external; here we only assert that each step
+names the right tool and wires the right output and inputs into it.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ import pandas as pd
 import pytest
 
 from genome.io.fasta import (
+    PREPARATION_TOOLS,
     GenomeFiles,
     faidx,
     fasta_to_2bit,
@@ -59,12 +60,26 @@ def test_chrom_sizes_missing_input_raises(tmp_path: Path) -> None:
         twobit_to_chrom_sizes(tmp_path / "nope.2bit")
 
 
-# --- caching wiring (no binaries: _run is stubbed via run_calls) ---
+# --- caching wiring (no binaries: ExternalTool.run is stubbed via run_calls) ---
 
 
 def test_faidx_runs_when_index_missing(fasta: Path, run_calls: list[tuple[str, list[str]]]) -> None:
     faidx(fasta)
-    assert len(run_calls) == 1
+    # The name reaches the binary: each step constructs its own tool, so the tool a step
+    # names is the one thing the fold could have got wrong and nothing else would catch.
+    assert run_calls == [("samtools", ["faidx", str(fasta)])]
+
+
+def test_each_preparation_step_names_its_own_tool(
+    fasta: Path, run_calls: list[tuple[str, list[str]]]
+) -> None:
+    # A stubbed tool writes nothing, so stand the intermediate 2bit up for the existence
+    # check the third step makes; `overwrite` takes freshness out of the question.
+    fasta.with_name("mini.2bit").write_text("cached")
+
+    prepare_fasta(fasta, overwrite=True)
+
+    assert [name for name, _ in run_calls] == list(PREPARATION_TOOLS)
 
 
 def test_faidx_reuses_fresh_index(

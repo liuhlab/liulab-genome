@@ -288,6 +288,22 @@ def test_run_to_skips_the_tool_when_the_output_is_fresh(
     assert tool.calls == []
 
 
+def test_run_to_reruns_when_an_input_is_newer(
+    tmp_path: Path, touch_newer_than: Callable[..., None]
+) -> None:
+    # The stale case, driven through `run_to` rather than through `is_fresh` alone: an
+    # output that exists is not thereby fresh, and a regenerated input must rebuild it.
+    tool = RecordingTool("samtools")
+    src = tmp_path / "in"
+    src.write_text("x")
+    out = tmp_path / "out"
+    out.write_text("cached")
+    touch_newer_than(src, out)  # input regenerated after the output
+
+    assert tool.run_to(["build"], output=out, inputs=[src]) == out
+    assert [call.args for call in tool.calls] == [("build",)]
+
+
 def test_run_to_overwrite_forces_the_run(
     tmp_path: Path, touch_newer_than: Callable[..., None]
 ) -> None:

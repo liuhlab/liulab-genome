@@ -14,8 +14,8 @@ import pytest
 import requests
 
 from genome import Genome
+from genome.external import ExternalTool
 from genome.io import download as download_mod
-from genome.io import utils as utils_mod
 from genome.io.fasta import PREPARATION_TOOLS
 
 
@@ -123,13 +123,26 @@ def touch_newer_than() -> Callable[..., None]:
 
 @pytest.fixture
 def run_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[str]]]:
-    """Record (and suppress) every ``genome.io.utils._run`` call so caching is observable."""
+    """Record (and suppress) every **External tool** invocation, so caching is observable.
+
+    Patches :meth:`genome.external.ExternalTool.run` — the one method every invocation
+    converges on, since :meth:`~genome.external.ExternalTool.run_to` reaches its binary
+    through ``self.run`` rather than around it. One ``setattr`` on the base class
+    therefore catches every tool driven by any adapter anywhere in the package, which is
+    the property ``fetch_url`` is spelled for on the download side.
+
+    Freshness is left running: ``run_to`` decides whether to call ``run`` before this
+    stub is reached, so an empty list still means *the tool was skipped*.
+    """
     calls: list[tuple[str, list[str]]] = []
 
-    def fake_run(name: str, args: Sequence[str]) -> None:
-        calls.append((name, list(args)))
+    def fake_run(
+        self: ExternalTool, args: Sequence[str], *, cwd: Path | None = None, capture: bool = True
+    ) -> str:
+        calls.append((self.name, list(args)))
+        return ""
 
-    monkeypatch.setattr(utils_mod, "_run", fake_run)
+    monkeypatch.setattr(ExternalTool, "run", fake_run)
     return calls
 
 

@@ -11,10 +11,11 @@ The headline entry point is :func:`prepare_fasta`, which runs all three steps:
 2. ``faToTwoBit``      →  ``<fasta>.2bit``       (compact 2bit encoding)
 3. ``twoBitInfo``      →  ``<fasta>.chrom.sizes`` (``name<TAB>length`` per seq)
 
-Every step is **cached**: it runs through :func:`_run_to`, which skips the
-native tool when its output already exists and is newer than its input (the same
-freshness rule ``make`` uses). Re-running a preparation is therefore cheap; pass
-``overwrite=True`` to force regeneration.
+Every step is **cached**: it runs through
+:meth:`genome.external.ExternalTool.run_to`, which skips the native tool when its
+output already exists and is newer than its input (the same freshness rule ``make``
+uses). Re-running a preparation is therefore cheap; pass ``overwrite=True`` to force
+regeneration.
 
 Examples
 --------
@@ -31,7 +32,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from genome.io.utils import _run_to
+from genome.external import InstalledTool
 
 #: The **External tools** :func:`prepare_fasta` runs, in pipeline order. Named here so
 #: that whatever records a finished preparation records the versions of these three.
@@ -112,7 +113,9 @@ def faidx(fasta_path: str | Path, *, overwrite: bool = False) -> Path:
     fasta = Path(fasta_path)
     _require_file(fasta)
     fai = fasta.with_name(fasta.name + ".fai")
-    return _run_to("samtools", ["faidx", str(fasta)], fai, [fasta], overwrite=overwrite)
+    return InstalledTool("samtools").run_to(
+        ["faidx", str(fasta)], output=fai, inputs=[fasta], overwrite=overwrite
+    )
 
 
 def fasta_to_2bit(
@@ -153,7 +156,9 @@ def fasta_to_2bit(
         if twobit_path is not None
         else _strip_fasta_suffix(fasta).with_suffix(".2bit")
     )
-    return _run_to("faToTwoBit", [str(fasta), str(twobit)], twobit, [fasta], overwrite=overwrite)
+    return InstalledTool("faToTwoBit").run_to(
+        [str(fasta), str(twobit)], output=twobit, inputs=[fasta], overwrite=overwrite
+    )
 
 
 def twobit_to_chrom_sizes(
@@ -196,7 +201,9 @@ def twobit_to_chrom_sizes(
         if sizes_path is not None
         else twobit.with_name(twobit.stem + ".chrom.sizes")
     )
-    return _run_to("twoBitInfo", [str(twobit), str(sizes)], sizes, [twobit], overwrite=overwrite)
+    return InstalledTool("twoBitInfo").run_to(
+        [str(twobit), str(sizes)], output=sizes, inputs=[twobit], overwrite=overwrite
+    )
 
 
 def read_chrom_sizes(sizes_path: str | Path) -> pd.Series:
