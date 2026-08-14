@@ -20,6 +20,7 @@ from genome.io.fasta import GenomeFiles
 from genome.io.registration import (
     ANNOTATIONS_SUBDIR,
     INDEXES_SUBDIR,
+    AssemblyDir,
     AssemblyRegistration,
     assembly_data_dir,
 )
@@ -110,7 +111,31 @@ def test_the_downloader_is_a_registration_that_also_fetches(
     dl = UCSCGenomeDownloader("hg38")
 
     assert isinstance(dl, AssemblyRegistration)
-    assert isinstance(dl, Downloader)  # Downloader.fetch is still part of its surface
-    # The registration's default wins over the plain downloader's per-user pooch cache.
+    # And *only* a registration. It used to be a Downloader as well, which gave it a
+    # second answer to "which directory?" that its constructor then had to overrule; the
+    # assembly's own directory is the only one it ever wanted.
+    assert not isinstance(dl, Downloader)
     assert dl.cache_dir == assembly_data_dir("hg38")
     assert dl.cache_dir != Path(pooch.os_cache("genome"))
+
+
+def test_the_plain_downloader_still_caches_where_it_always_did(tmp_path: Path) -> None:
+    # The sibling it stopped inheriting from is untouched: fetch_url bound to a cache
+    # directory, defaulting to pooch's per-user one.
+    assert Downloader().cache_dir == Path(pooch.os_cache("genome"))
+    assert Downloader(cache_dir=tmp_path).cache_dir == tmp_path
+
+
+def test_a_directory_answers_whether_it_is_finished_without_a_registration(
+    tmp_path: Path,
+) -> None:
+    # What a verification asks: it holds a name and a directory and no registration, and
+    # the question is the same one a registration asks itself.
+    here = AssemblyDir.locate("tiny", tmp_path)
+    assert here.completed_files(repair="unused") is None  # empty: a fresh registration
+
+    (tmp_path / "tiny.fa").write_text(">chrI\nACGT\n")
+    files = _derive(tmp_path / "tiny.fa")
+    AssemblyRegistration("tiny", tmp_path)._record_completion(files, source_url=None, sha256=None)
+
+    assert here.completed_files(repair="unused") == files
