@@ -2,8 +2,9 @@
 
 The pure-logic tests stub out the aligner binary (its resolution, version, and the
 subprocess call), so they run anywhere. A handful of integration tests build a real
-index from a toy FASTA + GTF, and those are the only tests in this suite needing a
-binary the package does not ship: :func:`_needs` is how one says so.
+index — from a toy FASTA + GTF, and from a chimera assembled out of the tiny
+components — and those are the only tests in this suite needing a binary the package
+does not ship: :func:`_needs` is how one says so.
 
 What a finished index is, is asked of its completion record and of nothing else, so
 most of what is worth asserting here — that an unbuilt index raises, that an
@@ -16,14 +17,15 @@ from __future__ import annotations
 import re
 import shutil
 import types
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TypeVar, cast
 
 import pandas as pd
 import pytest
 
 import genome.aligner.aligner as aligner_mod
+from genome import Genome
 from genome.aligner.aligner import IndexNotBuiltError
 from genome.aligner.chromap import Chromap
 from genome.aligner.chromap import _kwargs_to_flags as _chromap_kwargs_to_flags
@@ -40,10 +42,7 @@ from genome.io.completion import (
 )
 from genome.io.download import assembly_data_dir
 
-from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY
-
-if TYPE_CHECKING:
-    from genome.genome import Genome
+from .conftest import CHIMERA_COMPONENTS, CHIMERA_EVERYDAY, ComponentFactory
 
 #: What a mark may be applied to. Bounded, so both marks below resolve to the overload
 #: that hands the test function back rather than the one that builds a parametrised mark.
@@ -987,3 +986,235 @@ def test_a_build_over_an_assembly_pinning_no_digest_records_none(
     aligner.index()
 
     assert _DIGEST_KEY not in _record_of(aligner).details
+
+
+# ===========================================================================
+# A chimera is indexed like any other assembly, and that is the claim. There
+# is no chimera-specific code here to exercise — the reference is prepared,
+# the merged annotation is registered, and an index build sees an assembly —
+# so what these tests hold is that the general path survives the reference a
+# chimera actually is: nine sequences whose names carry their component, and
+# bytes copied from three components without being rewrapped or recased.
+# ===========================================================================
+
+#: What the everyday three merge to. Nobody chose this name: each component registers
+#: its annotation under the same colourless key, and the merge joins the contributions
+#: in component-sorted order — so the derived name is what picks the index directory,
+#: `+` included, which no shell has to quote.
+_MERGED_ANNOTATION = "genes+genes+genes"
+
+#: The assembly the everyday three build, likewise derived from the component set.
+_CHIMERA_ASSEMBLY = "tinyCe_tinyEc_tinySc"
+
+#: The nine chromosomes it carries, in FASTA order: components sorted, then each
+#: component's own file order. Spelled out rather than assembled from the fixture table
+#: by the same rule the build follows, which would agree with a build that was wrong.
+_CHIMERA_CHROMOSOMES = [
+    "I__tinyCe",
+    "II__tinyCe",
+    "MtDNA__tinyCe",
+    "NZ_TINY01000001.1__tinyEc",
+    "NZ_TINY01000002.1__tinyEc",
+    "chr1_KI270706v1_random__tinyEc",
+    "I__tinySc",
+    "II__tinySc",
+    "III__tinySc",
+]
+
+#: One gene from each component's own annotation. The fixture slices are disjoint
+#: set-wide, so each of these could only have reached the merge from where it says.
+_GENE_PER_COMPONENT = {"tinyCe": "YBL111C", "tinyEc": "YCL074W", "tinySc": "YAL069W"}
+
+#: How many genes the three annotations carry between them — 3 + 3 + 7 — which is the
+#: count STAR writes on the first line of ``geneInfo.tab``.
+_CHIMERA_GENES = 13
+
+
+@pytest.fixture
+def everyday_chimera(
+    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[Genome]:
+    """The everyday chimera, built for real, with its merged annotation registered.
+
+    ``LIULAB_DATA`` is pointed at the test's own root and the build is then left to
+    place itself under it, rather than sent elsewhere with a ``cache_dir``: an index
+    directory is derived from the assembly directory, and the digest an index pins is
+    read out of the assembly's record in that same place. Split the two and that digest
+    reads as *unknown* — a guard that passes without having been exercised.
+
+    Skips with :func:`chimera_component` when the preparation tools are absent, so a
+    test using this needs no marker of its own beyond the aligner it drives.
+    """
+    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "data"))
+    components = [chimera_component(name, with_annotation=True) for name in CHIMERA_EVERYDAY]
+    with Genome.chimera(*components) as built:
+        yield built
+
+
+@pytest.fixture
+def stub_star_over_chimera(everyday_chimera: Genome, monkeypatch: pytest.MonkeyPatch) -> STAR:
+    """A STAR over the everyday chimera, bound to its merged annotation, binary faked."""
+    monkeypatch.setattr(aligner_mod, "_resolve", lambda name: f"/fake/{name}")
+    monkeypatch.setattr(STAR, "_detect_version", lambda _self: "0.0-test")
+    return STAR(everyday_chimera, gtf=_MERGED_ANNOTATION)
+
+
+# -- the command a chimera is indexed with ----------------------------------
+
+
+def test_a_chimera_index_directory_is_named_after_the_merged_annotation(
+    everyday_chimera: Genome, stub_star_over_chimera: STAR, captured_run: list[list[str]]
+) -> None:
+    # The per-annotation layout is the general one; what is new is only that both halves
+    # of the path are derived — the assembly from its components, the annotation from
+    # what those components contributed.
+    assert everyday_chimera.default_gtf == _MERGED_ANNOTATION
+
+    stub_star_over_chimera.index()
+
+    assert stub_star_over_chimera.index_dir.parts[-4:] == (
+        "genome",
+        _CHIMERA_ASSEMBLY,
+        "index",
+        f"star_{_MERGED_ANNOTATION}",
+    )
+    assert _flag_value(captured_run[0], "--genomeDir") == str(stub_star_over_chimera.index_dir)
+
+    record = _record_of(stub_star_over_chimera)
+    assert record.name == f"star_{_MERGED_ANNOTATION}"
+    # Nothing in the record is chimera-specific: the derived assembly name already
+    # carries the components, so a key listing them again could only disagree with it.
+    assert record.details["assembly"] == _CHIMERA_ASSEMBLY
+    assert "components" not in record.details
+
+
+def test_the_everyday_chimeras_index_parameters_come_from_its_shape(
+    everyday_chimera: Genome, stub_star_over_chimera: STAR, captured_run: list[list[str]]
+) -> None:
+    # Nine sequences and 22,750 bases is the whole of what reaches these two knobs:
+    # log2(22750) / 2 - 1 -> 6 for the suffix array, and log2(22750 / 9) -> 11 for the
+    # bin, the mean sequence being far longer than the read sjdb_overhang implies.
+    sizes = everyday_chimera.chrom_sizes
+    assert (len(sizes), int(sizes.sum())) == (9, 22_750)
+
+    stub_star_over_chimera.index()
+
+    assert _flag_value(captured_run[0], "--genomeSAindexNbases") == "6"
+    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == "11"
+    parameters = _record_of(stub_star_over_chimera).details["parameters"]
+    assert (parameters["genomeSAindexNbases"], parameters["genomeChrBinNbits"]) == (6, 11)
+
+
+def test_a_chimera_index_pins_the_digest_of_the_chimera_it_was_built_from(
+    everyday_chimera: Genome, stub_star_over_chimera: STAR, captured_run: list[list[str]]
+) -> None:
+    # A chimera is registered like any other assembly, so the guard needs no case of its
+    # own: the digest is read from the record the chimera build wrote, which is the only
+    # thing that could ever pin bytes no download can be compared against.
+    stub_star_over_chimera.index()
+
+    assembly = read_record(everyday_chimera.fasta_path.parent)
+    assert assembly is not None
+    assert assembly.sha256 is not None
+    assert _record_of(stub_star_over_chimera).details[_DIGEST_KEY] == assembly.sha256
+
+
+# -- integration: a real STAR over a real chimera ---------------------------
+
+
+@_needs_star
+def test_real_star_index_over_a_chimera_writes_every_suffixed_name(
+    everyday_chimera: Genome,
+) -> None:
+    # Where the fixtures' prefix traps meet a real tool. The list is asserted whole
+    # because membership would pass against a build that dropped a suffix: `I` is a
+    # strict prefix of `II` and of `III`, and `tinyEc` of `tinyEcDub`, so a subtly wrong
+    # name still reads as present inside a right one.
+    star = STAR(everyday_chimera, gtf=_MERGED_ANNOTATION)
+
+    out = star.index(threads=2)
+
+    assert out == star.index_path  # reopening a fresh index does not raise
+    assert out.name == f"star_{_MERGED_ANNOTATION}"
+    names = (out / "chrName.txt").read_text().splitlines()
+    assert names == _CHIMERA_CHROMOSOMES
+    # Said out loud, because it is the mistake the equality above exists to refuse: an
+    # unsuffixed name is what makes a read's species unattributable.
+    assert "I" not in names
+
+
+@_needs_star
+def test_real_star_index_over_a_chimera_carries_the_merged_annotation(
+    everyday_chimera: Genome,
+) -> None:
+    # Every component's genes reach the index, and the one splice junction any of them
+    # carries sits on a suffixed name — so STAR read the merged GTF against the merged
+    # FASTA and the two agreed, which is the whole of what the merge is for.
+    star = STAR(everyday_chimera, gtf=_MERGED_ANNOTATION)
+
+    out = star.index(threads=2)
+
+    genes = (out / "geneInfo.tab").read_text().splitlines()
+    assert genes[0] == str(_CHIMERA_GENES)  # a count, then one line per gene
+    assert set(_GENE_PER_COMPONENT.values()) <= {line.split("\t")[0] for line in genes[1:]}
+
+    # tinyCe's YBL111C is the set's only two-exon transcript: exons [207, 1416] and
+    # [1516, 2309] leave the intron STAR reports here, 1-based inclusive as a GTF is.
+    junctions = [line.split("\t") for line in (out / "sjdbList.out.tab").read_text().splitlines()]
+    assert junctions == [["I__tinyCe", "1417", "1515", "-"]]
+
+
+@_needs_star
+def test_a_real_star_accepts_the_bin_size_a_chimeras_shape_asks_for(
+    everyday_chimera: Genome,
+) -> None:
+    # 11 rather than STAR's own 18, and a real STAR builds with it and echoes it back.
+    # A computed bin size had never reached a real build over a many-sequence reference,
+    # which is the shape it was computed for and the one a stub cannot refuse.
+    star = STAR(everyday_chimera, gtf=_MERGED_ANNOTATION)
+
+    out = star.index(threads=2)
+
+    assert _record_of(star).details["parameters"]["genomeChrBinNbits"] == 11
+    echoed = [
+        line.split("\t")[1]
+        for line in (out / "genomeParameters.txt").read_text().splitlines()
+        if line.startswith("genomeChrBinNbits\t")
+    ]
+    assert echoed == ["11"]
+
+
+# -- integration: a real chromap over the same chimera ----------------------
+
+
+@_needs_chromap
+def test_real_chromap_index_over_a_chimera_reads_a_heterogeneous_reference(
+    everyday_chimera: Genome, capfd: pytest.CaptureFixture[str]
+) -> None:
+    # Not symmetry with STAR, and not the naming contract either — a chromap index
+    # stores no sequence names, so it can say nothing about those. What only this test
+    # reaches is chromap's own bundled kseq.h over the reference a chimera is: nine
+    # sequences, wrapped at 60 columns for tinyCe and at 80 for tinyEc, soft-masked in
+    # the first and not in the second. The other real chromap test builds over
+    # _make_genome — one sequence, on one unwrapped line — so nothing else in this suite
+    # has ever handed chromap a second sequence or a wrap at all, and copying component
+    # bytes verbatim was verified through faidx, faToTwoBit and twoBitInfo, none of them
+    # this parser. Deleting this leaves that property with no witness.
+    chromap = Chromap(everyday_chimera)
+
+    out = chromap.index()
+
+    assert out == chromap.index_path
+    assert out.is_file()
+    assert out.stat().st_size > 0
+    record = _record_of(chromap)
+    assert record.files["chromap.index"] == out.stat().st_size
+    assert record.details["assembly"] == _CHIMERA_ASSEMBLY
+
+    # chromap's own count, read back off its stderr: every sequence and every base
+    # arrived, rather than the parser merely not crashing. The wording is chromap
+    # 0.3.2's, so a release that changes it fails here loudly instead of quietly
+    # proving less.
+    reported = capfd.readouterr().err
+    assert "number of sequences: 9" in reported
+    assert "number of bases: 22750" in reported
