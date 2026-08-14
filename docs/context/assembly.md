@@ -1,9 +1,9 @@
 # Assembly
 
 What an assembly is on disk, and what it costs to make it so. This context covers `genome.py`,
-`metadata.py`, `external.py` and `io/{download,fasta,twobit,utils}.py`: a name becomes a directory of
-prepared files, everything in that directory is derivable from one FASTA, and nothing is derived
-twice.
+`metadata.py`, `external.py` and `io/{download,registration,fasta,twobit,utils}.py`: a name becomes a
+directory of prepared files, everything in that directory is derivable from one FASTA, and nothing is
+derived twice.
 
 Words every context shares — **Assembly**, **Genome**, **Chromosome**, **Region**, **Data dir** and
 the rest — are defined once in the repo-root `CONTEXT-MAP.md`.

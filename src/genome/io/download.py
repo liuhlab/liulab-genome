@@ -6,6 +6,12 @@ single fetch step — every download goes through it and it is the only call sit
 :class:`UCSCGenomeDownloader` specializes it for reference-genome FASTA files from the
 UCSC golden path. See each for caching, storage layout, and hashing.
 
+Only the fetching is here. The rest of registering an assembly — the **Assembly dir**
+layout, the working area, placing the FASTA and writing the record — is
+:class:`~genome.io.registration.AssemblyRegistration`, which the downloader extends and
+which knows nothing about where the bytes came from. The layout names it now owns stay
+importable from this module, which is where they used to live.
+
 An assembly listed in the curated metadata table brings its own source URL and, where
 the lab has pinned one, the sha256 of its **unpacked** FASTA. That digest is checked
 after decompression rather than by pooch: pooch hashes the bytes it downloaded, which
@@ -35,8 +41,6 @@ Examples
 
 from __future__ import annotations
 
-import os
-import shlex
 import shutil
 from collections.abc import Callable
 from dataclasses import asdict
@@ -46,17 +50,17 @@ from urllib.parse import urlparse
 import pooch
 import requests
 
-from genome.io.completion import (
-    RECORD_NAME,
-    RegistrationError,
-    build_record,
-    check_registration,
-    clear_work_dir,
-    read_record,
-    work_dir,
-    write_record,
-)
-from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles, prepare_fasta
+from genome.io.completion import RECORD_NAME, RegistrationError, read_record
+from genome.io.fasta import GenomeFiles, prepare_fasta
+
+# Re-exported, not used here: the **Assembly dir** layout moved to `registration`
+# because the shared registration steps are written in terms of it, and these are the
+# spellings the rest of the package and its docs already import from this module.
+from genome.io.registration import ANNOTATIONS_SUBDIR as ANNOTATIONS_SUBDIR
+from genome.io.registration import INDEXES_SUBDIR as INDEXES_SUBDIR
+from genome.io.registration import AssemblyRegistration
+from genome.io.registration import assembly_data_dir as assembly_data_dir
+from genome.io.registration import liulab_data_dir as liulab_data_dir
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import METADATA_FIELDS, AssemblyMetadata, lookup_assembly
 
@@ -64,89 +68,9 @@ from genome.metadata import METADATA_FIELDS, AssemblyMetadata, lookup_assembly
 # returns the path (or paths) to use as the result of the download.
 _Processor = Callable[..., object]
 
-#: Environment variable naming the lab data root directory.
-LIULAB_DATA_ENV = "LIULAB_DATA"
-
-#: Well-known lab data roots, tried in order when ``LIULAB_DATA`` is unset.
-DEFAULT_LIULAB_DATA_PATHS = [
-    "/share/lhqlab/liulab_data",
-    "/large_storage/zhoulab/hanliu/liulab_data",
-]
-
 #: URL schemes a source may use, matching the downloaders pooch ships. Anything
 #: else is a local path (or an error, if it carries a scheme we cannot fetch).
 _URL_SCHEMES = frozenset({"http", "https", "ftp", "sftp"})
-
-#: Subdirectory of an **Assembly dir** holding its annotations. The Assembly context
-#: owns the layout, so the name lives here and the Annotation context reads it.
-ANNOTATIONS_SUBDIR = "gtf"
-
-#: Subdirectory of an **Assembly dir** holding its aligner indexes, likewise.
-INDEXES_SUBDIR = "index"
-
-#: The subtrees inside an **Assembly dir** that other contexts own. Each carries its own
-#: completion record, so an assembly must not count them as files it failed to claim —
-#: an annotation registered before its assembly is not an interrupted assembly.
-_FOREIGN_SUBDIRS = frozenset({ANNOTATIONS_SUBDIR, INDEXES_SUBDIR})
-
-
-def liulab_data_dir() -> Path:
-    """Return the root directory for lab reference data.
-
-    The location is read from the ``LIULAB_DATA`` environment variable. When that
-    is unset (or empty), each entry in :data:`DEFAULT_LIULAB_DATA_PATHS` is checked
-    in order and the first that exists is used as the root. If none exist, it falls
-    back to ``~/liulab_data``. The path is expanded (``~`` resolved) but **not**
-    created here — callers create the specific subdirectory they need on first write.
-
-    Returns
-    -------
-    pathlib.Path
-        The resolved lab data root.
-
-    Examples
-    --------
-    >>> import os
-    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
-    >>> liulab_data_dir()
-    PosixPath('/scratch/liulab')
-    >>> del os.environ["LIULAB_DATA"]
-    """
-    env = os.environ.get(LIULAB_DATA_ENV)
-    if env:
-        return Path(env).expanduser()
-    for candidate in DEFAULT_LIULAB_DATA_PATHS:
-        path = Path(candidate).expanduser()
-        if path.exists():
-            return path
-    return (Path.home() / "liulab_data").expanduser()
-
-
-def assembly_data_dir(assembly: str) -> Path:
-    """Return the directory holding all reference files for ``assembly``.
-
-    Every file tied to a reference assembly (FASTA, indexes, annotations, …)
-    lives under ``<liulab_data>/genome/<assembly>/`` so they stay co-located.
-
-    Parameters
-    ----------
-    assembly : str
-        Assembly name, e.g. ``"hg38"``.
-
-    Returns
-    -------
-    pathlib.Path
-        ``<liulab_data>/genome/<assembly>``.
-
-    Examples
-    --------
-    >>> import os
-    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
-    >>> assembly_data_dir("hg38")
-    PosixPath('/scratch/liulab/genome/hg38')
-    >>> del os.environ["LIULAB_DATA"]
-    """
-    return liulab_data_dir() / "genome" / assembly
 
 
 def _looks_like_url(source: str) -> bool:
@@ -288,7 +212,7 @@ class Downloader:
         )
 
 
-class UCSCGenomeDownloader(Downloader):
+class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
     """Download reference-genome FASTA files from the UCSC golden path.
 
     UCSC serves per-assembly downloads under
@@ -297,15 +221,16 @@ class UCSCGenomeDownloader(Downloader):
     (``<assembly>.fa.gz``) and, by default, decompresses it to
     ``<assembly>.fa``.
 
+    An :class:`~genome.io.registration.AssemblyRegistration` whose FASTA arrives over
+    the network: the base owns the assembly's directory and the steps that finish a
+    registration in it, and everything added here is about *where the bytes come from*
+    — the URL, the name check, the pinned digest. :class:`Downloader` is the second base
+    only for :meth:`Downloader.fetch`; ``cache_dir`` is the registration's.
+
     The assembly's metadata row is consulted first: when it pins a source URL that URL
     is fetched instead of the derived golden-path one, and when it pins a sha256 the
     unpacked FASTA is checked against it. An assembly the table does not list keeps
     working exactly as before — the table is a cross-reference, not an allow-list.
-
-    Unless ``cache_dir`` is given, files are stored under the per-assembly
-    reference directory ``<LIULAB_DATA>/genome/<assembly>/`` (see
-    :func:`assembly_data_dir`), keeping all reference files for an assembly
-    together.
 
     Parameters
     ----------
@@ -321,8 +246,6 @@ class UCSCGenomeDownloader(Downloader):
 
     Attributes
     ----------
-    assembly : str
-        The assembly name passed at construction.
     metadata : genome.metadata.AssemblyMetadata or None
         The record this downloader works from — the one passed in, else the curated
         table's row, else ``None`` for an assembly the table does not list.
@@ -344,10 +267,10 @@ class UCSCGenomeDownloader(Downloader):
         *,
         metadata: AssemblyMetadata | None = None,
     ) -> None:
-        if cache_dir is None:
-            cache_dir = assembly_data_dir(assembly)
-        super().__init__(cache_dir)
-        self.assembly = assembly
+        # Resolves cache_dir to the assembly's own directory, which is the one thing
+        # Downloader.__init__ would otherwise do — and it would default it to pooch's
+        # cache instead. The bases are not cooperative; the assembly-aware one wins.
+        super().__init__(assembly, cache_dir)
         self.metadata: AssemblyMetadata | None = (
             metadata if metadata is not None else lookup_assembly(assembly)
         )
@@ -380,59 +303,6 @@ class UCSCGenomeDownloader(Downloader):
             return pinned
         return f"{self.BASE_URL}/{self.assembly}/bigZips/{self.assembly}.fa.gz"
 
-    @property
-    def _work_dir(self) -> Path:
-        """The disposable working area this assembly downloads into.
-
-        Inside :attr:`cache_dir` on purpose: same filesystem, so placing the unpacked
-        FASTA is a rename rather than a copy, and it goes when the assembly does. See
-        :func:`~genome.io.completion.work_dir`.
-        """
-        return work_dir(self.cache_dir)
-
-    def _expected_genome_files(self) -> GenomeFiles:
-        """Paths the FASTA pipeline produces for this assembly (whether or not they exist).
-
-        Both :meth:`fetch_genome` and :meth:`fetch_genome_from` materialize the
-        FASTA as ``<assembly>.fa`` and derive identically named companions, so a
-        single layout describes either entry point.
-        """
-        fasta = self.cache_dir / f"{self.assembly}.fa"
-        return GenomeFiles(
-            fasta=fasta,
-            fai=fasta.with_name(fasta.name + ".fai"),
-            twobit=self.cache_dir / f"{self.assembly}.2bit",
-            chrom_sizes=self.cache_dir / f"{self.assembly}.chrom.sizes",
-        )
-
-    def _repair_command(self, source: str | Path | None = None) -> str:
-        """Return the command that re-registers this assembly from scratch.
-
-        Quoted verbatim into every error a broken directory raises, so it has to be a
-        command that exists and does the job. A seeded assembly carries its own source
-        into it: ``genome register tiny --force`` would fetch from the golden path,
-        which is not where such an assembly came from.
-        """
-        base = f"genome register {self.assembly} --force"
-        return base if source is None else f"{base} --source {shlex.quote(str(source))}"
-
-    def _completed_genome(self, *, overwrite: bool, repair: str) -> GenomeFiles | None:
-        """Return the prepared GenomeFiles when the record says so, else ``None``.
-
-        The completion record is the only thing consulted: it must be there, and every
-        file it claims must be present at the size it claims. That is one ``stat`` per
-        file and no file contents, so reopening a prepared genome is instant. An absent
-        or empty directory answers ``None`` — a fresh registration, which proceeds
-        normally — while a directory that cannot be trusted raises (see
-        :func:`~genome.io.completion.check_registration`). ``overwrite`` skips the
-        question entirely, which is what makes it the repair.
-        """
-        if overwrite:
-            return None
-        if check_registration(self.cache_dir, repair=repair, ignore=_FOREIGN_SUBDIRS) is None:
-            return None
-        return self._expected_genome_files()
-
     def _proven_fasta(self) -> tuple[Path, str] | None:
         """Return the FASTA already on disk with its digest, when it is provably right.
 
@@ -449,40 +319,6 @@ class UCSCGenomeDownloader(Downloader):
             return None
         actual = sha256_file(fasta)
         return (fasta, actual) if actual == expected else None
-
-    def _record_completion(
-        self, files: GenomeFiles, *, source_url: str | None, sha256: str | None
-    ) -> None:
-        """Write this assembly's completion record, then discard the working area.
-
-        Called last, once every derived file exists — writing the record is what makes
-        the registration finished, and the archive is only disposable after that. An
-        interrupted run therefore leaves its download in place and repairs without
-        fetching a whole genome again.
-        """
-        record = build_record(
-            self.cache_dir,
-            kind="genome",
-            name=self.assembly,
-            files=[files.fasta, files.fai, files.twobit, files.chrom_sizes],
-            source_url=source_url,
-            sha256=sha256,
-            tools=PREPARATION_TOOLS,
-        )
-        write_record(self.cache_dir, record)
-        clear_work_dir(self.cache_dir)
-
-    def _place_fasta(self, unpacked: Path) -> Path:
-        """Move ``unpacked`` out of the working area to ``<assembly>.fa`` and return it.
-
-        A rename within one filesystem, since the working area sits inside
-        :attr:`cache_dir` — no second copy of a whole genome is ever made.
-        """
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        fasta = self._expected_genome_files().fasta
-        if unpacked.resolve() != fasta.resolve():
-            unpacked.replace(fasta)
-        return fasta
 
     def validate_assembly(self, *, timeout: float = 30.0) -> None:
         """Check that ``assembly`` is a real golden-path directory at UCSC.
@@ -983,10 +819,8 @@ def verify_assembly(
             )
     else:
         target = downloader._expected_genome_files().fasta
-        registered = check_registration(
-            downloader.cache_dir,
-            repair=downloader._repair_command(),
-            ignore=_FOREIGN_SUBDIRS,
+        registered = downloader._completed_genome(
+            overwrite=False, repair=downloader._repair_command()
         )
         if registered is None or not target.is_file():
             raise FileNotFoundError(
