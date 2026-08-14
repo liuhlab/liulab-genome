@@ -109,8 +109,8 @@ preparation is no longer indistinguishable from a finished one.
   and the registration dispatches on which came back. The four ordered checks and their precedence
   are unchanged (ADR-0008), and `genome register <name>` is still one command for all three kinds.
 - **The downloader is a registration and nothing else.** It used to inherit from `Downloader` as
-  well, whose constructor never ran because its answer to *which directory?* was the wrong one; the
-  plain `Downloader` is unchanged and still fetches into a cache directory of its own.
+  well, whose constructor never ran because its answer to *which directory?* was the wrong one. That
+  base has since gone entirely — see Removed.
 - **An external tool is one module, not five.** Locating a binary, asking its version, running it,
   running it only when its output is stale, and saying what installs it were spread across
   `external.py`, `io/utils.py`, `io/completion.py` and every aligner, with two byte-identical version
