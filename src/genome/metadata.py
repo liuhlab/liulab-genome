@@ -27,11 +27,20 @@ pinned checksum — and an assembly or an annotation with no row is perfectly le
 Each dataclass declares its field list once: its table is read through those fields
 column by column, parsed by each field's own declared type, and a whole record is what
 :class:`~genome.genome.Genome` and the registration functions take to override the table.
+
+A row is a record's other spelling, and both directions are public:
+:func:`format_table_row` writes one, :meth:`AssemblyMetadata.from_row` and
+:meth:`AnnotationMetadata.from_row` read one. A table is the records it lists, so every
+lookup here takes ``table=`` and a caller with rows of their own hands those over instead
+of the shipped ones — which is theirs to do, the table being a cross-reference and not an
+allow-list (ADR-0003). The shipped TSVs are read in :func:`assembly_table` and
+:func:`annotation_table`, and nowhere else.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
@@ -49,6 +58,24 @@ _ANNOTATION_RESOURCE = "data/annotation_metadata.tsv"
 #: typo in a hand-maintained table and says so rather than reading as ``False``.
 _TRUE_CELLS = frozenset({"yes", "true", "1"})
 _FALSE_CELLS = frozenset({"no", "false", "0"})
+
+
+class MetadataRowError(ValueError):
+    """A row cannot be read as a record, and the message names the column that refused.
+
+    Raised by :meth:`AssemblyMetadata.from_row` and :meth:`AnnotationMetadata.from_row`,
+    for a cell no column's type can read and for a blank cell in a column that has no
+    unknown. A :class:`ValueError`, because a hand-maintained row that says something
+    the columns do not is a bad value rather than a broken program.
+
+    Examples
+    --------
+    >>> try:
+    ...     AssemblyMetadata.from_row({"assembly_name": "tiny", "ncbi_taxid": "many"})
+    ... except MetadataRowError as error:
+    ...     print("ncbi_taxid" in str(error))
+    True
+    """
 
 
 @dataclass(frozen=True)
@@ -148,6 +175,46 @@ class AssemblyMetadata:
             ncbi_taxid=None,
         )
 
+    @classmethod
+    def from_row(cls, row: Mapping[str, object]) -> AssemblyMetadata:
+        """Build a record from one row of a metadata table.
+
+        The reader half of the register-then-paste flow :func:`format_table_row` writes:
+        a row is a mapping of column name to cell, which is how the shipped TSV is read
+        and how :func:`dataclasses.asdict` of a record spells one. Each column is parsed
+        by its own declared type, and a blank cell — empty, absent, or the NaN pandas
+        reads a blank as — means unknown, which only a column that has an unknown takes.
+
+        Parameters
+        ----------
+        row : mapping of str to object
+            Column name to cell. A cell is the table's own text, but a value already of
+            the column's type is taken as it stands, so a record's fields are a row.
+            Keys outside :data:`METADATA_FIELDS` are ignored.
+
+        Returns
+        -------
+        AssemblyMetadata
+            The record the row spells.
+
+        Raises
+        ------
+        MetadataRowError
+            If a cell cannot be read as its column's type, or a column that has no
+            unknown is blank. The record is built from parsed cells or not at all, so a
+            caller is handed a whole record or an error naming the column — never a
+            record carrying the columns that happened to come before the bad one.
+
+        Examples
+        --------
+        >>> row = {"assembly_name": "sacCer3", "ncbi_taxid": "559292"}
+        >>> AssemblyMetadata.from_row(row).ncbi_taxid
+        559292
+        >>> AssemblyMetadata.from_row(row).species is None   # blank is unknown
+        True
+        """
+        return cls(**{name: _parse_cell(name, row, _FIELD_TYPES) for name in METADATA_FIELDS})
+
 
 #: Each metadata field's declared type, which parses that field's column of the table.
 _FIELD_TYPES: dict[str, Any] = get_type_hints(AssemblyMetadata)
@@ -207,6 +274,49 @@ class AnnotationMetadata:
     sha256: str | None = None
     default: bool = False
 
+    @classmethod
+    def from_row(cls, row: Mapping[str, object]) -> AnnotationMetadata:
+        """Build a record from one row of an annotation table.
+
+        :meth:`AssemblyMetadata.from_row` for the annotation table's own columns, and
+        the same rules — with one more: ``default`` is a flag column, where a blank cell
+        is the real answer *no* rather than an unknown.
+
+        Parameters
+        ----------
+        row : mapping of str to object
+            Column name to cell, as :meth:`AssemblyMetadata.from_row` takes one. Keys
+            outside :data:`ANNOTATION_FIELDS` are ignored.
+
+        Returns
+        -------
+        AnnotationMetadata
+            The record the row spells.
+
+        Raises
+        ------
+        MetadataRowError
+            As :meth:`AssemblyMetadata.from_row` raises it, and additionally for a flag
+            cell spelled a way no row spells one.
+
+        Examples
+        --------
+        >>> AnnotationMetadata.from_row(
+        ...     {
+        ...         "assembly": "sacCer3",
+        ...         "name": "ensgene_v101",
+        ...         "provider": "UCSC",
+        ...         "version": "ensGene.v101",
+        ...         "url": "https://example.org/sacCer3.ensGene.gtf.gz",
+        ...         "default": "yes",
+        ...     }
+        ... ).default
+        True
+        """
+        return cls(
+            **{name: _parse_cell(name, row, _ANNOTATION_FIELD_TYPES) for name in ANNOTATION_FIELDS}
+        )
+
 
 #: Each annotation field's declared type, which parses that field's column of the table.
 _ANNOTATION_FIELD_TYPES: dict[str, Any] = get_type_hints(AnnotationMetadata)
@@ -243,35 +353,70 @@ def format_table_row(row: Mapping[str, object]) -> str:
 
 
 @cache
-def _metadata_table() -> pd.DataFrame:
-    """Load and cache the curated assembly metadata table as a DataFrame of text."""
-    return _read_table(_METADATA_RESOURCE)
+def assembly_table() -> tuple[AssemblyMetadata, ...]:
+    """Return every assembly the shipped table lists, in table order.
+
+    What the lab officially supports — a pinned source and a pinned checksum each — and
+    what every lookup here reads when it is handed no ``table=`` of its own. Read once
+    and cached; the records are frozen, so the tuple is safe to hold on to.
+
+    Returns
+    -------
+    tuple of AssemblyMetadata
+        One record per row of ``data/assembly_metadata.tsv``.
+
+    Examples
+    --------
+    >>> "hg38" in {record.assembly_name for record in assembly_table()}
+    True
+    """
+    return tuple(AssemblyMetadata.from_row(row) for row in _rows(_METADATA_RESOURCE))
 
 
 @cache
-def _annotation_table() -> pd.DataFrame:
-    """Load and cache the curated annotation metadata table as a DataFrame of text."""
-    return _read_table(_ANNOTATION_RESOURCE)
+def annotation_table() -> tuple[AnnotationMetadata, ...]:
+    """Return every annotation the shipped table lists, for all assemblies, in table order.
+
+    The annotation half of :func:`assembly_table`, and the default the annotation
+    lookups read. :func:`list_annotation_metadata` is the usual way in, since an
+    annotation is asked for by the assembly it belongs to.
+
+    Returns
+    -------
+    tuple of AnnotationMetadata
+        One record per row of ``data/annotation_metadata.tsv``.
+
+    Examples
+    --------
+    >>> "ensgene_v101" in {record.name for record in annotation_table()}
+    True
+    """
+    return tuple(AnnotationMetadata.from_row(row) for row in _rows(_ANNOTATION_RESOURCE))
 
 
-def _read_table(resource_name: str) -> pd.DataFrame:
-    """Read one shipped TSV as text — every column, every cell, unparsed."""
+def _rows(resource_name: str) -> list[dict[str, Any]]:
+    """Read one shipped TSV as rows of text — every column, every cell, unparsed."""
     resource = files("genome").joinpath(resource_name)
     with resource.open("r", encoding="utf-8") as handle:
-        return pd.read_csv(handle, sep="\t", dtype=str)
+        frame = pd.read_csv(handle, sep="\t", dtype=str)
+    return [dict(row) for _, row in frame.iterrows()]
 
 
-def _cell_text(name: str, row: pd.Series) -> str:
+def _cell_text(name: str, row: Mapping[str, object]) -> str:
     """Return the ``name`` cell of ``row`` as stripped text, empty when it is blank.
 
-    The whole table is read as text, so anything that is not a non-empty string (a
-    missing column, or the NaN pandas reads a blank cell as) is an empty cell.
+    Blank is a missing column, ``None``, the NaN pandas reads a blank cell as, or
+    whitespace. Anything else is that cell's own text, so a row that spells a value in
+    its column's own type — an ``int`` taxid, a ``bool`` flag — reads back the same as
+    the table's text for it.
     """
     cell = row.get(name)
-    return cell.strip() if isinstance(cell, str) else ""
+    if cell is None or (isinstance(cell, float) and math.isnan(cell)):
+        return ""
+    return str(cell).strip()
 
 
-def _parse_flag(name: str, row: pd.Series) -> bool:
+def _parse_flag(name: str, row: Mapping[str, object]) -> bool:
     """Parse a boolean column — blank is ``False``, and a spelling nobody uses raises."""
     text = _cell_text(name, row).lower()
     if not text or text in _FALSE_CELLS:
@@ -279,49 +424,70 @@ def _parse_flag(name: str, row: pd.Series) -> bool:
     if text in _TRUE_CELLS:
         return True
     accepted = ", ".join(sorted(_TRUE_CELLS | _FALSE_CELLS))
-    raise ValueError(
-        f"the {name!r} column holds {text!r}, which is not a flag. Fix that cell in the "
-        f"shipped table to one of: {accepted} — or leave it blank, which reads as false."
+    raise MetadataRowError(
+        f"the {name!r} column holds {text!r}, which is not a flag. Fix that cell to one "
+        f"of: {accepted} — or leave it blank, which reads as false."
     )
 
 
-def _parse_cell(name: str, row: pd.Series, types: Mapping[str, Any]) -> Any:
+def _parse_cell(name: str, row: Mapping[str, object], types: Mapping[str, Any]) -> Any:
     """Parse the ``name`` column of ``row`` with that field's own declared type.
 
     A field declared optional (``T | None``) is parsed by ``T`` when its cell carries
     text, and is ``None`` when the cell is blank or its column is absent — a union is
     not callable, so the type inside it does the parsing. A field declared ``bool`` is a
     flag column, where an empty cell is a real answer (see :func:`_parse_flag`) rather
-    than an unknown. Any other field is parsed by its declared type, as every column was
-    before any of them became optional.
+    than an unknown. Any other field is parsed by its declared type and has no unknown,
+    so a blank cell there is a malformed row rather than the text ``'nan'``.
     """
     declared = types[name]
     if declared is bool:
         return _parse_flag(name, row)
     inside = [arg for arg in get_args(declared) if arg is not type(None)]
-    if not inside:
-        return declared(row[name])
     text = _cell_text(name, row)
-    return inside[0](text) if text else None
+    if inside:
+        return _parse_text(name, text, inside[0]) if text else None
+    if not text:
+        raise MetadataRowError(
+            f"the {name!r} column is blank, and it is one no row may leave blank. Fill "
+            f"that cell in: a blank cell reads back as unknown, and {name!r} has none."
+        )
+    return _parse_text(name, text, declared)
 
 
-@cache
-def lookup_assembly(assembly: str) -> AssemblyMetadata | None:
+def _parse_text(name: str, text: str, declared: Any) -> Any:
+    """Parse one cell's text with its column's type, or say which cell refused."""
+    try:
+        return declared(text)
+    except (TypeError, ValueError) as error:
+        raise MetadataRowError(
+            f"the {name!r} column holds {text!r}, which {declared.__name__} cannot read. "
+            f"Fix that cell to a value {declared.__name__} accepts."
+        ) from error
+
+
+def lookup_assembly(
+    assembly: str, *, table: Sequence[AssemblyMetadata] | None = None
+) -> AssemblyMetadata | None:
     """Return the :class:`AssemblyMetadata` for a UCSC (or canonical) assembly name, or ``None``.
 
     Parameters
     ----------
     assembly : str
-        The name to look up, matched against the table's ``ucsc_name`` and
-        ``assembly_name`` columns.
+        The name to look up, matched against each record's ``ucsc_name`` and
+        ``assembly_name``.
+    table : sequence of AssemblyMetadata, optional
+        The rows to look in; the shipped table (:func:`assembly_table`) when omitted.
+        Curating rows of your own is ordinary rather than an override — the table is a
+        cross-reference and never an allow-list (ADR-0003) — and nothing is installed
+        by passing them: the sequence is read for this call and no other.
 
     Returns
     -------
     AssemblyMetadata or None
-        The row for ``assembly``, or ``None`` when the table does not list it.
-        The table is a cross-reference, not an allow-list, so an unlisted
-        assembly is legal and its identifiers are simply unknown. A blank cell in
-        an optional column reads back as ``None``.
+        The row for ``assembly``, or ``None`` when the table does not list it. An
+        unlisted assembly is legal and its identifiers are simply unknown. A blank cell
+        in an optional column reads back as ``None``.
 
     Examples
     --------
@@ -331,21 +497,22 @@ def lookup_assembly(assembly: str) -> AssemblyMetadata | None:
     'https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz'
     >>> lookup_assembly("no_such_assembly") is None
     True
+    >>> mine = AssemblyMetadata.unknown("my_ref")
+    >>> lookup_assembly("my_ref", table=[mine]) == mine
+    True
     """
-    table = _metadata_table()
-    # A blank ``ucsc_name`` reads as NaN and compares equal to nothing, so a row for a
+    rows = assembly_table() if table is None else table
+    # A blank ``ucsc_name`` is ``None`` and equals no name asked for, so a row for a
     # reference UCSC never carried is found by its own name and never by an empty one.
-    match = table[(table["ucsc_name"] == assembly) | (table["assembly_name"] == assembly)]
-    if match.empty:
-        return None
-    row = match.iloc[0]
-    # Every column is read as text; each field's declared type parses its own column.
-    return AssemblyMetadata(
-        **{name: _parse_cell(name, row, _FIELD_TYPES) for name in METADATA_FIELDS}
+    return next(
+        (row for row in rows if assembly in (row.ucsc_name, row.assembly_name)),
+        None,
     )
 
 
-def assembly_metadata(assembly: str) -> AssemblyMetadata:
+def assembly_metadata(
+    assembly: str, *, table: Sequence[AssemblyMetadata] | None = None
+) -> AssemblyMetadata:
     """Return what is known about ``assembly`` — the table's row, or an unknown record.
 
     The **total** accessor, and the one to reach for when the question is *what are this
@@ -364,6 +531,8 @@ def assembly_metadata(assembly: str) -> AssemblyMetadata:
     ----------
     assembly : str
         The name to look up, matched as :func:`lookup_assembly` matches it.
+    table : sequence of AssemblyMetadata, optional
+        The rows to look in, as :func:`lookup_assembly` takes them.
 
     Returns
     -------
@@ -380,11 +549,13 @@ def assembly_metadata(assembly: str) -> AssemblyMetadata:
     >>> assembly_metadata("no_such_assembly").assembly_name
     'no_such_assembly'
     """
-    listed = lookup_assembly(assembly)
+    listed = lookup_assembly(assembly, table=table)
     return listed if listed is not None else AssemblyMetadata.unknown(assembly)
 
 
-def lookup_annotation(assembly: str, name: str) -> AnnotationMetadata | None:
+def lookup_annotation(
+    assembly: str, name: str, *, table: Sequence[AnnotationMetadata] | None = None
+) -> AnnotationMetadata | None:
     """Return the annotation ``name`` the table lists for ``assembly``, or ``None``.
 
     The lookup that makes registering an annotation by name possible: the row it
@@ -397,6 +568,9 @@ def lookup_annotation(assembly: str, name: str) -> AnnotationMetadata | None:
         ``assembly`` column.
     name : str
         The **Registered name** to look up, e.g. ``"gencode_v50"``.
+    table : sequence of AnnotationMetadata, optional
+        The rows to look in; the shipped table (:func:`annotation_table`) when omitted,
+        and read for this call only, as :func:`lookup_assembly` reads its own.
 
     Returns
     -------
@@ -412,14 +586,16 @@ def lookup_annotation(assembly: str, name: str) -> AnnotationMetadata | None:
     >>> lookup_annotation("sacCer3", "no_such_annotation") is None
     True
     """
-    table = _annotation_table()
-    match = table[(table["assembly"] == assembly) & (table["name"] == name)]
-    if match.empty:
-        return None
-    return _annotation_record(match.iloc[0])
+    rows = annotation_table() if table is None else table
+    return next(
+        (row for row in rows if row.assembly == assembly and row.name == name),
+        None,
+    )
 
 
-def list_annotation_metadata(assembly: str) -> list[AnnotationMetadata]:
+def list_annotation_metadata(
+    assembly: str, *, table: Sequence[AnnotationMetadata] | None = None
+) -> list[AnnotationMetadata]:
     """Return every annotation the table offers for ``assembly``, in table order.
 
     What the lab supports for an assembly — a different question from what is
@@ -428,7 +604,9 @@ def list_annotation_metadata(assembly: str) -> list[AnnotationMetadata]:
     Parameters
     ----------
     assembly : str
-        The assembly to list, matched against the table's ``assembly`` column.
+        The assembly to list, matched against each record's ``assembly``.
+    table : sequence of AnnotationMetadata, optional
+        The rows to list from, as :func:`lookup_annotation` takes them.
 
     Returns
     -------
@@ -443,13 +621,5 @@ def list_annotation_metadata(assembly: str) -> list[AnnotationMetadata]:
     >>> list_annotation_metadata("no_such_assembly")
     []
     """
-    table = _annotation_table()
-    match = table[table["assembly"] == assembly]
-    return [_annotation_record(row) for _, row in match.iterrows()]
-
-
-def _annotation_record(row: pd.Series) -> AnnotationMetadata:
-    """Build an :class:`AnnotationMetadata` from one text row of the annotation table."""
-    return AnnotationMetadata(
-        **{name: _parse_cell(name, row, _ANNOTATION_FIELD_TYPES) for name in ANNOTATION_FIELDS}
-    )
+    rows = annotation_table() if table is None else table
+    return [row for row in rows if row.assembly == assembly]

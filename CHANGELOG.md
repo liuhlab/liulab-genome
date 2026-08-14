@@ -88,6 +88,10 @@ preparation is no longer indistinguishable from a finished one.
   `Protein`. It reports the offending characters and refuses nothing; construction still validates
   nothing.
 - **`genome version --json`**, the one command that lacked the flag: `{"version": "..."}`.
+- **A metadata lookup takes the table to read.** The four lookups take `table=`, defaulting to the
+  shipped rows (`assembly_table()`, `annotation_table()`), and `AssemblyMetadata.from_row` /
+  `AnnotationMetadata.from_row` build a record from one row — raising `MetadataRowError`, naming the
+  column, rather than half-building one. Curating a row no longer means reaching past the API.
 
 ### Changed
 
