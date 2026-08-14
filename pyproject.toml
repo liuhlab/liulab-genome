@@ -61,8 +61,7 @@ platforms = ["osx-arm64", "linux-64", "osx-64"]
 [tool.pixi.pypi-dependencies]
 liulab-genome = { path = ".", editable = true }
 
-# The External tools, shelled out to and never reimplemented, plus the Python libraries
-# the package imports. In every environment: nothing here is optional.
+# Every environment gets these; nothing here is optional. Contrast the aligners below.
 [tool.pixi.dependencies]
 samtools = "*"
 bedtools = "*"
@@ -73,8 +72,7 @@ pandas = ">=2.1,<3"
 py2bit = ">=1.0.1,<2"
 gffutils = ">=0.14,<0.15"
 
-# One Python, on purpose: the suite runs on 3.13, and the 3.12 floor is held by
-# `ruff target-version` and `pyright pythonVersion`, not by a test lane.
+# One Python on purpose; the 3.12 floor is ruff's and pyright's. See AGENTS.md.
 [tool.pixi.feature.py313.dependencies]
 python = "3.13.*"
 
@@ -97,11 +95,8 @@ mkdocs-material = "*"
 mkdocstrings-python = "*"
 ruff = "*"   # mkdocstrings formats rendered signatures with it
 
-# THE ALIGNERS ARE THE ONLY BINARIES THIS PACKAGE DOES NOT SHIP WITH ITSELF, and they
-# are here rather than in `[tool.pixi.dependencies]` because installing them is only
-# required when Genome.build_<aligner>_index() is called — the aligner checks for
-# itself at that point. That is also why the tests needing them are a separate lane:
-# an environment without them makes those tests skip, and a skip is green.
+# Optional because they are only needed when Genome.build_<aligner>_index() is called,
+# and the aligner checks for itself then. Being optional is what earns them their own lane.
 [tool.pixi.feature.star.dependencies]
 star = "*"
 
@@ -120,28 +115,18 @@ fmt       = "ruff format ."
 fmt-check = "ruff format --check ."
 typecheck = "pyright"
 
-# TWO LANES, AND TOGETHER THEY ARE THE SUITE. `-m aligner` against its negation is total
-# by boolean negation, so no test can fall between them however the marker is applied,
-# and `--strict-markers` refuses one that was invented. `_needs` in tests/test_aligner.py
-# applies the marker and the skip under one name, so a test cannot carry the skip alone
-# and sit in the wrong lane. CI gives each lane a job; `check` runs the first of them.
-#
-# `auto` capped at 8: bare `auto` oversubscribes a big box (3.4 s against 2.8 s here) and
-# a bare 8 oversubscribes a 2-core runner, so `auto` finds the cores and the cap keeps
-# the count where it was measured best. Serial: 5.9 s. See docs/research/.
+# Two lanes, and together they are the suite — see AGENTS.md for why they must stay one.
+# The cap: `auto` alone oversubscribes, a bare 8 oversubscribes a small runner.
+# docs/research/test-suite-parallelism-2026-08-14.md
 test        = "pytest -m 'not aligner' -n auto --maxprocesses 8 --dist=load"
-# Serial, and not capped: three tests, where a worker pool costs more than it saves.
-# `depends-on` precisely BECAUSE pixi runs it sequentially — the binaries are proved to
-# answer before the selection happens. See scripts/require_aligners.sh.
+# Serial: three tests. `depends-on` because pixi runs it first, proving the binaries answer.
 test-aligner = { cmd = "pytest -m aligner", depends-on = ["require-aligners"] }
 require-aligners = "bash scripts/require_aligners.sh"
-# Everything, aligner tests included — they skip themselves when the binaries are absent.
 test-cov    = "pytest --cov=genome --cov-report=term-missing"
-# Serial on purpose: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
+# Serial: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
 test-failed = "pytest --lf --new-first -x -q"
 
-# Not `depends-on`: pixi runs those sequentially, which is what this replaces. check.sh
-# runs the four concurrently and prints each one's output whole, in a fixed order.
+# Not `depends-on`: pixi runs those sequentially, which is the thing this replaces.
 check     = "bash scripts/check.sh lint fmt-check typecheck test"
 
 build      = "python -m build"
@@ -207,7 +192,6 @@ testpaths = ["tests"]
 addopts = ["-ra", "--strict-markers", "--strict-config"]
 xfail_strict = true
 filterwarnings = ["error"]
-# Semantic, not a speed label: what a test needs, never how long it takes.
 markers = [
     "aligner: needs STAR or chromap — a binary this package does not ship with itself",
 ]
