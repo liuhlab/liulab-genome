@@ -35,6 +35,13 @@ the completion record written: ``source_url`` is ``None`` because nothing was fe
 and ``sha256`` is the digest of the bytes this module just wrote, which is what a later
 verification falls back to.
 
+**What no digest of a chimera can see** is a component registered again underneath it:
+the chimera's own bytes are untouched and still agree with its record, while the
+component they were copied from is gone. That is what the digests in ``details`` are for,
+and :func:`check_components_unchanged` is the comparison — record against record, with
+nothing rehashed — made both when a finished chimera is handed back and when one is
+verified. An absent digest on either side reads as *unknown* rather than as wrong.
+
 **The merge is part of the build.** Between those two steps the **Merged annotation** is
 registered, so there is no second surface to remember and ``genome register <chimera>
 --force`` repairs the annotation and the FASTA together. Each component contributes its
@@ -72,10 +79,20 @@ from genome.chimera import (
     derive_separator,
     suffixed,
 )
-from genome.io.completion import CompletionRecord, RegistrationError, read_record
+from genome.io.completion import (
+    CompletionRecord,
+    RegistrationError,
+    RegistrationMismatchError,
+    read_record,
+    record_path,
+)
 from genome.io.fasta import GenomeFiles, prepare_fasta, read_chrom_sizes
-from genome.io.gtf import GtfAnnotation, MergeSource, register_merged_gtf
-from genome.io.registration import AssemblyRegistration
+from genome.io.gtf import GtfAnnotation, MergeSource, annotation_dir, register_merged_gtf
+from genome.io.registration import (
+    AssemblyRegistration,
+    assembly_data_dir,
+    assembly_repair_command,
+)
 
 if TYPE_CHECKING:
     from genome.genome import Genome
@@ -288,6 +305,93 @@ def read_chimera_details(directory: Path) -> ChimeraDetails | None:
     return ChimeraDetails.from_record(read_record(directory))
 
 
+def check_components_unchanged(directory: Path, assembly: str) -> None:
+    """Raise unless every component of the assembly in ``directory`` is what it was.
+
+    The one failure a digest of a chimera's own bytes cannot show. Those bytes are a copy
+    of its components', so a component registered again underneath it leaves the chimera
+    intact, agreeing with its own record, and no longer a copy of anything that exists —
+    silently stale sequence, and stale gene models one level down. Both are caught here,
+    and both are **record against record**: the digests this chimera wrote down are
+    compared against the ones the components' own records pin now, so this reads a
+    handful of small JSON files and not one base of sequence.
+
+    An assembly with no components recorded has nothing to compare and returns at once,
+    which is what makes an ordinary assembly pay nothing rather than be asked about.
+    Likewise an absent digest on either side, which means *unknown* rather than wrong: a
+    component that pinned none, or an annotation registered before its digest was
+    recorded, leaves that component unguarded rather than refused.
+
+    Parameters
+    ----------
+    directory : pathlib.Path
+        The **Assembly dir** the chimera was built in.
+    assembly : str
+        Its assembly name, quoted in the error along with the command that repairs it.
+
+    Raises
+    ------
+    genome.io.completion.RegistrationMismatchError
+        If a component's FASTA, or the annotation it contributed to the **Merged
+        annotation**, is not the one this chimera was built from. The message names both
+        digests and ``genome register <assembly> --force``, which rebuilds both halves.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> check_components_unchanged(Path("/tmp/definitely-not-a-build"), "notAChimera")
+    """
+    details = read_chimera_details(directory)
+    if details is None:
+        return
+    for entry in details.component_details:
+        _check_component_unchanged(entry, assembly=assembly, directory=directory)
+
+
+def _check_component_unchanged(entry: ComponentDetails, *, assembly: str, directory: Path) -> None:
+    """Raise unless one component — its FASTA, then its annotation — is still itself.
+
+    The component is found by name under the shared data root, exactly as an aligner index
+    finds the assembly it was built from: a chimera's record carries component names and
+    no paths, which is what keeps a registered directory movable.
+    """
+    component_dir = assembly_data_dir(entry.name)
+    record = read_record(component_dir)
+    current = None if record is None else record.sha256
+    if _disagree(entry.sha256, current):
+        raise RegistrationMismatchError(
+            f"the chimera {assembly} in {directory} was built from a different "
+            f"{entry.name} than the one registered now: it recorded {entry.sha256} for "
+            f"that component, and {record_path(component_dir)} now pins {current}. "
+            f"{entry.name} was registered again afterwards, so the sequences it "
+            f"contributed here are a copy of bytes that are no longer anywhere — which "
+            f"nothing about this chimera's own files can show, since they are unchanged. "
+            f"Build it again with `{assembly_repair_command(assembly)}`."
+        )
+    if entry.annotation is None:
+        return
+    gtf_dir = annotation_dir(component_dir, entry.annotation)
+    annotation = read_record(gtf_dir)
+    current_annotation = None if annotation is None else annotation.sha256
+    if _disagree(entry.annotation_sha256, current_annotation):
+        raise RegistrationMismatchError(
+            f"the merged annotation of the chimera {assembly} in {directory} was merged "
+            f"from a different {entry.annotation} of {entry.name}: it recorded "
+            f"{entry.annotation_sha256} for that annotation, and {record_path(gtf_dir)} "
+            f"now pins {current_annotation}. That annotation was registered again after "
+            f"the merge, so the merged gene models are not the ones {entry.name} carries "
+            f"— the failure the sequence digests cannot show, since no base of this "
+            f"chimera's FASTA changed. Build it again with "
+            f"`{assembly_repair_command(assembly)}`, which rewrites the annotation and "
+            f"the FASTA together."
+        )
+
+
+def _disagree(recorded: str | None, current: str | None) -> bool:
+    """Whether two recorded digests are known to differ — unknown on either side is not."""
+    return recorded is not None and current is not None and recorded != current
+
+
 @dataclass(frozen=True)
 class _Contribution:
     """What one component puts into the **Merged annotation**, settled before any writing.
@@ -384,9 +488,11 @@ class ChimeraBuilder(AssemblyRegistration):
 
         A chimera whose record says it finished is returned from that record without
         rewriting anything — the annotation included, since a finished chimera already has
-        the one its build wrote. A directory that cannot be trusted **raises** instead of
-        being rebuilt, naming ``genome register <name> --force`` (ADR-0007). That command
-        is what ``overwrite=True`` is, and it repairs both halves in one pass.
+        the one its build wrote — but only once its components are shown to still be the
+        ones it was built from (:func:`check_components_unchanged`). A directory that
+        cannot be trusted **raises** instead of being rebuilt, naming ``genome register
+        <name> --force`` (ADR-0007). That command is what ``overwrite=True`` is, and it
+        repairs both halves in one pass.
 
         Parameters
         ----------
@@ -412,7 +518,9 @@ class ChimeraBuilder(AssemblyRegistration):
         genome.io.completion.UnfinishedRegistrationError
             If the chimera's directory holds files but no record.
         genome.io.completion.RegistrationMismatchError
-            If its record disagrees with what is on disk.
+            If its record disagrees with what is on disk, or if a component was
+            registered again since this chimera was built, so the copy of that
+            component's bytes held here is of bytes that no longer exist.
         genome.io.completion.RegistrationError
             If the built ``chrom.sizes`` is not the concatenation the components
             predict. Nothing vouches for the directory in that case — the record is
@@ -432,6 +540,10 @@ class ChimeraBuilder(AssemblyRegistration):
         """
         registered = self._completed_genome(overwrite=overwrite, repair=self._repair_command())
         if registered is not None:
+            # The record vouches for this directory's own files and can say nothing about
+            # the components those files were copied from, so the one question it cannot
+            # answer is asked here — before a stale chimera is handed back as finished.
+            check_components_unchanged(self.cache_dir, self.assembly)
             return registered
         # Settled here rather than beside the merge, so that a component naming an
         # annotation this machine has not registered costs nothing: the two refusals below

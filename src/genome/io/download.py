@@ -72,6 +72,13 @@ _Processor = Callable[..., object]
 #: else is a local path (or an error, if it carries a scheme we cannot fetch).
 _URL_SCHEMES = frozenset({"http", "https", "ftp", "sftp"})
 
+#: What answered *which digest should this FASTA have?* — the assembly's curated
+#: metadata row, or the completion record its own registration wrote. Reported by
+#: :func:`verify_assembly` so that being held to a pin and being held only to what this
+#: machine last produced are never read as the same result.
+_EXPECTED_FROM_TABLE = "table"
+_EXPECTED_FROM_RECORD = "record"
+
 
 def _looks_like_url(source: str) -> bool:
     """Return whether ``source`` is a fetchable URL rather than a local path."""
@@ -289,6 +296,36 @@ class UCSCGenomeDownloader(AssemblyRegistration, Downloader):
     def _expected_sha256(self) -> str | None:
         """The sha256 this assembly's metadata pins for the unpacked FASTA, or ``None``."""
         return self.metadata.sha256 if self.metadata else None
+
+    def _expected_digest(self) -> tuple[str | None, str | None]:
+        """Return the digest this assembly's FASTA is held to, and what supplied it.
+
+        A **fallback**, and deliberately not a question about what kind of assembly this
+        is: the curated row's pin answers whenever there is one, and otherwise the digest
+        the assembly's own completion record already holds does. The second is the only
+        thing that can answer for an assembly nothing was downloaded for — a chimera pins
+        nothing in the table by design (ADR-0008) — but nothing here asks whether it is
+        one, so any row that pins no digest gets the same treatment.
+
+        For verification alone. Fetching still consults :attr:`_expected_sha256` by
+        itself, because a record's digest is what this machine last produced, and holding
+        a fresh download to it would refuse exactly when an upstream file has legitimately
+        changed — which is the moment re-registering is what a caller wants.
+
+        Returns
+        -------
+        tuple of (str or None, str or None)
+            The digest to expect and where it came from — ``"table"`` for the curated
+            row, ``"record"`` for the completion record — or ``(None, None)`` when
+            neither pins one and there is nothing to check against.
+        """
+        pinned = self._expected_sha256
+        if pinned is not None:
+            return pinned, _EXPECTED_FROM_TABLE
+        record = read_record(self.cache_dir)
+        if record is not None and record.sha256 is not None:
+            return record.sha256, _EXPECTED_FROM_RECORD
+        return None, None
 
     @property
     def fasta_url(self) -> str:
@@ -760,18 +797,31 @@ def verify_assembly(
     cache_dir: str | Path | None = None,
     metadata: AssemblyMetadata | None = None,
 ) -> dict[str, object]:
-    """Re-read a FASTA and check its sha256 against the one ``assembly``'s row pins.
+    """Re-read a FASTA and check its sha256 against the digest expected of it.
 
     The one operation that reads bytes rather than sizes. Registering an assembly and
     reopening it both go by presence and size, which is what makes them instant; this
     is the deliberate re-verification for when integrity is actually in doubt, and it
     costs a full pass over the file.
 
+    What is expected of it comes from the assembly's curated row, and **failing that,
+    from the completion record its own registration wrote** — a fallback rather than a
+    question about what kind of assembly this is (see
+    :meth:`UCSCGenomeDownloader._expected_digest`). ``expected_from`` says which
+    answered, because being held to a pinned digest and being held only to what this
+    machine last produced are different results and a caller must be able to tell them
+    apart.
+
     With no ``fasta`` it verifies the assembly's own registered FASTA, and the
     registration must be intact — a directory that cannot be trusted raises here as it
-    does anywhere else. Point ``fasta`` at any file to check that instead: a copy taken
-    from a mirror or handed over by hand is checkable against the official row before
-    anything is built on it, and nothing needs to be registered first.
+    does anywhere else. Two things are then checked beside the digest, both by reading
+    records rather than bytes: that each component this assembly was built from is still
+    the one it was built from, and that each annotation merged into its own is still the
+    one that was merged. Neither costs an assembly without components anything. Point
+    ``fasta`` at any file to check that instead: a copy taken from a mirror or handed
+    over by hand is checkable before anything is built on it, and nothing needs to be
+    registered first — nothing is then asked about components, since the assembly's own
+    registration is not what is being verified.
 
     Parameters
     ----------
@@ -788,16 +838,18 @@ def verify_assembly(
     -------
     dict
         ``assembly``, the ``fasta`` that was read, its computed ``sha256``, the
-        ``expected`` digest the row pins (``None`` when it pins none), and
-        ``verified`` — whether there was a pin to check against at all. A digest that
-        disagrees raises rather than reporting ``False``.
+        ``expected`` digest (``None`` when nothing pins one), ``expected_from`` —
+        ``"table"``, ``"record"``, or ``None`` for the same case — and ``verified``,
+        whether there was anything to check against at all. A digest that disagrees
+        raises rather than reporting ``False``.
 
     Raises
     ------
     genome.io.utils.ChecksumMismatchError
-        If the row pins a sha256 and the file's digest is a different one.
+        If a digest is expected and the file's is a different one.
     genome.io.completion.RegistrationError
-        If the assembly's directory holds a build that cannot be trusted as finished.
+        If the assembly's directory holds a build that cannot be trusted as finished —
+        including one whose components were registered again underneath it.
     FileNotFoundError
         If there is no file to read — nothing registered for ``assembly``, or no file
         at an explicit ``fasta``.
@@ -809,6 +861,10 @@ def verify_assembly(
     >>> verify_assembly("sacCer3", fasta="/tmp/copied.fa")  # doctest: +SKIP
     {'assembly': 'sacCer3', 'fasta': '/tmp/copied.fa', ...}
     """
+    # Deferred: `genome.io.chimera` reaches this module through `genome.io.gtf`, so
+    # importing it at the top would be a cycle. Nothing else here needs it.
+    from genome.io.chimera import check_components_unchanged
+
     downloader = UCSCGenomeDownloader(assembly, cache_dir, metadata=metadata)
     if fasta is not None:
         target = Path(fasta).expanduser()
@@ -828,12 +884,19 @@ def verify_assembly(
                 f"nothing to verify. Register it with `genome register {assembly}`, or "
                 f"pass the FASTA to check with --fasta."
             )
-    expected = downloader._expected_sha256
+        # Beside the digest, never instead of it: this one reads records rather than
+        # bytes, and answers what a digest of this assembly's own bytes cannot.
+        check_components_unchanged(downloader.cache_dir, assembly)
+    expected, expected_from = downloader._expected_digest()
+    actual = sha256_file(target)
+    if expected is not None and actual != expected:
+        raise ChecksumMismatchError(target, expected, actual)
     return {
         "assembly": assembly,
         "fasta": str(target),
-        "sha256": downloader.verify_fasta(target),
+        "sha256": actual,
         "expected": expected,
+        "expected_from": expected_from,
         "verified": expected is not None,
     }
 

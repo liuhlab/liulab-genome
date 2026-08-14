@@ -850,9 +850,12 @@ def test_register_assembly_seeds_from_a_source_when_given_one(
     assert head_recorder.calls == []  # UCSC is never consulted about a seeded assembly
 
 
-def test_verify_assembly_rehashes_the_registered_fasta(
+def test_verify_assembly_falls_back_to_the_digest_the_record_already_holds(
     fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
 ) -> None:
+    # No row lists "tiny", so nothing pins a digest for it — and its own registration
+    # wrote one down. A fallback rather than a question about what kind of assembly this
+    # is: nothing was downloaded for a chimera either, and it takes the same path.
     fake_fetch.serve("tiny.fa.gz")
     register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
 
@@ -860,8 +863,9 @@ def test_verify_assembly_rehashes_the_registered_fasta(
 
     assert payload["fasta"] == str(tmp_path / "tiny.fa")
     assert payload["sha256"] == _TINY_FA_SHA256
-    assert payload["expected"] is None  # no row lists "tiny", so nothing to check against
-    assert payload["verified"] is False
+    assert payload["expected"] == _TINY_FA_SHA256
+    assert payload["expected_from"] == "record"
+    assert payload["verified"] is True
 
 
 def test_verify_assembly_confirms_a_fasta_that_matches_the_pin(
@@ -875,7 +879,41 @@ def test_verify_assembly_confirms_a_fasta_that_matches_the_pin(
 
     assert payload["verified"] is True
     assert payload["expected"] == _TINY_FA_SHA256
+    # The row answered, though the record beside it holds a digest too: a pin is what a
+    # digest is held to whenever there is one.
+    assert payload["expected_from"] == "table"
     assert payload["sha256"] == _TINY_FA_SHA256
+
+
+def test_verify_assembly_reports_when_nothing_pins_a_digest_at_all(
+    tmp_path: Path, data_dir: Path
+) -> None:
+    # The third state: no row lists "tiny", and nothing is registered here whose record
+    # could answer either. Reported rather than raised — a digest with nothing to compare
+    # against is still worth having, which is what `verified` says.
+    payload = verify_assembly("tiny", fasta=data_dir / "tiny.fa", cache_dir=tmp_path)
+
+    assert payload["sha256"] == _TINY_FA_SHA256
+    assert payload["expected"] is None
+    assert payload["expected_from"] is None
+    assert payload["verified"] is False
+
+
+def test_verify_assembly_catches_a_fasta_changed_behind_its_own_record(
+    fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+) -> None:
+    # The fallback is checked, not merely reported. One base flipped is the same number
+    # of bytes, so the registration check — which compares sizes — passes, and what
+    # catches it is the digest the record itself pins.
+    fake_fetch.serve("tiny.fa.gz")
+    register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
+    fasta = tmp_path / "tiny.fa"
+    raw = bytearray(fasta.read_bytes())
+    raw[-2] = ord("A") if raw[-2] != ord("A") else ord("T")
+    fasta.write_bytes(raw)
+
+    with pytest.raises(ChecksumMismatchError, match=_TINY_FA_SHA256):
+        verify_assembly("tiny", cache_dir=tmp_path)
 
 
 def test_verify_assembly_checks_a_hand_copied_fasta_against_the_official_row(

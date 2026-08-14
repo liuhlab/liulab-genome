@@ -6,3 +6,4 @@ mm10	Mus musculus	mm10	GRCm38	GCF_000001635.26	10090	https://hgdownload.soe.ucsc
 sacCer3	Saccharomyces cerevisiae	sacCer3	R64-1-1	GCF_000146045.2	559292	https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz	6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3
 ce11	Caenorhabditis elegans	ce11	WBcel235	GCF_000002985.6	6239	https://ftp.ebi.ac.uk/pub/databases/wormbase/releases/WS298/species/c_elegans/PRJNA13758/c_elegans.PRJNA13758.WS298.genomic_softmasked.fa.gz	f3ce0a58779d8448b23a063ef87a16000308474da4d36d5d165162ad24db346b
 ecHT115	Escherichia coli HT115		ASM435494v1	GCF_004354945.1	634469	https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/004/354/945/GCF_004354945.1_ASM435494v1/GCF_004354945.1_ASM435494v1_genomic.fna.gz	90d29fa6cf4dc083ac9dcbc752862e99255e6344fb446e59a83515fa50ddf94f
+ce11_ecHT115							

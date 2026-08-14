@@ -243,8 +243,11 @@ class TestVerify:
         assert result.exit_code == 0
         payload = _json.loads(result.stdout)
         assert payload["sha256"] == _TINY_FA_SHA256
-        assert payload["expected"] is None  # no row lists "tiny"
-        assert payload["verified"] is False
+        # No row lists "tiny", so what it is held to is the digest its own registration
+        # recorded — the fallback, and the payload says which answered.
+        assert payload["expected"] == _TINY_FA_SHA256
+        assert payload["expected_from"] == "record"
+        assert payload["verified"] is True
 
     def test_a_hand_copied_fasta_is_checkable_against_the_official_row(
         self, data_dir: Path
