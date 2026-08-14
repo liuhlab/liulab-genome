@@ -851,18 +851,24 @@ is the name you opened — the table is a cross-reference, not an allow-list.</p
 <h2 id="gene-annotations">Gene annotations<a class="headerlink" href="#gene-annotations" title="Permanent link">&para;</a></h2>
 <p>A genome can carry several annotations, each under a short name. Name one the annotation
 table lists for this assembly and it is fetched, verified, and built into a
-<a href="https://gffutils.readthedocs.io/">gffutils</a> database beside the assembly's files:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">register_annotation</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">)</span>   <span class="c1"># fetch + verify + build + record</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">annotations</span>                           <span class="c1"># [&#39;ensgene_v101&#39;] — registered here</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">offered_annotations</span>                   <span class="c1"># what the table offers for this assembly</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">get_gtf_path</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">)</span>          <span class="c1"># Path to the placed .gtf</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">default_gtf</span>                           <span class="c1"># the annotation used when you name none</span>
+<a href="https://gffutils.readthedocs.io/">gffutils</a> database beside the assembly's files.
+Everything about the <em>collection</em> of them is <code>genome.annotations</code>, one registry object
+rather than a handful of methods on <code>Genome</code>:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">annotations</span><span class="o">.</span><span class="n">register</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">)</span>   <span class="c1"># fetch + verify + build + record</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">annotations</span><span class="o">.</span><span class="n">registered</span>                 <span class="c1"># [&#39;ensgene_v101&#39;] — registered here</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">annotations</span><span class="o">.</span><span class="n">offered</span>                    <span class="c1"># what the table offers for this assembly</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">annotations</span><span class="o">.</span><span class="n">broken</span>                     <span class="c1"># here, and not to be trusted</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">annotations</span><span class="o">.</span><span class="n">path</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">)</span>       <span class="c1"># Path to the placed .gtf</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">default_gtf</span>                            <span class="c1"># the annotation used when you name none</span>
 </code></pre></div>
-<p><code>annotations</code> and <code>offered_annotations</code> answer different questions: what this machine
-has, and what the lab supports. <code>genome annotations &lt;assembly&gt;</code> prints one against the
-other.</p>
+<p><code>registered</code> and <code>offered</code> answer different questions: what this machine has, and what
+the lab supports. <code>genome annotations &lt;assembly&gt;</code> prints one against the other.</p>
+<p>The registry is deliberately not a list. It settles a four-way state — registered,
+broken, offered, nothing — so there is no <code>len()</code>, no <code>in</code> and no iterating over it:
+name the set you mean. Note that <code>if sacCer3.annotations:</code> is therefore always true and
+asks nothing; <code>if sacCer3.annotations.registered:</code> is the question.</p>
 <p>For a GTF the table does not list, hand over the path — a <code>.gz</code> is decompressed:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">register_gtf</span><span class="p">(</span><span class="s2">&quot;custom.gtf&quot;</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;custom&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">annotations</span><span class="o">.</span><span class="n">register_path</span><span class="p">(</span><span class="s2">&quot;custom.gtf&quot;</span><span class="p">,</span> <span class="s2">&quot;custom&quot;</span><span class="p">)</span>
 </code></pre></div>
 <p>Each annotation gets its own directory, <code>&lt;assembly dir&gt;/gtf/&lt;name&gt;/</code>, holding the GTF,
 the <code>.db</code>, and the record. Re-registering a name that is already registered does
@@ -906,7 +912,7 @@ so on a fresh machine the default is typically not registered yet. Asking for
 <tr>
 <td><a href="https://github.com/alexdobin/STAR">STAR</a></td>
 <td>RNA-seq (splice-aware)</td>
-<td><strong>required</strong> — one index per GTF</td>
+<td><strong>one</strong> — the default unless you name another</td>
 <td><code>index/star_&lt;gtf&gt;/</code> — a directory</td>
 </tr>
 <tr>
@@ -917,12 +923,14 @@ so on a fresh machine the default is typically not registered yet. Asking for
 </tr>
 </tbody>
 </table>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>                    <span class="c1"># against default_gtf</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>    <span class="c1"># ...or name one</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>
 </code></pre></div>
-<p>The <code>gtf</code> key is required for STAR and becomes part of the index directory name, so
-indexes for different annotations never collide. A finished index is cached and reused;
-pass <code>overwrite=True</code> to rebuild.</p>
+<p>The <code>gtf</code> key becomes part of the index directory name, so indexes for different
+annotations never collide. Omit it and the <strong>default annotation</strong> is used and names the
+directory; a genome with no default at all raises rather than guessing, naming both ways
+to give it one. A finished index is cached and reused; pass <code>overwrite=True</code> to rebuild.</p>
 <p>Commonly tuned options are named and everything else is forwarded to the tool as a raw
 flag:</p>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span>
@@ -974,7 +982,7 @@ to be registered here already.</p>
 <p>The components' own default annotations are merged and registered by the same build, so a
 chimera arrives annotated — and aligner indexes are built over it like any other assembly:</p>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">chimera</span><span class="o">.</span><span class="n">default_gtf</span>                   <span class="c1"># &#39;wormbase_ws298+refseq_rs_2025_06_26&#39;</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">chimera</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="n">chimera</span><span class="o">.</span><span class="n">default_gtf</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">chimera</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>   <span class="c1"># against that merged annotation</span>
 </code></pre></div>
 <p>Its name is what went into it, so it changes when a component's default annotation does.
 Rebuilding — <code>Genome.chimera(..., force=True)</code>, or <code>genome register &lt;name&gt; --force</code> —
@@ -1012,7 +1020,7 @@ provably good — an unpacked FASTA whose checksum still matches is reused, and 
 derived files are rebuilt.</p>
 <p>An empty or absent directory is not this: that is a fresh registration and proceeds
 normally. A broken <em>annotation</em> never blocks opening the genome; it is reported instead,
-in <code>broken_annotations</code>, each entry carrying the command that repairs it.</p>
+in <code>annotations.broken</code>, each entry carrying the command that repairs it.</p>
 <p>To re-check integrity when nothing has raised but you suspect a problem, <code>genome verify
 &lt;assembly&gt;</code> re-reads the FASTA and re-computes its digest.</p>
 

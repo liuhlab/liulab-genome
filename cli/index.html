@@ -714,8 +714,11 @@ function you would call yourself, so a shell and a notebook take one code path.<
 <p>Every command takes <code>--json</code> for machine-readable output. Errors go to stderr with a
 non-zero exit code: <code>2</code> for invalid input, <code>1</code> for everything else (a missing native
 tool, a failed download, a checksum mismatch, a registration that cannot be trusted).</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>$<span class="w"> </span>genome<span class="w"> </span>--help
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>$<span class="w"> </span>genome<span class="w"> </span>version
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>genome<span class="w"> </span>--help
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="gp">$ </span>genome<span class="w"> </span>version
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">2026.6.0</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="gp">$ </span>genome<span class="w"> </span>version<span class="w"> </span>--json
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">{&quot;version&quot;: &quot;2026.6.0&quot;}</span>
 </code></pre></div>
 <h2 id="genome-doctor"><code>genome doctor</code><a class="headerlink" href="#genome-doctor" title="Permanent link">&para;</a></h2>
 <p>Report which native tools are on <code>PATH</code>, and at what versions. Exits <code>1</code> naming the
@@ -847,8 +850,10 @@ before you build anything on it.</p>
 where a digest was missing on one side, <code>unknown</code>. A component that is no longer the one
 the chimera was built from exits <code>1</code>.</p>
 <h2 id="genome-revcomp-sequence"><code>genome revcomp &lt;sequence&gt;</code><a class="headerlink" href="#genome-revcomp-sequence" title="Permanent link">&para;</a></h2>
-<p>Reverse-complement a DNA sequence. Case is preserved; a character outside <code>A/C/G/T</code> exits
-<code>2</code> naming it.</p>
+<p>Reverse-complement a DNA sequence. Case is preserved; a character outside the <code>DNA</code>
+alphabet exits <code>2</code> naming it. The alphabet is the type's own — <code>DNA.ALPHABET</code>, read at the
+boundary rather than spelled again here — so the <a href="../sequences/#construction"><code>outside_alphabet</code></a>
+you would call yourself is the check this command applies.</p>
 <div class="language-console highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>ATCG
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="go">CGAT</span>
 <a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>aTcG<span class="w"> </span>--json
