@@ -1055,15 +1055,19 @@ tuned options are named; everything else is forwarded as a raw STAR flag:</p>
 </code></pre></div>
 <ul>
 <li><strong><code>sjdb_overhang</code></strong> (default <code>100</code>) — set to <code>read_length - 1</code> for best
-  splice-junction sensitivity.</li>
+  splice-junction sensitivity. It is also the only read length the index build
+  knows, so the bin size below is scaled against it.</li>
 <li><strong><code>threads</code></strong> (default <code>1</code>) — build threads.</li>
 <li><strong><code>overwrite</code></strong> (default <code>False</code>) — a finished index is <strong>cached and reused</strong>;
   pass <code>overwrite=True</code> to force a rebuild, and to rebuild over a directory that
   cannot be trusted (see below).</li>
 <li><strong>arbitrary STAR flags</strong> — pass any <code>genomeGenerate</code> option by its STAR name
-  without the leading <code>--</code> (e.g. <code>genomeSAindexNbases=11</code>). For small genomes the
-  suffix-array index size (<code>genomeSAindexNbases</code>) is auto-reduced unless you set
-  it yourself.</li>
+  without the leading <code>--</code> (e.g. <code>genomeSAindexNbases=11</code>). Two of them are sized
+  from the assembly instead of being left to STAR's defaults, unless you set them
+  yourself: the suffix-array index size (<code>genomeSAindexNbases</code>), reduced for a
+  small genome, and the genome-storage bin size (<code>genomeChrBinNbits</code>), reduced
+  for a reference of many short sequences — where STAR's default pads every
+  sequence to a multiple of 262,144 bases and says nothing about it.</li>
 </ul>
 <p>The call returns the path to the built genome directory:</p>
 <div class="language-python highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">index_dir</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensembl&quot;</span><span class="p">)</span>
