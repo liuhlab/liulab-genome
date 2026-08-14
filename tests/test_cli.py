@@ -122,11 +122,8 @@ class TestRevcomp:
     def test_invalid_input_exits_2(self) -> None:
         result = runner.invoke(app, ["revcomp", "ATCX"])
         assert result.exit_code == 2
-        # Typer's CliRunner merges stderr into output by default in newer versions;
-        # check either source for the error message.
-        combined = (result.stdout or "") + (result.stderr or "")
-        assert "error" in combined.lower()
-        assert "X" in combined
+        assert "error" in _output(result).lower()
+        assert "X" in _output(result)  # the base it could not complement
 
 
 @pytest.mark.skipif(not _BINARIES_PRESENT, reason="samtools/bedtools not on PATH")

@@ -21,9 +21,10 @@ This project uses [pixi](https://pixi.sh) with `conda-forge` + `bioconda` channe
 deps (`samtools`, `bedtools`) and Python tooling are all managed by pixi.
 
 ```bash
-pixi install            # solve & install the default env (resolves from pixi.lock if present)
-pixi shell              # activate the env
-pixi run check          # lint + fmt-check + typecheck + test (the CI gate)
+pixi install                     # solve & install the default env (resolves from pixi.lock if present)
+pixi shell                       # activate the env
+pixi run check                   # lint + fmt-check + typecheck + test, run concurrently (the gate)
+pixi run -e aligners test-aligner # the other lane: the tests that build a real STAR/chromap index
 ```
 
 See [`AGENTS.md`](./AGENTS.md) (`CLAUDE.md` symlinks to it) for the full contributor/agent working agreement.

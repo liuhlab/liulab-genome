@@ -50,13 +50,18 @@ mechanises it.**
 - **Python support points at both ends of the range on purpose.** Tests run on 3.13 only; the 3.12
   floor is held by `ruff target-version` and `pyright pythonVersion`, not by a test lane. Do not
   narrow `requires-python` to match what is tested, and do not raise the language level to match it.
-- **Tests.** `pixi run check` is the gate — lint, fmt-check, typecheck, test. Write the test from the
-  spec first, then implement until green. pytest, and hypothesis for parsers, coordinate conversions
-  and sequence transforms: assert invariants over generated inputs — `reverse_complement` is an
-  involution, length is preserved, round-trips are identity. Tests mirror `src/`. Fixtures are small
-  real files under `tests/data/`, subsampled; never a large genomic file. A test needing `samtools`
-  or `bedtools` runs inside the pixi env — gate it with a skip when the binary is absent. Coverage is
-  a signal, not a target.
+- **Tests.** `pixi run check` is the gate — lint, fmt-check, typecheck, test, run concurrently.
+  Write the test from the spec first, then implement until green. pytest, and hypothesis for parsers,
+  coordinate conversions and sequence transforms: assert invariants over generated inputs —
+  `reverse_complement` is an involution, length is preserved, round-trips are identity. Tests mirror
+  `src/`. Fixtures are small real files under `tests/data/`, subsampled; never a large genomic file.
+  Coverage is a signal, not a target.
+- **The suite is two lanes, and together they are all of it.** `-m aligner` against its negation is
+  total, so no test falls between them. A test needing `samtools` or `bedtools` runs inside the pixi
+  env — gate it with a skip when the binary is absent. A test needing **STAR or chromap** is
+  different: those live in optional features, so gate it with `_needs` in `tests/test_aligner.py`,
+  which applies the marker and the skip under one name. Never the skip alone — that test would sit in
+  the unit lane and skip itself green, which is what the split exists to end.
 - **Docstrings: NumPy structure is mechanised** — ruff selects `D` with the numpy convention — so the
   bar is what ruff cannot check. At least one runnable example on a public object. A subclass
   docstring describes only what differs from what it overrides, never the shared prose again. A short

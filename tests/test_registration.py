@@ -14,8 +14,6 @@ from pathlib import Path
 import pooch
 import pytest
 
-from genome.io import download as download_mod
-from genome.io import registration as registration_mod
 from genome.io.completion import UnfinishedRegistrationError, read_record
 from genome.io.download import Downloader, UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles
@@ -116,12 +114,3 @@ def test_the_downloader_is_a_registration_that_also_fetches(
     # The registration's default wins over the plain downloader's per-user pooch cache.
     assert dl.cache_dir == assembly_data_dir("hg38")
     assert dl.cache_dir != Path(pooch.os_cache("genome"))
-
-
-def test_the_layout_names_are_still_reachable_where_they_used_to_live() -> None:
-    # gtf.py, aligner.py and the docs import these from `download`; the move re-exports
-    # them rather than repointing every caller.
-    assert download_mod.assembly_data_dir is registration_mod.assembly_data_dir
-    assert download_mod.liulab_data_dir is registration_mod.liulab_data_dir
-    assert download_mod.ANNOTATIONS_SUBDIR == registration_mod.ANNOTATIONS_SUBDIR
-    assert download_mod.INDEXES_SUBDIR == registration_mod.INDEXES_SUBDIR

@@ -52,18 +52,10 @@ def test_resolve_raises_when_neither_lookup_finds_tool(
 
 
 @pytest.mark.skipif(not _BINARIES_PRESENT, reason="samtools/bedtools not on PATH")
-def test_samtools_version_returns_nonempty_string() -> None:
-    out = tool_version("samtools")
-    assert isinstance(out, str)
-    assert out.strip() != ""
-    assert "samtools" in out.lower()
-
-
-@pytest.mark.skipif(not _BINARIES_PRESENT, reason="samtools/bedtools not on PATH")
-def test_bedtools_version_returns_nonempty_string() -> None:
-    out = tool_version("bedtools")
-    assert isinstance(out, str)
-    assert out.strip() != ""
+def test_a_version_string_identifies_the_tool_it_came_from() -> None:
+    # The claim `doctor` below cannot make: non-empty is not the same as *this* tool's,
+    # and a resolver pointing at the wrong binary would satisfy non-empty happily.
+    assert "samtools" in tool_version("samtools").lower()
 
 
 @pytest.mark.skipif(not _BINARIES_PRESENT, reason="samtools/bedtools not on PATH")

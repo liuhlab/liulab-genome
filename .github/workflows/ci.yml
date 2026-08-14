@@ -1,5 +1,10 @@
 name: CI
 
+# Five jobs, run concurrently by GitHub. Wall-clock is set by the slowest, so the shape
+# that matters is not "how many jobs" but "does any job do work another already did".
+# The two test lanes are a PARTITION — `-m aligner` against its negation, total by
+# boolean negation — so between them they run the suite exactly once.
+
 on:
   push:
     branches: [main]
@@ -14,11 +19,11 @@ permissions:
 
 jobs:
   lint:
-    name: lint + typecheck
+    name: lint + typecheck + docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: prefix-dev/setup-pixi@v0.8.14
+      - uses: actions/checkout@v5
+      - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           environments: default
           locked: true
@@ -28,44 +33,57 @@ jobs:
         run: pixi run -e default fmt-check
       - name: pyright
         run: pixi run -e default typecheck
+      # Does the SITE build: a dead internal link, a nav entry naming a file that moved,
+      # a docstring mkdocstrings can no longer import. Folded in here rather than given
+      # a fifth runner — `default` already carries the `docs` feature, so this reuses
+      # the setup-pixi above and its whole marginal cost is the ~4 s build. Build only;
+      # deploying stays in docs.yml, the one workflow granted `contents: write`.
+      - name: mkdocs build --strict
+        run: pixi run -e default docs-build
 
+  # The unit lane: everything that does not need an aligner. `--durations=10` because
+  # what sets a parallel lane's wall is one indivisible test, and no worker count goes
+  # below one test — printing it makes that floor visible in every log. A measurement,
+  # not a gate.
   test:
     name: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: prefix-dev/setup-pixi@v0.8.14
+      - uses: actions/checkout@v5
+      - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           environments: test
           locked: true
-      - name: pytest
-        run: pixi run -e test test
+      - name: pytest -m 'not aligner'
+        run: pixi run -e test test -- --durations=10
 
-  # The `test` lane above runs in an environment without STAR or chromap, where the
-  # aligner integration tests skip themselves. This lane installs them and runs the
-  # suite for real, so the index builds are exercised on every push rather than only
-  # on a developer machine that happens to have both tools. The task asserts each
-  # binary before pytest, so the lane cannot go green while silently still skipping.
-  aligners:
-    name: aligner integration (STAR + chromap)
+  # The aligner lane: the three tests that build a real index. It used to re-run the
+  # WHOLE suite here just to un-skip them, which meant the unit lane's coverage was a
+  # function of what happened to be installed — those three skipped there, silently,
+  # and a skip is green. The marker partition ends both halves of that: this lane
+  # selects only what it installed binaries for, and cannot select at all until they
+  # answer (the verb depends on scripts/require_aligners.sh, which CI inherits rather
+  # than spelling a second copy of which binaries the lane needs).
+  aligner:
+    name: test (STAR + chromap)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: prefix-dev/setup-pixi@v0.8.14
+      - uses: actions/checkout@v5
+      - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           environments: aligners
           locked: true
-      - name: pytest with STAR + chromap installed
-        run: pixi run -e aligners test-aligners
+      - name: pytest -m aligner
+        run: pixi run -e aligners test-aligner -- --durations=10
 
   build:
     name: build wheel + sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0   # hatch-vcs needs full history to derive a version
-      - uses: prefix-dev/setup-pixi@v0.8.14
+      - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           environments: default
           locked: true
@@ -76,17 +94,3 @@ jobs:
           name: dist
           path: dist/
           if-no-files-found: error
-
-  docs:
-    name: docs build (no deploy)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: prefix-dev/setup-pixi@v0.8.14
-        with:
-          environments: docs
-          locked: true
-      - name: mkdocs build --strict
-        run: pixi run -e docs mkdocs build --strict
