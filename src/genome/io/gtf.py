@@ -62,7 +62,7 @@ from __future__ import annotations
 import gzip
 import shlex
 import shutil
-from collections.abc import Container, Iterable, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import IO, Any
@@ -98,6 +98,39 @@ _MAX_LISTED_NAMES = 10
 #: it. Deliberately not a path: a command naming a file that is not there is one that
 #: fails when it is pasted, which is worse than one visibly asking to be filled in.
 _UNKNOWN_PATH = "<path>"
+
+#: What ``details["chromosomes_unchecked_because"]`` says when the caller stood the check
+#: down — ``check_chromosomes=False``, or ``--no-check-chromosomes`` from a shell. There is
+#: no advice to give about it: the assembly may be registered and the names deliberately
+#: accepted, so all a surface can say is what the record therefore does not vouch for.
+_CALLER_OVERRIDE = "caller-override"
+
+#: …and when the check was asked for but had nothing to run against, the assembly having
+#: no ``chrom.sizes`` yet. Registering the assembly is what makes the check possible, so
+#: this is the one of the two states where saying so is useful advice rather than noise.
+_NO_CHROM_SIZES = "no-chrom-sizes"
+
+#: What each state of the chromosome check reads as, one sentence apiece — including the
+#: one where it ran and passed, since a surface that says nothing about it reads as a pass.
+#: Keyed by ``details["chromosomes_unchecked_because"]``; ``None`` is the check that ran.
+_CHECK_SUMMARIES = {
+    None: "chromosomes checked — every name the GTF uses is one the assembly carries",
+    _NO_CHROM_SIZES: (
+        "chromosomes not checked — nothing to check against; register the assembly first "
+        "to verify them"
+    ),
+    _CALLER_OVERRIDE: (
+        "chromosomes not checked — the check was stood down, so the record does not vouch "
+        "for the names"
+    ),
+}
+
+#: What a record written before the reason was recorded reads as. Its bare ``False`` was
+#: written for either reason and nothing on disk says which, so it is reported as neither.
+_UNKNOWN_REASON_SUMMARY = (
+    "chromosomes not checked — this record does not say why, so whether the names match "
+    "the assembly is unknown"
+)
 
 
 class ChromosomeMismatchError(ValueError):
@@ -662,7 +695,9 @@ def register_gtf(
     directory exactly as it was found. Unlike :func:`fetch_annotation`, this form is
     given no assembly name and so cannot derive where that file is — pass it, or accept
     that nothing is checked. What was decided is written into the record either way, as
-    ``details["chromosomes_checked"]``.
+    ``details["chromosomes_checked"]`` and, when it is ``False``,
+    ``details["chromosomes_unchecked_because"]`` — the two reasons never read as each
+    other. :func:`chromosome_check_summary` is what turns either into a sentence.
 
     Gene/transcript inference is disabled by default — standard annotation GTFs
     (GENCODE, Ensembl, RefSeq) already declare ``gene``/``transcript`` features, and
@@ -685,7 +720,8 @@ def register_gtf(
         the names are not checked.
     check_chromosomes : bool, default True
         Check the GTF's chromosome names against the assembly's. Pass ``False`` to
-        register a GTF whose mismatch you have inspected and accept.
+        register a GTF whose mismatch you have inspected and accept; the record
+        then says the check was stood down, rather than merely that it did not run.
     disable_infer_genes : bool, default True
         Do not reconstruct ``gene`` features from exon lines.
     disable_infer_transcripts : bool, default True
@@ -782,7 +818,7 @@ def _register_gtf(
         annotation,
         source_url=str(source),
         sha256=sha256_file(annotation.gtf),
-        details={"chromosomes_checked": known is not None},
+        details=_chromosome_check_details(known, requested=check_chromosomes),
         disable_infer_genes=disable_infer_genes,
         disable_infer_transcripts=disable_infer_transcripts,
     )
@@ -814,7 +850,9 @@ def fetch_annotation(
     assembly fails in seconds rather than after the minutes the database build takes.
     The reverse is not required — an assembly may carry scaffolds the annotation never
     mentions. An assembly with no ``chrom.sizes`` yet has nothing to check against, and
-    the record says so in ``details["chromosomes_checked"]``.
+    the record says so in ``details["chromosomes_checked"]`` — with
+    ``details["chromosomes_unchecked_because"]`` saying whether that was for want of a
+    ``chrom.sizes`` or because the caller stood the check down.
 
     An annotation that already has a valid record is returned silently: nothing is
     fetched, nothing is rebuilt and nothing is warned about. A directory that cannot be
@@ -840,7 +878,8 @@ def fetch_annotation(
         it and the row is looked up here.
     check_chromosomes : bool, default True
         Check the GTF's chromosome names against the assembly's. Pass ``False`` to
-        register an annotation whose mismatch you have inspected and accept.
+        register an annotation whose mismatch you have inspected and accept; the record
+        then says the check was stood down, rather than merely that it did not run.
     disable_infer_genes : bool, default True
         Do not reconstruct ``gene`` features from exon lines.
     disable_infer_transcripts : bool, default True
@@ -909,7 +948,7 @@ def fetch_annotation(
         details={
             "provider": row.provider,
             "version": row.version,
-            "chromosomes_checked": known is not None,
+            **_chromosome_check_details(known, requested=check_chromosomes),
         },
         disable_infer_genes=disable_infer_genes,
         disable_infer_transcripts=disable_infer_transcripts,
@@ -954,7 +993,8 @@ def register_annotation(
         A complete annotation record to use instead of the curated table's row.
     check_chromosomes : bool, default True
         Check the GTF's chromosome names against the assembly's. Pass ``False`` to
-        register an annotation whose mismatch you have inspected and accept.
+        register an annotation whose mismatch you have inspected and accept; the record
+        then says the check was stood down, rather than merely that it did not run.
     disable_infer_genes : bool, default True
         Do not reconstruct ``gene`` features from exon lines.
     disable_infer_transcripts : bool, default True
@@ -1024,7 +1064,8 @@ def register_annotation_by_path(
     its ``chrom.sizes`` is found rather than passed, so an unlisted GTF has its
     chromosome names checked by default, exactly as a listed one does. An assembly that
     is not prepared yet has no ``chrom.sizes`` to check against, and the record then says
-    the names went unchecked rather than claiming they passed.
+    the names went unchecked — and that it was for want of that file, not because anyone
+    stood the check down — rather than claiming they passed.
 
     Parameters
     ----------
@@ -1042,7 +1083,8 @@ def register_annotation_by_path(
         :func:`assembly_data_dir(assembly) <genome.io.download.assembly_data_dir>`.
     check_chromosomes : bool, default True
         Check the GTF's chromosome names against the assembly's. Pass ``False`` to
-        register a GTF whose mismatch you have inspected and accept.
+        register a GTF whose mismatch you have inspected and accept; the record
+        then says the check was stood down, rather than merely that it did not run.
     disable_infer_genes : bool, default True
         Do not reconstruct ``gene`` features from exon lines.
     disable_infer_transcripts : bool, default True
@@ -1087,6 +1129,71 @@ def register_annotation_by_path(
         disable_infer_transcripts=disable_infer_transcripts,
     )
     return _registration_payload(assembly_dir, assembly=assembly, name=name, repair=repair)
+
+
+def chromosome_check_summary(details: Mapping[str, Any]) -> str:
+    """Return the one line a surface prints about an annotation's chromosome-name check.
+
+    Four states, four sentences, and one of them is always returned: the check ran and
+    passed; it had nothing to run against, and registering the assembly is what fixes
+    that; the caller stood it down, which is not something to advise about; or the record
+    does not say which, and none of the three may be claimed. Silence is not a fifth
+    state — a surface that prints nothing about the check reads as one that passed.
+
+    ``details`` is a registration record's ``details``, as
+    :func:`register_annotation` and :func:`register_annotation_by_path` return it. The two
+    fields read are ``chromosomes_checked`` — the check ran and the GTF's names were all
+    the assembly's — and ``chromosomes_unchecked_because``, which says which of the two
+    reasons it did not, and is ``None`` when it did.
+
+    A record written before the second field existed carries a bare
+    ``chromosomes_checked: false`` that was written for either reason, and nothing on disk
+    says which. It reads as *unknown* rather than as either one, and rather than raising:
+    the reason is a fact that was never gathered, which is what an absent entry in
+    ``tool_versions`` means too.
+
+    Parameters
+    ----------
+    details : mapping of str to object
+        A registration record's ``details``. Anything else it holds is ignored, and a
+        mapping holding neither field reads as unknown.
+
+    Returns
+    -------
+    str
+        One sentence, with no trailing punctuation and no leading indent — the caller
+        decides how to set it.
+
+    Examples
+    --------
+    >>> chromosome_check_summary({"chromosomes_checked": True})
+    'chromosomes checked — every name the GTF uses is one the assembly carries'
+    >>> print(chromosome_check_summary({"chromosomes_unchecked_because": "caller-override"}))
+    chromosomes not checked — the check was stood down, so the record does not vouch for the names
+    """
+    if details.get("chromosomes_checked") is True:
+        return _CHECK_SUMMARIES[None]
+    # Anything else — the field absent, or a reason a later version writes and this one
+    # has never heard of — is a reason that cannot be reported, which is the unknown.
+    because = details.get("chromosomes_unchecked_because")
+    if isinstance(because, str) and because in _CHECK_SUMMARIES:
+        return _CHECK_SUMMARIES[because]
+    return _UNKNOWN_REASON_SUMMARY
+
+
+def _chromosome_check_details(known: frozenset[str] | None, *, requested: bool) -> dict[str, Any]:
+    """Return what the record says about the chromosome check: whether it ran, and why not.
+
+    ``known`` of ``None`` is a check that did not run, and the two reasons it can be are
+    exactly what a record carrying only the bool could not tell apart. A check that ran
+    and did not raise passed, so nothing is recorded beside the ``True``.
+    """
+    if known is not None:
+        return {"chromosomes_checked": True, "chromosomes_unchecked_because": None}
+    return {
+        "chromosomes_checked": False,
+        "chromosomes_unchecked_because": _NO_CHROM_SIZES if requested else _CALLER_OVERRIDE,
+    }
 
 
 def _registration_payload(

@@ -17,6 +17,7 @@ from genome.io.download import assembly_table_row as _assembly_table_row
 from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
 from genome.io.gtf import annotation_status as _annotation_status
+from genome.io.gtf import chromosome_check_summary as _chromosome_check_summary
 from genome.io.gtf import register_annotation as _register_annotation
 from genome.io.gtf import register_annotation_by_path as _register_annotation_by_path
 from genome.metadata import format_table_row as _format_table_row
@@ -44,7 +45,8 @@ _CHECK_CHROMOSOMES_HELP = (
     "Refuse a GTF naming sequences this assembly does not carry, before paying for the "
     "database build. Pass --no-check-chromosomes to register one whose mismatch you have "
     "inspected and accept — the annotation is built as it stands and the record says the "
-    "names went unchecked, so nothing later mistakes it for a verified one."
+    "check was stood down, so nothing later mistakes it for a verified one, and nothing "
+    "mistakes it for an annotation registered before its assembly either."
 )
 
 app = typer.Typer(help="Tools for handling genomic files.", no_args_is_help=True)
@@ -186,8 +188,9 @@ def register_annotation(
 
     The chromosome check needs the assembly's ``chrom.sizes``, so it can only run once
     the assembly itself is registered. Registering an annotation first is allowed and
-    reports ``chromosomes not checked``; register the assembly first to have the names
-    verified.
+    reports that there was nothing to check the names against, which registering the
+    assembly first is what fixes. Standing the check down yourself reports that instead,
+    and advises nothing: you meant it.
 
     Exits with code 1 when the table lists no such annotation, when the GTF is not the
     digest pinned for it, when it names chromosomes the assembly does not carry, or when
@@ -283,12 +286,11 @@ def _report_annotation(payload: dict[str, object], *, json: bool) -> None:
     typer.echo(f"  source  {payload['source_url']}")
     typer.echo(f"  sha256  {payload['sha256']}")
     typer.echo(f"  files   {', '.join(names)}")
-    # Whether the names were actually verified is not something to leave implicit: the
-    # check cannot run before the assembly is registered, and silence would read as a pass.
+    # Whether the names were actually verified is not something to leave implicit, and it
+    # is printed whichever way it went: silence would read as a pass. Which sentence that
+    # is belongs to the record and to the API that reads it, not to this surface.
     details = payload.get("details")
-    checked = details.get("chromosomes_checked") if isinstance(details, dict) else None
-    if checked is not True:
-        typer.echo("  chromosomes not checked — register the assembly first to verify them")
+    typer.echo(f"  {_chromosome_check_summary(details if isinstance(details, dict) else {})}")
 
 
 # Named for what it does rather than for the command it serves: ``from __future__ import

@@ -107,6 +107,13 @@ preparation is no longer indistinguishable from a finished one.
   `nan` — or, for a blank taxonomy id, an exception. The row `genome table-row` emits for an
   assembly the table does not list yet leaves the species and the NCBI identifiers blank, so pasting
   that line in is now a working route rather than one that breaks the next lookup.
+- **Registering with `--no-check-chromosomes` is no longer told to register the assembly first**,
+  which it may well have done already. An annotation record now says *why* the names went
+  unchecked — `details["chromosomes_unchecked_because"]` is `"caller-override"` or
+  `"no-chrom-sizes"`, and `None` when they were checked — so both registration commands report the
+  state they are in, advice included only where there is any to give. A check that ran and passed
+  now says so too, rather than being reported by silence. A record written before that field reads
+  as *unknown* rather than as either reason.
 
 ### Upgrading
 

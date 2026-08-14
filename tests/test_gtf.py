@@ -14,6 +14,7 @@ the shipped table is tested in test_metadata.
 from __future__ import annotations
 
 import gzip
+import json
 from pathlib import Path
 
 import gffutils
@@ -33,6 +34,7 @@ from genome.io.gtf import (
     _reject_unknown_chromosomes,
     annotation_dir,
     annotation_status,
+    chromosome_check_summary,
     default_annotation,
     fetch_annotation,
     list_annotations,
@@ -772,6 +774,7 @@ class TestChromosomeNames:
         record = read_record(annotation_dir(tmp_path, _NAME))
         assert record is not None
         assert record.details["chromosomes_checked"] is False
+        assert record.details["chromosomes_unchecked_because"] == "caller-override"
 
     def test_the_override_registers_by_name_too(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -788,6 +791,7 @@ class TestChromosomeNames:
         record = read_record(annotation_dir(tmp_path, _NAME))
         assert record is not None
         assert record.details["chromosomes_checked"] is False
+        assert record.details["chromosomes_unchecked_because"] == "caller-override"
 
     def test_a_matching_gtf_registered_by_name_records_that_it_was_checked(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -800,12 +804,15 @@ class TestChromosomeNames:
         record = read_record(annotation_dir(tmp_path, _NAME))
         assert record is not None
         assert record.details["chromosomes_checked"] is True
+        # A check that ran and did not raise passed, so there is no reason beside it.
+        assert record.details["chromosomes_unchecked_because"] is None
 
     def test_without_a_chrom_sizes_there_is_nothing_to_check_and_the_record_says_so(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
         # An annotation registered before its assembly was prepared: no chrom.sizes
-        # exists, so the names cannot be checked. The record says they were not.
+        # exists, so the names cannot be checked. The record says they were not, and
+        # says it was for want of that file rather than because anyone asked to skip it.
         fake_fetch.serve("ensembl_style.gtf")
         row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
 
@@ -815,6 +822,90 @@ class TestChromosomeNames:
         record = read_record(annotation_dir(tmp_path, _NAME))
         assert record is not None
         assert record.details["chromosomes_checked"] is False
+        assert record.details["chromosomes_unchecked_because"] == "no-chrom-sizes"
+
+
+class TestReadingBackWhatWasChecked:
+    """``chromosome_check_summary`` — one sentence per state, and never the wrong one.
+
+    The states differ in what a reader should do about them, which is why they are told
+    apart at all: an annotation registered before its assembly is waiting for the
+    assembly, and one whose check the caller stood down is waiting for nothing.
+    """
+
+    _ADVICE = "register the assembly first"
+
+    def test_a_check_that_ran_says_so_rather_than_saying_nothing(self) -> None:
+        # Silence is not how a pass is reported: a surface printing nothing about the
+        # check reads exactly like one printing that it passed.
+        summary = chromosome_check_summary(
+            {"chromosomes_checked": True, "chromosomes_unchecked_because": None}
+        )
+
+        assert "chromosomes checked" in summary
+        assert self._ADVICE not in summary
+
+    def test_nothing_to_check_against_is_the_one_state_that_advises(self) -> None:
+        summary = chromosome_check_summary(
+            {"chromosomes_checked": False, "chromosomes_unchecked_because": "no-chrom-sizes"}
+        )
+
+        assert "chromosomes not checked" in summary
+        assert self._ADVICE in summary
+
+    def test_an_override_is_never_told_to_register_the_assembly(self) -> None:
+        # The bug this fixes: the assembly may well be registered, and the caller turned
+        # the check off on purpose. What is left to say is what the record does not vouch
+        # for, not what to do about it.
+        summary = chromosome_check_summary(
+            {"chromosomes_checked": False, "chromosomes_unchecked_because": "caller-override"}
+        )
+
+        assert "stood down" in summary
+        assert self._ADVICE not in summary
+
+    def test_every_state_reads_as_its_own_sentence(self) -> None:
+        summaries = {
+            chromosome_check_summary(details)
+            for details in (
+                {"chromosomes_checked": True, "chromosomes_unchecked_because": None},
+                {"chromosomes_checked": False, "chromosomes_unchecked_because": "no-chrom-sizes"},
+                {"chromosomes_checked": False, "chromosomes_unchecked_because": "caller-override"},
+                {"chromosomes_checked": False},
+            )
+        }
+
+        assert len(summaries) == 4
+
+    def test_a_record_written_before_the_reason_existed_reads_as_unknown(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
+        # The real back-compatibility case, on a record that is on disk: an older version
+        # wrote the bare bool, and which of the two reasons it stood for is not knowable.
+        # It must read as neither, and reading it must not raise.
+        register_gtf(tmp_path, data_dir / "tiny.gtf", _NAME)
+        path = record_path(annotation_dir(tmp_path, _NAME))
+        written = json.loads(path.read_text())
+        written["details"] = {"chromosomes_checked": False}
+        path.write_text(json.dumps(written))
+
+        record = read_record(annotation_dir(tmp_path, _NAME))
+
+        assert record is not None
+        assert record.details == {"chromosomes_checked": False}
+        summary = chromosome_check_summary(record.details)
+        assert "does not say why" in summary
+        assert self._ADVICE not in summary  # nor is it claimed to be the override
+        assert "stood down" not in summary
+
+    def test_a_reason_this_version_has_never_heard_of_reads_as_unknown_too(self) -> None:
+        # Forward as well as backward: a record from a later version claiming some third
+        # reason is one this version cannot report, which is the same as not knowing.
+        summary = chromosome_check_summary(
+            {"chromosomes_checked": False, "chromosomes_unchecked_because": "some-later-reason"}
+        )
+
+        assert "does not say why" in summary
 
 
 @pytest.fixture(scope="session")
@@ -900,6 +991,7 @@ class TestRegisterAnnotation:
             "version": "ensGene.v101",
             "gffutils_version": gffutils.__version__,
             "chromosomes_checked": False,
+            "chromosomes_unchecked_because": "caller-override",
         }
 
     def test_it_files_the_annotation_under_the_assembly_data_dir(
@@ -1008,6 +1100,7 @@ class TestRegisterAnnotationByPath:
         assert payload["details"] == {
             "gffutils_version": gffutils.__version__,
             "chromosomes_checked": False,
+            "chromosomes_unchecked_because": "caller-override",
         }
 
     def test_the_inference_knobs_reach_the_database_build(self, tmp_path: Path) -> None:
