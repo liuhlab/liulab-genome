@@ -8,6 +8,11 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ## [Unreleased]
 
+## [2026.8.0] - 2026-08-17
+
+The first tagged release, and it is the whole package: everything below is what `genome` is, not what
+changed since a predecessor. Cut because a consumer needs to pin a release rather than a branch.
+
 Preparing a reference assembly is now reproducible: naming one is enough to fetch it from a pinned
 source, verify it against a pinned checksum, and record exactly what was done. A half-finished
 preparation is no longer indistinguishable from a finished one.
