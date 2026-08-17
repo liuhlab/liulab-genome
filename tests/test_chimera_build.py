@@ -40,7 +40,8 @@ from .conftest import (
     ComponentFactory,
 )
 
-#: What the everyday three build: nine sequences, in component-sorted then file order.
+#: What the everyday three build: nine sequences, one contiguous block per component in
+#: component-sorted order, each block in that component's own declared order.
 _EVERYDAY_NAME = "tinyCe_tinyEc_tinySc"
 _EVERYDAY_CHROMOSOMES = [
     "I__tinyCe",
@@ -128,11 +129,16 @@ def test_the_everyday_chimera_builds_and_opens_under_its_derived_name(
     )
 
 
-def test_the_component_order_a_caller_passes_does_not_reach_the_reference(
+def test_each_component_is_one_contiguous_block_in_its_own_declared_order(
     build_chimera: ChimeraFactory,
 ) -> None:
-    # Identity is the component set, not the order it arrived in, so the reversed call
-    # builds and opens the same directory rather than a second one.
+    # The published layout contract, and the reversed call is what proves it: identity is
+    # the component set rather than the order it arrived in, so the blocks come out
+    # component-sorted with each component's own order inside its own block whatever the
+    # caller did. Load-bearing off-repo — a consumer filtering one component's sequences
+    # back out of an alignment header recovers a single-assembly header only because this
+    # holds, and a different concatenation order would hand it a silently wrong header
+    # rather than a failure.
     chimera = build_chimera(*reversed(CHIMERA_EVERYDAY))
 
     assert chimera.assembly == _EVERYDAY_NAME
@@ -341,6 +347,9 @@ def test_a_component_carrying_a_doubled_underscore_escalates_the_separator(
     assert chimera.assembly == "tinyCe_tinyEcDub"
     assert details is not None
     assert details.separator == "___"
+    # And the same fact through the accessor an off-repo caller has, which is the only one
+    # that stops it hardcoding the default and splitting the doubled name in the wrong place.
+    assert chimera.separator == "___"
     assert "NZ_TINY02__000002.1___tinyEcDub" in chimera.chromosomes
     assert chimera.chromosomes[0] == "I___tinyCe"
     # And the recorded separator is the one that reads the names back.
@@ -368,6 +377,8 @@ def test_a_plain_assembly_is_not_a_chimera_of_nothing(
     worm = chimera_component("tinyCe")
 
     assert worm.components is None
+    assert worm.separator is None
+    assert worm.component_annotations is None
 
 
 def test_chrom_components_attributes_every_chromosome_of_a_chimera(

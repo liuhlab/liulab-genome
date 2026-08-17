@@ -65,8 +65,15 @@ is that component set rather than the order it arrived in, so the name derives b
 component names and joining them with `_` and is never overridable (ADR-0008), and every chromosome
 is suffixed `<chromosome>__<component>` unconditionally (ADR-0009), read back by
 `^(?P<chromosome>.+)__(?P<component>[A-Za-z0-9]+)$` with the chimera's own recorded separator
-substituted for `__` whenever a component forced a longer run. `Genome.components` is the single
-test of whether an assembly is one, answering `None` when it is not.
+substituted for `__` whenever a component forced a longer run, which `Genome.separator` reports.
+`Genome.components` is the single test of whether an assembly is one, answering `None` when it is
+not, and `Genome.component_annotations` says which annotation each component contributed to the
+merge, or `None` for one that contributed none. Its sequences are laid out **one contiguous block
+per component, components in the sorted order the name spells and each component's own declared
+order inside its block** — a published contract, not an artefact of how the concatenation happens to
+run, because a consumer that filters one component's sequences back out of an alignment header
+recovers a single-assembly header only while it holds, and a different order would hand that
+consumer a silently wrong header rather than a failure.
 _Avoid_: hybrid, combined genome, merged genome, multi-species reference; and "concatenated FASTA",
 which names the bytes rather than the assembly they belong to
 

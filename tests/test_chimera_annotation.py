@@ -221,6 +221,13 @@ def test_a_component_with_no_annotation_contributes_nothing(
     chimera = build_chimera("tinyCe", CHIMERA_ESCALATION)
 
     assert chimera.annotations.registered == [COMPONENT_ANNOTATION]
+    # Contributed against contributed-nothing, per component: the distinction that decides
+    # which annotation a per-component count is taken against, and the one the merged name
+    # cannot carry, since it names only the contributors.
+    assert chimera.component_annotations == {
+        "tinyCe": COMPONENT_ANNOTATION,
+        CHIMERA_ESCALATION: None,
+    }
     merged = chimera.annotations.path(COMPONENT_ANNOTATION)
     assert {split_suffixed(name, "___")[1] for name in _seqnames(merged)} == {"tinyCe"}
     assert set(_seqnames(merged)) < set(chimera.chromosomes)
