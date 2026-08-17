@@ -68,6 +68,18 @@ preparation is no longer indistinguishable from a finished one.
   and `None` for an assembly that is not a chimera — the single test of which it is. The second says
   which component each chromosome came from, as a Series mirroring `chrom_sizes`, and is total: a
   non-chimera maps every chromosome to its own assembly.
+- **`Genome.separator` and `Genome.component_annotations`**, both read off the completion record and
+  both `None` for an assembly that is not a chimera, exactly as `components` is. The first is the
+  underscore run this chimera's names were actually suffixed with, so a caller reading a suffixed
+  name back never assumes `__` and never splits an escalated name in the wrong place; the second is
+  the registered annotation each component contributed to the merge, or `None` for one that
+  contributed none — which the merged name cannot say, since it names only the contributors, and
+  which decides the annotation a per-component count is taken against.
+- **A chimera's sequence order is a published contract**, not an artefact of the concatenation: one
+  contiguous block per component, components in the sorted order the derived name spells, and each
+  component's own declared order inside its block. It was already verified after every build and is
+  now stated in the Chimera glossary entry, because a consumer that filters one component's sequences
+  back out of an alignment header recovers a single-assembly header only while it holds.
 - **A merged annotation, registered by the chimera's own build.** Each component contributes its
   default annotation, and the result is addressed by the `+`-join of their names in
   sorted-component order — `wormbase_ws298+refseq_rs_2025_06_26`. A chimera therefore arrives

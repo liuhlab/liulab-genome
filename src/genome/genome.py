@@ -418,6 +418,53 @@ class Genome(AlignerMixin):
         return None if self._chimera is None else self._chimera.components
 
     @property
+    def separator(self) -> str | None:
+        """The underscore run this **Chimera**'s chromosome names are suffixed with, or ``None``.
+
+        Read off the completion record, which is the only honest answer: the separator
+        belongs to one chimera, since a component whose own names carry ``__`` forces a
+        longer run (ADR-0009). A caller that assumed the default would split
+        ``NZ_TINY02__000002.1___tinyEcDub`` in the wrong place and hand the chromosome to
+        the wrong component. ``None`` — not the default — for an assembly that is not a
+        chimera, mirroring :attr:`components`.
+
+        Hand it to :func:`~genome.chimera.split_suffixed` to read a name back.
+
+        Examples
+        --------
+        >>> chimera = Genome.chimera(Genome("ce11"), Genome("ecHT115"))  # doctest: +SKIP
+        >>> chimera.separator                                            # doctest: +SKIP
+        '__'
+        >>> Genome("ce11").separator is None                             # doctest: +SKIP
+        True
+        """
+        return None if self._chimera is None else self._chimera.separator
+
+    @property
+    def component_annotations(self) -> dict[str, str | None] | None:
+        """What each **Component** contributed to the **Merged annotation**, or ``None``.
+
+        The **Registered name** per component, in the sorted-component order
+        :attr:`components` uses, and ``None`` for a component that contributed nothing —
+        a distinction that decides which annotation a per-component count is taken
+        against, so it is read off the record rather than from
+        ``Genome(component).default_gtf``: a component's default *now* is not necessarily
+        what went into this merge. ``None`` — not an empty mapping — for an assembly that
+        is not a chimera, mirroring :attr:`components`.
+
+        Examples
+        --------
+        >>> chimera = Genome.chimera(Genome("ce11"), Genome("ecHT115"))  # doctest: +SKIP
+        >>> chimera.component_annotations                                # doctest: +SKIP
+        {'ce11': 'wormbase_ws298', 'ecHT115': 'refseq_rs_2025_06_26'}
+        >>> Genome("ce11").component_annotations is None                 # doctest: +SKIP
+        True
+        """
+        if self._chimera is None:
+            return None
+        return {entry.name: entry.annotation for entry in self._chimera.component_details}
+
+    @property
     def chrom_components(self) -> pd.Series:
         """Which assembly each chromosome came from, as a Series mirroring :attr:`chrom_sizes`.
 
