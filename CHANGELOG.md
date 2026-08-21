@@ -8,6 +8,17 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ## [Unreleased]
 
+### Added
+
+- **An intron bound on the assembly table.** A row may now carry `intron_length_cap` — the longest
+  gap a spliced aligner should take for an intron on that assembly — and
+  `intron_length_cap_rationale`, which says why that number and not another. Registered for `ce11`
+  (50,000), `ecHT115` (1), `hg38` and `mm39` (1,000,000 each), and blank everywhere else, including
+  `sacCer3`: a blank cap reads back as `None` and means nobody has chosen a bound, which changes no
+  alignment. Every value is set by hand and none is derived from an annotation, whose longest intron
+  is a floor on what the organism does rather than a ceiling on it (ADR-0010). Nothing in this
+  package reads either column; they are curated here for whoever configures the aligner.
+
 ## [2026.8.0] - 2026-08-17
 
 The first tagged release, and it is the whole package: everything below is what `genome` is, not what

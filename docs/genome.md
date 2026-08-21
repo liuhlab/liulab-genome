@@ -104,7 +104,13 @@ sacCer3.metadata.species         # 'Saccharomyces cerevisiae'
 sacCer3.metadata.ncbi_name       # 'R64-1-1'
 sacCer3.metadata.source_url      # where the FASTA came from
 sacCer3.metadata.sha256          # digest of the unpacked FASTA (None if unpinned)
+sacCer3.metadata.intron_length_cap  # longest gap to allow as an intron (None if unset)
 ```
+
+`intron_length_cap` is for whoever configures a spliced aligner: a hand-set bound with
+`intron_length_cap_rationale` beside it saying why that number, curated for a handful of
+assemblies and `None` for the rest. Nothing in this package reads it, and `None` means
+nobody has chosen a bound — not that the assembly has no introns.
 
 `chrom_sizes` is returned as a copy, so mutating it never corrupts the genome's own view.
 `twobit_path`, `fasta_path` and `chrom_sizes_path` are there to hand to other tools.

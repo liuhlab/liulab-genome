@@ -32,9 +32,16 @@ from genome.metadata import (
 )
 
 #: Columns a shipped row is allowed to leave blank — the pinned source and digest fill
-#: in over time, and a reference UCSC has never carried has no name in that namespace.
+#: in over time, a reference UCSC has never carried has no name in that namespace, and
+#: an assembly nobody has chosen an intron bound for carries neither cap column.
 #: Every identifier column may be blank too; a curated row is expected to fill them.
-_OPTIONAL_FIELDS = ("ucsc_name", "source_url", "sha256")
+_OPTIONAL_FIELDS = (
+    "ucsc_name",
+    "source_url",
+    "sha256",
+    "intron_length_cap",
+    "intron_length_cap_rationale",
+)
 
 #: Every assembly the shipped table officially supports, read from the table itself: a
 #: row added without a test to match is then covered by whichever kind it turns out to be
@@ -74,6 +81,8 @@ def test_lookup_returns_the_row_for_a_listed_assembly() -> None:
         ncbi_taxid=9606,
         source_url="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz",
         sha256="5be01555d98347fdb3714dc84c6f77c9d8bc774adcf32c6f7a8fa06f5baf5e51",
+        intron_length_cap=1_000_000,
+        intron_length_cap_rationale="ENCODE's value, a convention rather than a measurement; it clips 8 annotated introns",
     )
 
 
@@ -102,6 +111,8 @@ def test_an_unknown_record_carries_the_name_and_nothing_else() -> None:
         ncbi_taxid=None,
         source_url=None,
         sha256=None,
+        intron_length_cap=None,
+        intron_length_cap_rationale=None,
     )
 
 
@@ -198,6 +209,8 @@ def test_every_declared_field_is_filled_from_the_table() -> None:
         "ncbi_taxid",
         "source_url",
         "sha256",
+        "intron_length_cap",
+        "intron_length_cap_rationale",
     )
     identifiers = [f for f in METADATA_FIELDS if f not in _OPTIONAL_FIELDS]
     assert all(getattr(record, field) is not None for field in identifiers)
@@ -272,6 +285,48 @@ def test_a_pinned_checksum_is_read_back_as_text() -> None:
     assert record.sha256 == "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3"
 
 
+# --- a bound the table carries and nothing in this package reads ------------
+
+
+#: Every intron bound the shipped table registers, and the whole of it: a value edited or
+#: a row filled in goes red here rather than reaching a consumer's aligner unremarked.
+#: Each is a hand-set round number with a recorded reason, never a maximum computed from
+#: an annotation — whose longest intron is a floor on what the organism does rather than
+#: a ceiling on it (ADR-0010).
+_REGISTERED_INTRON_CAPS = {"ce11": 50_000, "ecHT115": 1, "hg38": 1_000_000, "mm39": 1_000_000}
+
+
+def test_the_shipped_table_bounds_an_intron_only_where_a_number_is_backed() -> None:
+    # sacCer3 is the row to look at: nothing backs a number for yeast the way WormBase's
+    # own pipeline backs the worm's, so its cell is blank deliberately rather than
+    # pending. A chimera's is blank for a third reason again — its bound is the maximum
+    # over its components, derived by whoever aligns against it from a component set this
+    # row does not repeat. Blank reads back as ``None``, which is what leaves an assembly
+    # nobody has characterised aligning exactly as it did before.
+    caps = {
+        assembly: assembly_metadata(assembly).intron_length_cap for assembly in _SHIPPED_ASSEMBLIES
+    }
+
+    assert caps == {
+        assembly: _REGISTERED_INTRON_CAPS.get(assembly) for assembly in _SHIPPED_ASSEMBLIES
+    }
+    assert caps["sacCer3"] is None
+    assert all(caps[assembly] is None for assembly in _SHIPPED_CHIMERAS)
+
+
+def test_every_bound_the_table_carries_says_why_it_is_that_number() -> None:
+    # The reason rides in the row beside the value rather than in a commit message, so a
+    # later reader can tell a convention — ENCODE's mammalian million, run for a decade
+    # and below the longest annotated intron in both mammals it was written for — from a
+    # number read off an organism's own curators. A value with no reason beside it is the
+    # failure this guards: it is unrevisitable, since nobody can tell what it would take
+    # to change it.
+    for assembly in _SHIPPED_ASSEMBLIES:
+        record = assembly_metadata(assembly)
+        carries_reason = record.intron_length_cap_rationale is not None
+        assert carries_reason is (record.intron_length_cap is not None), assembly
+
+
 def test_a_blank_optional_cell_reads_back_as_none() -> None:
     # An unpinned checksum is unverified, not wrong — and never the string "nan". Every
     # downloaded row pins both optional columns today, and the chimera row's blanks say
@@ -331,9 +386,12 @@ def test_a_malformed_row_never_yields_a_half_built_record() -> None:
 def test_optional_fields_default_to_none_when_a_record_is_built_by_hand() -> None:
     record = AssemblyMetadata("tiny", "Testus minimus", "tiny", "TINY.1", "GCF_0.0", 1)
     assert (record.source_url, record.sha256) == (None, None)
+    assert (record.intron_length_cap, record.intron_length_cap_rationale) == (None, None)
 
 
 def test_format_table_row_renders_the_columns_in_table_order() -> None:
+    # sacCer3 pins a source and a digest and carries no intron bound, so the line it
+    # renders to also says what an unfilled cell looks like in the middle of a full row.
     record = lookup_assembly("sacCer3")
     assert record is not None
     assert format_table_row(asdict(record)).split("\t") == [
@@ -345,12 +403,14 @@ def test_format_table_row_renders_the_columns_in_table_order() -> None:
         "559292",
         "https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz",
         "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3",
+        "",
+        "",
     ]
 
 
 def test_format_table_row_leaves_unknown_values_blank() -> None:
     row = format_table_row({"assembly_name": "newAsm", "sha256": "abc123"})
-    assert row.split("\t") == ["newAsm", "", "", "", "", "", "", "abc123"]
+    assert row.split("\t") == ["newAsm", "", "", "", "", "", "", "abc123", "", ""]
 
 
 # --- a rendered row reads back as itself -------------------------------------
@@ -379,6 +439,8 @@ _RECORDS = st.builds(
     ncbi_taxid=st.none() | st.integers(min_value=1),
     source_url=st.none() | _CELLS,
     sha256=st.none() | _CELLS,
+    intron_length_cap=st.none() | st.integers(min_value=1),
+    intron_length_cap_rationale=st.none() | _CELLS,
 )
 
 
@@ -436,6 +498,7 @@ def test_a_row_with_every_identifier_blank_reads_back_as_unknown() -> None:
     assert record.ncbi_name is None
     assert record.ncbi_assembly_id is None
     assert record.ncbi_taxid is None
+    assert record.intron_length_cap is None
     assert record.sha256 == "0" * 64
 
 
