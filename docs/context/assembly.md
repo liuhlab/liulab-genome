@@ -22,8 +22,14 @@ Both may be blank: an unpinned checksum is unverified rather than wrong. So may 
 lab supports references UCSC has never carried, and those have no name in that namespace at all. A
 cross-reference and never
 an allow-list — an assembly absent from the table is perfectly legal, and a complete record handed to
-`Genome(...)` replaces the row wholesale, every field or none.
-_Avoid_: registry, catalog, database, manifest — each implies the table decides what exists
+`Genome(...)` replaces the row wholesale, every field or none. One column is neither a
+cross-reference nor a pin: `intron_length_cap` is the longest gap a spliced aligner should take for
+an intron on this assembly, with `intron_length_cap_rationale` saying why that number and not
+another — set by hand for a consumer to apply, never derived from an annotation, never read here,
+and blank wherever nobody has chosen one (ADR-0010).
+_Avoid_: registry, catalog, database, manifest — each implies the table decides what exists; and
+`intron_length_cap` as the assembly's longest intron — it is a bound someone chose, not a length
+anyone measured
 
 **Assembly dir**:
 The single directory holding everything tied to one **Assembly**, `<data dir>/genome/<assembly>/` —

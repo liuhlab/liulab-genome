@@ -968,7 +968,8 @@ class TestTableRow:
         result = runner.invoke(app, ["table-row", "hg38"])
 
         assert result.exit_code == 0
-        assert result.stdout.strip().split("\t") == [
+        row = result.stdout.strip().split("\t")
+        assert row[:8] == [
             "hg38",
             "Homo sapiens",
             "hg38",
@@ -978,6 +979,11 @@ class TestTableRow:
             "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz",
             _TINY_FA_SHA256,
         ]
+        # Every curated column rides along, not only the two this command computes: the
+        # line is pasted over the row it replaces, so a cell dropped here is a cell
+        # deleted from the table. hg38's intron bound is one nothing could recompute.
+        assert row[metadata.METADATA_FIELDS.index("intron_length_cap")] == "1000000"
+        assert row[metadata.METADATA_FIELDS.index("intron_length_cap_rationale")]
 
     def test_json(self) -> None:
         result = runner.invoke(app, ["table-row", "hg38", "--json"])
@@ -999,7 +1005,7 @@ class TestTableRow:
         assert result.exit_code == 0
         row = result.stdout.strip().split("\t")
         assert row[0] == "sacCer3"
-        assert row[-1] == _TINY_FA_SHA256
+        assert row[metadata.METADATA_FIELDS.index("sha256")] == _TINY_FA_SHA256
 
     def test_a_chimera_is_refused_before_anything_is_downloaded(
         self, fake_fetch: FakeFetch

@@ -5,7 +5,9 @@ records, for each known reference assembly, its canonical name and the cross-ref
 used to talk about it across databases: species, UCSC name, NCBI name, NCBI assembly
 accession, and NCBI taxonomy id. A row may additionally pin where that assembly's FASTA
 is fetched from and the sha256 of the **unpacked** FASTA it yields, which is what makes
-preparing the assembly reproducible.
+preparing the assembly reproducible, and it may carry the longest gap a spliced aligner
+should take for an intron on that assembly together with the reason that number was
+chosen — a bound for a consumer to apply, hand-set and never derived here (ADR-0010).
 
 Two accessors, because there are two questions. :func:`assembly_metadata` answers *what
 is known about this assembly* and always answers with a record: the table's row, or one
@@ -91,12 +93,23 @@ class AssemblyMetadata:
     time, and a freshly prepared assembly pins its source and digest well before
     anyone supplies its species, its UCSC and NCBI names or its taxonomy id.
 
-    The last two fields are what makes preparing an assembly reproducible.
+    ``source_url`` and ``sha256`` are what makes preparing an assembly reproducible.
     ``source_url`` pins where its FASTA is fetched from, so nothing has to be derived
     or guessed; ``sha256`` pins the digest of the **unpacked** FASTA that source
     yields — not of the compressed archive it arrives in, so a copy taken from a
     mirror or recompressed elsewhere still matches (ADR-0006). A row with no digest is
     unverified rather than wrong.
+
+    ``intron_length_cap`` is the longest gap a spliced aligner should take for an
+    intron on this assembly, and ``intron_length_cap_rationale`` says why that number
+    and not another. It is a deliberately loose round number set by hand, never
+    computed from an annotation — an annotation catalogues the transcripts someone
+    observed, so its longest intron is a floor on what the organism does rather than a
+    ceiling on it (ADR-0010). Nothing in this package reads either field: they are
+    curated here so that a consumer choosing aligner parameters reads a fact about the
+    assembly from the same row as its identifiers. A blank cap is an assembly nobody
+    has characterised, which is legal and says *no bound has been chosen* — the reading
+    that leaves such an assembly aligning exactly as it did before.
 
     A **Chimera**'s row pins neither, and that is deliberate rather than pending: its
     bytes are not fetched from anywhere, and they are derived by a pure function from
@@ -131,6 +144,8 @@ class AssemblyMetadata:
     ncbi_taxid: int | None
     source_url: str | None = None
     sha256: str | None = None
+    intron_length_cap: int | None = None
+    intron_length_cap_rationale: str | None = None
 
     @classmethod
     def unknown(cls, assembly_name: str) -> AssemblyMetadata:
@@ -347,7 +362,7 @@ def format_table_row(row: Mapping[str, object]) -> str:
     Examples
     --------
     >>> format_table_row({"assembly_name": "sacCer3", "ncbi_taxid": 559292})
-    'sacCer3\t\t\t\t\t559292\t\t'
+    'sacCer3\t\t\t\t\t559292\t\t\t\t'
     """
     return "\t".join("" if row.get(name) is None else str(row[name]) for name in METADATA_FIELDS)
 

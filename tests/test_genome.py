@@ -185,6 +185,8 @@ _OVERRIDE = AssemblyMetadata(
     ncbi_taxid=1,
     source_url="https://mirror.example.org/references/tiny.fa.gz",
     sha256="00ff" * 16,
+    intron_length_cap=1234,
+    intron_length_cap_rationale="a number this test made up",
 )
 
 
@@ -201,6 +203,8 @@ def test_metadata_record_replaces_the_curated_row(prepared_dir: Path) -> None:
             1,
             "https://mirror.example.org/references/tiny.fa.gz",
             "00ff" * 16,
+            1234,
+            "a number this test made up",
         ]
 
 
