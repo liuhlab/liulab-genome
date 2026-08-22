@@ -1,0 +1,40 @@
+{
+  "annotation": "ensgene_v101",
+  "assembly": "sacCer3",
+  "categories": {
+    "rRNA": {
+      "description": "Nuclear ribosomal RNA genes of the chrXII rDNA repeat that are themselves mature ribosomal RNAs: the small-subunit RDN18-1 and RDN18-2, the large-subunit RDN25-1, RDN25-2, RDN58-1 and RDN58-2, and the six 5S genes RDN5-1 through RDN5-6. This category is non-redundant and safe to sum on its own. The 35S precursor these subunits are processed out of sits in rRNA_precursor, and summing the two categories together double-counts every read in a mature subunit.",
+      "source": "Membership is every transcript in UCSC sacCer3.ensGene.gtf.gz whose transcript_id carries the _rRNA suffix, which is the only biotype that GTF offers: it has no gene_biotype or gene_type attribute and no gene feature rows at all. The set was cross-checked against SGD (yeastgenome.org), whose rRNA gene features for R64 are exactly these same loci. The four transcribed spacers per repeat are excluded, because SGD's own sub-feature typing calls them external and internal transcribed spacer regions rather than rRNA. Two caveats bear on any rRNA fraction computed here. The rDNA array is collapsed in this reference to two of the roughly 100 to 200 tandem 9.1 kb copies present in the real genome, so no rDNA copy number can be inferred from it. And SGD flags RDN5-2 through RDN5-5 as variant alleles that cannot support viability as the sole source of 5S rRNA, yet still types all six RDN5 loci as rRNA genes with no qualifier, which is why they are kept here.",
+      "gene_ids": [
+        "RDN18-1",
+        "RDN18-2",
+        "RDN25-1",
+        "RDN25-2",
+        "RDN5-1",
+        "RDN5-2",
+        "RDN5-3",
+        "RDN5-4",
+        "RDN5-5",
+        "RDN5-6",
+        "RDN58-1",
+        "RDN58-2"
+      ]
+    },
+    "rRNA_precursor": {
+      "description": "The 35S ribosomal RNA precursor transcript, present here as RDN37-1 and RDN37-2, one per rDNA repeat copy in this reference. Under this GTF each RDN37 gene spans exactly the same bases as RDN25 plus ITS2 plus RDN58 plus ITS1 plus RDN18 of its own repeat, tiling them with no gap and no overlap, so it contributes zero unique bases. It is held apart from rRNA for that reason: summing the two categories together double-counts every read that falls in a mature subunit.",
+      "source": "Both ids come from the _rRNA transcript_id suffix in UCSC sacCer3.ensGene.gtf.gz. SGD (yeastgenome.org) describes RDN37 as the 35S rRNA transcript that is processed into the 25S, 18S and 5.8S rRNAs represented by the RDN25, RDN18 and RDN58 loci. The containment was verified arithmetically against the GTF's own coordinates, where RDN37-1 at 451786-457732 and RDN37-2 at 460923-466869 are each 5947 bp and each equal the summed length of their five nested features. Note that SGD draws the RDN37 boundaries wider than this GTF does, at 451575-458432 and 460712-467569, taking in the external transcribed spacers as well, so the containment is larger still under SGD's definition. This category is specific to this annotation: GENCODE v50 on hg38 carries no RNA45S gene at all, and WormBase WS298 annotates its four rRNA genes as disjoint loci with no precursor feature.",
+      "gene_ids": [
+        "RDN37-1",
+        "RDN37-2"
+      ]
+    },
+    "Mt_rRNA": {
+      "description": "The two ribosomal RNA genes encoded by the mitochondrial genome on chrM: Q0020, the 15S rRNA of the small mitoribosomal subunit, and Q0158, the 21S rRNA of the large subunit. They are held separate from the nuclear rRNA genes so that a caller can count mitochondrial and nuclear rRNA independently.",
+      "source": "Both ids come from the _rRNA transcript_id suffix in UCSC sacCer3.ensGene.gtf.gz, and their identities were settled against SGD, which names Q0020 as 15S_RRNA (SGDID S000007287) and Q0158 as 21S_RRNA (SGDID S000007288). One hazard is worth knowing. The Q0158 span of 58009-62447 includes the omega group-I intron at 60725-61867, which encodes the I-SceI endonuclease ORF SCEI/Q0160 at 61022-61729, so reads from that protein-coding ORF fall inside the 21S rRNA gene span.",
+      "gene_ids": [
+        "Q0020",
+        "Q0158"
+      ]
+    }
+  }
+}

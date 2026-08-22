@@ -1,0 +1,47 @@
+{
+  "annotation": "wormbase_ws298",
+  "assembly": "ce11",
+  "categories": {
+    "rRNA": {
+      "description": "Nuclear ribosomal RNA genes that WormBase annotates as functional and expects to be transcribed: rrn-1.1 and rrn-1.2 are the two assembled 18S copies of the chrI 45S rDNA repeat unit, rrn-2.1 is that unit's 5.8S and rrn-3.1 its 26S large subunit (each gene is one mature subunit, not the 45S precursor, so the transcribed spacers between them are not covered), and the sixteen rrn-4.* genes are 5S rRNA, fifteen in the chrV tandem array and rrn-4.16 a divergent copy on chrI.",
+      "source": "WormBase WS298 gene_biotype rRNA, checked gene by gene against the WormBase REST classification (type rRNA) and NCBI Gene subunit descriptions (18S, 5.8S, 26S, 5S). rrn-4.16 is kept here although it is only 76.9 percent identical to the chrV array consensus, because both WormBase and NCBI affirmatively call it a functional 5S gene and neither marks it questionable. Two caveats bear on any rRNA fraction computed from this list. The chrI 45S rDNA array is collapsed in ce11, only about one and a half copies of the 7,197 bp repeat being assembled before the chrI telomere at 15,072,434 where the N2 genome carries roughly 100 per haploid, so reads from about 100 copies pile onto four features. And four antisense ncRNA genes called from RNA-seq, WBGene00201398, WBGene00198814, WBGene00196396 and WBGene00195813, lie on the opposite strand inside rrn-1.1, rrn-1.2, rrn-3.1 and rrn-3.56, so in an unstranded assay reads from those rRNA genes can be assigned to features outside every category here and silently deflate the fraction.",
+      "gene_ids": [
+        "WBGene00004512",
+        "WBGene00004513",
+        "WBGene00004567",
+        "WBGene00004622",
+        "WBGene00014621",
+        "WBGene00077465",
+        "WBGene00077466",
+        "WBGene00077467",
+        "WBGene00077468",
+        "WBGene00077469",
+        "WBGene00077470",
+        "WBGene00077471",
+        "WBGene00077472",
+        "WBGene00077473",
+        "WBGene00077474",
+        "WBGene00077475",
+        "WBGene00077476",
+        "WBGene00077477",
+        "WBGene00189966",
+        "WBGene00235197"
+      ]
+    },
+    "rRNA_pseudogene": {
+      "description": "rRNA-derived loci that WormBase does not call functional rRNA genes; the only member, rrn-3.56, is the 3'-terminal 852 bp of a 26S gene, 99.9 percent identical (851/852) to the last 852 bp of rrn-3.1 and sitting exactly one 7,197 bp repeat unit upstream of it, left exposed where the collapsed chrI rDNA array begins mid-repeat, so it carries real 26S sequence yet is typed a pseudogene.",
+      "source": "WormBase WS298 types WBGene00004677 as pseudogene (the GTF gene_biotype, and classification type pseudogene from the WormBase REST gene page) while NCBI Gene 13183151 types the very same locus rRNA, and that disagreement is worth four points of measured rRNA share on a real plate (49.5 percent without it, 53.1 percent with it), which is why it is handed to the caller as its own category rather than dropped or merged into rRNA.",
+      "gene_ids": [
+        "WBGene00004677"
+      ]
+    },
+    "Mt_rRNA": {
+      "description": "The two ribosomal RNA genes encoded by the mitochondrial genome, whose sequence is spelled MtDNA in this assembly rather than chrM: MTCE.7 is the small subunit 12S rRNA (rrnS, 696 bp) and MTCE.33 is the large subunit 16S rRNA (rrnL, 952 bp).",
+      "source": "WormBase WS298 lumps both into gene_biotype rRNA, so they were split out by sequence name and their subunit identities settled against RefSeq NC_001328.1, which annotates s-rRNA at 898..1594 and l-rRNA at 10403..11355, the same two loci one base longer at the 3' end.",
+      "gene_ids": [
+        "WBGene00014454",
+        "WBGene00014472"
+      ]
+    }
+  }
+}
