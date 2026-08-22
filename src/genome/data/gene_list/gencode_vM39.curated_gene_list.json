@@ -3,9 +3,11 @@
   "assembly": "mm39",
   "categories": {
     "rRNA": {
-      "description": "A nuclear ribosomal RNA locus that GENCODE types rRNA and that MGI does not mark as a pseudogene. Every member is 5S- or 5.8S-sized: 279 predicted Gm* gene models, 72 n-R5s* copies of the 5S repeat, and Rn5s, the 5S gene itself. There is no 18S, 28S or 45S gene model in this category, because the mouse rDNA arrays are not represented in the mm39 primary assembly.",
-      "source": "The gene_type attribute of the GENCODE M39 GTF, minus the two loci moved to rRNA_pseudogene below on MGI's authority (MGI MRK_List2.rpt, retrieved 2026-08-22, joined through the mgi_id attribute the GTF itself carries). Read the count before you use it: this category holds 352 loci, of which 279 are predicted Gm* models and 72 are copies of the 5S repeat, whereas the human files in this set ship 29 on hg38 and 19 on hg19. That gap is a real difference between the two annotations and not something this package can fix, because GENCODE never applies the rRNA_pseudogene biotype to mouse at all, so the ~500 rRNA-derived loci that human splits off as pseudogenes stay inside mouse rRNA. An rRNA fraction computed from this category is therefore not comparable to one computed from the human files unless the caller first decides which of these loci should count. Nor is it comparable across mouse releases by id: vM25 and vM39 annotate the same 356 loci, but only 14 of them keep their gene id and only 83 keep their gene name, so this list must be read for the release it names.",
+      "description": "Every rRNA-derived gene GENCODE M39 annotates on mm39: 354 nuclear loci, of which 279 are predicted Gm* models and 72 are copies of the 5S repeat, plus the two mitochondrial genes mt-Rnr1 (12S) and mt-Rnr2 (16S). The list is deliberately inclusive, being meant for counting rRNA-derived reads as a QC metric rather than for describing rRNA biology.",
+      "source": "The gene_type attribute of the registered GTF, taking rRNA and Mt_rRNA together; GENCODE never applies the rRNA_pseudogene biotype to mouse, so nothing was split off. This includes Rn18s-rs5, formerly Gm42418 and the locus routinely filtered as rRNA contamination from mouse single-cell data: at 1,849 bp against a 148 bp maximum everywhere else, it dominates this metric. GENCODE annotates no 18S, 28S or 45S gene in mouse either, the rDNA arrays not being in the primary assembly.",
       "gene_ids": [
+        "ENSMUSG00000064337.1",
+        "ENSMUSG00000064339.1",
         "ENSMUSG00000064515.3",
         "ENSMUSG00000064548.3",
         "ENSMUSG00000064554.3",
@@ -69,6 +71,7 @@
         "ENSMUSG00000119546.1",
         "ENSMUSG00000119561.1",
         "ENSMUSG00000119562.1",
+        "ENSMUSG00000119584.1",
         "ENSMUSG00000119587.1",
         "ENSMUSG00000119615.1",
         "ENSMUSG00000119639.1",
@@ -87,6 +90,7 @@
         "ENSMUSG00000119904.1",
         "ENSMUSG00000119919.1",
         "ENSMUSG00000119920.1",
+        "ENSMUSG00000119925.1",
         "ENSMUSG00001118664.1",
         "ENSMUSG00002074856.1",
         "ENSMUSG00002074864.1",
@@ -358,22 +362,6 @@
         "ENSMUSG00002076977.1",
         "ENSMUSG00002076979.1",
         "ENSMUSG00002076988.1"
-      ]
-    },
-    "rRNA_pseudogene": {
-      "description": "An rRNA-derived locus that GENCODE types rRNA but that MGI classifies as a pseudogene, so it is not expected to produce functional rRNA whatever the GTF biotype says. Both members are here because the publisher contradicts itself about them, not because this curation judged them non-functional. One of the two matters far more than the other for read counting. Rn18s-rs5 is 1,849 bp where every other rRNA-derived locus in this annotation is at most 148 bp, and it is the locus routinely filtered as rRNA contamination from mouse single-cell data under its former name Gm42418. A caller that sums rRNA alone therefore leaves out the single largest source of rRNA-derived reads in mouse, which for that metric is likely the wrong choice.",
-      "source": "MGI, consulted for every locus in this file through the mgi_id attribute of the GENCODE M39 GTF and MGI MRK_List2.rpt retrieved 2026-08-22; exactly two of the 356 resolve to marker type Pseudogene and feature type pseudogene. Rn5s-ps1 is MGI:99528, 5S RNA pseudogene 1, and the -ps suffix is MGI's own pseudogene marker. Rn18s-rs5 is MGI:107222, 18s RNA related sequence 5, formerly Gm42418, and MGI is not non-committal about it: it types the marker Pseudogene outright, unlike its siblings Rn18s-rs1 through rs7 which MGI types rRNA gene. Ensembl carries the contradiction in plain sight, serving both loci with biotype rRNA and an MGI-sourced description that says pseudogene.",
-      "gene_ids": [
-        "ENSMUSG00000119584.1",
-        "ENSMUSG00000119925.1"
-      ]
-    },
-    "Mt_rRNA": {
-      "description": "A ribosomal RNA gene encoded by the mitochondrial genome, kept separate from nuclear rRNA so a caller can count mitochondrial and nuclear ribosomal signal independently. Both members are on chrM: mt-Rnr1 is the 12S rRNA and mt-Rnr2 is the 16S rRNA.",
-      "source": "The Mt_rRNA gene_type of the GENCODE M39 GTF, which needed no adjustment here. Confirmed against MGI:102493 (mt-Rnr1, mitochondrially encoded 12S rRNA) and MGI:102492 (mt-Rnr2, mitochondrially encoded 16S rRNA), both typed rRNA gene.",
-      "gene_ids": [
-        "ENSMUSG00000064337.1",
-        "ENSMUSG00000064339.1"
       ]
     }
   }

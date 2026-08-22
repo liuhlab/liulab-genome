@@ -167,9 +167,7 @@ Which categories that annotation declares, and how many genes are in each — wh
 ```console
 $ genome gene-categories ce11_ecHT115
 categories for ce11_ecHT115 / wormbase_ws298+refseq_rs_2025_06_26
-  rRNA             36  (ce11: 20, ecHT115: 16)
-  rRNA_pseudogene   1  (ce11: 1)
-  Mt_rRNA           2  (ce11: 2)
+  rRNA  39  (ce11: 23, ecHT115: 16)
 ```
 
 `--json` emits every category with its gene ids and its sources — the same answer

@@ -77,10 +77,12 @@ _Avoid_: gene inference, building the hierarchy, auto-detect
 ### Genes
 
 **Gene category**:
-One named group of genes inside one **Annotation** — `rRNA`, `Mt_rRNA` — declared by that
+One named group of genes inside one **Annotation** — `rRNA` is the only one today — declared by that
 annotation's **Curated gene list** and never by this package: which categories exist differs per
-annotation and is data. One that is declared always holds at least one gene, so an annotation that
-cannot answer for a category says so rather than answering with none.
+annotation and is data. A category is drawn for counting reads, so it is inclusive and its genes may
+overlap: `rRNA` holds everything rRNA-derived, pseudogene copies and mitochondrial genes among them.
+One that is declared always holds at least one gene, so an annotation that cannot answer for a
+category says so rather than answering with none.
 _Avoid_: biotype, gene type, `gene_type`/`gene_biotype` — those name the **GTF** attribute a category
 is curated *instead of*; class, group, gene set
 

@@ -15,9 +15,12 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   gene-list <assembly> <category>` and `genome gene-categories <assembly>`, both with `--json`.
   The answer comes from a curated gene list shipped inside the package, one per annotation, and not
   from the GTF's own biotype attribute, which four publishers spell two ways over three taxonomies
-  that disagree and which `sacCer3/ensgene_v101` omits altogether (ADR-0011). Categories are
-  returned as themselves — whether `rRNA_pseudogene` counts toward a metric is the caller's
-  decision — and a merged annotation answers with one source per contributing component, so a
+  that disagree and which `sacCer3/ensgene_v101` omits altogether (ADR-0011). Every annotation
+  declares one category today, `rRNA`, holding **everything rRNA-derived it carries** — mature
+  genes, pseudogene copies, mitochondrial rRNAs, and yeast's 35S precursor. It is drawn for
+  counting rRNA-derived reads as a QC metric rather than for describing rRNA biology, so it is
+  inclusive and its genes may overlap; each list says in its own prose what it holds and what it
+  under-reports. A merged annotation answers with one source per contributing component, so a
   chimera's genes stay attributable. **An annotation that cannot answer raises rather than
   returning nothing**: `NoGeneCategoriesError` for one no list ships for and
   `GeneCategoryNotDeclaredError` for one whose list declares other categories, both `LookupError`s

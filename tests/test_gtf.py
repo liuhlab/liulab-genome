@@ -1438,7 +1438,12 @@ def _curated_ids(annotation: str, category: str) -> tuple[str, ...]:
 
 
 def _register_merged(
-    assembly_dir: Path, name: str, source: Path, *, assembly: str = _CHIMERA
+    assembly_dir: Path,
+    name: str,
+    source: Path,
+    *,
+    assembly: str = _CHIMERA,
+    food: str = _FOOD,
 ) -> GtfAnnotation:
     """Register a merged annotation of the worm/food pair under ``name``, from one GTF.
 
@@ -1446,6 +1451,9 @@ def _register_merged(
     into ``details`` is what the gene-category path reads back, so standing that in would
     test the stand-in. The fixture GTF is merged twice under two component names, which is
     all the record needs to carry — nothing here reads the features.
+
+    ``food`` names the second contributor's annotation, so a caller may merge in one no
+    curated list ships for and test what a contributor that cannot contribute does.
     """
     chrom_sizes = _write_chrom_sizes(
         assembly_dir,
@@ -1457,7 +1465,7 @@ def _register_merged(
         name,
         [
             MergeSource(_WORM_COMPONENT, _WORM, source),
-            MergeSource(_FOOD_COMPONENT, _FOOD, source),
+            MergeSource(_FOOD_COMPONENT, food, source),
         ],
         separator="__",
         chrom_sizes=chrom_sizes,
@@ -1664,20 +1672,22 @@ class TestMergedGeneList:
             *_curated_ids(_FOOD, shared),
         ]
 
-    def test_a_category_one_contributor_declares_answers_with_that_one_alone(
+    def test_a_contributor_that_cannot_answer_is_left_out_rather_than_raised_over(
         self, tmp_path: Path
     ) -> None:
-        # A bacterium has no mitochondria, and a worm annotation declaring a category its
-        # food's does not is an omission rather than a failure — the answer simply carries
-        # the one source.
-        registry = self._registry(tmp_path)
-        worm_only = sorted(set(_declared(_WORM)) - set(_declared(_FOOD)))
-        assert worm_only, "the two contributors declare the same categories; nothing to test"
+        # One component's annotation is curated and the other's is not, so only one of the
+        # two can contribute. That is an omission and not a failure: the answer carries the
+        # contributor that can answer, and stays attributed to its component.
+        gtf = tmp_path / "ann.gtf"
+        gtf.write_text(_GTF)
+        _register_merged(tmp_path, "merged", gtf, food="nobody_curated_this")
+        registry = AnnotationRegistry.locate(_CHIMERA, tmp_path)
+        category = _declared(_WORM)[0]
 
-        answer = registry.gene_list(worm_only[0], f"{_WORM}+{_FOOD}")
+        answer = registry.gene_list(category, "merged")
 
-        assert [source.component for source in answer.sources] == [_WORM_COMPONENT]
-        assert answer.gene_ids == list(_curated_ids(_WORM, worm_only[0]))
+        assert [contributed.component for contributed in answer.sources] == [_WORM_COMPONENT]
+        assert answer.gene_ids == list(_curated_ids(_WORM, category))
 
     def test_a_category_no_contributor_declares_raises(self, tmp_path: Path) -> None:
         registry = self._registry(tmp_path)

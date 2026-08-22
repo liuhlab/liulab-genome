@@ -195,22 +195,28 @@ so on a fresh machine the default is typically not registered yet. Asking for
 
 ### Which genes are in a category
 
-Ask an annotation which of its genes are in a **gene category** — `rRNA`, and whatever
-else was curated for it — and get the ids back with the sources that contributed them:
+Ask an annotation which of its genes are in a **gene category** and get the ids back with
+the sources that contributed them. Today every annotation declares one category, `rRNA`:
 
 ```python
 worm = Genome("ce11")
-worm.gene_list("rRNA").gene_ids                    # ['WBGene00004512', ...] — 20 of them
-[answer.category for answer in worm.gene_lists()]  # ['rRNA', 'rRNA_pseudogene', 'Mt_rRNA']
+worm.gene_list("rRNA").gene_ids                    # ['WBGene00004512', ...] — 23 of them
+[answer.category for answer in worm.gene_lists()]  # ['rRNA']
 ```
 
-The categories are the annotation's own and differ between them: `ecHT115`'s RefSeq
-annotation declares `rRNA` alone, `sacCer3`'s declares an `rRNA_precursor` nothing else
-has. `gene_lists()` is how you find out what may be asked for — nothing here knows a
-category vocabulary, and none of this collapses to a boolean, because whether
-`rRNA_pseudogene` counts toward your metric is your decision and not this package's.
+`rRNA` is **everything rRNA-derived that annotation carries** — the mature genes, the
+pseudogene copies, the mitochondrial rRNAs, and for yeast the 35S precursor. It is built
+for counting rRNA-derived reads as a QC metric rather than for describing rRNA biology, so
+a pseudogene copy that captures reads counts the same as a functional gene. Features may
+overlap: yeast's `RDN37` spans the same bases as the subunits it is processed into, so
+count over the union of intervals rather than summing per-gene counts if that matters.
+Each list says what it holds and what it misses in its own `description` and `source` —
+read them, since what a list under-reports differs per annotation.
 
-They come from a curated list shipped inside the package rather than from the GTF's own
+`gene_lists()` is how you find out what may be asked for; nothing here knows a category
+vocabulary, so a second category added later needs no code change.
+
+The ids come from a curated list shipped inside the package rather than from the GTF's own
 biotype attribute, which four publishers spell two ways over three taxonomies that do not
 agree — and which `sacCer3/ensgene_v101` omits entirely, so deriving it yourself reports no
 rRNA for yeast and never says so (ADR-0011).
@@ -240,13 +246,12 @@ is what keeps its genes attributable:
 chimera = Genome("ce11_ecHT115")
 rrna = chimera.gene_list("rRNA")
 [(source.component, len(source.gene_ids)) for source in rrna.sources]
-# [('ce11', 20), ('ecHT115', 16)]
+# [('ce11', 23), ('ecHT115', 16)]
 rrna.gene_ids     # both components', concatenated in that order and never de-duplicated
 ```
 
-A component that does not declare the category is simply left out of `sources`: `Mt_rRNA`
-on that chimera is worm's two genes alone, because a bacterium has no mitochondria and
-that is not a failure.
+A component whose annotation no curated list ships for is simply left out of `sources`
+rather than raised over — an omission, not a failure.
 
 ## Aligner indexes
 
