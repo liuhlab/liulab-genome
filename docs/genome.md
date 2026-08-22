@@ -193,6 +193,61 @@ It names an annotation without locating one — opening a genome never starts a 
 so on a fresh machine the default is typically not registered yet. Asking for
 `default_gtf_path` is what surfaces that, naming the command that closes the gap.
 
+### Which genes are in a category
+
+Ask an annotation which of its genes are in a **gene category** — `rRNA`, and whatever
+else was curated for it — and get the ids back with the sources that contributed them:
+
+```python
+worm = Genome("ce11")
+worm.gene_list("rRNA").gene_ids                    # ['WBGene00004512', ...] — 20 of them
+[answer.category for answer in worm.gene_lists()]  # ['rRNA', 'rRNA_pseudogene', 'Mt_rRNA']
+```
+
+The categories are the annotation's own and differ between them: `ecHT115`'s RefSeq
+annotation declares `rRNA` alone, `sacCer3`'s declares an `rRNA_precursor` nothing else
+has. `gene_lists()` is how you find out what may be asked for — nothing here knows a
+category vocabulary, and none of this collapses to a boolean, because whether
+`rRNA_pseudogene` counts toward your metric is your decision and not this package's.
+
+They come from a curated list shipped inside the package rather than from the GTF's own
+biotype attribute, which four publishers spell two ways over three taxonomies that do not
+agree — and which `sacCer3/ensgene_v101` omits entirely, so deriving it yourself reports no
+rRNA for yeast and never says so (ADR-0011).
+
+**An annotation that cannot answer raises rather than handing back nothing**, and the two
+ways it cannot are separate errors, because you act differently on them:
+
+```python
+from genome import GeneCategoryNotDeclaredError, NoGeneCategoriesError
+
+try:
+    genes = worm.gene_list("tRNA").gene_ids
+except NoGeneCategoriesError:
+    ...      # no curated list ships for this annotation at all
+except GeneCategoryNotDeclaredError:
+    ...      # one does, and this category is not among the ones it declares
+```
+
+Both are `LookupError`s, so `except LookupError` catches the pair. No declared category is
+ever empty and neither call ever returns an empty collection, so a zero you get back is a
+zero you measured.
+
+A [chimera](#chimera-assemblies) answers with one source per contributing component, which
+is what keeps its genes attributable:
+
+```python
+chimera = Genome("ce11_ecHT115")
+rrna = chimera.gene_list("rRNA")
+[(source.component, len(source.gene_ids)) for source in rrna.sources]
+# [('ce11', 20), ('ecHT115', 16)]
+rrna.gene_ids     # both components', concatenated in that order and never de-duplicated
+```
+
+A component that does not declare the category is simply left out of `sources`: `Mt_rRNA`
+on that chimera is worm's two genes alone, because a bacterium has no mitochondria and
+that is not a failure.
+
 ## Aligner indexes
 
 Two aligners ship, and they differ in whether an annotation is involved:
