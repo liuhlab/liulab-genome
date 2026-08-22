@@ -16,10 +16,17 @@ from genome import metadata
 from genome.cli import app
 from genome.external import REQUIRED_TOOLS
 from genome.external import doctor as doctor_api
+from genome.gene_list import curated_gene_list
 from genome.io import download as download_mod
 from genome.io.completion import read_record, record_path, write_record
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
-from genome.io.gtf import AnnotationRegistry, GtfAnnotation, annotation_dir
+from genome.io.gtf import (
+    AnnotationRegistry,
+    GtfAnnotation,
+    MergeSource,
+    annotation_dir,
+    register_merged_gtf,
+)
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.seq import DNA
 
@@ -1020,6 +1027,196 @@ class TestTableRow:
         assert "no sha256" in _output(result)
         assert "genome verify ce11_ecHT115" in _output(result)
         assert fake_fetch.calls == []
+
+
+class TestGeneCategoryCommands:
+    """``genome gene-list`` and ``genome gene-categories`` — a category's genes, and which exist.
+
+    The shipped curated gene lists answer, since which categories exist is data and no
+    fixture may pretend otherwise: the tests read them off the shipped file rather than
+    naming any. ``sacCer3``/``ensgene_v101`` is the pair used throughout, because its
+    curated list is what makes an annotation with no biotype attribute answerable at all.
+    """
+
+    #: The category names a shipped curated list declares, in the order it spells them.
+    def _declared(self, annotation: str) -> tuple[str, ...]:
+        listed = curated_gene_list(annotation)
+        assert listed is not None, f"no curated gene list ships for {annotation}"
+        return tuple(listed.categories)
+
+    def _ids(self, annotation: str, category: str) -> tuple[str, ...]:
+        listed = curated_gene_list(annotation)
+        assert listed is not None
+        return listed.categories[category].gene_ids
+
+    def _registered(self, liulab_data: Path, data_dir: Path) -> None:
+        """Register the fixture GTF as sacCer3's ``ensgene_v101``, where the layout puts it."""
+        _register(
+            "sacCer3", liulab_data / "genome" / "sacCer3", data_dir / "tiny.gtf", "ensgene_v101"
+        )
+
+    def _merged(self, liulab_data: Path, tmp_path: Path) -> None:
+        """Register a merged annotation of worm and its food, where the layout puts it."""
+        source = tmp_path / "one.gtf"
+        source.write_text('chrI\ttest\texon\t1\t50\t.\t+\t.\tgene_id "g1"; transcript_id "t1";\n')
+        assembly_dir = liulab_data / "genome" / "ce11_ecHT115"
+        assembly_dir.mkdir(parents=True, exist_ok=True)
+        chrom_sizes = assembly_dir / "ce11_ecHT115.chrom.sizes"
+        chrom_sizes.write_text("chrI__ce11\t10000\nchrI__ecHT115\t10000\n")
+        register_merged_gtf(
+            assembly_dir,
+            "wormbase_ws298+refseq_rs_2025_06_26",
+            [
+                MergeSource("ce11", "wormbase_ws298", source),
+                MergeSource("ecHT115", "refseq_rs_2025_06_26", source),
+            ],
+            separator="__",
+            chrom_sizes=chrom_sizes,
+        )
+
+    def test_only_the_gene_ids_reach_stdout_so_the_output_pipes(
+        self, liulab_data: Path, data_dir: Path
+    ) -> None:
+        self._registered(liulab_data, data_dir)
+        category = self._declared("ensgene_v101")[0]
+
+        result = runner.invoke(app, ["gene-list", "sacCer3", category])
+
+        assert result.exit_code == 0
+        assert result.stdout == "".join(
+            f"{gene_id}\n" for gene_id in self._ids("ensgene_v101", category)
+        )
+        # The attribution is worth printing and must not cost the pipe, so it goes beside it.
+        assert category in result.stderr
+        assert "ensgene_v101" in result.stderr
+
+    def test_the_annotation_may_be_named_instead_of_defaulted(
+        self, liulab_data: Path, data_dir: Path
+    ) -> None:
+        self._registered(liulab_data, data_dir)
+        category = self._declared("ensgene_v101")[0]
+
+        result = runner.invoke(
+            app, ["gene-list", "sacCer3", category, "--annotation", "ensgene_v101"]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == list(self._ids("ensgene_v101", category))
+
+    def test_gene_list_json_carries_the_ids_and_keeps_the_sources_apart(
+        self, liulab_data: Path, data_dir: Path
+    ) -> None:
+        self._registered(liulab_data, data_dir)
+        category = self._declared("ensgene_v101")[0]
+
+        result = runner.invoke(app, ["gene-list", "sacCer3", category, "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert list(payload) == ["assembly", "annotation", "category", "gene_ids", "sources"]
+        assert payload["assembly"] == "sacCer3"
+        assert payload["gene_ids"] == list(self._ids("ensgene_v101", category))
+        assert [list(source) for source in payload["sources"]] == [
+            ["component", "annotation", "description", "source", "gene_ids"]
+        ]
+        assert payload["sources"][0]["component"] is None
+
+    def test_gene_categories_prints_one_row_per_category_with_its_count(
+        self, liulab_data: Path, data_dir: Path
+    ) -> None:
+        self._registered(liulab_data, data_dir)
+        declared = self._declared("ensgene_v101")
+
+        result = runner.invoke(app, ["gene-categories", "sacCer3"])
+
+        assert result.exit_code == 0
+        lines = result.stdout.splitlines()
+        assert lines[0] == "categories for sacCer3 / ensgene_v101"
+        assert [line.split()[0] for line in lines[1:]] == list(declared)
+        assert [line.split()[1] for line in lines[1:]] == [
+            str(len(self._ids("ensgene_v101", category))) for category in declared
+        ]
+
+    def test_gene_categories_json_is_every_category_as_gene_list_answers_one(
+        self, liulab_data: Path, data_dir: Path
+    ) -> None:
+        self._registered(liulab_data, data_dir)
+
+        result = runner.invoke(app, ["gene-categories", "sacCer3", "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert [entry["category"] for entry in payload] == list(self._declared("ensgene_v101"))
+        assert all(entry["gene_ids"] for entry in payload)
+
+    def test_a_merged_annotation_shows_the_per_component_split(
+        self, liulab_data: Path, tmp_path: Path
+    ) -> None:
+        # The case #111 was opened over: worm rRNA and its food's arrive as one category
+        # and must stay distinguishable inside it.
+        self._merged(liulab_data, tmp_path)
+
+        result = runner.invoke(app, ["gene-categories", "ce11_ecHT115"])
+
+        assert result.exit_code == 0
+        lines = result.stdout.splitlines()
+        assert lines[0] == "categories for ce11_ecHT115 / wormbase_ws298+refseq_rs_2025_06_26"
+        assert any("(ce11: " in line and "ecHT115: " in line for line in lines[1:])
+
+    def test_a_merged_annotations_gene_list_attributes_every_source(
+        self, liulab_data: Path, tmp_path: Path
+    ) -> None:
+        self._merged(liulab_data, tmp_path)
+        shared = next(
+            category
+            for category in self._declared("wormbase_ws298")
+            if category in self._declared("refseq_rs_2025_06_26")
+        )
+
+        result = runner.invoke(app, ["gene-list", "ce11_ecHT115", shared, "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert [source["component"] for source in payload["sources"]] == ["ce11", "ecHT115"]
+        assert payload["gene_ids"] == [
+            *self._ids("wormbase_ws298", shared),
+            *self._ids("refseq_rs_2025_06_26", shared),
+        ]
+
+    def test_an_annotation_no_curated_list_ships_for_exits_one_saying_so(
+        self, liulab_data: Path, data_dir: Path
+    ) -> None:
+        # Not an empty list of genes and not exit 0: the caller has to be able to tell
+        # *nothing is known here* from *there are none of these genes*.
+        _register("tiny", liulab_data / "genome" / "tiny", data_dir / "tiny.gtf", "mine")
+
+        result = runner.invoke(app, ["gene-list", "tiny", "rRNA"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "no curated gene list ships" in _output(result)
+        assert "ensgene_v101" in _output(result)  # …and which annotations do have one
+
+    def test_a_category_the_annotation_does_not_declare_exits_one_listing_the_ones_it_does(
+        self, liulab_data: Path, data_dir: Path
+    ) -> None:
+        self._registered(liulab_data, data_dir)
+
+        result = runner.invoke(app, ["gene-list", "sacCer3", "no_such_category"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "no_such_category" in _output(result)
+        for category in self._declared("ensgene_v101"):
+            assert category in _output(result)
+
+    def test_an_unregistered_annotation_exits_one_naming_the_command_that_registers_it(
+        self, liulab_data: Path
+    ) -> None:
+        result = runner.invoke(app, ["gene-categories", "sacCer3"])
+
+        assert result.exit_code == 1
+        assert "genome register-annotation sacCer3 ensgene_v101" in _output(result)
 
 
 class TestTheSurfacesThatDidNotChange:
