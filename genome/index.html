@@ -442,6 +442,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#which-genes-are-in-a-category" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which genes are in a category
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -690,6 +701,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#which-genes-are-in-a-category" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Which genes are in a category
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -902,6 +924,51 @@ annotation, else <code>None</code>.</p>
 <p>It names an annotation without locating one — opening a genome never starts a download —
 so on a fresh machine the default is typically not registered yet. Asking for
 <code>default_gtf_path</code> is what surfaces that, naming the command that closes the gap.</p>
+<h3 id="which-genes-are-in-a-category">Which genes are in a category<a class="headerlink" href="#which-genes-are-in-a-category" title="Permanent link">&para;</a></h3>
+<p>Ask an annotation which of its genes are in a <strong>gene category</strong> and get the ids back with
+the sources that contributed them. Today every annotation declares one category, <code>rRNA</code>:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">worm</span> <span class="o">=</span> <span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;ce11&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">worm</span><span class="o">.</span><span class="n">gene_list</span><span class="p">(</span><span class="s2">&quot;rRNA&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">gene_ids</span>                    <span class="c1"># [&#39;WBGene00004512&#39;, ...] — 23 of them</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="p">[</span><span class="n">answer</span><span class="o">.</span><span class="n">category</span> <span class="k">for</span> <span class="n">answer</span> <span class="ow">in</span> <span class="n">worm</span><span class="o">.</span><span class="n">gene_lists</span><span class="p">()]</span>  <span class="c1"># [&#39;rRNA&#39;]</span>
+</code></pre></div>
+<p><code>rRNA</code> is <strong>everything rRNA-derived that annotation carries</strong> — the mature genes, the
+pseudogene copies, the mitochondrial rRNAs, and for yeast the 35S precursor. It is built
+for counting rRNA-derived reads as a QC metric rather than for describing rRNA biology, so
+a pseudogene copy that captures reads counts the same as a functional gene. Features may
+overlap: yeast's <code>RDN37</code> spans the same bases as the subunits it is processed into, so
+count over the union of intervals rather than summing per-gene counts if that matters.
+Each list says what it holds and what it misses in its own <code>description</code> and <code>source</code> —
+read them, since what a list under-reports differs per annotation.</p>
+<p><code>gene_lists()</code> is how you find out what may be asked for; nothing here knows a category
+vocabulary, so a second category added later needs no code change.</p>
+<p>The ids come from a curated list shipped inside the package rather than from the GTF's own
+biotype attribute, which four publishers spell two ways over three taxonomies that do not
+agree — and which <code>sacCer3/ensgene_v101</code> omits entirely, so deriving it yourself reports no
+rRNA for yeast and never says so (ADR-0011).</p>
+<p><strong>An annotation that cannot answer raises rather than handing back nothing</strong>, and the two
+ways it cannot are separate errors, because you act differently on them:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">GeneCategoryNotDeclaredError</span><span class="p">,</span> <span class="n">NoGeneCategoriesError</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="n">genes</span> <span class="o">=</span> <span class="n">worm</span><span class="o">.</span><span class="n">gene_list</span><span class="p">(</span><span class="s2">&quot;tRNA&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">gene_ids</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="k">except</span> <span class="n">NoGeneCategoriesError</span><span class="p">:</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>    <span class="o">...</span>      <span class="c1"># no curated list ships for this annotation at all</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="k">except</span> <span class="n">GeneCategoryNotDeclaredError</span><span class="p">:</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>    <span class="o">...</span>      <span class="c1"># one does, and this category is not among the ones it declares</span>
+</code></pre></div>
+<p>Both are <code>LookupError</code>s, so <code>except LookupError</code> catches the pair. No declared category is
+ever empty and neither call ever returns an empty collection, so a zero you get back is a
+zero you measured.</p>
+<p>A <a href="#chimera-assemblies">chimera</a> answers with one source per contributing component, which
+is what keeps its genes attributable:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">chimera</span> <span class="o">=</span> <span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;ce11_ecHT115&quot;</span><span class="p">)</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">rrna</span> <span class="o">=</span> <span class="n">chimera</span><span class="o">.</span><span class="n">gene_list</span><span class="p">(</span><span class="s2">&quot;rRNA&quot;</span><span class="p">)</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="p">[(</span><span class="n">source</span><span class="o">.</span><span class="n">component</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">source</span><span class="o">.</span><span class="n">gene_ids</span><span class="p">))</span> <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">rrna</span><span class="o">.</span><span class="n">sources</span><span class="p">]</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># [(&#39;ce11&#39;, 23), (&#39;ecHT115&#39;, 16)]</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">rrna</span><span class="o">.</span><span class="n">gene_ids</span>     <span class="c1"># both components&#39;, concatenated in that order and never de-duplicated</span>
+</code></pre></div>
+<p>A component whose annotation no curated list ships for is simply left out of <code>sources</code>
+rather than raised over — an omission, not a failure.</p>
 <h2 id="aligner-indexes">Aligner indexes<a class="headerlink" href="#aligner-indexes" title="Permanent link">&para;</a></h2>
 <p>Two aligners ship, and they differ in whether an annotation is involved:</p>
 <table>
@@ -928,9 +995,9 @@ so on a fresh machine the default is typically not registered yet. Asking for
 </tr>
 </tbody>
 </table>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>                    <span class="c1"># against default_gtf</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>    <span class="c1"># ...or name one</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>                    <span class="c1"># against default_gtf</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">,</span> <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>    <span class="c1"># ...or name one</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">()</span>
 </code></pre></div>
 <p>The <code>gtf</code> key becomes part of the index directory name, so indexes for different
 annotations never collide. Omit it and the <strong>default annotation</strong> is used and names the
@@ -938,25 +1005,25 @@ directory; a genome with no default at all raises rather than guessing, naming b
 to give it one. A finished index is cached and reused; pass <code>overwrite=True</code> to rebuild.</p>
 <p>Commonly tuned options are named and everything else is forwarded to the tool as a raw
 flag:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>    <span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">,</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>    <span class="n">sjdb_overhang</span><span class="o">=</span><span class="mi">99</span><span class="p">,</span>        <span class="c1"># --sjdbOverhang; ideally read_length - 1</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>    <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>               <span class="c1"># --runThreadN</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>    <span class="n">genomeSAindexNbases</span><span class="o">=</span><span class="mi">11</span><span class="p">,</span>  <span class="c1"># any other genomeGenerate flag, sans the leading --</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="p">)</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">(</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>    <span class="n">kmer</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>                 <span class="c1"># -k/--kmer</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>    <span class="n">window</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>               <span class="c1"># -w/--window</span>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>    <span class="n">min_frag_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>      <span class="c1"># any other --build-index flag; underscores become hyphens</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>    <span class="n">gtf</span><span class="o">=</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">,</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>    <span class="n">sjdb_overhang</span><span class="o">=</span><span class="mi">99</span><span class="p">,</span>        <span class="c1"># --sjdbOverhang; ideally read_length - 1</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>    <span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>               <span class="c1"># --runThreadN</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    <span class="n">genomeSAindexNbases</span><span class="o">=</span><span class="mi">11</span><span class="p">,</span>  <span class="c1"># any other genomeGenerate flag, sans the leading --</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="p">)</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">build_chromap_index</span><span class="p">(</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>    <span class="n">kmer</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>                 <span class="c1"># -k/--kmer</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>    <span class="n">window</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>               <span class="c1"># -w/--window</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>    <span class="n">min_frag_length</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>      <span class="c1"># any other --build-index flag; underscores become hyphens</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="p">)</span>
 </code></pre></div>
 <p><code>genomeSAindexNbases</code> and <code>genomeChrBinNbits</code> are sized from the assembly unless you set
 them. chromap's index build is single-threaded, so there is no <code>threads</code>.</p>
 <p>Building an index and using one are separate jobs. The <code>get_*</code> methods return the path a
 mapping run needs and build nothing:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">get_star_index</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">)</span>   <span class="c1"># -&gt; STAR --genomeDir</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">get_chromap_index</span><span class="p">()</span>              <span class="c1"># -&gt; chromap -x</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">get_star_index</span><span class="p">(</span><span class="s2">&quot;ensgene_v101&quot;</span><span class="p">)</span>   <span class="c1"># -&gt; STAR --genomeDir</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">get_chromap_index</span><span class="p">()</span>              <span class="c1"># -&gt; chromap -x</span>
 </code></pre></div>
 <p>Neither aligner is in the default environment — install what you need with <code>pixi add star</code>
 / <code>pixi add chromap</code>, or use the project's <code>aligners</code> environment
@@ -965,8 +1032,8 @@ mapping run needs and build nothing:</p>
 <p>A <strong>chimera</strong> is one reference concatenated from assemblies you have already prepared — a
 worm and the bacterium it eats — so a library carrying reads from both takes one alignment
 pass instead of two.</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">chimera</span> <span class="o">=</span> <span class="n">Genome</span><span class="o">.</span><span class="n">chimera</span><span class="p">(</span><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;ce11&quot;</span><span class="p">),</span> <span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;ecHT115&quot;</span><span class="p">))</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">chimera</span><span class="o">.</span><span class="n">assembly</span>              <span class="c1"># &#39;ce11_ecHT115&#39;</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">chimera</span> <span class="o">=</span> <span class="n">Genome</span><span class="o">.</span><span class="n">chimera</span><span class="p">(</span><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;ce11&quot;</span><span class="p">),</span> <span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;ecHT115&quot;</span><span class="p">))</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">chimera</span><span class="o">.</span><span class="n">assembly</span>              <span class="c1"># &#39;ce11_ecHT115&#39;</span>
 </code></pre></div>
 <p>The name is the component names sorted and joined by <code>_</code>, so you never choose it and
 either order builds and reopens the same <code>ce11_ecHT115</code>. From a shell, naming it is
@@ -974,20 +1041,20 @@ building it — <code>genome register ce11_ecHT115</code>. Nothing is downloaded
 to be registered here already.</p>
 <p>Every chromosome carries the component it came from, <code>&lt;chromosome&gt;__&lt;component&gt;</code>, and a
 <strong>bare name does not resolve</strong>:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">chimera</span><span class="p">[</span><span class="s2">&quot;I__ce11:0-10&quot;</span><span class="p">]</span>       <span class="c1"># chromosome I of ce11, first ten bases</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">chimera</span><span class="p">[</span><span class="s2">&quot;I:0-10&quot;</span><span class="p">]</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># ValueError: unknown chromosome &#39;I&#39;; ce11_ecHT115 is a chimera, and every chromosome</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># name in one carries the component it came from, so a bare name never resolves</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="c1"># (ADR-0009). It carries &#39;I&#39; as: I__ce11. Ask for the one you meant.</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="n">chimera</span><span class="p">[</span><span class="s2">&quot;I__ce11:0-10&quot;</span><span class="p">]</span>       <span class="c1"># chromosome I of ce11, first ten bases</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="n">chimera</span><span class="p">[</span><span class="s2">&quot;I:0-10&quot;</span><span class="p">]</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="c1"># ValueError: unknown chromosome &#39;I&#39;; ce11_ecHT115 is a chimera, and every chromosome</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># name in one carries the component it came from, so a bare name never resolves</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="c1"># (ADR-0009). It carries &#39;I&#39; as: I__ce11. Ask for the one you meant.</span>
 </code></pre></div>
 <p>Two accessors read that split back:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">chimera</span><span class="o">.</span><span class="n">components</span>                    <span class="c1"># [&#39;ce11&#39;, &#39;ecHT115&#39;] — None for any other assembly</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="n">chimera</span><span class="o">.</span><span class="n">chrom_components</span><span class="p">[</span><span class="s2">&quot;I__ce11&quot;</span><span class="p">]</span>   <span class="c1"># &#39;ce11&#39; — one entry per chromosome</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">chimera</span><span class="o">.</span><span class="n">components</span>                    <span class="c1"># [&#39;ce11&#39;, &#39;ecHT115&#39;] — None for any other assembly</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="n">chimera</span><span class="o">.</span><span class="n">chrom_components</span><span class="p">[</span><span class="s2">&quot;I__ce11&quot;</span><span class="p">]</span>   <span class="c1"># &#39;ce11&#39; — one entry per chromosome</span>
 </code></pre></div>
 <p>The components' own default annotations are merged and registered by the same build, so a
 chimera arrives annotated — and aligner indexes are built over it like any other assembly:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">chimera</span><span class="o">.</span><span class="n">default_gtf</span>                   <span class="c1"># &#39;wormbase_ws298+refseq_rs_2025_06_26&#39;</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="n">chimera</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>   <span class="c1"># against that merged annotation</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="n">chimera</span><span class="o">.</span><span class="n">default_gtf</span>                   <span class="c1"># &#39;wormbase_ws298+refseq_rs_2025_06_26&#39;</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="n">chimera</span><span class="o">.</span><span class="n">build_star_index</span><span class="p">(</span><span class="n">threads</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>   <span class="c1"># against that merged annotation</span>
 </code></pre></div>
 <p>Its name is what went into it, so it changes when a component's default annotation does.
 Rebuilding — <code>Genome.chimera(..., force=True)</code>, or <code>genome register &lt;name&gt; --force</code> —
@@ -997,16 +1064,16 @@ by hand is never touched.</p>
 <h2 id="regions">Regions<a class="headerlink" href="#regions" title="Permanent link">&para;</a></h2>
 <p><code>Region</code> is the shared coordinate type: frozen, validated, 0-based half-open, with an
 explicit strand that is never defaulted to <code>+</code>.</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">Region</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.region</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_region</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="n">r</span> <span class="o">=</span> <span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>         <span class="c1"># Region(chrom=&#39;chrIV&#39;, start=0, end=10, strand=&#39;.&#39;)</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>                             <span class="c1"># 10</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>                             <span class="c1"># &#39;chrIV:0-10&#39;</span>
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>
-<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>
-<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrIV:1,000-2,000&quot;</span><span class="p">)</span>  <span class="c1"># (&#39;chrIV&#39;, 1000, 2000) — separators tolerated</span>
-<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrM&quot;</span><span class="p">)</span>               <span class="c1"># (&#39;chrM&#39;, None, None) — a bare chromosome name</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">Region</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.region</span><span class="w"> </span><span class="kn">import</span> <span class="n">parse_region</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="n">r</span> <span class="o">=</span> <span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>         <span class="c1"># Region(chrom=&#39;chrIV&#39;, start=0, end=10, strand=&#39;.&#39;)</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="nb">len</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>                             <span class="c1"># 10</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="nb">str</span><span class="p">(</span><span class="n">r</span><span class="p">)</span>                             <span class="c1"># &#39;chrIV:0-10&#39;</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a>
+<a id="__codelineno-23-9" name="__codelineno-23-9" href="#__codelineno-23-9"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrIV:1,000-2,000&quot;</span><span class="p">)</span>  <span class="c1"># (&#39;chrIV&#39;, 1000, 2000) — separators tolerated</span>
+<a id="__codelineno-23-10" name="__codelineno-23-10" href="#__codelineno-23-10"></a><span class="n">parse_region</span><span class="p">(</span><span class="s2">&quot;chrM&quot;</span><span class="p">)</span>               <span class="c1"># (&#39;chrM&#39;, None, None) — a bare chromosome name</span>
 </code></pre></div>
 <p>Construction enforces <code>start &gt;= 0</code>, <code>end &gt;= start</code>, and <code>strand</code> in <code>{"+", "-", "."}</code>.</p>
 <h2 id="when-a-directory-cannot-be-trusted">When a directory cannot be trusted<a class="headerlink" href="#when-a-directory-cannot-be-trusted" title="Permanent link">&para;</a></h2>
@@ -1014,10 +1081,10 @@ explicit strand that is never defaulted to <code>+</code>.</p>
 A directory holding files with no record (a run that was interrupted) or a record that
 disagrees with what is on disk (a file deleted or truncated afterwards) raises rather
 than being rebuilt quietly:</p>
-<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">)</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="c1"># RegistrationMismatchError: /data/genome/hg38 disagrees with its .completion.json:</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="c1"># hg38.2bit: recorded 841756144 bytes, found 0. Something changed these files after they</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="c1"># were registered. Re-register it with `genome register hg38 --force`.</span>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;hg38&quot;</span><span class="p">)</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="c1"># RegistrationMismatchError: /data/genome/hg38 disagrees with its .completion.json:</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="c1"># hg38.2bit: recorded 841756144 bytes, found 0. Something changed these files after they</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="c1"># were registered. Re-register it with `genome register hg38 --force`.</span>
 </code></pre></div>
 <p>Every such message names its own repair, and the repair is always the same shape:
 re-register with <code>--force</code> (or <code>overwrite=True</code> for an index). It keeps whatever is

@@ -485,6 +485,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#genome-gene-list-assembly-category" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome gene-list &lt;assembly&gt; &lt;category&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-gene-categories-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome gene-categories &lt;assembly&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#genome-verify-assembly" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -644,6 +666,28 @@
     <span class="md-ellipsis">
       
         genome annotations &lt;assembly&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-gene-list-assembly-category" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome gene-list &lt;assembly&gt; &lt;category&gt;
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#genome-gene-categories-assembly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome gene-categories &lt;assembly&gt;
       
     </span>
   </a>
@@ -834,15 +878,41 @@ it works for an assembly you have never registered.</p>
 <p>An annotation that is here but cannot be trusted reads as <code>broken</code>, with the problem and
 the repair on the line below. Exit stays <code>0</code> — one broken annotation never hides the
 others.</p>
+<h2 id="genome-gene-list-assembly-category"><code>genome gene-list &lt;assembly&gt; &lt;category&gt;</code><a class="headerlink" href="#genome-gene-list-assembly-category" title="Permanent link">&para;</a></h2>
+<p>Print the gene ids an annotation puts in one <a href="../genome/#which-genes-are-in-a-category">gene category</a>,
+one per line. Only the ids go to stdout, so the output pipes; the heading and the
+per-source attribution go to stderr.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>genome<span class="w"> </span>gene-list<span class="w"> </span>ce11<span class="w"> </span>rRNA<span class="w"> </span>&gt;<span class="w"> </span>rrna.txt
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">rRNA for ce11 / wormbase_ws298</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="go">  wormbase_ws298  20</span>
+</code></pre></div>
+<p><code>--annotation NAME</code> asks about a registered annotation other than the assembly's default
+one. <code>--json</code> carries the same answer with the sources kept apart:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">$ </span>genome<span class="w"> </span>gene-list<span class="w"> </span>ce11_ecHT115<span class="w"> </span>rRNA<span class="w"> </span>--json
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="go">{&quot;assembly&quot;: &quot;ce11_ecHT115&quot;, &quot;annotation&quot;: &quot;wormbase_ws298+refseq_rs_2025_06_26&quot;,</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="go"> &quot;category&quot;: &quot;rRNA&quot;, &quot;gene_ids&quot;: [&quot;WBGene00004512&quot;, …], &quot;sources&quot;: [{&quot;component&quot;: &quot;ce11&quot;, …}]}</span>
+</code></pre></div>
+<p>Exits <code>1</code> when the annotation is not registered here, when no curated gene list ships for
+it, and when it declares categories but not this one — three different facts, each with
+its own message. None of them prints an empty list of genes.</p>
+<h2 id="genome-gene-categories-assembly"><code>genome gene-categories &lt;assembly&gt;</code><a class="headerlink" href="#genome-gene-categories-assembly" title="Permanent link">&para;</a></h2>
+<p>Which categories that annotation declares, and how many genes are in each — what
+<code>genome gene-list</code> may be asked for. A merged annotation shows the per-component split.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span>genome<span class="w"> </span>gene-categories<span class="w"> </span>ce11_ecHT115
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="go">categories for ce11_ecHT115 / wormbase_ws298+refseq_rs_2025_06_26</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="go">  rRNA  39  (ce11: 23, ecHT115: 16)</span>
+</code></pre></div>
+<p><code>--json</code> emits every category with its gene ids and its sources — the same answer
+<code>genome gene-list</code> gives for one of them, for all of them at once.</p>
 <h2 id="genome-verify-assembly"><code>genome verify &lt;assembly&gt;</code><a class="headerlink" href="#genome-verify-assembly" title="Permanent link">&para;</a></h2>
 <p>Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is
 the deliberate full-file re-check; registering and reopening go by size alone. Exits <code>1</code>
 on a mismatch.</p>
-<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="gp">$ </span>genome<span class="w"> </span>verify<span class="w"> </span>sacCer3
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="go">/data/liulab_data/genome/sacCer3/sacCer3.fa: sha256 6ff72f07… matches the digest pinned for it</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="gp">$ </span>genome<span class="w"> </span>verify<span class="w"> </span>sacCer3<span class="w"> </span>--fasta<span class="w"> </span>/tmp/from-a-colleague.fa
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="go">error: sha256 mismatch for /tmp/from-a-colleague.fa: expected 6ff72f07…, got 9316629b….</span>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="gp">$ </span>genome<span class="w"> </span>verify<span class="w"> </span>sacCer3
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="go">/data/liulab_data/genome/sacCer3/sacCer3.fa: sha256 6ff72f07… matches the digest pinned for it</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="gp">$ </span>genome<span class="w"> </span>verify<span class="w"> </span>sacCer3<span class="w"> </span>--fasta<span class="w"> </span>/tmp/from-a-colleague.fa
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="go">error: sha256 mismatch for /tmp/from-a-colleague.fa: expected 6ff72f07…, got 9316629b….</span>
 </code></pre></div>
 <p><code>--fasta</code> checks any file against the official row — useful for a copy you were handed,
 before you build anything on it.</p>
@@ -854,17 +924,17 @@ the chimera was built from exits <code>1</code>.</p>
 alphabet exits <code>2</code> naming it. The alphabet is the type's own — <code>DNA.ALPHABET</code>, read at the
 boundary rather than spelled again here — so the <a href="../sequences/#construction"><code>outside_alphabet</code></a>
 you would call yourself is the check this command applies.</p>
-<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>ATCG
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="go">CGAT</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>aTcG<span class="w"> </span>--json
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="go">{&quot;input&quot;: &quot;aTcG&quot;, &quot;reverse_complement&quot;: &quot;CgAt&quot;}</span>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>ATCG
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="go">CGAT</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="gp">$ </span>genome<span class="w"> </span>revcomp<span class="w"> </span>aTcG<span class="w"> </span>--json
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="go">{&quot;input&quot;: &quot;aTcG&quot;, &quot;reverse_complement&quot;: &quot;CgAt&quot;}</span>
 </code></pre></div>
 <h2 id="genome-table-row-assembly"><code>genome table-row &lt;assembly&gt;</code><a class="headerlink" href="#genome-table-row-assembly" title="Permanent link">&para;</a></h2>
 <p>Download an assembly, unpack it, hash the unpacked FASTA, and print the line to paste
 into the shipped metadata table — how the checksum column gets filled in. A checksum the
 table already pins is reported, never enforced.</p>
-<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>$<span class="w"> </span>genome<span class="w"> </span>table-row<span class="w"> </span>sacCer3
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>sacCer3<span class="w"> </span>Saccharomyces<span class="w"> </span>cerevisiae<span class="w">    </span>sacCer3<span class="w"> </span>R64-1-1<span class="w"> </span>GCF_000146045.2<span class="w"> </span><span class="m">559292</span><span class="w">  </span>https://…/sacCer3.fa.gz<span class="w"> </span>6ff72f07…
+<div class="language-bash highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>$<span class="w"> </span>genome<span class="w"> </span>table-row<span class="w"> </span>sacCer3
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>sacCer3<span class="w"> </span>Saccharomyces<span class="w"> </span>cerevisiae<span class="w">    </span>sacCer3<span class="w"> </span>R64-1-1<span class="w"> </span>GCF_000146045.2<span class="w"> </span><span class="m">559292</span><span class="w">  </span>https://…/sacCer3.fa.gz<span class="w"> </span>6ff72f07…
 </code></pre></div>
 <p>A chimera exits <code>1</code> before anything is downloaded: its row carries the name and nothing
 else, so there is no row here to compute. Check one with <code>genome verify</code> instead.</p>
