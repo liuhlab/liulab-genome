@@ -73,3 +73,25 @@ gffutils reconstructing `gene` and `transcript` rows from exon lines in a **GTF*
 neither. Off by default and deliberately: GENCODE, Ensembl and RefSeq all declare those features
 already, and inferring them is gffutils' slow path — turn it on only for a bare exon-level GTF.
 _Avoid_: gene inference, building the hierarchy, auto-detect
+
+### Genes
+
+**Gene category**:
+One named group of genes inside one **Annotation** — `rRNA` is the only one today — declared by that
+annotation's **Curated gene list** and never by this package: which categories exist differs per
+annotation and is data. A category is drawn for counting reads, so it is inclusive and its genes may
+overlap: `rRNA` holds everything rRNA-derived, pseudogene copies and mitochondrial genes among them.
+One that is declared always holds at least one gene, so an annotation that cannot answer for a
+category says so rather than answering with none.
+_Avoid_: biotype, gene type, `gene_type`/`gene_biotype` — those name the **GTF** attribute a category
+is curated *instead of*; class, group, gene set
+
+**Curated gene list**:
+The hand-maintained JSON shipped inside the package, one per **Annotation**, saying which of its
+genes are in each **Gene category** and, per category, what membership means there and where it came
+from. It is the source of truth rather than the **GTF**'s own biotype attribute, which four
+publishers spell two ways over three disagreeing taxonomies and one omits altogether (ADR-0011); an
+annotation no list ships for is unanswerable, which is not the same fact as one whose category is
+empty.
+_Avoid_: biotype table, gene type table, allow-list, whitelist; and never "the gene list", which
+names no annotation

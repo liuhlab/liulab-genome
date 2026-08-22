@@ -71,6 +71,16 @@ against the other, and :func:`default_annotation` is the one rule that picks the
 annotation** out of both. Those three scans plus that rule are what a registry is: they are
 read together, once, and every later question is answered from the answer.
 
+**An annotation can also say which genes are in a category.**
+:meth:`AnnotationRegistry.gene_list` and :meth:`AnnotationRegistry.gene_lists` answer from
+the **Curated gene list** :mod:`genome.gene_list` ships for that annotation, addressed by
+the same **Registered name** everything else here is. A **Merged annotation** answers per
+contributor, read off its record, so its genes stay attributable to the component they came
+from. Neither ever answers with an empty collection: an annotation that ships no list and
+one whose list does not declare the category asked for raise errors of their own, since a
+caller acts differently on those two facts and a silent zero is what that surface exists to
+prevent.
+
 Examples
 --------
 >>> from pathlib import Path
@@ -94,6 +104,13 @@ import gffutils
 import pooch
 
 from genome.chimera import suffixed
+from genome.gene_list import (
+    CuratedGeneList,
+    GeneCategoryNotDeclaredError,
+    NoGeneCategoriesError,
+    curated_annotations,
+    curated_gene_list,
+)
 from genome.io import fetch
 from genome.io.completion import (
     RECORD_NAME,
@@ -113,6 +130,8 @@ from genome.io.results import (
     UNCHECKED_NO_CHROM_SIZES,
     AnnotationStatus,
     AnnotationStatusRow,
+    GeneList,
+    GeneListSource,
     RegisteredAnnotation,
     annotation_register_command,
 )
@@ -364,6 +383,21 @@ class BrokenAnnotation:
     directory: Path
     problem: str
     repair: str
+
+
+@dataclass(frozen=True)
+class _Contributor:
+    """One annotation whose **Curated gene list** may answer for another, and for what.
+
+    A plain annotation contributes itself, against the assembly it is registered for. A
+    **Merged annotation** contributes one of these per entry of its completion record's
+    ``merged_from``, each against its own **Component** — which is the assembly whose
+    genes those are, and therefore the one its curated list has to name.
+    """
+
+    component: str | None
+    assembly: str
+    annotation: str
 
 
 def _annotations_root(assembly_dir: Path) -> Path:
@@ -1021,6 +1055,197 @@ class AnnotationRegistry:
             annotations=tuple(rows),
         )
 
+    def gene_list(self, category: str, name: str | None = None) -> GeneList:
+        """Return the genes one registered annotation puts in ``category``.
+
+        The genes come from the **Curated gene list** shipped for that annotation and
+        never from the GTF's own biotype attribute, which is spelled two ways across four
+        publishers, carries three taxonomies that do not agree, and is absent altogether
+        from some annotations (ADR-0011). Nothing here knows a category vocabulary: which
+        categories exist is what the curated list declares.
+
+        The annotation must be **registered here** — it is resolved through :meth:`path`,
+        so an unregistered name earns the error that names the command registering it.
+        The curated list is then held to the assembly it was curated against, since a name
+        is unique only within its assembly and a list found by name alone is not yet known
+        to be about this reference.
+
+        For a **Merged annotation** the record's ``merged_from`` says who contributed, and
+        each contributor's own curated list answers for its own **Component**: the result
+        carries one source per contributor that declares the category, so a caller counting
+        worm ribosomal RNA can drop the *E. coli* entry. A contributor that does not
+        declare it is simply absent — a bacterium has no mitochondria, and that is not a
+        failure.
+
+        **There is no empty answer.** An annotation nothing ships a list for, and one whose
+        list does not declare this category, are different facts and each raises an error
+        of its own.
+
+        Parameters
+        ----------
+        category : str
+            The **Gene category** to ask for, as the curated list spells it — ``"rRNA"``,
+            ``"Mt_rRNA"``.
+        name : str, optional
+            The **Registered name** to ask about. Omitted, this assembly's **Default
+            annotation** answers.
+
+        Returns
+        -------
+        genome.io.results.GeneList
+            The category, its gene ids, and one
+            :class:`~genome.io.results.GeneListSource` per contributing curated list.
+
+        Raises
+        ------
+        ValueError
+            If ``name`` is omitted and no **Default annotation** is decided; the message
+            names the argument that chooses one.
+        AnnotationNotRegisteredError
+            If nothing of that name is registered here.
+        genome.gene_list.NoGeneCategoriesError
+            If no curated list ships for that annotation — nothing can be asked of it,
+            which is not the same answer as its having no genes in this category.
+        genome.gene_list.GeneCategoryNotDeclaredError
+            If it declares categories and not this one; the message lists the ones it does.
+        genome.gene_list.GeneListAssemblyMismatchError
+            If the curated list found under that name was curated against another
+            assembly, in which case it must not answer here.
+
+        Examples
+        --------
+        >>> registry = AnnotationRegistry.locate("ce11")      # doctest: +SKIP
+        >>> registry.gene_list("rRNA").gene_ids[:2]           # doctest: +SKIP
+        ['WBGene00004512', 'WBGene00004513']
+        >>> [source.component for source in registry.gene_list("rRNA").sources]  # doctest: +SKIP
+        [None]
+        """
+        resolved, contributors = self._gene_list_contributors(name)
+        return self._category_answer(resolved, category, contributors)
+
+    def gene_lists(self, name: str | None = None) -> tuple[GeneList, ...]:
+        """Return every **Gene category** one registered annotation declares.
+
+        :meth:`gene_list` for all of them at once, in the order the curated lists spell
+        them — and for a **Merged annotation**, each contributor's own order, contributors
+        first-listed first. Everything :meth:`gene_list` says about resolution, the
+        assembly guard and attribution holds here.
+
+        **Never an empty tuple.** An annotation that declares nothing raises rather than
+        answering emptily, which is the whole distinction this surface exists to keep: a
+        caller that got ``()`` could not tell *no categories are declared* from *every
+        category is empty*, and no declared category is ever empty.
+
+        Parameters
+        ----------
+        name : str, optional
+            The **Registered name** to ask about. Omitted, this assembly's **Default
+            annotation** answers.
+
+        Returns
+        -------
+        tuple of genome.io.results.GeneList
+            One entry per declared category, in declaration order. Never empty.
+
+        Raises
+        ------
+        ValueError
+            If ``name`` is omitted and no **Default annotation** is decided.
+        AnnotationNotRegisteredError
+            If nothing of that name is registered here.
+        genome.gene_list.NoGeneCategoriesError
+            If no curated list ships for that annotation.
+        genome.gene_list.GeneListAssemblyMismatchError
+            If a curated list found by name was curated against another assembly.
+
+        Examples
+        --------
+        >>> registry = AnnotationRegistry.locate("hg38")      # doctest: +SKIP
+        >>> [answer.category for answer in registry.gene_lists()]   # doctest: +SKIP
+        ['rRNA', 'rRNA_pseudogene', 'Mt_rRNA']
+        """
+        resolved, contributors = self._gene_list_contributors(name)
+        return tuple(
+            self._category_answer(resolved, category, contributors)
+            for category in _declared_categories(contributors)
+        )
+
+    def _gene_list_contributors(
+        self, name: str | None
+    ) -> tuple[str, tuple[tuple[_Contributor, CuratedGeneList], ...]]:
+        """Resolve the annotation asked about and the curated lists that answer for it.
+
+        Everything both gene-category questions share: which annotation is meant, that it
+        is registered here, who contributed to it, whose curated list may speak for each
+        contributor, and that each of those was curated against the right assembly. A
+        contributor no list ships for is left out rather than raised over — one component
+        of a merge carrying no curated list must not silence the others — and only when
+        *no* contributor has one is there nothing to answer with.
+        """
+        resolved = self._named(name)
+        contributors = _contributors_of(self.path(resolved).parent, resolved, self.assembly)
+        answering: list[tuple[_Contributor, CuratedGeneList]] = []
+        for contributor in contributors:
+            listed = curated_gene_list(contributor.annotation)
+            if listed is None:
+                continue
+            listed.check_assembly(contributor.assembly)
+            answering.append((contributor, listed))
+        if not answering:
+            merged = [one.annotation for one in contributors if one.component is not None]
+            raise NoGeneCategoriesError(
+                resolved, self.assembly, curated_annotations(), contributors=merged
+            )
+        return resolved, tuple(answering)
+
+    def _category_answer(
+        self,
+        annotation: str,
+        category: str,
+        contributors: Sequence[tuple[_Contributor, CuratedGeneList]],
+    ) -> GeneList:
+        """Assemble one category's answer, or say that nobody declared it."""
+        sources: list[GeneListSource] = []
+        for contributor, listed in contributors:
+            declared = listed.categories.get(category)
+            if declared is None:
+                continue
+            sources.append(
+                GeneListSource(
+                    component=contributor.component,
+                    annotation=contributor.annotation,
+                    description=declared.description,
+                    source=declared.source,
+                    gene_ids=declared.gene_ids,
+                )
+            )
+        if not sources:
+            raise GeneCategoryNotDeclaredError(
+                annotation, self.assembly, category, _declared_categories(contributors)
+            )
+        return GeneList(
+            assembly=self.assembly,
+            annotation=annotation,
+            category=category,
+            sources=tuple(sources),
+        )
+
+    def _named(self, name: str | None) -> str:
+        """Return the annotation a caller meant, which is the default when they named none."""
+        if name is not None:
+            return name
+        if self._default is None:
+            raise ValueError(
+                f"no annotation was named and {self.assembly!r} has no default one to fall "
+                f"back on, so there is nothing to ask about. Name one with the annotation "
+                f"argument — gene_list(<category>, <name>) here, annotation=<name> from the "
+                f"assembly-addressed functions, --annotation <name> from a shell — or decide "
+                f"the assembly's default once with Genome({self.assembly!r}, "
+                f"default_gtf=<name>). genome.annotations.registered says what is registered "
+                f"here."
+            )
+        return self._default
+
     def _adopt(self, annotation: GtfAnnotation) -> GtfAnnotation:
         """Fold a just-registered annotation into the four states, adopting it if alone.
 
@@ -1063,6 +1288,133 @@ def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> 
     'ensgene_v101'
     """
     return AnnotationRegistry.locate(assembly, cache_dir).status()
+
+
+def gene_list(
+    assembly: str,
+    category: str,
+    *,
+    annotation: str | None = None,
+    cache_dir: str | Path | None = None,
+) -> GeneList:
+    """Return the genes ``assembly``'s annotation puts in ``category``.
+
+    :meth:`AnnotationRegistry.gene_list` for an assembly named rather than opened, which
+    is what ``genome gene-list`` runs. A registry is built for the length of the call, so
+    there is no second code path. Nothing is prepared, fetched or built to answer it.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to ask about, e.g. ``"ce11"``.
+    category : str
+        The **Gene category**, as the curated list spells it.
+    annotation : str, optional
+        The **Registered name** to ask about; the **Default annotation** when omitted.
+    cache_dir : str or pathlib.Path, optional
+        Override which assembly directory is inspected, as
+        :func:`annotation_status` takes it.
+
+    Returns
+    -------
+    genome.io.results.GeneList
+        The answer :meth:`AnnotationRegistry.gene_list` describes.
+
+    Raises
+    ------
+    ValueError
+        If ``annotation`` is omitted and no **Default annotation** is decided.
+    AnnotationNotRegisteredError
+        If that annotation is not registered here.
+    genome.gene_list.NoGeneCategoriesError
+        If no curated gene list ships for it.
+    genome.gene_list.GeneCategoryNotDeclaredError
+        If it declares categories and not this one.
+
+    Examples
+    --------
+    >>> gene_list("ce11", "rRNA").category                   # doctest: +SKIP
+    'rRNA'
+    """
+    return AnnotationRegistry.locate(assembly, cache_dir).gene_list(category, annotation)
+
+
+def gene_lists(
+    assembly: str, *, annotation: str | None = None, cache_dir: str | Path | None = None
+) -> tuple[GeneList, ...]:
+    """Return every **Gene category** ``assembly``'s annotation declares.
+
+    :meth:`AnnotationRegistry.gene_lists` addressed by assembly name — what ``genome
+    gene-categories`` runs, built the same way :func:`gene_list` is. Never an empty tuple:
+    an annotation that declares nothing raises instead.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to ask about, e.g. ``"hg38"``.
+    annotation : str, optional
+        The **Registered name** to ask about; the **Default annotation** when omitted.
+    cache_dir : str or pathlib.Path, optional
+        Override which assembly directory is inspected.
+
+    Returns
+    -------
+    tuple of genome.io.results.GeneList
+        One entry per declared category, in declaration order. Never empty.
+
+    Raises
+    ------
+    ValueError
+        If ``annotation`` is omitted and no **Default annotation** is decided.
+    AnnotationNotRegisteredError
+        If that annotation is not registered here.
+    genome.gene_list.NoGeneCategoriesError
+        If no curated gene list ships for it.
+
+    Examples
+    --------
+    >>> [answer.category for answer in gene_lists("hg38")]    # doctest: +SKIP
+    ['rRNA', 'rRNA_pseudogene', 'Mt_rRNA']
+    """
+    return AnnotationRegistry.locate(assembly, cache_dir).gene_lists(annotation)
+
+
+def _contributors_of(directory: Path, name: str, assembly: str) -> tuple[_Contributor, ...]:
+    """Return the annotations that contributed to the one registered in ``directory``.
+
+    The completion record is what knows, and it is asked rather than the name parsed: a
+    **Merged annotation**'s name is the ``+``-join of what went into it, but splitting on
+    ``+`` would guess at which component each half came from, and a caller cannot attribute
+    genes to a component nobody wrote down. No ``merged_from`` marker means one
+    contributor, the annotation itself, against the assembly it is registered for.
+    """
+    record = read_record(directory)
+    merged = record.details.get(_MERGED_FROM_KEY) if record is not None else None
+    if not merged:
+        return (_Contributor(component=None, assembly=assembly, annotation=name),)
+    return tuple(
+        _Contributor(
+            component=str(entry[_MERGED_COMPONENT_KEY]),
+            assembly=str(entry[_MERGED_COMPONENT_KEY]),
+            annotation=str(entry[_MERGED_ANNOTATION_KEY]),
+        )
+        for entry in merged
+    )
+
+
+def _declared_categories(
+    contributors: Iterable[tuple[_Contributor, CuratedGeneList]],
+) -> tuple[str, ...]:
+    """Return every category the contributors declare between them, in declaration order.
+
+    First-listed contributor first and each one's own order kept, with a category two of
+    them declare appearing once, where the first put it — so a merged annotation reads as
+    the union of its parts rather than as one part with the rest appended.
+    """
+    declared: dict[str, None] = {}
+    for _contributor, listed in contributors:
+        declared.update(dict.fromkeys(listed.categories))
+    return tuple(declared)
 
 
 def _status_row(

@@ -10,6 +10,22 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **An annotation can name the genes in a category.** `Genome.gene_list("rRNA")` returns the gene
+  ids, and `Genome.gene_lists()` every category that annotation declares — from the CLI, `genome
+  gene-list <assembly> <category>` and `genome gene-categories <assembly>`, both with `--json`.
+  The answer comes from a curated gene list shipped inside the package, one per annotation, and not
+  from the GTF's own biotype attribute, which four publishers spell two ways over three taxonomies
+  that disagree and which `sacCer3/ensgene_v101` omits altogether (ADR-0011). Every annotation
+  declares one category today, `rRNA`, holding **everything rRNA-derived it carries** — mature
+  genes, pseudogene copies, mitochondrial rRNAs, and yeast's 35S precursor. It is drawn for
+  counting rRNA-derived reads as a QC metric rather than for describing rRNA biology, so it is
+  inclusive and its genes may overlap; each list says in its own prose what it holds and what it
+  under-reports. A merged annotation answers with one source per contributing component, so a
+  chimera's genes stay attributable. **An annotation that cannot answer raises rather than
+  returning nothing**: `NoGeneCategoriesError` for one no list ships for and
+  `GeneCategoryNotDeclaredError` for one whose list declares other categories, both `LookupError`s
+  so they can be caught together and still told apart. No declared category is ever empty and no
+  call ever hands back an empty collection. Lists ship for all seven registered annotations.
 - **An intron bound on the assembly table.** A row may now carry `intron_length_cap` — the longest
   gap a spliced aligner should take for an intron on that assembly — and
   `intron_length_cap_rationale`, which says why that number and not another. Registered for `ce11`

@@ -1,0 +1,28 @@
+{
+  "annotation": "refseq_rs_2025_06_26",
+  "assembly": "ecHT115",
+  "categories": {
+    "rRNA": {
+      "description": "Every locus RefSeq types rRNA in this annotation: six complete 5S genes and ten 16S or 23S entries that RefSeq flags partial. The truncation is the assembly's and not the biology's, this being a draft contig-level assembly in which the repeated rrn operons broke across contig boundaries.",
+      "source": "RefSeq's own gene_biotype in the registered GTF, with the 16S, 23S or 5S identity of each bare locus tag taken from the product qualifier in GCF_004354945.1_ASM435494v1_genomic.gff.gz and cross-checked against Rfam RF00177, RF02541 and RF00001. An E. coli K-12 derivative carries roughly seven 16S, seven 23S and eight 5S genes, so this list is a genuine but incomplete and partly truncated rRNA complement and will under-report.",
+      "gene_ids": [
+        "E1179_RS02970",
+        "E1179_RS02975",
+        "E1179_RS07735",
+        "E1179_RS07740",
+        "E1179_RS14460",
+        "E1179_RS14955",
+        "E1179_RS17440",
+        "E1179_RS17450",
+        "E1179_RS20485",
+        "E1179_RS22505",
+        "E1179_RS22545",
+        "E1179_RS22570",
+        "E1179_RS22590",
+        "E1179_RS22600",
+        "E1179_RS22605",
+        "E1179_RS22615"
+      ]
+    }
+  }
+}

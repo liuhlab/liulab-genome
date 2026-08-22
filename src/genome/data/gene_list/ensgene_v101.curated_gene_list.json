@@ -1,0 +1,28 @@
+{
+  "annotation": "ensgene_v101",
+  "assembly": "sacCer3",
+  "categories": {
+    "rRNA": {
+      "description": "Every rRNA gene in this annotation: the mature subunits RDN18-1 and RDN18-2 (18S), RDN25-1 and RDN25-2 (25S), RDN58-1 and RDN58-2 (5.8S) and RDN5-1 through RDN5-6 (5S), the 35S precursor RDN37-1 and RDN37-2, and the two mitochondrial rRNAs Q0020 (15S) and Q0158 (21S). The list is deliberately inclusive, being meant for counting rRNA-derived reads as a QC metric rather than for describing rRNA biology.",
+      "source": "This GTF carries no gene_biotype or gene_type attribute and no gene feature rows at all, so membership is every transcript whose transcript_id carries the _rRNA suffix, cross-checked against SGD, whose rRNA gene set for R64 is exactly these loci. The features overlap by construction: RDN37 is the precursor and spans the same bases as the RDN25, RDN58 and RDN18 of its own repeat, so count over the union of intervals rather than summing per-gene counts if that distinction matters. The rDNA array is also collapsed to two of the roughly 100 to 200 tandem copies in the real genome.",
+      "gene_ids": [
+        "Q0020",
+        "Q0158",
+        "RDN18-1",
+        "RDN18-2",
+        "RDN25-1",
+        "RDN25-2",
+        "RDN37-1",
+        "RDN37-2",
+        "RDN5-1",
+        "RDN5-2",
+        "RDN5-3",
+        "RDN5-4",
+        "RDN5-5",
+        "RDN5-6",
+        "RDN58-1",
+        "RDN58-2"
+      ]
+    }
+  }
+}

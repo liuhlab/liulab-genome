@@ -38,6 +38,7 @@ from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import AnnotationRegistry
 from genome.io.registration import AssemblyDir
+from genome.io.results import GeneList
 from genome.io.twobit import TwoBit
 from genome.metadata import AssemblyMetadata, assembly_metadata
 from genome.region import Region, parse_region
@@ -297,6 +298,90 @@ class Genome(AlignerMixin):
         []
         """
         return self._registry
+
+    def gene_list(self, category: str, annotation: str | None = None) -> GeneList:
+        """Return the genes one of this genome's annotations puts in ``category``.
+
+        The everyday way in to a **Gene category**: name the category and get the gene ids
+        in it, with one source per contributing **Curated gene list** so a **Chimera**'s
+        genes stay attributable to the component they came from. Which categories exist is
+        a property of the annotation rather than of this package — ask
+        :meth:`gene_lists` what this one declares.
+
+        Nothing here answers with an empty collection. An annotation no curated list ships
+        for and one whose list does not declare this category raise different errors,
+        because a caller acts differently on *nothing can be asked of this annotation* and
+        *this category was not curated for it* — and neither means the annotation has no
+        such genes.
+
+        Parameters
+        ----------
+        category : str
+            The **Gene category**, as the curated list spells it — ``"rRNA"``.
+        annotation : str, optional
+            The **Registered name** to ask about. Omitted, :attr:`default_gtf` answers.
+
+        Returns
+        -------
+        genome.io.results.GeneList
+            The category, its gene ids, and what contributed them.
+
+        Raises
+        ------
+        ValueError
+            If ``annotation`` is omitted and this genome has no **Default annotation**.
+        genome.io.gtf.AnnotationNotRegisteredError
+            If that annotation is not registered here.
+        genome.gene_list.NoGeneCategoriesError
+            If no curated gene list ships for it.
+        genome.gene_list.GeneCategoryNotDeclaredError
+            If it declares categories and not this one.
+
+        Examples
+        --------
+        >>> worm = Genome("ce11")                        # doctest: +SKIP
+        >>> worm.gene_list("rRNA").category              # doctest: +SKIP
+        'rRNA'
+        >>> len(worm.gene_list("rRNA").gene_ids)         # doctest: +SKIP
+        22
+        """
+        return self._registry.gene_list(category, annotation)
+
+    def gene_lists(self, annotation: str | None = None) -> tuple[GeneList, ...]:
+        """Return every **Gene category** one of this genome's annotations declares.
+
+        :meth:`gene_list` for all of them at once, in declaration order — the way to find
+        out what may be asked for, since the categories are the curated list's to declare
+        and differ between annotations. Never an empty tuple: an annotation that declares
+        none raises instead, so *declares nothing* is never read as *declares empty
+        categories*.
+
+        Parameters
+        ----------
+        annotation : str, optional
+            The **Registered name** to ask about. Omitted, :attr:`default_gtf` answers.
+
+        Returns
+        -------
+        tuple of genome.io.results.GeneList
+            One entry per declared category. Never empty.
+
+        Raises
+        ------
+        ValueError
+            If ``annotation`` is omitted and this genome has no **Default annotation**.
+        genome.io.gtf.AnnotationNotRegisteredError
+            If that annotation is not registered here.
+        genome.gene_list.NoGeneCategoriesError
+            If no curated gene list ships for it.
+
+        Examples
+        --------
+        >>> human = Genome("hg38")                                   # doctest: +SKIP
+        >>> [answer.category for answer in human.gene_lists()]       # doctest: +SKIP
+        ['rRNA', 'rRNA_pseudogene', 'Mt_rRNA']
+        """
+        return self._registry.gene_lists(annotation)
 
     @property
     def default_gtf_path(self) -> Path | None:

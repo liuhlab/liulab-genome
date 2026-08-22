@@ -41,6 +41,10 @@
 
 ::: genome.metadata
 
+## `genome.gene_list`
+
+::: genome.gene_list
+
 ## `genome.external`
 
 ::: genome.external

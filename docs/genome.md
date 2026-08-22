@@ -193,6 +193,66 @@ It names an annotation without locating one — opening a genome never starts a 
 so on a fresh machine the default is typically not registered yet. Asking for
 `default_gtf_path` is what surfaces that, naming the command that closes the gap.
 
+### Which genes are in a category
+
+Ask an annotation which of its genes are in a **gene category** and get the ids back with
+the sources that contributed them. Today every annotation declares one category, `rRNA`:
+
+```python
+worm = Genome("ce11")
+worm.gene_list("rRNA").gene_ids                    # ['WBGene00004512', ...] — 23 of them
+[answer.category for answer in worm.gene_lists()]  # ['rRNA']
+```
+
+`rRNA` is **everything rRNA-derived that annotation carries** — the mature genes, the
+pseudogene copies, the mitochondrial rRNAs, and for yeast the 35S precursor. It is built
+for counting rRNA-derived reads as a QC metric rather than for describing rRNA biology, so
+a pseudogene copy that captures reads counts the same as a functional gene. Features may
+overlap: yeast's `RDN37` spans the same bases as the subunits it is processed into, so
+count over the union of intervals rather than summing per-gene counts if that matters.
+Each list says what it holds and what it misses in its own `description` and `source` —
+read them, since what a list under-reports differs per annotation.
+
+`gene_lists()` is how you find out what may be asked for; nothing here knows a category
+vocabulary, so a second category added later needs no code change.
+
+The ids come from a curated list shipped inside the package rather than from the GTF's own
+biotype attribute, which four publishers spell two ways over three taxonomies that do not
+agree — and which `sacCer3/ensgene_v101` omits entirely, so deriving it yourself reports no
+rRNA for yeast and never says so (ADR-0011).
+
+**An annotation that cannot answer raises rather than handing back nothing**, and the two
+ways it cannot are separate errors, because you act differently on them:
+
+```python
+from genome import GeneCategoryNotDeclaredError, NoGeneCategoriesError
+
+try:
+    genes = worm.gene_list("tRNA").gene_ids
+except NoGeneCategoriesError:
+    ...      # no curated list ships for this annotation at all
+except GeneCategoryNotDeclaredError:
+    ...      # one does, and this category is not among the ones it declares
+```
+
+Both are `LookupError`s, so `except LookupError` catches the pair. No declared category is
+ever empty and neither call ever returns an empty collection, so a zero you get back is a
+zero you measured.
+
+A [chimera](#chimera-assemblies) answers with one source per contributing component, which
+is what keeps its genes attributable:
+
+```python
+chimera = Genome("ce11_ecHT115")
+rrna = chimera.gene_list("rRNA")
+[(source.component, len(source.gene_ids)) for source in rrna.sources]
+# [('ce11', 23), ('ecHT115', 16)]
+rrna.gene_ids     # both components', concatenated in that order and never de-duplicated
+```
+
+A component whose annotation no curated list ships for is simply left out of `sources`
+rather than raised over — an omission, not a failure.
+
 ## Aligner indexes
 
 Two aligners ship, and they differ in whether an annotation is involved:

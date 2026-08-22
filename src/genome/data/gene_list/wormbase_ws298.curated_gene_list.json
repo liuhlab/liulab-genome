@@ -1,0 +1,35 @@
+{
+  "annotation": "wormbase_ws298",
+  "assembly": "ce11",
+  "categories": {
+    "rRNA": {
+      "description": "Every rRNA-derived gene WormBase WS298 annotates on ce11: the chrI 45S unit as rrn-1.1 and rrn-1.2 (18S), rrn-2.1 (5.8S) and rrn-3.1 (26S), the sixteen rrn-4.* 5S genes, the two mitochondrial rRNAs MTCE.7 (12S) and MTCE.33 (16S), and rrn-3.56. The list is deliberately inclusive, being meant for counting rRNA-derived reads as a QC metric rather than for describing rRNA biology.",
+      "source": "gene_biotype rRNA in the registered GTF, plus rrn-3.56, which WormBase types a pseudogene while NCBI types the same locus rRNA. Including it is the point: it is 851/852 identical to the 3' end of rrn-3.1 and captures real 26S reads, and it moved one plate's measured rRNA share from 49.5 to 53.1 percent. The chrI rDNA array is collapsed in ce11 to about one and a half of the roughly 100 copies the real genome carries, so reads from every copy pile onto these few features. Chromosomes are spelled I and MtDNA here, without a chr prefix.",
+      "gene_ids": [
+        "WBGene00004512",
+        "WBGene00004513",
+        "WBGene00004567",
+        "WBGene00004622",
+        "WBGene00004677",
+        "WBGene00014454",
+        "WBGene00014472",
+        "WBGene00014621",
+        "WBGene00077465",
+        "WBGene00077466",
+        "WBGene00077467",
+        "WBGene00077468",
+        "WBGene00077469",
+        "WBGene00077470",
+        "WBGene00077471",
+        "WBGene00077472",
+        "WBGene00077473",
+        "WBGene00077474",
+        "WBGene00077475",
+        "WBGene00077476",
+        "WBGene00077477",
+        "WBGene00189966",
+        "WBGene00235197"
+      ]
+    }
+  }
+}

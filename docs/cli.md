@@ -134,6 +134,45 @@ An annotation that is here but cannot be trusted reads as `broken`, with the pro
 the repair on the line below. Exit stays `0` — one broken annotation never hides the
 others.
 
+## `genome gene-list <assembly> <category>`
+
+Print the gene ids an annotation puts in one [gene category](genome.md#which-genes-are-in-a-category),
+one per line. Only the ids go to stdout, so the output pipes; the heading and the
+per-source attribution go to stderr.
+
+```console
+$ genome gene-list ce11 rRNA > rrna.txt
+rRNA for ce11 / wormbase_ws298
+  wormbase_ws298  20
+```
+
+`--annotation NAME` asks about a registered annotation other than the assembly's default
+one. `--json` carries the same answer with the sources kept apart:
+
+```console
+$ genome gene-list ce11_ecHT115 rRNA --json
+{"assembly": "ce11_ecHT115", "annotation": "wormbase_ws298+refseq_rs_2025_06_26",
+ "category": "rRNA", "gene_ids": ["WBGene00004512", …], "sources": [{"component": "ce11", …}]}
+```
+
+Exits `1` when the annotation is not registered here, when no curated gene list ships for
+it, and when it declares categories but not this one — three different facts, each with
+its own message. None of them prints an empty list of genes.
+
+## `genome gene-categories <assembly>`
+
+Which categories that annotation declares, and how many genes are in each — what
+`genome gene-list` may be asked for. A merged annotation shows the per-component split.
+
+```console
+$ genome gene-categories ce11_ecHT115
+categories for ce11_ecHT115 / wormbase_ws298+refseq_rs_2025_06_26
+  rRNA  39  (ce11: 23, ecHT115: 16)
+```
+
+`--json` emits every category with its gene ids and its sources — the same answer
+`genome gene-list` gives for one of them, for all of them at once.
+
 ## `genome verify <assembly>`
 
 Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is

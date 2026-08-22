@@ -2,8 +2,10 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
+from genome.gene_list import GeneCategoryNotDeclaredError, NoGeneCategoriesError
 from genome.genome import Genome
 from genome.io.gtf import AnnotationRegistry
+from genome.io.results import GeneList
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.region import Region
 from genome.seq import DNA, RNA, Protein
@@ -19,7 +21,10 @@ __all__ = [
     "AnnotationMetadata",
     "AnnotationRegistry",
     "AssemblyMetadata",
+    "GeneCategoryNotDeclaredError",
+    "GeneList",
     "Genome",
+    "NoGeneCategoriesError",
     "Protein",
     "Region",
     "__version__",

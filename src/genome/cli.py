@@ -21,10 +21,14 @@ from genome.io.download import assembly_table_row as _assembly_table_row
 from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
 from genome.io.gtf import annotation_status as _annotation_status
+from genome.io.gtf import gene_list as _gene_list
+from genome.io.gtf import gene_lists as _gene_lists
 from genome.io.gtf import register_annotation as _register_annotation
 from genome.io.gtf import register_gtf as _register_gtf
 from genome.io.results import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
+from genome.io.results import GeneList as _GeneList
+from genome.io.results import GeneListSource as _GeneListSource
 from genome.io.results import RegisteredAnnotation as _RegisteredAnnotation
 from genome.io.results import VerifiedAssembly as _VerifiedAssembly
 from genome.metadata import format_table_row as _format_table_row
@@ -36,6 +40,18 @@ from genome.seq import DNA
 #: it. ``RegistrationError`` and ``ToolNotFoundError`` are ``RuntimeError``s;
 #: ``ChecksumMismatchError`` is a ``ValueError``; a failed download is an ``OSError``.
 _ASSEMBLY_ERRORS = (ValueError, OSError, RuntimeError)
+
+#: What a failed gene-category command raises, on top of the above. An annotation that
+#: ships no curated gene list, and one whose list does not declare the category asked for,
+#: are lookups that found nothing rather than bad values — so they are ``LookupError``s,
+#: which :data:`_ASSEMBLY_ERRORS` does not cover.
+_GENE_LIST_ERRORS = (*_ASSEMBLY_ERRORS, LookupError)
+
+#: Help for the ``--annotation`` option both gene-category commands take.
+_ANNOTATION_HELP = (
+    "Ask about this registered annotation instead of the assembly's default one. An "
+    "assembly with no default and none named has nothing to answer about, and says so."
+)
 
 #: Help for the two feature-inference switches, in one place: both registration
 #: commands offer them and a reader of either help text deserves the same explanation.
@@ -430,6 +446,113 @@ def list_annotations(
         if row.broken:
             typer.echo(f"      {row.problem}")
     typer.echo(status.default_summary)
+
+
+@app.command("gene-list")
+def gene_list(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'ce11'."),
+    category: str = typer.Argument(..., help="Gene category, e.g. 'rRNA'."),
+    annotation: str | None = typer.Option(None, "--annotation", help=_ANNOTATION_HELP),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Print the gene ids an annotation puts in one category, one per line.
+
+    The genes come from a curated gene list shipped inside this package, not from the
+    GTF's own biotype attribute — which is spelled two ways across four publishers, sorts
+    genes by three taxonomies that do not agree, and is missing altogether from some
+    annotations, so a caller deriving categories itself reports none for those and never
+    finds out.
+
+    Only the ids go to stdout, so the output pipes: the heading and the per-source
+    attribution go to stderr. For a merged annotation there is one source per contributing
+    component, and the ids are concatenated in that order and never de-duplicated — two
+    components carrying one gene id is a real ambiguity, not something to collapse here.
+    `--json` carries the same answer with the sources kept apart.
+
+    `genome gene-categories <assembly>` says which categories may be asked for; they are
+    the curated list's to declare and differ between annotations.
+
+    Exits with code 1 when the annotation is not registered here, when no curated gene
+    list ships for it, and when it declares categories but not this one — three different
+    facts, each with its own message, and none of them an empty list of genes.
+    """
+    try:
+        listed = _gene_list(assembly, category, annotation=annotation)
+    except _GENE_LIST_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(listed.as_json()))
+        return
+    # Attribution to stderr, ids to stdout: a bare id list is what a shell pipeline wants,
+    # and who contributed what is what a reader wants. Neither has to cost the other.
+    typer.echo(f"{listed.category} for {listed.assembly} / {listed.annotation}", err=True)
+    for source in listed.sources:
+        typer.echo(f"  {_source_label(source)}  {len(source.gene_ids)}", err=True)
+    for gene_id in listed.gene_ids:
+        typer.echo(gene_id)
+
+
+@app.command("gene-categories")
+def gene_categories(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'ce11'."),
+    annotation: str | None = typer.Option(None, "--annotation", help=_ANNOTATION_HELP),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """List the gene categories an annotation declares, with a gene count for each.
+
+    What may be asked of `genome gene-list`, since the categories are a property of the
+    annotation rather than of this package: human GENCODE splits rRNA pseudogenes out and
+    mouse does not, yeast carries a precursor category nothing else has, and a bacterium
+    has no mitochondrial category at all.
+
+    A merged annotation shows the per-component split beside each count, so a category one
+    component declares and another does not is visible as such rather than as a smaller
+    number. `--json` carries every category with its gene ids and its sources — the same
+    answer `genome gene-list` gives for one of them, for all of them at once.
+
+    Exits with code 1 when the annotation is not registered here, and when no curated gene
+    list ships for it — which is not the same answer as its declaring no genes, and is why
+    an empty list is never printed.
+    """
+    try:
+        answers = _gene_lists(assembly, annotation=annotation)
+    except _GENE_LIST_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps([answer.as_json() for answer in answers]))
+        return
+    first = answers[0]
+    typer.echo(f"categories for {first.assembly} / {first.annotation}")
+    name_width = max(len(answer.category) for answer in answers)
+    count_width = max(len(str(len(answer.gene_ids))) for answer in answers)
+    for answer in answers:
+        typer.echo(_category_row(answer, name_width=name_width, count_width=count_width))
+
+
+def _source_label(source: _GeneListSource) -> str:
+    """Return who contributed a category's genes: the component and its annotation, or it alone."""
+    if source.component is None:
+        return source.annotation
+    return f"{source.component}: {source.annotation}"
+
+
+def _category_row(answer: _GeneList, *, name_width: int, count_width: int) -> str:
+    """Return one category's line: its name, its gene count, and the per-component split.
+
+    The split is printed only where there is one to print — a merged annotation's — since
+    for any other the single component would repeat the annotation already in the heading.
+    """
+    line = f"  {answer.category:<{name_width}}  {len(answer.gene_ids):>{count_width}}"
+    split = ", ".join(
+        f"{source.component}: {len(source.gene_ids)}"
+        for source in answer.sources
+        if source.component is not None
+    )
+    return f"{line}  ({split})" if split else line
 
 
 @app.command()

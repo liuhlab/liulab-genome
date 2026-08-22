@@ -1,18 +1,20 @@
-"""What a registration answers with: the five values the API returns and ``--json`` writes.
+"""What the API answers with: the values it returns and ``--json`` writes.
 
-Registering something in this package — an **Assembly**, an annotation — ends by returning
-a value that says what happened, and every surface reads that same value: a script keeps
-it, the CLI prints it, ``--json`` serializes it. Those five values live here, together,
-because they change for one reason: *what an answer must be able to say*. The modules that
-do the work import them; nothing here does any of it, reads a directory, or reaches the
-network.
+Registering something in this package — an **Assembly**, an annotation — or asking it a
+question about one ends by returning a value that says what it found, and every surface
+reads that same value: a script keeps it, the CLI prints it, ``--json`` serializes it.
+Those values live here, together, because they change for one reason: *what an answer must
+be able to say*. The modules that do the work import them; nothing here does any of it,
+reads a directory, or reaches the network.
 
-Three of them carry a **Completion marker** whole rather than copying it out field by
+Two of them carry a **Completion marker** whole rather than copying it out field by
 field — :class:`RegisteredAssembly` and :class:`RegisteredAnnotation` — so every later
 question is answered off the record in hand instead of by opening the directory again. The
-other two are reports assembled from more than one source: :class:`VerifiedAssembly` sets a
-digest against what pinned it, and :class:`AnnotationStatus` sets what the annotation table
-offers against what this machine holds, one :class:`AnnotationStatusRow` per name.
+rest are reports assembled from more than one source: :class:`VerifiedAssembly` sets a
+digest against what pinned it, :class:`AnnotationStatus` sets what the annotation table
+offers against what this machine holds, one :class:`AnnotationStatusRow` per name, and
+:class:`GeneList` sets one **Gene category**'s genes against the **Curated gene list**s
+that contributed them, one :class:`GeneListSource` apiece.
 
 **An answer knows how it reads.** :attr:`AnnotationStatusRow.state` and
 :attr:`AnnotationStatus.default_summary` are here rather than in the surface printing them,
@@ -422,6 +424,145 @@ class RegisteredAnnotation:
             The record's fields, followed by ``assembly`` and ``directory``.
         """
         return {**asdict(self.record), "assembly": self.assembly, "directory": str(self.directory)}
+
+
+@dataclass(frozen=True)
+class GeneListSource:
+    """One **Curated gene list** that contributed to an answer, and what it contributed.
+
+    What makes a **Merged annotation**'s genes attributable: one of these per contributing
+    annotation, so a caller counting worm ribosomal RNA can drop the *E. coli* entry
+    rather than being handed one number it cannot take apart. An annotation that is not a
+    merge has exactly one, whose ``component`` is ``None``.
+
+    ``description`` and ``source`` travel with the ids rather than being looked up
+    separately, because they are what says whether these ids mean what the caller's metric
+    needs: two annotations spelling a category the same way need not have curated it the
+    same way.
+
+    Attributes
+    ----------
+    component : str or None
+        The **Component** assembly whose genes these are, for a contributor to a **Merged
+        annotation**; ``None`` for anything else.
+    annotation : str
+        The **Registered name** of the contributing annotation.
+    description : str
+        What membership in this category means for that annotation.
+    source : str
+        Where that membership came from, and the caveats on using it.
+    gene_ids : tuple of str
+        The gene ids it contributed, in the order its curated list lists them.
+
+    Examples
+    --------
+    >>> source = GeneListSource(
+    ...     component="ce11",
+    ...     annotation="wormbase_ws298",
+    ...     description="the mature ribosomal RNA genes",
+    ...     source="WormBase WS298 gene_biotype",
+    ...     gene_ids=("WBGene00004512", "WBGene00004513"),
+    ... )
+    >>> source.as_json()["component"]
+    'ce11'
+    >>> len(source.gene_ids)
+    2
+    """
+
+    component: str | None
+    annotation: str
+    description: str
+    source: str
+    gene_ids: tuple[str, ...]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this contribution as ``--json`` serializes it: every attribute, in order.
+
+        Returns
+        -------
+        dict
+            The fields above, under their own names, with ``gene_ids`` as a list.
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class GeneList:
+    """The genes one annotation puts in one **Gene category**, attributed to their sources.
+
+    :meth:`~genome.io.gtf.AnnotationRegistry.gene_list`'s answer — what ``genome
+    gene-list`` prints and what its ``--json`` serializes. There is no empty one: an
+    annotation that declares no categories, and one that declares categories but not this
+    one, each raise a :class:`LookupError` of their own rather than answering with
+    nothing, so holding one of these means the category was really declared and really has
+    genes in it.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** asked about.
+    annotation : str
+        The **Registered name** asked about — the merged name for a **Merged annotation**,
+        whose contributors are named in :attr:`sources`.
+    category : str
+        The **Gene category**, as the curated lists spell it.
+    sources : tuple of GeneListSource
+        One entry per contributing **Curated gene list**, in contributor order. Never
+        empty. A contributor that does not declare this category is simply absent — a
+        bacterium has no mitochondria, and that is not a failure to report.
+
+    Examples
+    --------
+    >>> genes = GeneList(
+    ...     assembly="ce11",
+    ...     annotation="wormbase_ws298",
+    ...     category="rRNA",
+    ...     sources=(
+    ...         GeneListSource(None, "wormbase_ws298", "rRNA genes", "WormBase", ("a", "b")),
+    ...     ),
+    ... )
+    >>> genes.gene_ids
+    ['a', 'b']
+    >>> genes.as_json()["category"]
+    'rRNA'
+    """
+
+    assembly: str
+    annotation: str
+    category: str
+    sources: tuple[GeneListSource, ...]
+
+    @property
+    def gene_ids(self) -> list[str]:
+        """Every source's gene ids, concatenated in source order — a fresh list each call.
+
+        **Concatenated and not de-duplicated.** A merge rewrites only the seqname and
+        never the ``gene_id``, so two components carrying the same id would be a real
+        ambiguity in the merged annotation, and collapsing it here would hide exactly that
+        — a caller summing over these would silently under-count one of the two. Where
+        that matters, :attr:`sources` says which contributor each id came from.
+        """
+        return [gene_id for source in self.sources for gene_id in source.gene_ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``assembly``, ``annotation``, ``category``, the concatenated ``gene_ids``, and
+            ``sources`` as a list of :meth:`GeneListSource.as_json` entries.
+            :attr:`gene_ids` is written out beside the sources it is read from rather than
+            left to the reader: assembling it is where a reader would reach for a set and
+            de-duplicate, which is the one thing this answer must not do.
+        """
+        return {
+            "assembly": self.assembly,
+            "annotation": self.annotation,
+            "category": self.category,
+            "gene_ids": self.gene_ids,
+            "sources": [source.as_json() for source in self.sources],
+        }
 
 
 @dataclass(frozen=True)
