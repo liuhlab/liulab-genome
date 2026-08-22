@@ -17,7 +17,8 @@ import pandas as pd
 import pytest
 
 import genome.genome as genome_mod
-from genome import DNA, AnnotationRegistry, Genome, Region
+from genome import DNA, AnnotationRegistry, Genome, NoGeneCategoriesError, Region
+from genome.gene_list import curated_gene_list
 from genome.io.completion import (
     RegistrationMismatchError,
     UnfinishedRegistrationError,
@@ -579,3 +580,57 @@ def test_path_or_url_seeds_from_local_fasta(
     with Genome("tiny", path_or_url=src, cache_dir=tmp_path / "cache") as g:
         assert g.fetch_sequence("chrA:0-8") == DNA("ACGTACGT")
         assert g.chromosomes == ["chrA", "chrB"]
+
+
+class TestGeneCategories:
+    """``Genome.gene_list`` / ``.gene_lists`` — the everyday way to a category's genes.
+
+    Both delegate to the registry, so what is asserted here is that they reach it and
+    that the answer arrives whole; what the answer *is* belongs to test_gtf. The shipped
+    curated list answers, so the categories are read off it rather than named.
+    """
+
+    def _declared(self, annotation: str) -> tuple[str, ...]:
+        """The categories the shipped curated list declares for ``annotation``."""
+        listed = curated_gene_list(annotation)
+        assert listed is not None, f"no curated gene list ships for {annotation}"
+        return tuple(listed.categories)
+
+    def test_a_genome_answers_for_its_default_annotation(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        with Genome("sacCer3", cache_dir=yeast_dir) as g:
+            g.annotations.register_path(data_dir / "tiny.gtf", "ensgene_v101")
+            category = self._declared("ensgene_v101")[0]
+
+            answer = g.gene_list(category)
+
+            assert g.default_gtf == "ensgene_v101"
+            assert (answer.assembly, answer.annotation, answer.category) == (
+                "sacCer3",
+                "ensgene_v101",
+                category,
+            )
+            assert answer.gene_ids == g.annotations.gene_list(category).gene_ids
+
+    def test_gene_lists_says_what_may_be_asked_for(self, yeast_dir: Path, data_dir: Path) -> None:
+        with Genome("sacCer3", cache_dir=yeast_dir) as g:
+            g.annotations.register_path(data_dir / "tiny.gtf", "ensgene_v101")
+
+            answers = g.gene_lists()
+
+            assert [answer.category for answer in answers] == list(self._declared("ensgene_v101"))
+            assert all(answer.gene_ids for answer in answers)
+
+    def test_an_annotation_that_cannot_answer_raises_rather_than_answering_emptily(
+        self, yeast_dir: Path, data_dir: Path
+    ) -> None:
+        # The whole point of the surface: a caller must be able to tell *nothing is known
+        # about this annotation's categories* from *there are none of these genes*.
+        with Genome("tiny", cache_dir=yeast_dir) as g:
+            g.annotations.register_path(data_dir / "tiny.gtf", "mine")
+
+            with pytest.raises(NoGeneCategoriesError):
+                g.gene_lists()
+            with pytest.raises(NoGeneCategoriesError):
+                g.gene_list("rRNA")

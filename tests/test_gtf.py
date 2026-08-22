@@ -22,6 +22,12 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from genome.gene_list import (
+    GeneCategoryNotDeclaredError,
+    GeneListAssemblyMismatchError,
+    NoGeneCategoriesError,
+    curated_gene_list,
+)
 from genome.io import gtf as gtf_module
 from genome.io.completion import (
     RegistrationMismatchError,
@@ -41,6 +47,8 @@ from genome.io.gtf import (
     annotation_status,
     default_annotation,
     discard_merged_annotation,
+    gene_list,
+    gene_lists,
     list_annotations,
     list_broken_annotations,
     register_annotation,
@@ -1392,6 +1400,338 @@ class TestRegisterGtf:
 
         assert payload.name == "WS298"
         assert list(list_annotations(tmp_path)) == ["WS298"]
+
+
+# ---------------------------------------------------------------------------------------
+# Which genes are in a category, and what an annotation that cannot say answers
+# ---------------------------------------------------------------------------------------
+
+#: An annotation whose curated gene list ships today, and the assembly the table files it
+#: under. Named rather than derived: registering it under *another* assembly is what the
+#: guard below is about, so the pairing has to be written down somewhere the test controls.
+_CURATED = "gencode_v50"
+_CURATED_ASSEMBLY = "hg38"
+
+#: The two contributors a **Merged annotation** of worm and its food is made of, and the
+#: components whose sequences their features sit on.
+_WORM, _WORM_COMPONENT = "wormbase_ws298", "ce11"
+_FOOD, _FOOD_COMPONENT = "refseq_rs_2025_06_26", "ecHT115"
+_CHIMERA = f"{_WORM_COMPONENT}_{_FOOD_COMPONENT}"
+
+
+def _declared(annotation: str) -> tuple[str, ...]:
+    """The categories a shipped curated list declares, in file order — never a fixed set.
+
+    Which categories exist is the curated list's to say and differs per annotation, so
+    every assertion below reads them off the shipped file rather than naming them.
+    """
+    listed = curated_gene_list(annotation)
+    assert listed is not None, f"no curated gene list ships for {annotation}"
+    return tuple(listed.categories)
+
+
+def _curated_ids(annotation: str, category: str) -> tuple[str, ...]:
+    """The gene ids a shipped curated list puts in ``category``."""
+    listed = curated_gene_list(annotation)
+    assert listed is not None
+    return listed.categories[category].gene_ids
+
+
+def _register_merged(
+    assembly_dir: Path, name: str, source: Path, *, assembly: str = _CHIMERA
+) -> GtfAnnotation:
+    """Register a merged annotation of the worm/food pair under ``name``, from one GTF.
+
+    A real :func:`register_merged_gtf`, not a hand-written record: what a merge writes
+    into ``details`` is what the gene-category path reads back, so standing that in would
+    test the stand-in. The fixture GTF is merged twice under two component names, which is
+    all the record needs to carry — nothing here reads the features.
+    """
+    chrom_sizes = _write_chrom_sizes(
+        assembly_dir,
+        *(f"chrI__{component}" for component in (_WORM_COMPONENT, _FOOD_COMPONENT)),
+        assembly=assembly,
+    )
+    return register_merged_gtf(
+        assembly_dir,
+        name,
+        [
+            MergeSource(_WORM_COMPONENT, _WORM, source),
+            MergeSource(_FOOD_COMPONENT, _FOOD, source),
+        ],
+        separator="__",
+        chrom_sizes=chrom_sizes,
+    )
+
+
+class TestGeneList:
+    """``AnnotationRegistry.gene_list`` — the genes one annotation puts in one category.
+
+    The shipped curated lists answer here, since which categories exist is data and no
+    fixture may pretend otherwise. What is asserted is structure: who contributed, what
+    order the ids arrive in, and — the point of the whole surface — that an annotation
+    which cannot answer raises rather than answering with nothing.
+    """
+
+    def _registry(self, tmp_path: Path, *, assembly: str = _CURATED_ASSEMBLY) -> AnnotationRegistry:
+        """Register the fixture GTF under a curated annotation's name and open the registry."""
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        _register_by_path(tmp_path, source, _CURATED, assembly=assembly)
+        return AnnotationRegistry.locate(assembly, tmp_path)
+
+    def test_a_plain_annotation_answers_as_one_source_belonging_to_no_component(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path)
+        category = _declared(_CURATED)[0]
+
+        answer = registry.gene_list(category, _CURATED)
+
+        assert (answer.assembly, answer.annotation, answer.category) == (
+            _CURATED_ASSEMBLY,
+            _CURATED,
+            category,
+        )
+        # One contributor, and `component` is None rather than the assembly's own name:
+        # attribution is what a merge needs, and there is nothing here to attribute.
+        assert [source.component for source in answer.sources] == [None]
+        assert [source.annotation for source in answer.sources] == [_CURATED]
+
+    def test_the_ids_are_the_curated_lists_own_in_the_order_it_lists_them(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path)
+        category = _declared(_CURATED)[0]
+
+        answer = registry.gene_list(category, _CURATED)
+
+        assert answer.gene_ids == list(_curated_ids(_CURATED, category))
+        assert answer.gene_ids  # never an empty answer: a declared category has genes
+
+    def test_a_source_carries_what_membership_means_and_where_it_came_from(
+        self, tmp_path: Path
+    ) -> None:
+        # The two sentences travel with the ids, because they are what says whether these
+        # ids mean what the caller's metric needs.
+        answer = self._registry(tmp_path).gene_list(_declared(_CURATED)[0], _CURATED)
+
+        assert answer.sources[0].description.strip()
+        assert answer.sources[0].source.strip()
+
+    def test_a_category_the_list_does_not_declare_raises_and_lists_the_ones_it_does(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path)
+
+        with pytest.raises(GeneCategoryNotDeclaredError) as excinfo:
+            registry.gene_list("no_such_category", _CURATED)
+
+        message = str(excinfo.value)
+        assert "no_such_category" in message
+        for category in _declared(_CURATED):
+            assert category in message
+
+    def test_an_annotation_nothing_ships_a_list_for_raises_the_other_absence(
+        self, tmp_path: Path
+    ) -> None:
+        # The fact #111 exists for: *no categories are declared* and *this category is not
+        # declared* are different, and neither is an empty answer.
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        _register_by_path(tmp_path, source, "mine")
+        registry = AnnotationRegistry.locate("tiny", tmp_path)
+
+        with pytest.raises(NoGeneCategoriesError) as excinfo:
+            registry.gene_list("rRNA", "mine")
+
+        message = str(excinfo.value)
+        assert "mine" in message
+        assert _CURATED in message  # …and which annotations do declare categories
+
+    def test_the_two_absences_are_told_apart_by_type_and_caught_together(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path)
+        source = tmp_path / "ann.gtf"
+        _register_by_path(tmp_path, source, "mine", assembly=_CURATED_ASSEMBLY)
+        both = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path)
+
+        with pytest.raises(LookupError) as declared:
+            registry.gene_list("no_such_category", _CURATED)
+        with pytest.raises(LookupError) as nothing:
+            both.gene_list("no_such_category", "mine")
+
+        assert isinstance(declared.value, GeneCategoryNotDeclaredError)
+        assert isinstance(nothing.value, NoGeneCategoriesError)
+        assert not isinstance(declared.value, NoGeneCategoriesError)
+        assert not isinstance(nothing.value, GeneCategoryNotDeclaredError)
+
+    def test_an_unregistered_name_earns_the_error_it_already_had(self, tmp_path: Path) -> None:
+        # Callers pass names, never paths, and a name nothing registered is resolved by the
+        # same `path` every other question goes through — so the message is the same one.
+        registry = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path)
+
+        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
+            registry.gene_list("rRNA", _CURATED)
+
+        assert f"genome register-annotation {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
+
+    def test_naming_no_annotation_asks_the_default_one(self, tmp_path: Path) -> None:
+        registry = self._registry(tmp_path)
+        category = _declared(_CURATED)[0]
+
+        assert registry.default == _CURATED
+        assert registry.gene_list(category).annotation == _CURATED
+
+    def test_no_default_and_no_name_says_which_argument_chooses_one(self, tmp_path: Path) -> None:
+        registry = AnnotationRegistry.locate("tiny", tmp_path)
+
+        with pytest.raises(ValueError, match="annotation") as excinfo:
+            registry.gene_list("rRNA")
+
+        assert "default_gtf" in str(excinfo.value)
+
+    def test_a_list_curated_against_another_assembly_refuses_to_answer(
+        self, tmp_path: Path
+    ) -> None:
+        # A name is unique only within its assembly, so a list found by name alone is not
+        # yet known to be about this reference — and answering would hand back another
+        # species' genes under this one's name.
+        registry = self._registry(tmp_path, assembly="tiny")
+
+        with pytest.raises(GeneListAssemblyMismatchError) as excinfo:
+            registry.gene_list(_declared(_CURATED)[0], _CURATED)
+
+        message = str(excinfo.value)
+        assert "tiny" in message
+        assert _CURATED_ASSEMBLY in message
+
+    def test_gene_lists_returns_every_declared_category_in_file_order(self, tmp_path: Path) -> None:
+        answers = self._registry(tmp_path).gene_lists(_CURATED)
+
+        assert [answer.category for answer in answers] == list(_declared(_CURATED))
+        assert all(answer.gene_ids for answer in answers)
+
+    def test_gene_lists_raises_rather_than_answering_with_an_empty_tuple(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        _register_by_path(tmp_path, source, "mine")
+
+        with pytest.raises(NoGeneCategoriesError):
+            AnnotationRegistry.locate("tiny", tmp_path).gene_lists("mine")
+
+
+class TestMergedGeneList:
+    """A **Merged annotation**'s genes, attributed to the component each came from.
+
+    The case #111 was opened over: a chimera of a worm and the bacterium it eats, whose
+    ribosomal RNA is both species' and must not arrive as one number.
+    """
+
+    def _registry(self, tmp_path: Path, name: str = f"{_WORM}+{_FOOD}") -> AnnotationRegistry:
+        """Register a merged annotation under ``name`` and open the chimera's registry."""
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        _register_merged(tmp_path, name, source)
+        return AnnotationRegistry.locate(_CHIMERA, tmp_path)
+
+    def test_each_contributor_answers_for_its_own_component(self, tmp_path: Path) -> None:
+        registry = self._registry(tmp_path)
+        shared = next(category for category in _declared(_WORM) if category in _declared(_FOOD))
+
+        answer = registry.gene_list(shared, f"{_WORM}+{_FOOD}")
+
+        assert [(source.component, source.annotation) for source in answer.sources] == [
+            (_WORM_COMPONENT, _WORM),
+            (_FOOD_COMPONENT, _FOOD),
+        ]
+        assert answer.annotation == f"{_WORM}+{_FOOD}"
+        assert answer.assembly == _CHIMERA
+
+    def test_the_ids_are_the_contributions_concatenated_and_never_de_duplicated(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path)
+        shared = next(category for category in _declared(_WORM) if category in _declared(_FOOD))
+
+        answer = registry.gene_list(shared, f"{_WORM}+{_FOOD}")
+
+        assert answer.gene_ids == [
+            *_curated_ids(_WORM, shared),
+            *_curated_ids(_FOOD, shared),
+        ]
+
+    def test_a_category_one_contributor_declares_answers_with_that_one_alone(
+        self, tmp_path: Path
+    ) -> None:
+        # A bacterium has no mitochondria, and a worm annotation declaring a category its
+        # food's does not is an omission rather than a failure — the answer simply carries
+        # the one source.
+        registry = self._registry(tmp_path)
+        worm_only = sorted(set(_declared(_WORM)) - set(_declared(_FOOD)))
+        assert worm_only, "the two contributors declare the same categories; nothing to test"
+
+        answer = registry.gene_list(worm_only[0], f"{_WORM}+{_FOOD}")
+
+        assert [source.component for source in answer.sources] == [_WORM_COMPONENT]
+        assert answer.gene_ids == list(_curated_ids(_WORM, worm_only[0]))
+
+    def test_a_category_no_contributor_declares_raises(self, tmp_path: Path) -> None:
+        registry = self._registry(tmp_path)
+
+        with pytest.raises(GeneCategoryNotDeclaredError):
+            registry.gene_list("no_such_category", f"{_WORM}+{_FOOD}")
+
+    def test_who_contributed_comes_from_the_record_and_not_from_splitting_the_name(
+        self, tmp_path: Path
+    ) -> None:
+        # The name of a merge is the +-join of what went in, but it cannot say which
+        # component each half came from — and that is exactly what attribution needs.
+        registry = self._registry(tmp_path, name="merged")
+        shared = next(category for category in _declared(_WORM) if category in _declared(_FOOD))
+
+        answer = registry.gene_list(shared, "merged")
+
+        assert [source.component for source in answer.sources] == [
+            _WORM_COMPONENT,
+            _FOOD_COMPONENT,
+        ]
+
+    def test_gene_lists_is_the_union_of_what_the_contributors_declare(self, tmp_path: Path) -> None:
+        registry = self._registry(tmp_path)
+        union = list(dict.fromkeys([*_declared(_WORM), *_declared(_FOOD)]))
+
+        assert [answer.category for answer in registry.gene_lists()] == union
+
+
+class TestAddressedByAssembly:
+    """``gene_list`` and ``gene_lists`` addressed by assembly name rather than opened.
+
+    A registry for the length of the call, exactly as ``annotation_status`` is, so there
+    is no second code path to keep in step.
+    """
+
+    def test_it_answers_for_an_assembly_named_rather_than_opened(self, tmp_path: Path) -> None:
+        source = tmp_path / "ann.gtf"
+        source.write_text(_GTF)
+        _register_by_path(tmp_path, source, _CURATED, assembly=_CURATED_ASSEMBLY)
+        category = _declared(_CURATED)[0]
+
+        answer = gene_list(_CURATED_ASSEMBLY, category, cache_dir=tmp_path)
+
+        assert answer.annotation == _CURATED
+        assert [entry.category for entry in gene_lists(_CURATED_ASSEMBLY, cache_dir=tmp_path)] == (
+            list(_declared(_CURATED))
+        )
+
+    def test_an_assembly_with_nothing_registered_raises_rather_than_answering(
+        self, tmp_path: Path
+    ) -> None:
+        with pytest.raises(AnnotationNotRegisteredError):
+            gene_list(_CURATED_ASSEMBLY, "rRNA", annotation=_CURATED, cache_dir=tmp_path)
 
 
 # ---------------------------------------------------------------------------------------
