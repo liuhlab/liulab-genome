@@ -9,6 +9,11 @@ missing is exactly what a mouse-specific question is about. The price paid inste
 un-harmonised family vocabularies, 75 values under Lambert's `DBD` and 72 under AnimalTFDB's
 `Family`, deliberately not crosswalked: `ARID/BRIGHT` and `ARID` are not asserted equivalent,
 because inventing an equivalence nobody has checked is worse than shipping two vocabularies that
-each say who spelled them. Two further costs are accepted: this package builds no ortholog or
-homology support at all, and mouse has no assessed-negative genes, since AnimalTFDB lists only the
-genes it judges TFs — visible asymmetry rather than a fabricated one.
+each say who spelled them. Two further costs are accepted: no census here is derived through
+orthologs, whatever homology the package now serves, and mouse has no assessed-negative genes, since
+AnimalTFDB lists only the genes it judges TFs — visible asymmetry rather than a fabricated one.
+
+**Status.** Amended 2026-08-29: the cost line read "this package builds no ortholog or homology
+support at all", which ADR-0019 ended by adding a **Homology set** a caller can query. Orthology is
+served and still never consumed, so the decision above is untouched — mouse TFs come from
+AnimalTFDB's own census, and no table this package publishes is derived across species.

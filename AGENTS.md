@@ -25,7 +25,7 @@ moves between directories and its number does not; `—` means no record cites t
 | R2 | **Shell out, never reimplement.** `samtools`, `bedtools`, STAR and chromap are **External tool**s: locate on `PATH`, fail naming the install command. | — |
 | R3 | **Never read a whole genomic file into memory.** | — |
 | R4 | **0-based half-open internally.** Convert to 1-based-inclusive (VCF, GFF/GTF, SAM) only at the I/O boundary, and say so in the docstring. | — |
-| R5 | **Never assume assembly, coordinate system or strand.** The assembly id travels with the data and is never inferred; mixing builds is an error, not a warning; strand `.` is unknown and never silently `+`. | ADR-0003 |
+| R5 | **Never assume assembly, coordinate system, strand or species.** The assembly id travels with the data and is never inferred; mixing builds is an error, not a warning; strand `.` is unknown and never silently `+`; a gene id never crosses species implicitly — homology is answered when a caller asks for it and never applied on their behalf. | ADR-0003, ADR-0019 |
 | R6 | **Default to private.** Only `__init__.py` re-exports and the CLI surface are public; promotion is a one-line refactor. | — |
 | R7 | **The CLI is a thin client.** Logic lives in the API so `import genome` and the CLI hit one code path; every command emits `--json`; non-zero exit on failure, with errors that name the next action. | — |
 | R8 | **A feature without tests is not done.** | — |
@@ -33,7 +33,7 @@ moves between directories and its number does not; `—` means no record cites t
 
 ## Where to read next
 
-- **A term, or a synonym to avoid** — [`CONTEXT-MAP.md`](CONTEXT-MAP.md) and the five per-context
+- **A term, or a synonym to avoid** — [`CONTEXT-MAP.md`](CONTEXT-MAP.md) and the eight per-context
   glossaries it lists under [`docs/context/`](docs/context/).
 - **A decision — why it is this way, and what lost** — [`docs/adr/`](docs/adr/).
 - **A measurement — a number, and the method that produced it** — [`docs/research/`](docs/research/),

@@ -211,6 +211,30 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   with both costs stated rather than smoothed over — 151 human genes are both a **TF gene** and a
   cofactor, and the two classification vocabularies are deliberately not crosswalked (ADR-0014).
   Vocabulary and records only; no behaviour changes.
+- **The words for cross-database gene identifiers and for cross-species homology, settled before the
+  code that will use them.** Two new bounded contexts get glossaries — `docs/context/xref.md` and
+  `docs/context/orthology.md` — so that an **Xref set** is never called a crosswalk, an id map or a
+  mapping table in an issue, a test name or an error message, and so that a **Homology link**'s
+  **Homology type** is read as its publisher's claim about evolution rather than as a count of rows
+  in whatever file came back. Xref coins **Xref set**, **Xref source**, **Default xref source**,
+  **Namespace** and **Symbol match**; orthology coins **Homology set**, **Homology link**,
+  **Homology type**, **Dropped partner** and **Paralogy link**. The context map lists both and draws
+  the seven edges joining them to Annotation, TF and Motif — two of which are **prohibitions rather
+  than calls**: nothing shipped here is keyed by a foreign **Namespace**, and no list this package
+  publishes is derived through homology. **Four records settle what the design decided.** ADR-0017:
+  the hub is the **Gene id stem**, a query reads exactly one **Xref set**, and nothing composes two
+  hops or merges two publishers — NCBI and Ensembl agree on only 57.5% of human gene-level (GeneID,
+  ENSG) pairs, so a merged table would decide nearly half its rows by a rule nobody published.
+  ADR-0018: only a publisher keeping dated releases at stable URLs is eligible, and its bytes are
+  downloaded rather than shipped, at two costs stated rather than smoothed over — neither set
+  answers offline on a fresh install, and mouse gets current symbols only, previous and alias
+  spellings being MGI's and MGI publishing no dated archive. ADR-0019: **orthology is served and
+  never consumed**, so worm still has no TF census and mouse still has no assessed-negative genes
+  even with a homology table on disk. ADR-0020: a **Homology type** is the publisher's tree-derived
+  label and is never recomputed after filtering. ADR-0014 gains a `**Status.**` line, its cost line
+  having said this package builds no ortholog or homology support at all, and the rule against
+  assuming an assembly, a coordinate system or a strand is extended in place — a gene id never
+  crosses species implicitly. Vocabulary and records only; no behaviour changes.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;
