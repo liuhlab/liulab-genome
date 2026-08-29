@@ -18,6 +18,11 @@ moves.
 it is written into the Parquet file's own key-value metadata under
 :data:`HIT_PROVENANCE_KEY` and put back on ``frame.attrs`` by :func:`read_hits`.
 
+**Two questions are answered from the footer alone**, because the case a written table
+exists for is the case where reading it back is fatal: :func:`provenance_of` says what the
+scan was and :func:`hit_count` says how many hits it found, neither of them reading a row.
+That is what a finished scan is summarised from.
+
 **The dtypes are written explicitly rather than inferred per batch.** A categorical
 column's index width follows its cardinality, so two batches would otherwise disagree on
 the schema — ``int8`` for the batch with four sequence names and ``int16`` for the one with
@@ -184,11 +189,7 @@ def read_hits(path: str | Path) -> pd.DataFrame:
     >>> hits.attrs["threshold"]
     0.0001
     """
-    source = Path(path)
-    if not source.is_file():
-        raise FileNotFoundError(
-            f"hit table not found: {source}. Scan with output={source} to write one."
-        )
+    source = _existing(path)
     frame = pd.read_parquet(source)
     for name, dtype in HIT_DTYPES.items():
         if dtype == "category" and name in frame.columns:
@@ -196,17 +197,49 @@ def read_hits(path: str | Path) -> pd.DataFrame:
             # astype("category") sorts them, and the in-memory table is what this must equal.
             column = frame[name]
             frame[name] = column.cat.set_categories(sorted(column.cat.categories))
-    frame.attrs = _provenance_of(source)
+    frame.attrs = provenance_of(source)
     return frame
 
 
-def _provenance_of(path: Path) -> dict[Hashable, Any]:
-    """Read the scan's provenance out of the file's metadata, or ``{}`` if it carries none.
+def provenance_of(path: str | Path) -> dict[Hashable, Any]:
+    """Read what a written **Hit table** was scanned with, without reading a row of it.
 
-    Every JSON array becomes a tuple again, which is what a **Hit table**'s background and
-    its two motif lists are in memory.
+    The provenance alone — the **Background**, the **Threshold**, the **Release**, the
+    **Tax group** and the two motif lists, exactly what :func:`read_hits` puts on
+    ``frame.attrs``. It comes out of the file's own key-value metadata, so a 550-million-row
+    scan answers as fast as an empty one; :func:`read_hits` is for when the rows are wanted
+    too, and a genome-scale scan is precisely when reading them back is fatal.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        A Parquet file written by :func:`write_hits`.
+
+    Returns
+    -------
+    dict
+        What :data:`~genome.tf.motif.scan.HIT_PROVENANCE` names, with every JSON array
+        read back as a tuple — which is what a background and the two motif lists are in
+        memory. Empty for a Parquet file written by something else, which simply carries
+        none.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``path`` does not exist.
+
+    Examples
+    --------
+    >>> import tempfile
+    >>> from pathlib import Path
+    >>> from genome.tf.motif.scan import empty_hits
+    >>> with tempfile.TemporaryDirectory() as directory:
+    ...     written = write_hits([empty_hits()], Path(directory) / "none.parquet",
+    ...                          {"threshold": 0.0001, "motifs_skipped": ("MA0261.1",)})
+    ...     provenance_of(written)
+    {'threshold': 0.0001, 'motifs_skipped': ('MA0261.1',)}
     """
-    metadata = pq.read_schema(path).metadata or {}
+    metadata = pq.read_schema(_existing(path)).metadata or {}
     raw = metadata.get(HIT_PROVENANCE_KEY)
     if raw is None:
         return {}
@@ -214,3 +247,55 @@ def _provenance_of(path: Path) -> dict[Hashable, Any]:
     return {
         key: tuple(value) if isinstance(value, list) else value for key, value in recorded.items()
     }
+
+
+def hit_count(path: str | Path) -> int:
+    """Return how many **Motif hit**s a written **Hit table** holds, reading none of them.
+
+    Off the file's footer, where Parquet records the row count of every row group, so this
+    costs the same on a genome-scale scan as on an empty one. It is what a summary of a
+    finished scan reports: reading 550 million rows back to count them is the one thing a
+    scan that streamed to disk exists to avoid.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        A Parquet file written by :func:`write_hits`.
+
+    Returns
+    -------
+    int
+        How many rows the file holds. Zero for a scan that found nothing, which still
+        wrote a file.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``path`` does not exist.
+
+    Examples
+    --------
+    >>> import tempfile
+    >>> from pathlib import Path
+    >>> import numpy as np
+    >>> from genome.tf.motif import Motif, MotifSet
+    >>> counts = np.zeros((4, 8))
+    >>> for column, base in enumerate("GATTACAG"):
+    ...     counts["ACGT".index(base), column] = 100.0
+    >>> motifs = MotifSet([Motif("MA9999.1", "Gattacag", counts)])
+    >>> with tempfile.TemporaryDirectory() as directory:
+    ...     written = motifs.scan("TTTTTGATTACAGTTTTT", output=Path(directory) / "h.parquet")
+    ...     hit_count(written)
+    1
+    """
+    return int(pq.ParquetFile(_existing(path)).metadata.num_rows)
+
+
+def _existing(path: str | Path) -> Path:
+    """Return ``path`` as a :class:`~pathlib.Path`, refusing one that is not a file yet."""
+    source = Path(path)
+    if not source.is_file():
+        raise FileNotFoundError(
+            f"hit table not found: {source}. Scan with output={source} to write one."
+        )
+    return source

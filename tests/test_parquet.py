@@ -34,7 +34,9 @@ from genome.tf.motif import (
     HIT_DTYPES,
     HIT_PROVENANCE,
     MotifSet,
+    hit_count,
     parse_transfac,
+    provenance_of,
     read_hits,
 )
 from genome.tf.motif.parquet import HIT_PROVENANCE_KEY, write_hits
@@ -257,3 +259,50 @@ class TestNoGuardAndNoRefusal:
         peaks = {f"peak{index:05d}": "TTTTGATTACAGTTTT" for index in range(2000)}
         found = read_hits(motifs.scan_sequences(peaks, output=tmp_path / "hits.parquet"))
         assert len(found) == len(motifs.scan_sequences(peaks)) == 2000
+
+
+class TestTheFooterAnswersWithoutTheRows:
+    """What a written scan was, and how much of it there is, read off the footer alone.
+
+    The case a written table exists for is the case where reading it back is fatal — 550
+    million rows is hg38 against a full vertebrate release — so the two facts a finished
+    scan is summarised from must cost the same there as on an empty file.
+    """
+
+    def test_the_provenance_is_the_one_read_hits_puts_on_the_frame(self, written: Path) -> None:
+        assert provenance_of(written) == read_hits(written).attrs
+
+    def test_the_count_is_the_number_of_rows_the_table_holds(self, written: Path) -> None:
+        assert hit_count(written) == len(read_hits(written)) > 0
+
+    def test_a_scan_that_found_nothing_counts_zero_rather_than_raising(
+        self, motifs: MotifSet, tmp_path: Path
+    ) -> None:
+        found = motifs.scan("N" * 400, output=tmp_path / "none.parquet")
+        assert hit_count(found) == 0
+        assert set(provenance_of(found)) == set(HIT_PROVENANCE)
+
+    def test_neither_reads_a_row(self, written: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The claim itself: pandas' reader is the only thing here that materialises rows,
+        # so making it raise proves neither of these went near one.
+        def refuse(*args: object, **kwargs: object) -> pd.DataFrame:
+            raise AssertionError("the rows were read back")
+
+        monkeypatch.setattr(pd, "read_parquet", refuse)
+        assert hit_count(written) > 0
+        assert provenance_of(written)["threshold"] == 1e-4
+
+    def test_a_parquet_written_by_something_else_carries_no_provenance(
+        self, in_memory: pd.DataFrame, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "foreign.parquet"
+        in_memory.to_parquet(path)
+        assert provenance_of(path) == {}
+        assert hit_count(path) == len(in_memory)
+
+    @pytest.mark.parametrize("reader", [provenance_of, hit_count])
+    def test_a_file_that_is_not_there_says_how_to_make_one(
+        self, reader: object, tmp_path: Path
+    ) -> None:
+        with pytest.raises(FileNotFoundError, match="Scan with output="):
+            reader(tmp_path / "never-written.parquet")  # type: ignore[operator]

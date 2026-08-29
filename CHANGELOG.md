@@ -10,6 +10,22 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
+  batch case, and the one motif operation that belongs in a shell script and a scheduler job;
+  listing, plotting and comparing motifs get no command, because they are notebook work. It takes
+  the FASTA and the output path, plus `--release`, `--tax-group`, `--threshold`, `--background`
+  and `--workers`, and prints what the run was — release, tax group, motifs scanned, motifs
+  skipped, the background actually used, the threshold, sequences scanned, hits written, workers,
+  and where the hits went. **The hits go to the named file and the summary to standard output**,
+  so `--json` is never corrupted by table data, and any progress display is suppressed under it.
+  **It defaults to every core the allocation granted** — the Slurm allocation first, then process
+  affinity, then the machine — where the library defaults to one worker: a console script is a
+  proper entry point, so the process-pool hazard behind that default does not apply here.
+  `--background` takes the three modes; four frequencies of your own stay a Python call, since a
+  mistyped one on a command line would change every cutoff and look like a scan that simply found
+  fewer hits. The summary is read off the Parquet footer and never by reading the hits back, which
+  is what `provenance_of(path)` and `hit_count(path)` are for — what a written scan was, and how
+  many hits it holds, at the same cost on 550 million rows as on none.
 - **Scanning regions takes the same arguments every other scan does.**
   `Genome.scan_regions` now forwards `background=` and `workers=` to the scan underneath it,
   so the case an HPC user hits first — a background derived from the peak set's own composition,

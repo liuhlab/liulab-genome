@@ -34,7 +34,7 @@ from genome.tf.motif.motif import (
     MotifNotFoundError,
     MotifSet,
 )
-from genome.tf.motif.parquet import HIT_PROVENANCE_KEY, read_hits
+from genome.tf.motif.parquet import HIT_PROVENANCE_KEY, hit_count, provenance_of, read_hits
 from genome.tf.motif.scan import (
     HIT_COLUMNS,
     HIT_DTYPES,
@@ -78,7 +78,9 @@ __all__ = [
     "MotifSet",
     "RaggedComparisonError",
     "TransfacError",
+    "hit_count",
     "parse_transfac",
+    "provenance_of",
     "read_hits",
     "resolve_workers",
     "threshold_cache_dir",
