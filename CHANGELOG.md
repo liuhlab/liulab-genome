@@ -10,6 +10,49 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **Which genes in another species a gene is homologous to, on Ensembl Compara's own trees.**
+  `genome.homology` is the Orthology context and a peer of `genome.tf`. `HomologySet(species,
+  other_species)` pins **Compara release 116**, fetches the per-species dump that holds that pair
+  once into `$LIULAB_DATA/homology/` — a sibling of the assembly tree, beside `motif/` — checks the
+  publisher's own md5 against the bytes as they arrive, slices the pair out a row at a time, and
+  records a **Completion marker** carrying both checksums: the publisher's as provenance and the
+  derived slice's own sha256 as the integrity check, re-verified on every read. All three pairings
+  among human, mouse and worm answer, in either direction, off one prepared file per pair. The slice
+  is a plain gzipped TSV with Compara's own header and Compara's own rows, so a collaborator reads it
+  in R without this package. **Nothing here is computed**: every field of every link is a cell of
+  that file, and this package publishes no quality score, no ranking and no "best ortholog" of its
+  own.
+- **The Compara partition guard, which is the trap this exists for.** The per-species dumps are a
+  de-duplicated partition *at the pair level* — Compara's own README calls each file "an arbitrary
+  subset of orthologies involving the given genome" — and which file holds a pair is **not stable
+  across releases**: counted on 116, the human file holds **0** human↔mouse rows and 23,982
+  human↔worm; the mouse file holds 23,764 human and 25,006 worm; the worm file holds neither. (On
+  110 the human file held 16,242 mouse rows, so the assignment really does move.) Which file holds
+  which pair is therefore a **measurement** in the shipped `homology_metadata.tsv`, re-taken on every
+  prepare: a slice that comes back empty **raises naming the other file** and writes nothing, rather
+  than answering empty. A pair is never partially present, which is what makes zero trustworthy.
+- **A Homology type is the publisher's and is never recomputed** (ADR-0020). `HomologyLink` carries
+  Compara's `homology_type` verbatim, its high-confidence flag and both quality scores; resolving an
+  answer into a registered **Annotation** through `resolve_gene_ids` — used unchanged, with no
+  `Genome` mixin and no `Genome`-level convenience — leaves the label alone and reports the
+  **Dropped partner**s separately, so a view that *looks* one-to-one is never mistaken for one.
+  Orthologs are the default and paralogs come back only on request. **Measured, and worth stating:
+  release 116 publishes no cross-species paralogy at all** — zero `between_species_paralog` in the
+  whole 4.0 M-row human dump, and every `other_paralog` (128,020), `within_species_paralog` (13,144)
+  and `gene_split` (9) row relates two genes of *one* species — so on this release the switch
+  changes nothing for these three pairs. It is kept because it is where such a row would land and
+  because *not an ortholog* must stay distinguishable from *absent* (ADR-0013).
+- **A quality score that is null for a whole species pair says so before a filter empties.**
+  `goc_score` and `wga_coverage` are `NULL` on **100%** of the rows of *either* worm pairing — all
+  23,982 human↔worm and all 25,006 mouse↔worm — where the human↔mouse pair carries real values.
+  Which columns a set holds nothing in is measured over the prepared slice, not listed against a
+  pair, and rides on the set and on every answer. Compara 116 is the release pinned because it is the
+  newest that publishes both an `MD5SUM` and the compressed naming: only releases 90 and 116 publish
+  an md5 at all, and 113 ships these dumps uncompressed — so each row carries a URL read off the
+  release's own listing rather than one built from a template, and a row with no checksum is refused.
+  **Orthology is served and never consumed** (ADR-0019): no table this package publishes is derived
+  through homology, held structurally — nothing outside `genome.homology` may import it, which a test
+  asserts by reading every module's source.
 - **Which genes are transcription factors, answered by a published census that ships in the
   wheel.** `genome.tf.gene` is the gene half of the TF context, keyed by gene where the motif half
   is keyed by motif. Name an assembly and `Genome.tf_gene_list()` answers with the genes one census

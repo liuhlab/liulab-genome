@@ -97,6 +97,18 @@
 
 ::: genome.tf.link
 
+## `genome.homology.metadata`
+
+::: genome.homology.metadata
+
+## `genome.homology.compara`
+
+::: genome.homology.compara
+
+## `genome.homology.annotation`
+
+::: genome.homology.annotation
+
 ## `genome.external`
 
 ::: genome.external
