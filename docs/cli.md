@@ -225,6 +225,57 @@ Exits `1` when the annotation is not registered here, when no census ships for t
 assembly's species, and when nothing says what species the assembly is — three different
 facts, each with its own message. None of them prints an empty list of genes.
 
+## `genome tf-cofactor-list <assembly>`
+
+Print the gene ids a publisher lists as transcription cofactors, one per line — the other
+half of the machinery, shaped exactly like `genome tf-gene-list`. A cofactor is a chromatin
+remodeller, a histone-modifying enzyme, a Mediator subunit: it recognises no sequence of its
+own, so no scan will ever find it, but which genes are cofactors is published. The table is
+chosen by the species the assembly's own metadata row names, never by anything you pass.
+
+```console
+$ genome tf-cofactor-list mm39 > cofactors.txt
+TF cofactors for mm39 / gencode_vM39 (Mus musculus)
+  AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Mus_musculus_Cof
+```
+
+A third stderr line closes the account as `genome tf-gene-list`'s does: how many cofactors
+and gene ids those came to, and how many gene id stems this annotation carries no gene for.
+Each of the mouse table's 970 stems is either a gene on stdout or on that count, never
+quietly dropped.
+
+`--annotation NAME` asks a registered annotation other than the assembly's default one.
+`--json` carries the whole record: every gene with the publisher that listed it and that
+publisher's own classification, one provenance entry per publisher to cite, and the stems
+that resolved to nothing.
+
+```console
+$ genome tf-cofactor-list mm39 --json
+{"assembly": "mm39", "annotation": "gencode_vM39", "species": "Mus musculus",
+ "provenance": {"species": "Mus musculus", "ncbi_taxid": 10090, …,
+                "sources": [{"publisher": "AnimalTFDB", "version": "4.0", "pubmed_id": 36268869, …}]},
+ "cofactors": [{"gene_id_stem": "ENSMUSG00000000085", "gene_ids": ["ENSMUSG00000000085.16"],
+                "symbol": "Scmh1", "is_cofactor": true, "source": "animaltfdb",
+                "classifications": {"animaltfdb_family": "Others",
+                                    "animaltfdb_category": "Other Cofactors"}}, …],
+ "gene_ids": ["ENSMUSG00000000085.16", …], "unresolved": […]}
+```
+
+Nothing here decides what a cofactor is. Membership and classification travel with the
+publisher who reached them, which is why whose list it is prints beside the answer, and why
+each entry's `source` says who listed the gene — `both` there is agreement that the gene is
+a cofactor and nothing about how either publisher classified it. The vocabularies are not
+crosswalked: group by `animaltfdb_category` within one publisher, never across two.
+
+`genome tf-cofactor-list ce11` answers while `genome tf-gene-list ce11` exits `1`. AnimalTFDB
+assessed worm cofactors and no publisher has released a worm TF census — the publishers'
+shape, not a defect here.
+
+Exits `1` when the annotation is not registered here, when no cofactor table ships for the
+assembly's species — the message names the species that have one — and when nothing says
+what species the assembly is. Three different facts, each with its own message. None of them
+prints an empty list of genes.
+
 ## `genome verify <assembly>`
 
 Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is

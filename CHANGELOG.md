@@ -168,6 +168,18 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   halves do not raise for the same assemblies**: a worm assembly answers here and raises from
   `tf_gene_list()`, because a publisher assessed worm cofactors and none has released a worm TF
   census.
+- **`genome tf-cofactor-list <assembly>` prints an assembly's transcription cofactors**, shaped
+  exactly like `genome tf-gene-list` because a caller who learned one has learned the other. Gene
+  ids to stdout one per line, the heading and the publishers' attribution to stderr so the output
+  pipes; `--annotation` names which registered annotation to ask; `--json` emits the whole record —
+  every gene with the publisher that listed it and that publisher's own classification, one
+  provenance entry per publisher to cite, and the unresolved **Gene id stem**s. Non-zero exit with a
+  message naming the next action for each of three distinct failures: the annotation is not
+  registered, no cofactor table ships for this assembly's species — **and the message names the
+  species that do** — and nothing says what species the assembly is. The command computes nothing:
+  `tf_cofactor_list()` is the one code path, so the shell and a notebook cannot drift. **A worm
+  assembly is answered here and refused by `genome tf-gene-list`**, pinned in a test of its own so
+  that the asymmetry is not mistaken for a bug and quietly "fixed".
 - **The words for transcription cofactors, settled before the code that will use them.** The TF gene
   context glossary now covers the whole TF context at `docs/context/tf.md`, and defines
   **Transcription cofactor**, **Cofactor table** and **TF cofactor list** — so that a bare
