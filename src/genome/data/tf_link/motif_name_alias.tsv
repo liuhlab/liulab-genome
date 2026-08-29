@@ -1,0 +1,4 @@
+species	motif_name_part	gene_id_stem	census_symbol	note
+Homo sapiens	SCAND3	ENSG00000232040	ZBED9	JASPAR renamed ZBED9 to SCAND3 after Lambert et al. 2018 was published
+Homo sapiens	TBXT	ENSG00000164458	T	JASPAR renamed T to TBXT after Lambert et al. 2018 was published
+Homo sapiens	ZFTA	ENSG00000188070	C11orf95	JASPAR renamed C11orf95 to ZFTA after Lambert et al. 2018 was published
