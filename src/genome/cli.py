@@ -28,6 +28,7 @@ from genome.io.gtf import gene_list as _gene_list
 from genome.io.gtf import gene_lists as _gene_lists
 from genome.io.gtf import register_annotation as _register_annotation
 from genome.io.gtf import register_gtf as _register_gtf
+from genome.io.gtf import tf_cofactor_list as _tf_cofactor_list
 from genome.io.gtf import tf_gene_list as _tf_gene_list
 from genome.io.results import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
@@ -59,13 +60,14 @@ from genome.tf.motif.workers import resolve_workers as _resolve_workers
 _ASSEMBLY_ERRORS = (ValueError, OSError, RuntimeError)
 
 #: What a failed gene-list command raises, on top of the above — the gene-category pair
-#: and the TF gene list alike. An annotation that ships no curated gene list, one whose
-#: list does not declare the category asked for, a species no census ships for and an
-#: assembly nothing names a species for are lookups that found nothing rather than bad
-#: values — so they are ``LookupError``s, which :data:`_ASSEMBLY_ERRORS` does not cover,
-#: and so is the ``KeyError`` an unregistered annotation has always raised. One list for
-#: all three commands because they are alike by construction: each asks one registered
-#: annotation a question a shipped file answers, and each absence on the way is a lookup.
+#: and both TF lists alike. An annotation that ships no curated gene list, one whose
+#: list does not declare the category asked for, a species no census or cofactor table
+#: ships for and an assembly nothing names a species for are lookups that found nothing
+#: rather than bad values — so they are ``LookupError``s, which :data:`_ASSEMBLY_ERRORS`
+#: does not cover, and so is the ``KeyError`` an unregistered annotation has always
+#: raised. One list for all four commands because they are alike by construction: each
+#: asks one registered annotation a question a shipped file answers, and each absence on
+#: the way is a lookup.
 _GENE_LIST_ERRORS = (*_ASSEMBLY_ERRORS, LookupError)
 
 #: What a failed motif scan raises. The same three, and each already says what to do: a
@@ -76,7 +78,7 @@ _GENE_LIST_ERRORS = (*_ASSEMBLY_ERRORS, LookupError)
 #: assembly and the two lists are alike by coincidence rather than by construction.
 _MOTIF_SCAN_ERRORS = (ValueError, OSError, RuntimeError)
 
-#: Help for the ``--annotation`` option both gene-category commands take.
+#: Help for the ``--annotation`` option every command asking one annotation a question takes.
 _ANNOTATION_HELP = (
     "Ask about this registered annotation instead of the assembly's default one. An "
     "assembly with no default and none named has nothing to answer about, and says so."
@@ -636,6 +638,70 @@ def tf_gene_list(
     typer.echo(f"  {listed.provenance.attribution()}", err=True)
     typer.echo(
         f"  {len(listed.genes)} genes, {len(gene_ids)} gene ids, "
+        f"{len(listed.unresolved)} stems this annotation carries no gene for",
+        err=True,
+    )
+    for gene_id in gene_ids:
+        typer.echo(gene_id)
+
+
+@app.command("tf-cofactor-list")
+def tf_cofactor_list(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'mm39'."),
+    annotation: str | None = typer.Option(None, "--annotation", help=_ANNOTATION_HELP),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Print the gene ids a publisher lists as transcription cofactors, one per line.
+
+    `genome tf-gene-list` for the other half of the machinery, and the same shape: a
+    cofactor — a chromatin remodeller, a histone-modifying enzyme, a Mediator subunit —
+    recognises no sequence of its own and so has no motif to scan for, but which genes are
+    cofactors is published, and this is that list met with one annotation. Nothing here
+    decides what a cofactor is: membership and classification both travel with the
+    publisher, and who to cite is printed beside the answer.
+
+    The species comes from the assembly's own metadata row and is never passed in, so
+    asking for mouse cofactors while holding a worm assembly is not expressible. A table
+    is keyed by gene id stems — gene ids with the version suffix dropped — and a
+    registered annotation is not, so every stem is resolved into the ids that annotation
+    actually spells and the output joins to a counts matrix with nothing left to
+    normalise. A stem naming two genes prints both rather than one of them.
+
+    Only the ids go to stdout, so the output pipes: the heading, the publishers'
+    attribution and the counts go to stderr, the last of them saying how many stems this
+    annotation carries no gene for. `--json` carries the whole record — every gene with
+    the publisher that listed it and that publisher's own classification, one provenance
+    entry per publisher to cite, and those unresolved stems.
+
+    A worm assembly is answered here and refused by `genome tf-gene-list`: a publisher
+    assessed worm cofactors and none has released a worm TF census. That is what the
+    publishers have done rather than a defect here.
+
+    Exits with code 1 when the annotation is not registered here, when no cofactor table
+    ships for the assembly's species, and when nothing says what species the assembly is —
+    three different facts, each with its own message, and none of them an empty list of
+    genes.
+    """
+    try:
+        listed = _tf_cofactor_list(assembly, annotation=annotation)
+    except _GENE_LIST_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(listed.as_json()))
+        return
+    # Attribution to stderr, ids to stdout, for the reason `tf-gene-list` splits them: a
+    # bare id list is what a shell pipeline wants, and a reader needs to know whose list it
+    # is. The counts join the attribution because what the table holds and this annotation
+    # does not is the one thing a plain id list cannot show.
+    gene_ids = listed.gene_ids
+    typer.echo(
+        f"TF cofactors for {listed.assembly} / {listed.annotation} ({listed.species})", err=True
+    )
+    typer.echo(f"  {listed.provenance.attribution()}", err=True)
+    typer.echo(
+        f"  {len(listed.cofactors)} cofactors, {len(gene_ids)} gene ids, "
         f"{len(listed.unresolved)} stems this annotation carries no gene for",
         err=True,
     )

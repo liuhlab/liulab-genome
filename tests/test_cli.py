@@ -30,6 +30,7 @@ from genome.io.gtf import (
 )
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.seq import DNA
+from genome.tf.cofactor import CofactorTable, cofactor_table
 from genome.tf.gene import TFGeneTable, tf_gene_table
 from genome.tf.motif import MIN_MOTIF_LENGTH, hit_count, provenance_of, read_hits
 from genome.tf.motif import jaspar as jaspar_mod
@@ -1446,6 +1447,170 @@ class TestTFGeneListCommand:
         assert result.stdout == ""
         assert "nothing says what species 'tiny' is" in _output(result)
         assert "Homo sapiens" in _output(result)
+
+
+class TestTFCofactorListCommand:
+    """``genome tf-cofactor-list`` — an assembly's cofactors, shaped like ``tf-gene-list``.
+
+    The shipped tables answer, as the shipped censuses answer for TF genes: which genes a
+    publisher lists as cofactors is that publisher's judgement and no fixture stands in for
+    it, so every expectation below is read off the shipped file. What is asserted here is
+    the command and not the crossing — ``tests/test_gtf.py`` owns that — so: the
+    stdout/stderr split that makes the output pipe, the record ``--json`` emits, and a
+    non-zero exit naming the next action for each of the three ways it can fail.
+
+    One test is about neither: a worm assembly answers here while ``tf-gene-list`` refuses
+    the same one, because a publisher assessed worm cofactors and none has released a worm
+    TF census. That asymmetry is the publishers' shape rather than a defect, and it is
+    pinned so that nobody smooths it away.
+    """
+
+    def _table(self, assembly: str) -> CofactorTable:
+        """The cofactor table shipped for ``assembly``'s species, whichever publisher wrote it."""
+        species = metadata.assembly_metadata(assembly).species
+        assert species is not None, f"{assembly} has no species in the assembly table"
+        table = cofactor_table(species)
+        assert table is not None, f"no cofactor table ships for {species}"
+        return table
+
+    def _registered(
+        self,
+        liulab_data: Path,
+        *gene_ids: str,
+        assembly: str = _MOUSE_ASSEMBLY,
+        name: str = _MOUSE_ANNOTATION,
+    ) -> None:
+        """Register a GTF declaring ``gene_ids`` as ``assembly``'s ``name``, where it lives."""
+        source = liulab_data / f"{assembly}.{name}.gtf"
+        source.write_text(_gtf_declaring(*gene_ids))
+        _register(assembly, liulab_data / "genome" / assembly, source, name)
+
+    def _listed(self, assembly: str, count: int) -> list[str]:
+        """``count`` gene ids, one per listed stem, versioned as GENCODE spells them."""
+        return [f"{stem}.1" for stem in self._table(assembly).cofactor_stems[:count]]
+
+    def test_only_the_gene_ids_reach_stdout_so_the_output_pipes(self, liulab_data: Path) -> None:
+        gene_ids = self._listed(_MOUSE_ASSEMBLY, 2)
+        self._registered(liulab_data, *gene_ids)
+
+        result = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY])
+
+        assert result.exit_code == 0
+        assert result.stdout == "".join(f"{gene_id}\n" for gene_id in gene_ids)
+        # Whose list it is must be printed and must not cost the pipe, so it goes beside
+        # the ids: the heading, the publishers' own attribution, and what the crossing
+        # cost — the stems the table holds that this annotation carries no gene for.
+        assert f"{_MOUSE_ASSEMBLY} / {_MOUSE_ANNOTATION}" in result.stderr
+        assert "Mus musculus" in result.stderr
+        assert self._table(_MOUSE_ASSEMBLY).provenance.attribution() in result.stderr
+        unresolved = len(self._table(_MOUSE_ASSEMBLY).cofactor_stems) - len(gene_ids)
+        assert f"2 cofactors, 2 gene ids, {unresolved} stems" in result.stderr
+
+    def test_the_annotation_may_be_named_instead_of_defaulted(self, liulab_data: Path) -> None:
+        gene_ids = self._listed(_MOUSE_ASSEMBLY, 1)
+        self._registered(liulab_data, *gene_ids, name="mine")
+
+        result = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY, "--annotation", "mine"])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == gene_ids
+        assert f"{_MOUSE_ASSEMBLY} / mine" in result.stderr
+
+    def test_json_carries_the_cofactors_the_provenance_and_the_unresolved_stems(
+        self, liulab_data: Path
+    ) -> None:
+        table = self._table(_MOUSE_ASSEMBLY)
+        stem = table.cofactor_stems[0]
+        self._registered(liulab_data, f"{stem}.1")
+
+        result = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY, "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert list(payload) == [
+            "assembly",
+            "annotation",
+            "species",
+            "provenance",
+            "cofactors",
+            "gene_ids",
+            "unresolved",
+        ]
+        assert (payload["assembly"], payload["annotation"]) == (_MOUSE_ASSEMBLY, _MOUSE_ANNOTATION)
+        assert payload["gene_ids"] == [f"{stem}.1"]
+        # One provenance record per publisher that contributed, never one flattened row.
+        assert [source["pubmed_id"] for source in payload["provenance"]["sources"]] == [
+            source.pubmed_id for source in table.provenance.sources
+        ]
+        assert payload["unresolved"]  # what this annotation carries no gene for, not dropped
+        cells = dict(zip(table.columns, table.rows[table.gene_id_stems.index(stem)], strict=True))
+        cofactor = payload["cofactors"][0]
+        assert (cofactor["symbol"], cofactor["source"]) == (cells["symbol"], cells["source"])
+        assert cofactor["is_cofactor"] is True
+        assert cofactor["classifications"]["animaltfdb_category"] == cells["animaltfdb_category"]
+
+    def test_a_worm_assembly_answers_although_tf_gene_list_refuses_the_same_one(
+        self, liulab_data: Path
+    ) -> None:
+        # AnimalTFDB assessed worm cofactors and no publisher has censused worm
+        # transcription factors, so one command answers and the other refuses for one
+        # registered annotation. WormBase's ids carry no version, and a stem carrying
+        # none resolves to itself, so they are registered exactly as the table spells them.
+        gene_ids = list(self._table("ce11").cofactor_stems[:2])
+        self._registered(liulab_data, *gene_ids, assembly="ce11", name="wormbase_ws298")
+
+        answered = runner.invoke(app, ["tf-cofactor-list", "ce11"])
+        refused = runner.invoke(app, ["tf-gene-list", "ce11"])
+
+        assert answered.exit_code == 0
+        assert answered.stdout.splitlines() == gene_ids
+        assert "Caenorhabditis elegans" in answered.stderr
+        assert refused.exit_code == 1
+        assert "no TF census ships" in _output(refused)
+
+    def test_an_unregistered_annotation_exits_one_naming_the_command_that_registers_it(
+        self, liulab_data: Path
+    ) -> None:
+        result = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        next_action = f"genome register-annotation {_MOUSE_ASSEMBLY} {_MOUSE_ANNOTATION}"
+        assert next_action in _output(result)
+
+    def test_a_species_no_cofactor_table_ships_for_exits_one_naming_the_species_that_have_one(
+        self, liulab_data: Path
+    ) -> None:
+        # Mouse gene ids registered for a yeast assembly: the species is the assembly's own
+        # and never what the GTF happens to hold, so this is refused rather than answered.
+        self._registered(
+            liulab_data, *self._listed(_MOUSE_ASSEMBLY, 1), assembly="sacCer3", name="ensgene_v101"
+        )
+
+        result = runner.invoke(app, ["tf-cofactor-list", "sacCer3"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "no cofactor table ships" in _output(result)
+        assert "Saccharomyces cerevisiae" in _output(result)
+        assert "Mus musculus" in _output(result)  # …and what may be asked about instead
+
+    def test_an_assembly_nothing_names_a_species_for_exits_one_saying_so(
+        self, liulab_data: Path
+    ) -> None:
+        # Not the same fact as no table ships: the question was which species this is, and
+        # no row answered it. The message says which shipped table could not be chosen, so
+        # a cofactor question is never refused with a sentence about a census.
+        self._registered(
+            liulab_data, *self._listed(_MOUSE_ASSEMBLY, 1), assembly="tiny", name="mine"
+        )
+
+        result = runner.invoke(app, ["tf-cofactor-list", "tiny", "--annotation", "mine"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "nothing says what species 'tiny' is, so no cofactor table" in _output(result)
+        assert "Mus musculus" in _output(result)
 
 
 class TestTheSurfacesThatDidNotChange:
