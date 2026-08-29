@@ -89,6 +89,10 @@
 
 ::: genome.tf.motif.mixin
 
+## `genome.tf.link`
+
+::: genome.tf.link
+
 ## `genome.external`
 
 ::: genome.external
