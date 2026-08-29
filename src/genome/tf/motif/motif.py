@@ -49,7 +49,7 @@ Motif(motif_id='MA9999.1', motif_name='Gattaca', length=6, offset=0)
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -59,6 +59,9 @@ import numpy.typing as npt
 from genome.seq import DNA
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
+    from pathlib import Path
+
+    import pandas as pd
     from matplotlib.axes import Axes
 
 #: The rows of a **Count matrix**, in order. The same order MOODS and logomaker use, so
@@ -95,6 +98,15 @@ _FILTERABLE: dict[str, bool] = {
 #: silently. Trimming that produced a 6-column motif would therefore be trimming that
 #: produced an unusable one.
 MIN_MOTIF_LENGTH = 7
+
+#: The **Threshold** a scan is called at when the caller names none: one per-position
+#: p-value, converted per **Motif** against the **Background** into the score that motif
+#: must clear. Here rather than on the engine adapter because these signatures name it.
+DEFAULT_THRESHOLD = 1e-4
+
+#: What :meth:`MotifSet.scan` calls its sequence when the caller names none — a fixed
+#: literal rather than a blank, so every row of every **Hit table** names its sequence.
+DEFAULT_SEQUENCE_NAME = "sequence"
 
 #: What :meth:`Motif.trim` calls uninformative, in bits. A flank whose most common base
 #: holds barely half the observations carries about 0.21 bits and goes; one holding 55%
@@ -1033,6 +1045,199 @@ class MotifSet:
             and all(_matches(motif, key, values) for key, values in wanted.items())
         ]
         return MotifSet(kept)
+
+    # ------------------------------------------------------------------- scanning
+
+    def scan(
+        self,
+        sequence: str,
+        name: str = DEFAULT_SEQUENCE_NAME,
+        *,
+        threshold: float = DEFAULT_THRESHOLD,
+        background: Sequence[float] | npt.NDArray[np.float64] | None = None,
+    ) -> pd.DataFrame:
+        """Scan one sequence with every motif here and return the **Hit table**.
+
+        The quick case — one locus, checked once. It answers with exactly the table
+        :meth:`scan_sequences` and :meth:`scan_fasta` answer with, down to the column
+        order and the dtypes, so nothing downstream branches on how the scan was called.
+
+        Both strands are scanned. Coordinates are **0-based half-open** and always in the
+        forward frame, whichever strand matched, and **Strand** is ``+`` or ``-`` — never
+        ``.``, because a scan knows which of the two it scored. The interval covers the
+        bases the matrix scored, so a trimmed motif's hit is as long as the trimmed motif;
+        :attr:`Motif.offset` maps a position *within* the motif and not the interval.
+
+        **The sequence is upper-cased**, so a soft-masked one yields exactly the hits its
+        upper-case equivalent does and there is no argument that would change that
+        (ADR-0012).
+
+        Parameters
+        ----------
+        sequence : str
+            The bases to scan. A :class:`~genome.seq.DNA` or a plain string.
+        name : str, default ``"sequence"``
+            What the ``sequence_name`` column carries. A fixed literal by default, so
+            every row names its sequence even when the caller did not.
+        threshold : float, default 1e-4
+            The **Threshold**: one per-position p-value, converted per motif against
+            ``background`` into the score that motif must clear. In ``(0, 1)``.
+        background : sequence of float, optional
+            The **Background**: four frequencies over :data:`BASES`, above zero and
+            summing to 1. Uniform when omitted.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per **Motif hit**: ``motif_id``, ``motif_name``, ``sequence_name``,
+            ``start``, ``end``, ``strand``, ``score`` — the score in bits, not a p-value.
+            The scan's provenance is on ``frame.attrs``: the background, the threshold, the
+            **Release** and **Tax group** where the set knows them, and which motifs were
+            scanned and which were skipped.
+
+        Raises
+        ------
+        ValueError
+            If ``threshold`` is not in ``(0, 1)``, or ``background`` is not four positive
+            frequencies summing to 1.
+
+        Notes
+        -----
+        Motifs shorter than :data:`MIN_MOTIF_LENGTH` are **not scanned** and are named in
+        ``frame.attrs["motifs_skipped"]``. A 6-mer cannot reach the default threshold at
+        all, and an engine asked for it anyway would fall back to that matrix's best
+        attainable cutoff and over-call in silence.
+
+        A **Release** answers with its release and tax group on the table; a set that
+        :meth:`filter` returned answers with ``None`` for both, since a filtered release is
+        no longer that release and must not claim to be.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> counts = np.zeros((4, 8))
+        >>> for column, base in enumerate("GATTACAG"):
+        ...     counts["ACGT".index(base), column] = 100.0
+        >>> motifs = MotifSet([Motif("MA9999.1", "Gattacag", counts)])
+        >>> hits = motifs.scan("TTTTTGATTACAGTTTTT")
+        >>> hits[["motif_id", "sequence_name", "start", "end", "strand"]]
+           motif_id sequence_name  start  end strand
+        0  MA9999.1      sequence      5   13      +
+        >>> hits.attrs["motifs_scanned"], hits.attrs["threshold"]
+        (('MA9999.1',), 0.0001)
+        """
+        return self.scan_sequences({name: sequence}, threshold=threshold, background=background)
+
+    def scan_sequences(
+        self,
+        sequences: Mapping[str, str],
+        *,
+        threshold: float = DEFAULT_THRESHOLD,
+        background: Sequence[float] | npt.NDArray[np.float64] | None = None,
+    ) -> pd.DataFrame:
+        """Scan named sequences — a peak set in one call — and return the **Hit table**.
+
+        The same table :meth:`scan` returns, with ``sequence_name`` carrying the mapping's
+        own keys and the rows in the mapping's own order. See :meth:`scan` for the
+        coordinate convention, the strand rule, the upper-casing and the provenance.
+
+        Parameters
+        ----------
+        sequences : mapping of str to str
+            Name to bases. Scanned one at a time, so the peak cost is the longest sequence
+            rather than all of them.
+        threshold : float, default 1e-4
+            The **Threshold**, as a per-position p-value.
+        background : sequence of float, optional
+            The **Background**. Uniform when omitted.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The **Hit table**, empty of rows but not of schema when nothing matched.
+
+        Raises
+        ------
+        ValueError
+            If ``threshold`` is not in ``(0, 1)``, or the background is not four positive
+            frequencies summing to 1.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> counts = np.zeros((4, 8))
+        >>> for column, base in enumerate("GATTACAG"):
+        ...     counts["ACGT".index(base), column] = 100.0
+        >>> motifs = MotifSet([Motif("MA9999.1", "Gattacag", counts)])
+        >>> peaks = {"peak1": "TTTTT" + "GATTACAG" + "TTTTT",
+        ...          "peak2": "CCCCC" + "CTGTAATC" + "CCCCC"}   # the same site, flipped
+        >>> hits = motifs.scan_sequences(peaks)
+        >>> list(zip(hits["sequence_name"], hits["strand"], hits["start"], hits["end"]))
+        [('peak1', '+', 5, 13), ('peak2', '-', 5, 13)]
+        """
+        # Imported here rather than at module scope: the engine adapter imports this
+        # module, so naming it up there would be a cycle — and this stays the pure core.
+        from genome.tf.motif.scan import scan_stream
+
+        return scan_stream(self, sequences.items(), threshold=threshold, background=background)
+
+    def scan_fasta(
+        self,
+        path: str | Path,
+        *,
+        threshold: float = DEFAULT_THRESHOLD,
+        background: Sequence[float] | npt.NDArray[np.float64] | None = None,
+    ) -> pd.DataFrame:
+        r"""Scan every record of a FASTA and return the **Hit table**.
+
+        The same table :meth:`scan` returns. Records are read and scanned one at a time,
+        so the file is never held whole; plain or gzipped.
+
+        **A record's name is its header up to the first whitespace**, which is what STAR
+        and chromap write into an alignment produced from the same file — so this table
+        joins against that alignment with nobody renaming anything.
+
+        Parameters
+        ----------
+        path : str or pathlib.Path
+            The FASTA to scan, ``.fa`` or ``.fa.gz``.
+        threshold : float, default 1e-4
+            The **Threshold**, as a per-position p-value.
+        background : sequence of float, optional
+            The **Background**. Uniform when omitted.
+
+        Returns
+        -------
+        pandas.DataFrame
+            The **Hit table**, with ``sequence_name`` carrying the truncated record names.
+
+        Raises
+        ------
+        FileNotFoundError
+            If ``path`` does not exist.
+        ValueError
+            If the file is not FASTA, a record carries no name, ``threshold`` is not in
+            ``(0, 1)``, or the background is not four positive frequencies summing to 1.
+
+        Examples
+        --------
+        >>> import tempfile
+        >>> from pathlib import Path
+        >>> import numpy as np
+        >>> counts = np.zeros((4, 8))
+        >>> for column, base in enumerate("GATTACAG"):
+        ...     counts["ACGT".index(base), column] = 100.0
+        >>> motifs = MotifSet([Motif("MA9999.1", "Gattacag", counts)])
+        >>> with tempfile.TemporaryDirectory() as directory:
+        ...     fasta = Path(directory) / "peaks.fa"
+        ...     _ = fasta.write_text(">peak1 chrI:100-118 of nowhere\nTTTTTGATTACAGTTTTT\n")
+        ...     hits = motifs.scan_fasta(fasta)
+        >>> list(zip(hits["sequence_name"], hits["start"], hits["strand"]))
+        [('peak1', 5, '+')]
+        """
+        from genome.tf.motif.scan import read_fasta, scan_stream
+
+        return scan_stream(self, read_fasta(path), threshold=threshold, background=background)
 
 
 def base_id(motif: Motif) -> str:

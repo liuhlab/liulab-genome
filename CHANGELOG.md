@@ -10,6 +10,34 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **Scan DNA with a motif set and get one hit table back, whatever you scanned.**
+  `MotifSet.scan(sequence, name="sequence")`, `MotifSet.scan_sequences({name: bases})` and
+  `MotifSet.scan_fasta(path)` answer with the same table — the same columns, in the same order,
+  with the same compact dtypes (`motif_id`, `motif_name`, `sequence_name` and `strand` categorical,
+  `start` and `end` `int32`, `score` `float16`) — so nothing downstream branches on how the scan was
+  called. **The dtypes are the contract and not an optimisation**: 19 bytes a row against about 100
+  for what pandas would infer. Coordinates are **0-based half-open and always in the forward frame**,
+  both strands are scanned, and the strand is `+` or `-` and never unknown, because a scan knows
+  which of the two it scored. The engine is MOODS, which has no strand concept: the adapter doubles
+  the matrix list with reverse complements, computes a cutoff per entry, and splits the results back
+  by index — and a position reported for a reverse-complement matrix is already a forward-frame
+  start, which the suite asserts against the engine rather than trusting. **The threshold is a
+  per-position p-value**, 1e-4 by default, converted per motif against the background; the `score`
+  column carries log-odds **in bits** (MOODS scores in nats and the one conversion lives in the
+  adapter) and no per-hit p-value is computed. **Motifs shorter than 7 positions are not scanned and
+  are named on the result** rather than called at a looser cutoff than was asked for: a 6-mer has
+  4096 possible words, so its best match has p = 2.44e-4, and an engine asked for 1e-4 anyway clamps
+  and over-calls in silence on roughly 98 of 879 vertebrate motifs. **Input is upper-cased, so a
+  soft-masked sequence yields exactly the hits its upper-case equivalent does**, with no option to
+  honour the masking — the one place a scan contradicts a shared-kernel term, recorded as ADR-0012.
+  A FASTA record's name is its header **up to the first whitespace**, matching what STAR and chromap
+  write into an alignment made from the same file, so a hit table joins against that alignment with
+  nobody renaming anything; plain or gzipped, and records are read one at a time. The table carries
+  its provenance on `frame.attrs` — the background, the threshold, the release, the tax group, and
+  which motifs were scanned and which skipped — read off the set, so a `JasparDatabase` names its
+  release and a filtered one answers `None` for both, since a filtered release is no longer that
+  release. This release is serial with a uniform background; the scan produces batches internally,
+  one per named sequence, so a Parquet sink and a parallel source attach without restructuring it.
 - **Name a JASPAR release and query it like a dictionary that filters itself.**
   `JasparDatabase("2024", "vertebrates")` fetches that release's transfac file once into
   `<LIULAB_DATA>/motif/jaspar/`, flat and with the release and tax group in the name, and every

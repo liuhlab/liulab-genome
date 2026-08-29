@@ -2,9 +2,10 @@
 
 Small, subsampled **real** files — never a large genomic file. Every sequence byte here came from
 UCSC's `sacCer3` golden path and every motif byte from a published JASPAR release; both were cut
-down on the lab cluster, and nothing is synthesised. Names are this repo's where a fixture needs a
-spelling `sacCer3` does not have, and one 200-base stretch is lower-cased — both are called out
-below, and nothing else departs from the source bytes.
+down on the lab cluster. Three fixtures depart from the source bytes and every departure is named
+below: names are this repo's where a fixture needs a spelling `sacCer3` does not have; two stretches
+are lower-cased; and `planted_motifs.fa` has **39 bases overwritten** with three JASPAR consensus
+words, which is the one place a base here was chosen rather than found. Nothing else is synthesised.
 
 | File | What it is |
 |---|---|
@@ -14,6 +15,7 @@ below, and nothing else departs from the source bytes.
 | `tiny.gtf.gz` | `tiny.gtf`, gzipped |
 | `ensembl_style.gtf` | `tiny.gtf` with the `chr` prefix stripped (`I`, `II`, `III`) — an Ensembl-spelled annotation for the chromosome-name mismatch case |
 | `tiny_jaspar_transfac.txt` | Ten whole records of the JASPAR 2024 `all` union file, in its own order — see below |
+| `planted_motifs.fa` | Two 600-base windows of `tiny.fa` with three motif consensus words written into them at known positions and strands — see below |
 
 Sources:
 
@@ -54,6 +56,45 @@ None of this is prose to be trusted either: `tests/test_jaspar.py` asserts every
 each id, name, length and tax group, each multi-valued and each blank annotation, the fractional
 counts, the two below-minimum lengths and the long record's flank bits — against the committed
 bytes.
+
+## `planted_motifs.fa` — the sequences a scan is checked against
+
+**This is the one fixture whose bases are not all found bases.** Everything else here is `sacCer3`
+as UCSC published it; this file is two 600-base windows of `tiny.fa` — `chrI:1-600` as `plantedI`
+and `chrII:1-600` as `plantedII`, 1-based inclusive — with **three consensus words written over 39
+of those 1 200 bases**. A scan needs a site it knows the answer for, and yeast does not oblige on
+demand. Every base outside the three intervals below is `sacCer3`'s, and `tests/test_scan.py`
+asserts exactly that: it puts the source bases back over the three intervals and gets `tiny.fa`'s
+own windows out again.
+
+What was planted, where, and on which strand — coordinates **0-based half-open**, as everything
+inside this package is:
+
+| Record | Interval | Strand | Motif | Bases written | The rule it exists to break |
+|---|---|---|---|---|---|
+| `plantedI` | `[100, 115)` | `+` | `MA0139.2` CTCF | `GCCACCAGGGGGCGC` | The everyday case: a site on the forward strand, found at the position it was planted at |
+| `plantedI` | `[300, 315)` | `-` | `MA0139.2` CTCF | `GCGCCCCCTGGTGGC` | The **same word reverse-complemented**. It must be reported on `-` over *these* bases — a forward-frame `[300, 315)` and not a position counted from the other end, which is the off-by-one the whole adapter exists to centralise |
+| `plantedII` | `[200, 209)` | `+` | `MA0789.1` POU3F4 | `tatgcaaat` | **Lower case**: a soft-masked site, which must be found exactly as its upper-case equivalent is, because a scan discards **Soft-masking** without being asked (ADR-0012) |
+
+Two more things the bytes carry, and neither is decoration:
+
+- **`plantedII`'s header is `>plantedII  sacCer3 chrII:1-600, bases 180-240 soft-masked`.** The
+  record name is `plantedII` and everything after the first whitespace is description — which is
+  what STAR and chromap write into an alignment made from the same file, so a **Hit table** joins
+  against that alignment with nobody renaming anything. `plantedI`'s header carries no description,
+  so both shapes are present.
+- **`plantedII[180:240)` is lower-cased** — exactly one wrapped line, so it is visible in the file,
+  and it holds the planted POU3F4 site with flanks either side of it. The bases are `sacCer3`'s;
+  only their case is this repo's.
+
+The motifs are the ones `tiny_jaspar_transfac.txt` already holds, so this file adds no matrices.
+That fixture's two below-minimum records, `MA2355.1` and `MA0261.1`, are why nothing needed to be
+planted to test the length floor: they can never be scanned, and every scan names them.
+
+None of this is prose to be trusted: `tests/test_scan.py` asserts every row of the table above
+against the committed bytes — the two record names and their headers, the 600-base lengths, each
+planted word at its offset, that the reverse word really is the forward one flipped, the bounds of
+the masked window, the 60-base wrap, and the `sacCer3` backbone underneath all of it.
 
 ## `chimera/` — the tiny component assemblies
 

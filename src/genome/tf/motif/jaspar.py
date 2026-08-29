@@ -1,6 +1,6 @@
 """One JASPAR **Release** on disk, parsed into a **Motif set** you can query.
 
-I/O boundary module, and the only one in this context: name a release and a **Tax group**
+I/O boundary module: name a release and a **Tax group**
 and the matching file is fetched once into the ``motif/`` subtree of the **Data dir**,
 shared by every project on the machine, then read back as a :class:`JasparDatabase`. A
 second construction re-reads what is there and fetches nothing. The types it hands back

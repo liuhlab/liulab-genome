@@ -53,6 +53,10 @@
 
 ::: genome.tf.motif.jaspar
 
+## `genome.tf.motif.scan`
+
+::: genome.tf.motif.scan
+
 ## `genome.external`
 
 ::: genome.external

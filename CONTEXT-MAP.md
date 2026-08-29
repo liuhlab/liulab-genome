@@ -115,7 +115,7 @@ both halves of the convention or neither
 **Soft-masking**:
 Lower-case bases marking repeat-masked regions. It is data, not formatting: it survives fetching,
 slicing and reverse-complement, and is discarded only by asking, since `TwoBit(masked=True)` is the
-default.
+default. Scanning is the one exception and discards it unasked — ADR-0012.
 _Avoid_: case, lowercase, formatting; bare "masking" — hard-masking writes `N` and is a different
 thing
 
