@@ -8,11 +8,13 @@ recognises* — the count matrix and where it occurs in an assembly — and so i
 keyed by motif. The mapping between the two is many-to-many, which is why neither
 half owns it.
 
-Cofactors are a carve-out and not a gap. :mod:`genome.tf.cofactor` is the third
-subpackage, keyed by gene as :mod:`genome.tf.gene` is, and it answers which genes
-a publisher lists as cofactors of transcription rather than as transcription
-factors. A cofactor recognises no sequence of its own, so it has no motif and
-nothing here scans for one.
+Cofactors are a carve-out and not a gap. :mod:`genome.tf.cofactor` is a third
+part and a peer of both. It is keyed by gene exactly as the census half is, and it
+is a peer rather than a part of it because the question differs: that half says
+whether a gene is a **TF gene** and of what **DBD family**, this one says whether
+it is a **Transcription cofactor** and of what class. A cofactor binds no DNA
+sequence-specifically and so has no motif, which is why nothing in the motif half
+answers for one.
 
 The join itself is :mod:`genome.tf.link`, which lives here rather than in either
 half because it imports both and neither imports it. It is re-exported from this
