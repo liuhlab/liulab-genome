@@ -81,6 +81,25 @@ one whose list does not declare the category asked for raise errors of their own
 caller acts differently on those two facts and a silent zero is what that surface exists to
 prevent.
 
+**And which of its own gene ids a caller's stems name.**
+:meth:`AnnotationRegistry.resolve_gene_ids` matches a **Gene id stem** — a gene id with
+its version dropped — against the stem of every gene id in the **Annotation database**,
+which makes it the first thing in this package to open the database registering an
+annotation has always built. It answers with *every* gene id a stem names and never picks
+one, and the stems that named nothing come back on the answer rather than being dropped.
+It is general: nothing about it knows what the stems it is handed are a list *of*, and a
+caller holding a few thousand of them resolves the lot in one pass.
+
+**Its first caller is a published census.** :meth:`AnnotationRegistry.tf_gene_list`
+resolves the **TF gene table** :mod:`genome.tf.gene` ships for this assembly's species
+into the annotation's own gene ids, so the answer joins to a counts matrix with nothing
+left to normalise. The species is read from the assembly's own metadata row and never
+passed in, so one species' transcription factors cannot be asked for while holding
+another species' assembly (ADR-0003);
+nothing here decides what a transcription factor is, and the census's provenance travels
+on the answer. Two absences raise rather than answering emptily, as the gene categories'
+pair does: an assembly whose species has no census, and one nothing names a species for.
+
 Examples
 --------
 >>> from pathlib import Path
@@ -133,10 +152,27 @@ from genome.io.results import (
     GeneList,
     GeneListSource,
     RegisteredAnnotation,
+    ResolvedGeneIds,
+    TFGene,
+    TFGeneList,
     annotation_register_command,
 )
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
-from genome.metadata import AnnotationMetadata, list_annotation_metadata, lookup_annotation
+from genome.metadata import (
+    AnnotationMetadata,
+    assembly_metadata,
+    list_annotation_metadata,
+    lookup_annotation,
+)
+from genome.tf.gene import (
+    TRUE_CELL,
+    UNIFORM_COLUMNS,
+    TFGeneTable,
+    census_metadata,
+    census_species,
+    species_slug,
+    tf_gene_table,
+)
 
 #: Subdirectory under an assembly's data dir holding all its GTF annotations.
 #: The Assembly context owns the layout, so the name is read from there.
@@ -160,6 +196,19 @@ _MERGED_FROM_KEY = "merged_from"
 #: Keys of one entry under :data:`_MERGED_FROM_KEY`.
 _MERGED_COMPONENT_KEY = "component"
 _MERGED_ANNOTATION_KEY = "annotation"
+
+#: What is asked of an **Annotation database** to resolve **Gene id stem**s: the id of
+#: every gene feature, ascending, and nothing else. That id is the table's primary key —
+#: so the ordering is an index walk — and for a GTF it is the ``gene_id`` gffutils keys
+#: gene features by, which is the annotation's own spelling of its gene ids. It goes
+#: through gffutils' own ``execute`` and is read a row at a time off the cursor: building
+#: a feature object per row would parse an attribute blob per gene for a value already in
+#: hand, and a GENCODE annotation has some 78,000 of them.
+_GENE_IDS_QUERY = "SELECT id FROM features WHERE featuretype = 'gene' ORDER BY id"
+
+#: What separates a gene id from its version — ``ENSG00000123456.7`` — and therefore what
+#: a **Gene id stem** is everything before. An id carrying none is its own stem.
+_VERSION_SEPARATOR = "."
 
 
 class ChromosomeMismatchError(ValueError):
@@ -300,6 +349,155 @@ class AnnotationNotRegisteredError(KeyError):
         super().__init__(
             f"no annotation {name!r} is registered for {assembly!r}. Registered here: "
             f"{_elide(self.registered) or '(none)'}. {next_step}"
+        )
+
+
+class NoGeneFeaturesError(LookupError):
+    """An annotation's database holds no gene at all, so no gene id can be resolved.
+
+    The absence a caller must never read as *this annotation carries none of my genes*.
+    A GTF that declares only exons registers as exons alone —
+    :meth:`AnnotationRegistry.register` leaves **Feature inference** off, and rightly, since
+    it is gffutils' slow path and the publishers who matter declare their genes — so an
+    annotation like that would answer every stem with *not found* while looking perfectly
+    healthy. It says so instead, and names the argument that rebuilds it with the genes in.
+
+    A :class:`LookupError`, as the other absences on this surface are.
+
+    Parameters
+    ----------
+    annotation : str
+        The **Registered name** that was asked about.
+    assembly : str
+        The **Assembly** it is registered for.
+
+    Attributes
+    ----------
+    annotation : str
+        The name asked about.
+    assembly : str
+        The assembly it is registered for.
+
+    Examples
+    --------
+    >>> try:
+    ...     raise NoGeneFeaturesError("mine", "tiny")
+    ... except LookupError as error:
+    ...     print("--infer-genes" in str(error))
+    True
+    """
+
+    def __init__(self, annotation: str, assembly: str) -> None:
+        self.annotation = annotation
+        self.assembly = assembly
+        super().__init__(
+            f"the annotation {annotation!r} registered for {assembly!r} has no gene features "
+            f"in its database, so there is nothing to resolve gene ids against. This is not "
+            f"a gene it happens to lack: its GTF declares no gene lines at all, and "
+            f"reconstructing them from the exons is off by default. Register it again with "
+            f"that turned on — --infer-genes from a shell, disable_infer_genes=False from "
+            f"Python — or register an annotation whose GTF declares its genes."
+        )
+
+
+class NoTFCensusError(LookupError):
+    """No census has been published for this **Assembly**'s species, so none can answer.
+
+    The first of the two absences a **TF gene list** has, and the one a caller must never
+    read as *this species has no transcription factors*: nobody has published a census
+    for it, which is a fact about the literature and not about the genome. Worm, yeast and
+    *E. coli* land here today. The message names the species that do have one, since asking
+    about one of those is the thing a caller can do instead.
+
+    A :class:`LookupError`, so it may be caught together with :class:`UnknownSpeciesError`
+    and still told apart — exactly as the **Curated gene list**'s two absences are.
+
+    Parameters
+    ----------
+    assembly : str
+        The **Assembly** asked about.
+    species : str
+        The species its metadata row names, which is what no census ships for.
+    censused : iterable of str
+        The species a census does ship for.
+
+    Attributes
+    ----------
+    assembly : str
+        The assembly asked about.
+    species : str
+        Its species.
+    censused : tuple of str
+        The species that do have a census.
+
+    Examples
+    --------
+    >>> try:
+    ...     raise NoTFCensusError("ce11", "Caenorhabditis elegans", ["Homo sapiens"])
+    ... except LookupError as error:
+    ...     print("Homo sapiens" in str(error))
+    True
+    """
+
+    def __init__(self, assembly: str, species: str, censused: Iterable[str]) -> None:
+        self.assembly = assembly
+        self.species = species
+        self.censused: tuple[str, ...] = tuple(censused)
+        super().__init__(
+            f"no TF census ships for {species!r}, which is the species the assembly table "
+            f"names for {assembly!r} — so which of its genes are transcription factors is "
+            f"unanswered here rather than answered with none. Censuses ship for: "
+            f"{_elide(self.censused) or '(none)'}. Answering for {species!r} means shipping a "
+            f"census for it, which scripts/build_tf_census.py writes."
+        )
+
+
+class UnknownSpeciesError(LookupError):
+    """Nothing says what species this **Assembly** is, so no census can be chosen for it.
+
+    The second of the two absences, and a different fact from :class:`NoTFCensusError`:
+    the question was not *is there a census for this species* but *which species is this*,
+    and nothing answered it. Two ways in, and neither is a mistake — a **Chimera** is more
+    than one species by construction and no census answers for one, and an assembly the
+    curated table does not list carries no species at all, which is the ordinary state of
+    a free-form local key.
+
+    The species is read from the assembly's own metadata and never passed in, so this is
+    what a caller gets instead of quietly being handed another species' census.
+
+    Parameters
+    ----------
+    assembly : str
+        The **Assembly** whose species nothing names.
+    censused : iterable of str
+        The species a census ships for.
+
+    Attributes
+    ----------
+    assembly : str
+        The assembly asked about.
+    censused : tuple of str
+        The species that have a census.
+
+    Examples
+    --------
+    >>> try:
+    ...     raise UnknownSpeciesError("ce11_ecHT115", ["Homo sapiens"])
+    ... except LookupError as error:
+    ...     print("Homo sapiens" in str(error))
+    True
+    """
+
+    def __init__(self, assembly: str, censused: Iterable[str]) -> None:
+        self.assembly = assembly
+        self.censused: tuple[str, ...] = tuple(censused)
+        super().__init__(
+            f"nothing says what species {assembly!r} is, so no TF census can be chosen for "
+            f"it. The species comes from the assembly's own metadata row and is never passed "
+            f"in, which is what makes asking for one species' transcription factors while "
+            f"holding another's assembly impossible. A chimera is more than one species and "
+            f"no census answers for one; anything else needs a row naming its species in the "
+            f"assembly metadata table. Censuses ship for: {_elide(self.censused) or '(none)'}."
         )
 
 
@@ -800,16 +998,7 @@ class AnnotationRegistry:
         >>> registry.path("ensgene_v101")              # doctest: +SKIP
         PosixPath('/data/genome/sacCer3/gtf/ensgene_v101/ensgene_v101.gtf')
         """
-        annotation = self._registered.get(name)
-        if annotation is None:
-            raise AnnotationNotRegisteredError(
-                self.assembly,
-                name,
-                self._registered,
-                [record.name for record in self._offered],
-                broken=self._broken.get(name),
-            )
-        return annotation.gtf
+        return self._annotation(name).gtf
 
     def register(
         self,
@@ -1170,6 +1359,194 @@ class AnnotationRegistry:
             for category in _declared_categories(contributors)
         )
 
+    def resolve_gene_ids(self, stems: Iterable[str], name: str | None = None) -> ResolvedGeneIds:
+        """Return the gene ids one registered annotation carries for each **Gene id stem**.
+
+        A stem is a gene id with its version dropped — ``ENSG00000123456`` for
+        ``ENSG00000123456.7`` — which is how every published table keyed by gene arrives,
+        and never how a GENCODE **Annotation** spells the same gene. This is the crossing:
+        every gene id in the **Annotation database** is reduced to its own stem, and a stem
+        answers with every gene id that reduced to it. An id carrying no version is its own
+        stem, so an annotation whose ids were never versioned — WormBase's, SGD's — resolves
+        each of its genes to itself and is untouched by an Ensembl-shaped assumption.
+
+        **Every id, and never a chosen one.** One stem naming two gene ids is not a
+        malformed annotation: ``gencode_v50lift37`` has nine such stems, eight of them
+        pseudoautosomal genes carrying a ``_PAR_Y`` copy, and a resolver taking the first
+        would hand back the X copy of a Y gene without saying it had chosen. So the answer
+        is a mapping to *all* of them, ascending.
+
+        **Nothing is dropped.** Stems this annotation carries no gene for come back in
+        :attr:`~genome.io.results.ResolvedGeneIds.unresolved`, so a caller resolving a few
+        thousand at once can see which of them this annotation does not have rather than
+        counting the answer and wondering.
+
+        The annotation must be **registered here**, and a **Merged annotation** is read
+        exactly as any other: it has one database of its own, holding both components' gene
+        features under the components' own gene ids — a merge rewrites seqnames and never a
+        ``gene_id`` — so a stem naming a gene in each component answers with both, which is
+        the same rule as the pseudoautosomal one and needs no attribution to apply it.
+
+        One indexed pass over the database's gene features answers the whole call, however
+        many stems it was handed; nothing reads the GTF, and no annotation is held in
+        memory.
+
+        Parameters
+        ----------
+        stems : iterable of str
+            The **Gene id stem**s to resolve, in the order they should come back. Repeats
+            are asked once. Pass them all at once: the cost is the pass, not the stem.
+        name : str, optional
+            The **Registered name** to resolve against. Omitted, this assembly's **Default
+            annotation** answers.
+
+        Returns
+        -------
+        genome.io.results.ResolvedGeneIds
+            The stems that named gene ids, mapped to every id each names, and the stems
+            that named none.
+
+        Raises
+        ------
+        ValueError
+            If ``name`` is omitted and no **Default annotation** is decided; the message
+            names the argument that chooses one.
+        AnnotationNotRegisteredError
+            If nothing of that name is registered here.
+        NoGeneFeaturesError
+            If its database holds no gene at all — every stem would otherwise resolve to
+            nothing, which is a different fact and must not be reported as this one.
+
+        Examples
+        --------
+        >>> registry = AnnotationRegistry.locate("hg19")             # doctest: +SKIP
+        >>> answer = registry.resolve_gene_ids(                      # doctest: +SKIP
+        ...     ["ENSG00000182378", "ENSG00000141510"], "gencode_v50lift37"
+        ... )
+        >>> answer.resolved["ENSG00000182378"]                       # doctest: +SKIP
+        ('ENSG00000182378.14', 'ENSG00000182378.14_PAR_Y')
+        """
+        resolved_name = self._named(name)
+        annotation = self._annotation(resolved_name)
+        # Asked once each and answered in the order they arrived, so a caller can read its
+        # own list against the answer.
+        asked = tuple(dict.fromkeys(stems))
+        if not asked:
+            return ResolvedGeneIds(
+                assembly=self.assembly, annotation=resolved_name, resolved={}, unresolved=()
+            )
+        found, any_genes = _gene_ids_by_stem(annotation.db, frozenset(asked))
+        if not any_genes:
+            raise NoGeneFeaturesError(resolved_name, self.assembly)
+        return ResolvedGeneIds(
+            assembly=self.assembly,
+            annotation=resolved_name,
+            resolved={stem: tuple(found[stem]) for stem in asked if stem in found},
+            unresolved=tuple(stem for stem in asked if stem not in found),
+        )
+
+    def tf_gene_list(
+        self, name: str | None = None, *, include_rejected: bool = False
+    ) -> TFGeneList:
+        """Return the genes a census judges transcription factors, in this annotation's ids.
+
+        The **TF gene table** :mod:`genome.tf.gene` ships for this assembly's species, met
+        with one registered annotation: every **Gene id stem** the census is keyed by is
+        resolved through :meth:`resolve_gene_ids` into the gene ids this annotation
+        actually spells, so the answer joins to a counts matrix with nothing left for the
+        caller to normalise. A stem naming two gene ids answers with both, and the stems
+        this annotation carries no gene for ride back on
+        :attr:`~genome.io.results.TFGeneList.unresolved` rather than being dropped.
+
+        **The species is the assembly's own** — the curated metadata table's, read here and
+        never passed in, so asking for human transcription factors while holding a mouse
+        assembly is not expressible (ADR-0003).
+
+        **Nothing here decides what a transcription factor is.** The verdict is the
+        census's, and the answer carries the publisher, version and PubMed id that reached
+        it. Assessed-positive by default, because the common case is not 2,765 rows to
+        filter down to 1,639; ``include_rejected`` widens to the genes the census assessed
+        and turned down, which is the whole census and still not every gene there is — one
+        it never assessed is absent from both answers, and that is a third fact.
+
+        Wanting only ``Known motif``, or wanting ``Inferred motif`` included, is a re-filter
+        on the **TF assessment** each gene already carries in
+        :attr:`~genome.io.results.TFGene.judgements` rather than a second flag here.
+
+        Parameters
+        ----------
+        name : str, optional
+            The **Registered name** to answer in the gene ids of. Omitted, this assembly's
+            **Default annotation** answers.
+        include_rejected : bool, default False
+            Carry the genes the census assessed and judged *not* to be transcription
+            factors as well, each saying so in
+            :attr:`~genome.io.results.TFGene.is_tf`. A census that records no rejections
+            answers the same either way.
+
+        Returns
+        -------
+        genome.io.results.TFGeneList
+            The genes, the census's provenance, and the stems that resolved to nothing.
+
+        Raises
+        ------
+        UnknownSpeciesError
+            If nothing names this assembly's species — a chimera, or an assembly no
+            curated row lists.
+        NoTFCensusError
+            If no census ships for that species; the message names the ones that do.
+        ValueError
+            If ``name`` is omitted and no **Default annotation** is decided.
+        AnnotationNotRegisteredError
+            If nothing of that name is registered here.
+        NoGeneFeaturesError
+            If its database holds no gene at all.
+
+        Examples
+        --------
+        >>> registry = AnnotationRegistry.locate("hg38")              # doctest: +SKIP
+        >>> answer = registry.tf_gene_list("gencode_v50")             # doctest: +SKIP
+        >>> answer.genes[0].symbol, answer.genes[0].dbd_family        # doctest: +SKIP
+        ('TFAP2A', 'AP-2')
+        >>> answer.provenance.publisher                               # doctest: +SKIP
+        'Lambert et al. 2018'
+        """
+        species = assembly_metadata(self.assembly).species
+        if species is None:
+            raise UnknownSpeciesError(self.assembly, _censused_species())
+        census = tf_gene_table(species)
+        if census is None:
+            raise NoTFCensusError(self.assembly, species, _censused_species())
+        resolved = self.resolve_gene_ids(
+            census.gene_id_stems if include_rejected else census.assessed_positive, name
+        )
+        return TFGeneList(
+            assembly=self.assembly,
+            annotation=resolved.annotation,
+            species=species,
+            provenance=census.provenance,
+            genes=_tf_genes(census, resolved),
+            unresolved=resolved.unresolved,
+        )
+
+    def _annotation(self, name: str) -> GtfAnnotation:
+        """Return the files of the annotation registered as ``name``, or raise for it.
+
+        Every question about one registered annotation comes through here, so a name
+        nothing registered earns one error with one next action wherever it was asked.
+        """
+        annotation = self._registered.get(name)
+        if annotation is None:
+            raise AnnotationNotRegisteredError(
+                self.assembly,
+                name,
+                self._registered,
+                [record.name for record in self._offered],
+                broken=self._broken.get(name),
+            )
+        return annotation
+
     def _gene_list_contributors(
         self, name: str | None
     ) -> tuple[str, tuple[tuple[_Contributor, CuratedGeneList], ...]]:
@@ -1379,6 +1756,100 @@ def gene_lists(
     return AnnotationRegistry.locate(assembly, cache_dir).gene_lists(annotation)
 
 
+def tf_gene_list(
+    assembly: str,
+    *,
+    annotation: str | None = None,
+    include_rejected: bool = False,
+    cache_dir: str | Path | None = None,
+) -> TFGeneList:
+    """Return the genes a published census judges transcription factors in ``assembly``.
+
+    :meth:`AnnotationRegistry.tf_gene_list` for an assembly named rather than opened,
+    built the way :func:`gene_list` is: a registry for the length of the call, so a shell
+    surface over it adds no second code path. Nothing is prepared, fetched or built to
+    answer it, and the census is read from inside the package.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to ask about, e.g. ``"hg38"``. Its own metadata row names the
+        species, which is what selects the census.
+    annotation : str, optional
+        The **Registered name** to answer in the gene ids of; the **Default annotation**
+        when omitted.
+    include_rejected : bool, default False
+        Carry the genes the census assessed and turned down as well.
+    cache_dir : str or pathlib.Path, optional
+        Override which assembly directory is inspected, as :func:`gene_list` takes it.
+
+    Returns
+    -------
+    genome.io.results.TFGeneList
+        The answer :meth:`AnnotationRegistry.tf_gene_list` describes.
+
+    Raises
+    ------
+    UnknownSpeciesError
+        If nothing names the assembly's species.
+    NoTFCensusError
+        If no census ships for that species.
+    ValueError
+        If ``annotation`` is omitted and no **Default annotation** is decided.
+    AnnotationNotRegisteredError
+        If that annotation is not registered here.
+    NoGeneFeaturesError
+        If its database holds no gene at all.
+
+    Examples
+    --------
+    >>> tf_gene_list("hg38").provenance.publisher            # doctest: +SKIP
+    'Lambert et al. 2018'
+    """
+    return AnnotationRegistry.locate(assembly, cache_dir).tf_gene_list(
+        annotation, include_rejected=include_rejected
+    )
+
+
+def _censused_species() -> tuple[str, ...]:
+    """Return the species a census ships for, in the spelling an assembly's row uses.
+
+    What both absences name as the thing a caller can ask about instead. The shipped files
+    are what is enumerated, since one is what makes a species answerable; the provenance
+    table beside them is only read for the publisher's own spelling, so a census shipping
+    without a row is still named — badly, as its slug, which is the state
+    :func:`~genome.tf.gene.census.tf_gene_table` raises over anyway.
+    """
+    named = {species_slug(record.species): record.species for record in census_metadata()}
+    return tuple(named.get(slug, slug) for slug in census_species())
+
+
+def _tf_genes(census: TFGeneTable, resolved: ResolvedGeneIds) -> tuple[TFGene, ...]:
+    """Return one entry per resolved stem, carrying the census's own row for that gene.
+
+    The census's four uniform columns become fields and everything after them stays under
+    the publisher's own name, because beyond those four no two censuses carry the same
+    columns and nothing here compares one publisher's with another's (ADR-0014). The order
+    is the census's own row order, which is the order the stems were asked about.
+    """
+    publisher_columns = census.columns[len(UNIFORM_COLUMNS) :]
+    rows = {row[0]: row for row in census.rows}
+    genes: list[TFGene] = []
+    for stem, gene_ids in resolved.resolved.items():
+        cells = dict(zip(census.columns, rows[stem], strict=True))
+        genes.append(
+            TFGene(
+                gene_id_stem=stem,
+                gene_ids=gene_ids,
+                symbol=cells["symbol"],
+                is_tf=cells["is_tf"] == TRUE_CELL,
+                dbd_family=cells["dbd_family"],
+                judgements={name: cells[name] for name in publisher_columns},
+            )
+        )
+    return tuple(genes)
+
+
 def _contributors_of(directory: Path, name: str, assembly: str) -> tuple[_Contributor, ...]:
     """Return the annotations that contributed to the one registered in ``directory``.
 
@@ -1415,6 +1886,47 @@ def _declared_categories(
     for _contributor, listed in contributors:
         declared.update(dict.fromkeys(listed.categories))
     return tuple(declared)
+
+
+def _gene_id_stem(gene_id: str) -> str:
+    """Return ``gene_id`` with its version dropped — its **Gene id stem**.
+
+    Everything before the first separator, and the whole id when it carries none, which is
+    what makes an unversioned annotation's gene its own stem. GENCODE's pseudoautosomal
+    ``ENSG00000182378.14_PAR_Y`` stems to ``ENSG00000182378`` alongside the copy it is of,
+    which is the collision the caller is handed both halves of.
+    """
+    stem, separator, _version = gene_id.partition(_VERSION_SEPARATOR)
+    return stem if separator else gene_id
+
+
+def _gene_ids_by_stem(database: Path, wanted: Container[str]) -> tuple[dict[str, list[str]], bool]:
+    """Return the gene ids in ``database`` under each wanted stem, and whether it has any.
+
+    One pass, a row at a time off a cursor over the gene features alone: the database is
+    queried rather than read, so a GENCODE-sized annotation costs an index walk of its gene
+    rows and holds only what matched. The ids under a stem arrive ascending because the
+    query does, so two machines answer in one order.
+
+    The second half of the answer is *whether the database holds a gene at all*, because
+    **no genes** and **no matching genes** are different facts that the mapping alone
+    cannot tell apart, and the caller says something different about each.
+    """
+    found: dict[str, list[str]] = {}
+    any_genes = False
+    handle = gffutils.FeatureDB(str(database))
+    try:
+        for row in handle.execute(_GENE_IDS_QUERY):
+            any_genes = True
+            gene_id = str(row["id"])
+            stem = _gene_id_stem(gene_id)
+            if stem in wanted:
+                found.setdefault(stem, []).append(gene_id)
+    finally:
+        # The registry hands back an answer and not a handle, so the SQLite connection
+        # this opened closes here — including on the way out of an exception.
+        handle.conn.close()
+    return found, any_genes
 
 
 def _status_row(

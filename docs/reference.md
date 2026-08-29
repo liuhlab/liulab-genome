@@ -45,6 +45,10 @@
 
 ::: genome.gene_list
 
+## `genome.tf.gene.census`
+
+::: genome.tf.gene.census
+
 ## `genome.tf.motif.motif`
 
 ::: genome.tf.motif.motif
@@ -84,6 +88,10 @@
 ## `genome.tf.motif.mixin`
 
 ::: genome.tf.motif.mixin
+
+## `genome.tf.link`
+
+::: genome.tf.link
 
 ## `genome.external`
 

@@ -30,6 +30,7 @@ from genome.io.gtf import (
 )
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.seq import DNA
+from genome.tf.gene import TFGeneTable, tf_gene_table
 from genome.tf.motif import MIN_MOTIF_LENGTH, hit_count, provenance_of, read_hits
 from genome.tf.motif import jaspar as jaspar_mod
 from genome.tf.motif.jaspar import MOTIF_COUNTS
@@ -65,6 +66,14 @@ _TINY_ANNOTATION = AnnotationMetadata(
     default=True,
 )
 
+#: The two assemblies a census ships for, with the annotation each one defaults to. Named
+#: rather than derived: which species has a census is exactly what the TF command is about,
+#: so the pairing is written down where the test controls it. Two of them because the
+#: censuses are two publishers' and their columns differ — mouse's has none beyond the
+#: uniform four — and a command that only ever met Lambert's would not know that.
+_TF_ASSEMBLY, _TF_ANNOTATION = "hg38", "gencode_v50"
+_MOUSE_ASSEMBLY, _MOUSE_ANNOTATION = "mm39", "gencode_vM39"
+
 #: Which of the committed motifs a scan leaves out, and how many are left to scan with.
 #: Read off the fixture table rather than written down again, so a changed fixture moves the
 #: expected summary with it: a motif under the minimum length cannot reach the default
@@ -96,6 +105,19 @@ def _output(result: object) -> str:
 def _register(assembly: str, assembly_dir: Path, gtf: Path, name: str) -> GtfAnnotation:
     """Register ``gtf`` under ``assembly_dir``, so a command has something to report on."""
     return AnnotationRegistry.locate(assembly, assembly_dir).register_path(gtf, name)
+
+
+def _gtf_declaring(*gene_ids: str) -> str:
+    """A GTF declaring one gene, transcript and exon per id, in the shape GENCODE has.
+
+    The ids are the only thing that varies: nothing reading it looks at a coordinate, so
+    every gene sits on the same interval rather than inviting anyone to.
+    """
+    return "".join(
+        f'chrI\ttest\t{feature}\t1\t100\t.\t+\t.\tgene_id "{gene_id}"; transcript_id "{gene_id}_t";\n'
+        for gene_id in gene_ids
+        for feature in ("gene", "transcript", "exon")
+    )
 
 
 def _feature_types(database_path: Path) -> list[str]:
@@ -1256,6 +1278,174 @@ class TestGeneCategoryCommands:
 
         assert result.exit_code == 1
         assert "genome register-annotation sacCer3 ensgene_v101" in _output(result)
+
+
+class TestTFGeneListCommand:
+    """``genome tf-gene-list`` — an assembly's TF genes, shaped like ``genome gene-list``.
+
+    The shipped censuses answer, as the shipped curated lists answer for gene categories:
+    which genes are transcription factors is the census's judgement and no fixture stands
+    in for it, so every expectation below is read off the shipped file. What is asserted
+    here is the command and not the crossing — ``tests/test_gtf.py`` owns that — so: the
+    stdout/stderr split that makes the output pipe, the record ``--json`` emits, and a
+    non-zero exit naming the next action for each of the three ways it can fail.
+    """
+
+    def _census(self, assembly: str) -> TFGeneTable:
+        """The census shipped for ``assembly``'s species, whichever publisher wrote it."""
+        species = metadata.assembly_metadata(assembly).species
+        assert species is not None, f"{assembly} has no species in the assembly table"
+        census = tf_gene_table(species)
+        assert census is not None, f"no census ships for {species}"
+        return census
+
+    def _registered(
+        self,
+        liulab_data: Path,
+        *gene_ids: str,
+        assembly: str = _TF_ASSEMBLY,
+        name: str = _TF_ANNOTATION,
+    ) -> None:
+        """Register a GTF declaring ``gene_ids`` as ``assembly``'s ``name``, where it lives."""
+        source = liulab_data / f"{assembly}.{name}.gtf"
+        source.write_text(_gtf_declaring(*gene_ids))
+        _register(assembly, liulab_data / "genome" / assembly, source, name)
+
+    def _positive(self, assembly: str, count: int) -> list[str]:
+        """``count`` gene ids, one per assessed-positive stem, versioned as GENCODE spells them."""
+        return [f"{stem}.1" for stem in self._census(assembly).assessed_positive[:count]]
+
+    def test_only_the_gene_ids_reach_stdout_so_the_output_pipes(self, liulab_data: Path) -> None:
+        gene_ids = self._positive(_TF_ASSEMBLY, 2)
+        self._registered(liulab_data, *gene_ids)
+
+        result = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY])
+
+        assert result.exit_code == 0
+        assert result.stdout == "".join(f"{gene_id}\n" for gene_id in gene_ids)
+        # Whose judgement it is must be printed and must not cost the pipe, so it goes
+        # beside the ids: the heading, the census's own attribution, and what the crossing
+        # cost — the stems the census holds that this annotation carries no gene for.
+        assert f"{_TF_ASSEMBLY} / {_TF_ANNOTATION}" in result.stderr
+        assert "Homo sapiens" in result.stderr
+        assert self._census(_TF_ASSEMBLY).provenance.attribution() in result.stderr
+        unresolved = len(self._census(_TF_ASSEMBLY).assessed_positive) - len(gene_ids)
+        assert f"2 genes, 2 gene ids, {unresolved} stems" in result.stderr
+
+    def test_the_annotation_may_be_named_instead_of_defaulted(self, liulab_data: Path) -> None:
+        gene_ids = self._positive(_TF_ASSEMBLY, 1)
+        self._registered(liulab_data, *gene_ids, name="mine")
+
+        result = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY, "--annotation", "mine"])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == gene_ids
+        assert f"{_TF_ASSEMBLY} / mine" in result.stderr
+
+    def test_json_carries_the_genes_the_provenance_and_the_unresolved_stems(
+        self, liulab_data: Path
+    ) -> None:
+        census = self._census(_TF_ASSEMBLY)
+        stem = census.assessed_positive[0]
+        self._registered(liulab_data, f"{stem}.1")
+
+        result = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY, "--json"])
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert list(payload) == [
+            "assembly",
+            "annotation",
+            "species",
+            "provenance",
+            "genes",
+            "gene_ids",
+            "unresolved",
+        ]
+        assert (payload["assembly"], payload["annotation"]) == (_TF_ASSEMBLY, _TF_ANNOTATION)
+        assert payload["gene_ids"] == [f"{stem}.1"]
+        assert payload["provenance"]["pubmed_id"] == census.provenance.pubmed_id
+        assert payload["unresolved"]  # what this annotation carries no gene for, not dropped
+        cells = dict(
+            zip(census.columns, census.rows[census.gene_id_stems.index(stem)], strict=True)
+        )
+        gene = payload["genes"][0]
+        assert gene["dbd_family"] == cells["dbd_family"]
+        assert gene["judgements"]["tf_assessment"] == cells["tf_assessment"]
+
+    def test_a_mouse_assembly_is_answered_by_the_census_published_for_mouse(
+        self, liulab_data: Path
+    ) -> None:
+        # The verdict travels with the census that reached it, so which one spoke is a
+        # fact about the assembly's species and never about which one came first.
+        gene_ids = self._positive(_MOUSE_ASSEMBLY, 1)
+        self._registered(liulab_data, *gene_ids, assembly=_MOUSE_ASSEMBLY, name=_MOUSE_ANNOTATION)
+
+        result = runner.invoke(app, ["tf-gene-list", _MOUSE_ASSEMBLY])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == gene_ids
+        assert "Mus musculus" in result.stderr
+        assert self._census(_MOUSE_ASSEMBLY).provenance.attribution() in result.stderr
+        assert self._census(_TF_ASSEMBLY).provenance.publisher not in result.stderr
+
+    def test_a_census_recording_nothing_beyond_the_uniform_columns_still_emits_json(
+        self, liulab_data: Path
+    ) -> None:
+        # AnimalTFDB ships the four uniform columns and no more, so every mouse gene's
+        # judgements are empty. A surface reaching for a **TF assessment** that is not
+        # there would raise here rather than print, which is why nothing does.
+        gene_ids = self._positive(_MOUSE_ASSEMBLY, 1)
+        self._registered(liulab_data, *gene_ids, assembly=_MOUSE_ASSEMBLY, name=_MOUSE_ANNOTATION)
+
+        result = runner.invoke(app, ["tf-gene-list", _MOUSE_ASSEMBLY, "--json"])
+
+        assert result.exit_code == 0
+        gene = _json.loads(result.stdout)["genes"][0]
+        assert gene["judgements"] == {}
+        assert gene["dbd_family"]  # the uniform four are there all the same
+
+    def test_an_unregistered_annotation_exits_one_naming_the_command_that_registers_it(
+        self, liulab_data: Path
+    ) -> None:
+        result = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert f"genome register-annotation {_TF_ASSEMBLY} {_TF_ANNOTATION}" in _output(result)
+
+    def test_a_species_no_census_ships_for_exits_one_naming_the_species_that_have_one(
+        self, liulab_data: Path
+    ) -> None:
+        # Human gene ids registered for a worm assembly: the species is the assembly's own
+        # and never what the GTF happens to hold, so this is refused rather than answered.
+        self._registered(
+            liulab_data, *self._positive(_TF_ASSEMBLY, 1), assembly="ce11", name="wormbase_ws298"
+        )
+
+        result = runner.invoke(app, ["tf-gene-list", "ce11"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "no TF census ships" in _output(result)
+        assert "Caenorhabditis elegans" in _output(result)
+        assert "Homo sapiens" in _output(result)  # …and what may be asked about instead
+
+    def test_an_assembly_nothing_names_a_species_for_exits_one_saying_so(
+        self, liulab_data: Path
+    ) -> None:
+        # Not the same fact as no census ships: the question was which species this is,
+        # and no row answered it. An unlisted local key is the ordinary way in.
+        self._registered(
+            liulab_data, *self._positive(_TF_ASSEMBLY, 1), assembly="tiny", name="mine"
+        )
+
+        result = runner.invoke(app, ["tf-gene-list", "tiny", "--annotation", "mine"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "nothing says what species 'tiny' is" in _output(result)
+        assert "Homo sapiens" in _output(result)
 
 
 class TestTheSurfacesThatDidNotChange:

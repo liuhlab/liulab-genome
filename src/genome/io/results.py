@@ -12,9 +12,13 @@ field — :class:`RegisteredAssembly` and :class:`RegisteredAnnotation` — so e
 question is answered off the record in hand instead of by opening the directory again. The
 rest are reports assembled from more than one source: :class:`VerifiedAssembly` sets a
 digest against what pinned it, :class:`AnnotationStatus` sets what the annotation table
-offers against what this machine holds, one :class:`AnnotationStatusRow` per name, and
+offers against what this machine holds, one :class:`AnnotationStatusRow` per name,
 :class:`GeneList` sets one **Gene category**'s genes against the **Curated gene list**s
-that contributed them, one :class:`GeneListSource` apiece.
+that contributed them, one :class:`GeneListSource` apiece, :class:`ResolvedGeneIds`
+sets the **Gene id stem**s a caller asked about against the gene ids one annotation
+actually carries — including the stems it carries none for — and :class:`TFGeneList` sets
+one published census against one annotation, one :class:`TFGene` per gene it named here,
+carrying the census's own provenance so the verdict never travels without it.
 
 **An answer knows how it reads.** :attr:`AnnotationStatusRow.state` and
 :attr:`AnnotationStatus.default_summary` are here rather than in the surface printing them,
@@ -40,6 +44,7 @@ from typing import Any
 
 from genome.io.completion import CompletionRecord
 from genome.io.components import ChimeraDetails
+from genome.tf.gene import CensusProvenance
 
 #: What answered *which digest should this FASTA have?* — the assembly's curated
 #: metadata row, or the completion record its own registration wrote. Reported by
@@ -562,6 +567,272 @@ class GeneList:
             "category": self.category,
             "gene_ids": self.gene_ids,
             "sources": [source.as_json() for source in self.sources],
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedGeneIds:
+    """The gene ids one **Annotation** carries for the **Gene id stem**s it was asked about.
+
+    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`'s answer. A stem is a gene
+    id with its version dropped, and inside one annotation it may name more than one gene
+    id — nine do in ``gencode_v50lift37``, eight of them pseudoautosomal-Y — so every stem
+    answers with **all** of them and nothing here picks one. Two stems never name the same
+    gene id, since an id has exactly one stem.
+
+    **What was asked about and is not there rides back on the answer.** A caller holding a
+    few thousand stems gets the ones this annotation carries no gene for in
+    :attr:`unresolved` rather than a shorter list than it passed, so what the thing it was
+    holding contains and this annotation does not is visible instead of dropped.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** asked about.
+    annotation : str
+        The **Registered name** whose own gene ids these are.
+    resolved : mapping of str to tuple of str
+        Every stem that named at least one gene id, in the order the stems were asked
+        about, to the ids it names, in ascending order. No value is ever an empty tuple —
+        a stem that named nothing is in :attr:`unresolved` instead.
+    unresolved : tuple of str
+        The stems no gene id in the annotation is of, in the order they were asked about.
+
+    Examples
+    --------
+    >>> answer = ResolvedGeneIds(
+    ...     assembly="hg19",
+    ...     annotation="gencode_v50lift37",
+    ...     resolved={
+    ...         "ENSG00000182378": ("ENSG00000182378.14", "ENSG00000182378.14_PAR_Y"),
+    ...         "ENSG00000141510": ("ENSG00000141510.18",),
+    ...     },
+    ...     unresolved=("ENSG00000288541",),
+    ... )
+    >>> answer.gene_ids
+    ['ENSG00000182378.14', 'ENSG00000182378.14_PAR_Y', 'ENSG00000141510.18']
+    >>> answer.as_json()["unresolved"]
+    ['ENSG00000288541']
+    """
+
+    assembly: str
+    annotation: str
+    resolved: Mapping[str, tuple[str, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_ids(self) -> list[str]:
+        """Every gene id resolved, stem order and then id order — a fresh list each call.
+
+        **Every** id, not one per stem. Flattening is exactly where a reader would take
+        the first id of each stem and lose the second, which is the pseudoautosomal gene
+        this answer's shape exists to keep; :attr:`resolved` is what says which stem an id
+        came from.
+        """
+        return [gene_id for ids in self.resolved.values() for gene_id in ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``assembly``, ``annotation``, ``resolved`` as a mapping of stem to a list of
+            gene ids, ``unresolved`` as a list, and the flattened ``gene_ids``. The last
+            is written out beside the mapping it is read from for the reason
+            :attr:`gene_ids` gives: a reader assembling it is a reader who might take one
+            id per stem.
+        """
+        return {
+            "assembly": self.assembly,
+            "annotation": self.annotation,
+            "resolved": {stem: list(ids) for stem, ids in self.resolved.items()},
+            "unresolved": list(self.unresolved),
+            "gene_ids": self.gene_ids,
+        }
+
+
+@dataclass(frozen=True)
+class TFGene:
+    """One gene a census assessed, named in one **Annotation**'s own gene ids.
+
+    An entry of a :class:`TFGeneList`. The census's four uniform columns are fields of
+    their own — the **Gene id stem** it is keyed by, the symbol, the TF flag and the **DBD
+    family** — and everything the publisher recorded beyond them stays under the
+    publisher's own name in :attr:`judgements`, because beyond those four no two censuses
+    carry the same columns and nothing here compares one publisher's with another's
+    (ADR-0014).
+
+    ``gene_ids`` is a tuple because one stem may name more than one gene id in one
+    annotation and this never picks one — see
+    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`. It is never empty: a stem
+    the annotation carries no gene for is in :attr:`TFGeneList.unresolved` instead of here.
+
+    Attributes
+    ----------
+    gene_id_stem : str
+        The **Gene id stem** the census is keyed by.
+    gene_ids : tuple of str
+        Every gene id this annotation spells that stem with, ascending.
+    symbol : str or None
+        The gene symbol the census records, or ``None`` where it records none.
+    is_tf : bool
+        The census's own TF flag. ``True`` for every gene of a **TF gene list** left at
+        its default, and the field that tells a rejected gene from an accepted one when a
+        caller widened to carry both.
+    dbd_family : str or None
+        The **DBD family** this census classifies the gene under, in the publisher's own
+        vocabulary — group by it within a species and never across two.
+    judgements : mapping of str to (str or None)
+        Every other column the census records for this gene, under the census's own
+        snake_case spelling of its published name: the **TF assessment** a caller tightens
+        or loosens on, the binding mode, the motif status, the KRAB flag and the
+        third-party votes, for a census that records them. ``None`` is a cell the
+        publisher left blank.
+
+    Examples
+    --------
+    >>> gene = TFGene(
+    ...     gene_id_stem="ENSG00000214717",
+    ...     gene_ids=("ENSG00000214717.13", "ENSG00000214717.13_PAR_Y"),
+    ...     symbol="ZBED1",
+    ...     is_tf=True,
+    ...     dbd_family="BED ZF",
+    ...     judgements={"tf_assessment": "Known motif"},
+    ... )
+    >>> gene.judgements["tf_assessment"]
+    'Known motif'
+    >>> gene.as_json()["gene_ids"]
+    ['ENSG00000214717.13', 'ENSG00000214717.13_PAR_Y']
+    """
+
+    gene_id_stem: str
+    gene_ids: tuple[str, ...]
+    symbol: str | None
+    is_tf: bool
+    dbd_family: str | None
+    judgements: Mapping[str, str | None]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this gene as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            The fields above under their own names, with ``gene_ids`` as a list and
+            ``judgements`` as a plain mapping under the census's own column names.
+        """
+        return {
+            "gene_id_stem": self.gene_id_stem,
+            "gene_ids": list(self.gene_ids),
+            "symbol": self.symbol,
+            "is_tf": self.is_tf,
+            "dbd_family": self.dbd_family,
+            "judgements": dict(self.judgements),
+        }
+
+
+@dataclass(frozen=True)
+class TFGeneList:
+    """One **Assembly**'s **TF gene**s, in its registered annotation's own gene ids.
+
+    :meth:`~genome.io.gtf.AnnotationRegistry.tf_gene_list`'s answer, and what a
+    ``--json`` surface over it serializes. The census's **Gene id stem**s
+    resolved against one annotation, so the ids join to a counts matrix with nothing left
+    to normalise, and assessed-positive by default: the common case is not 2,765 rows to
+    filter down to 1,639.
+
+    **Nothing here decides what a transcription factor is.** Every verdict is the census's
+    and travels with :attr:`provenance`, which names the publisher to cite. Two censuses
+    that classify one factor differently are two answers rather than a contradiction, and
+    this says which one is speaking.
+
+    **What the census holds and this annotation does not is visible.** A stem no gene id
+    here is of comes back in :attr:`unresolved` rather than being dropped, so a caller can
+    count what the crossing cost instead of wondering.
+
+    There is no empty one for the reasons an absent census would give: an assembly whose
+    species has no census, and one nothing names a species for, each raise a
+    :class:`LookupError` of their own.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** asked about.
+    annotation : str
+        The **Registered name** whose own gene ids these are.
+    species : str
+        The species the assembly's own metadata row names, which is what selected the
+        census. Never passed in by a caller, so asking for one species' transcription
+        factors while holding another species' assembly is not expressible (ADR-0003).
+    provenance : genome.tf.gene.census.CensusProvenance
+        Where the census came from: publisher, version, PubMed id, source URL and digest.
+        :meth:`~genome.tf.gene.census.CensusProvenance.attribution` renders the line to
+        print beside anything it answered.
+    genes : tuple of TFGene
+        One entry per **Gene id stem** that named at least one gene id here, in the
+        census's own row order.
+    unresolved : tuple of str
+        The stems this annotation carries no gene for, in census row order.
+
+    Examples
+    --------
+    >>> from genome.tf.gene import tf_gene_table
+    >>> answer = TFGeneList(
+    ...     assembly="hg38",
+    ...     annotation="gencode_v50",
+    ...     species="Homo sapiens",
+    ...     provenance=tf_gene_table("Homo sapiens").provenance,
+    ...     genes=(
+    ...         TFGene("ENSG00000137203", ("ENSG00000137203.12",), "TFAP2A", True, "AP-2", {}),
+    ...     ),
+    ...     unresolved=("ENSG00000214717",),
+    ... )
+    >>> answer.gene_ids
+    ['ENSG00000137203.12']
+    >>> answer.provenance.publisher
+    'Lambert et al. 2018'
+    >>> answer.as_json()["unresolved"]
+    ['ENSG00000214717']
+    """
+
+    assembly: str
+    annotation: str
+    species: str
+    provenance: CensusProvenance
+    genes: tuple[TFGene, ...]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_ids(self) -> list[str]:
+        """Every gene id, gene order then id order — a fresh list each call.
+
+        **Every** id, not one per gene, for the reason
+        :attr:`ResolvedGeneIds.gene_ids` gives: flattening is where a reader would take
+        the first id of a stem that names two and lose the other. :attr:`genes` is what
+        says which gene an id came from, and what the census said about it.
+        """
+        return [gene_id for gene in self.genes for gene_id in gene.gene_ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``assembly``, ``annotation``, ``species``, the census's ``provenance`` under
+            its own field names, ``genes`` as a list of :meth:`TFGene.as_json` entries,
+            the flattened ``gene_ids``, and ``unresolved`` as a list. The ids are written
+            out beside the genes they are read from for the reason :attr:`gene_ids` gives.
+        """
+        return {
+            "assembly": self.assembly,
+            "annotation": self.annotation,
+            "species": self.species,
+            "provenance": asdict(self.provenance),
+            "genes": [gene.as_json() for gene in self.genes],
+            "gene_ids": self.gene_ids,
+            "unresolved": list(self.unresolved),
         }
 
 

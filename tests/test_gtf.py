@@ -14,6 +14,7 @@ the shipped table is tested in test_metadata.
 from __future__ import annotations
 
 import gzip
+import json
 from dataclasses import asdict
 from pathlib import Path
 
@@ -42,6 +43,9 @@ from genome.io.gtf import (
     ChromosomeMismatchError,
     GtfAnnotation,
     MergeSource,
+    NoGeneFeaturesError,
+    NoTFCensusError,
+    UnknownSpeciesError,
     _reject_unknown_chromosomes,
     annotation_dir,
     annotation_status,
@@ -54,11 +58,13 @@ from genome.io.gtf import (
     register_annotation,
     register_gtf,
     register_merged_gtf,
+    tf_gene_list,
 )
 from genome.io.registration import AssemblyDir
 from genome.io.results import chromosome_check_summary
 from genome.io.utils import ChecksumMismatchError
-from genome.metadata import AnnotationMetadata
+from genome.metadata import AnnotationMetadata, assembly_metadata
+from genome.tf.gene import UNIFORM_COLUMNS, TFGeneTable, tf_gene_table
 
 from .conftest import FakeFetch
 from .test_source import _module_level_imports
@@ -1715,6 +1721,479 @@ class TestMergedGeneList:
         union = list(dict.fromkeys([*_declared(_WORM), *_declared(_FOOD)]))
 
         assert [answer.category for answer in registry.gene_lists()] == union
+
+
+# ---------------------------------------------------------------------------------------
+# Which of an annotation's own gene ids a Gene id stem names
+# ---------------------------------------------------------------------------------------
+
+#: A pseudoautosomal gene as GENCODE spells it on a lift: one stem, two gene ids, the
+#: second the Y copy. Real ids — PLCXD1 and TP53 — because the shape of the collision is
+#: the whole point and an invented id would not have it.
+_PAR_X = "ENSG00000182378.14"
+_PAR_Y = "ENSG00000182378.14_PAR_Y"
+_ALONE = "ENSG00000141510.18"
+_PAR_STEM = "ENSG00000182378"
+_ALONE_STEM = "ENSG00000141510"
+
+#: A stem no fixture below carries a gene for — what the census holds and the annotation
+#: does not.
+_ABSENT_STEM = "ENSG00000288541"
+
+
+def _gtf_declaring(*gene_ids: str) -> str:
+    """A GTF declaring one gene, transcript and exon per id, in the shape GENCODE has.
+
+    The ids are the only thing that varies: nothing reading it looks at a coordinate, so
+    every gene sits on the same interval rather than inviting anyone to.
+    """
+    lines: list[str] = []
+    for gene_id in gene_ids:
+        attributes = f'gene_id "{gene_id}"; transcript_id "{gene_id}_t";'
+        lines.extend(
+            f"chrI\ttest\t{feature}\t1\t100\t.\t+\t.\t{attributes}"
+            for feature in ("gene", "transcript", "exon")
+        )
+    return "\n".join(lines) + "\n"
+
+
+class TestResolveGeneIds:
+    """``AnnotationRegistry.resolve_gene_ids`` — a **Gene id stem** against real gene ids.
+
+    The first surface here to open the **Annotation database**, so every test registers a
+    fixture GTF for real and asks the registry, exactly as the gene-category tests do. What
+    is asserted is what a caller holding a published table keyed by unversioned ids gets
+    back: both of the ids a stem names rather than one of them, and the stems this
+    annotation has nothing for said out loud.
+    """
+
+    def _registry(self, tmp_path: Path, gtf: str, name: str = "mine") -> AnnotationRegistry:
+        """Register ``gtf`` under ``name`` for the ``tiny`` assembly and open the registry."""
+        source = tmp_path / f"{name}.gtf"
+        source.write_text(gtf)
+        _register_by_path(tmp_path, source, name)
+        return AnnotationRegistry.locate("tiny", tmp_path)
+
+    def test_a_stem_resolves_to_the_versioned_id_the_annotation_spells_it_with(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path, _gtf_declaring(_ALONE))
+
+        answer = registry.resolve_gene_ids([_ALONE_STEM], "mine")
+
+        assert answer.resolved == {_ALONE_STEM: (_ALONE,)}
+        assert answer.unresolved == ()
+        assert (answer.assembly, answer.annotation) == ("tiny", "mine")
+
+    def test_a_stem_naming_two_gene_ids_answers_with_both_rather_than_choosing(
+        self, tmp_path: Path
+    ) -> None:
+        # The `gencode_v50lift37` case: nine stems name two genes each, eight of them a
+        # pseudoautosomal pair. Answering with the first would hand back the X copy of a Y
+        # gene without ever saying a choice had been made.
+        registry = self._registry(tmp_path, _gtf_declaring(_PAR_Y, _PAR_X, _ALONE))
+
+        answer = registry.resolve_gene_ids([_PAR_STEM], "mine")
+
+        assert answer.resolved[_PAR_STEM] == (_PAR_X, _PAR_Y)
+
+    def test_a_stem_this_annotation_carries_no_gene_for_is_reported_and_not_dropped(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path, _gtf_declaring(_ALONE))
+
+        answer = registry.resolve_gene_ids([_ALONE_STEM, _ABSENT_STEM], "mine")
+
+        assert answer.unresolved == (_ABSENT_STEM,)
+        assert _ABSENT_STEM not in answer.resolved
+        # …and what did resolve is still there, so an absence costs the caller nothing else.
+        assert answer.gene_ids == [_ALONE]
+
+    def test_an_annotation_whose_ids_carry_no_version_resolves_each_stem_to_itself(
+        self, tmp_path: Path
+    ) -> None:
+        # WormBase and SGD never versioned a gene id, and an Ensembl-shaped assumption
+        # would leave both unresolvable. An id with no version is its own stem.
+        registry = self._registry(tmp_path, _GTF)
+
+        answer = registry.resolve_gene_ids(["g1", "g2"], "mine")
+
+        assert answer.resolved == {"g1": ("g1",)}
+        assert answer.unresolved == ("g2",)
+
+    def test_the_answer_keeps_the_order_the_stems_were_asked_about_and_asks_repeats_once(
+        self, tmp_path: Path
+    ) -> None:
+        # A caller passing a few thousand at once reads its own list against the answer.
+        registry = self._registry(tmp_path, _gtf_declaring(_ALONE, _PAR_X))
+
+        answer = registry.resolve_gene_ids(
+            [_PAR_STEM, _ABSENT_STEM, _ALONE_STEM, _PAR_STEM], "mine"
+        )
+
+        assert list(answer.resolved) == [_PAR_STEM, _ALONE_STEM]
+        assert answer.gene_ids == [_PAR_X, _ALONE]
+        assert answer.unresolved == (_ABSENT_STEM,)
+
+    def test_asking_about_no_stems_answers_emptily_rather_than_about_every_gene(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path, _gtf_declaring(_ALONE))
+
+        answer = registry.resolve_gene_ids([], "mine")
+
+        assert (dict(answer.resolved), answer.unresolved) == ({}, ())
+
+    def test_an_annotation_declaring_no_genes_says_so_rather_than_failing_every_stem(
+        self, tmp_path: Path
+    ) -> None:
+        # An exon-level GTF registers as exons alone, since reconstructing the features
+        # above them is off by default. Every stem would come back unresolved, which reads
+        # as *this annotation has none of your genes* and is a different fact entirely.
+        registry = self._registry(tmp_path, _BARE_GTF)
+
+        with pytest.raises(NoGeneFeaturesError) as excinfo:
+            registry.resolve_gene_ids(["g1"], "mine")
+
+        message = str(excinfo.value)
+        assert "mine" in message
+        assert "--infer-genes" in message  # …and the argument that rebuilds it with genes
+
+    def test_an_unregistered_name_earns_the_error_it_already_had(self, tmp_path: Path) -> None:
+        # Resolved through the same lookup every other question goes through, so the
+        # message and its repair are the ones that surface already has.
+        registry = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path)
+
+        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
+            registry.resolve_gene_ids([_ALONE_STEM], _CURATED)
+
+        assert f"genome register-annotation {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
+
+    def test_naming_no_annotation_asks_the_default_one(self, tmp_path: Path) -> None:
+        registry = self._registry(tmp_path, _gtf_declaring(_ALONE))
+
+        assert registry.default == "mine"
+        assert registry.resolve_gene_ids([_ALONE_STEM]).annotation == "mine"
+
+    def test_a_merged_annotation_answers_from_its_own_database_for_either_component(
+        self, tmp_path: Path
+    ) -> None:
+        # A merge rewrites seqnames and never a `gene_id`, so its one database holds both
+        # components' genes under the ids their own annotations gave them — and resolution
+        # reads that database, exactly as it reads any other annotation's.
+        worm = tmp_path / "worm.gtf"
+        worm.write_text(_gtf_declaring("WBGene00004512"))
+        food = tmp_path / "food.gtf"
+        food.write_text(_gtf_declaring(_ALONE))
+        chrom_sizes = _write_chrom_sizes(
+            tmp_path,
+            *(f"chrI__{component}" for component in (_WORM_COMPONENT, _FOOD_COMPONENT)),
+            assembly=_CHIMERA,
+        )
+        register_merged_gtf(
+            tmp_path,
+            "merged",
+            [
+                MergeSource(_WORM_COMPONENT, _WORM, worm),
+                MergeSource(_FOOD_COMPONENT, _FOOD, food),
+            ],
+            separator="__",
+            chrom_sizes=chrom_sizes,
+        )
+        registry = AnnotationRegistry.locate(_CHIMERA, tmp_path)
+
+        answer = registry.resolve_gene_ids(["WBGene00004512", _ALONE_STEM], "merged")
+
+        assert answer.gene_ids == ["WBGene00004512", _ALONE]
+        assert answer.unresolved == ()
+
+
+# ---------------------------------------------------------------------------------------
+# Which of an annotation's genes a published census judges transcription factors
+# ---------------------------------------------------------------------------------------
+
+#: An assembly whose species has a census, one whose species has none, and one nothing
+#: names a species for at all — the chimera, which is more than one species by
+#: construction. Named rather than derived: which species a census ships for is exactly
+#: what these tests are about, so the pairing is written down where the test controls it.
+_CENSUSED_ASSEMBLY = _CURATED_ASSEMBLY
+_UNCENSUSED_ASSEMBLY = "ce11"
+
+#: ZBED1 as GENCODE spells it on a pseudoautosomal region: one **Gene id stem**, two gene
+#: ids, and a gene Lambert judges a transcription factor — so the collision a resolver must
+#: not silently pick from is a **TF gene**'s own, rather than an invented one.
+_TF_PAR_X = "ENSG00000214717.13"
+_TF_PAR_Y = "ENSG00000214717.13_PAR_Y"
+_TF_PAR_STEM = "ENSG00000214717"
+
+
+def _census() -> TFGeneTable:
+    """The census shipped for the species of the assembly the tests below register against.
+
+    Read off the shipped file rather than named, exactly as the curated gene lists are:
+    which genes are transcription factors is the census's judgement, and no fixture may
+    stand in for it.
+    """
+    species = assembly_metadata(_CENSUSED_ASSEMBLY).species
+    assert species is not None, f"{_CENSUSED_ASSEMBLY} has no species in the assembly table"
+    census = tf_gene_table(species)
+    assert census is not None, f"no census ships for {species}"
+    return census
+
+
+def _census_row(stem: str) -> dict[str, str | None]:
+    """The census's own row for one **Gene id stem**, keyed by its own column names."""
+    census = _census()
+    row = census.rows[census.gene_id_stems.index(stem)]
+    return dict(zip(census.columns, row, strict=True))
+
+
+def _rejected_stem() -> str:
+    """A stem the census assessed and judged *not* to be a transcription factor."""
+    census = _census()
+    positive = set(census.assessed_positive)
+    return next(stem for stem in census.gene_id_stems if stem not in positive)
+
+
+def _stem_assessed(assessment: str) -> str:
+    """A stem the census judged a TF under one of its own **TF assessment** grades."""
+    return next(
+        stem
+        for stem in _census().assessed_positive
+        if _census_row(stem)["tf_assessment"] == assessment
+    )
+
+
+def _versioned(stem: str) -> str:
+    """One gene id an annotation might spell that stem with — a version it never carries."""
+    return f"{stem}.1"
+
+
+class TestTFGeneList:
+    """``AnnotationRegistry.tf_gene_list`` — where a published census meets an annotation.
+
+    The shipped census answers here, as the shipped curated lists do for gene categories:
+    what a census holds is its publisher's business and no fixture pretends otherwise. What
+    is asserted is the crossing — the census's **Gene id stem**s arriving as this
+    annotation's own gene ids, what rode back unresolved, and that an assembly no census
+    can answer for raises rather than answering with nothing.
+    """
+
+    def _registry(
+        self,
+        tmp_path: Path,
+        *gene_ids: str,
+        assembly: str = _CENSUSED_ASSEMBLY,
+        name: str = "mine",
+    ) -> AnnotationRegistry:
+        """Register a GTF declaring ``gene_ids`` under ``name`` and open the registry."""
+        tmp_path.mkdir(parents=True, exist_ok=True)
+        source = tmp_path / f"{name}.gtf"
+        source.write_text(_gtf_declaring(*gene_ids))
+        _register_by_path(tmp_path, source, name, assembly=assembly)
+        return AnnotationRegistry.locate(assembly, tmp_path)
+
+    def test_the_census_arrives_in_this_annotations_own_gene_ids(self, tmp_path: Path) -> None:
+        # The whole point of the surface: the answer joins to a counts matrix keyed by this
+        # annotation's ids, with no normalisation left for the caller.
+        stems = _census().assessed_positive[:2]
+        gene_ids = [_versioned(stem) for stem in stems]
+        registry = self._registry(tmp_path, *gene_ids)
+
+        answer = registry.tf_gene_list("mine")
+
+        assert (answer.assembly, answer.annotation) == (_CENSUSED_ASSEMBLY, "mine")
+        assert [gene.gene_id_stem for gene in answer.genes] == list(stems)
+        assert answer.gene_ids == gene_ids
+
+    def test_only_the_genes_the_census_judged_transcription_factors_are_carried(
+        self, tmp_path: Path
+    ) -> None:
+        # The common case is not 2,765 rows to filter down to 1,639.
+        positive, rejected = _census().assessed_positive[0], _rejected_stem()
+        registry = self._registry(tmp_path, _versioned(positive), _versioned(rejected))
+
+        answer = registry.tf_gene_list("mine")
+
+        assert [gene.gene_id_stem for gene in answer.genes] == [positive]
+        assert [gene.is_tf for gene in answer.genes] == [True]
+
+    def test_a_caller_can_widen_to_the_genes_the_census_assessed_and_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        # …and widening carries the verdict rather than dropping it: a gene the census
+        # assessed and turned down arrives saying so, which is not the same fact as a gene
+        # it never looked at, and that one is absent from both answers.
+        positive, rejected = _census().assessed_positive[0], _rejected_stem()
+        registry = self._registry(tmp_path, _versioned(positive), _versioned(rejected))
+
+        answer = registry.tf_gene_list("mine", include_rejected=True)
+
+        assert {gene.gene_id_stem: gene.is_tf for gene in answer.genes} == {
+            positive: True,
+            rejected: False,
+        }
+
+    def test_a_gene_carries_the_censuss_family_and_every_judgement_it_recorded(
+        self, tmp_path: Path
+    ) -> None:
+        census = _census()
+        stem = census.assessed_positive[0]
+        registry = self._registry(tmp_path, _versioned(stem))
+
+        gene = registry.tf_gene_list("mine").genes[0]
+
+        cells = _census_row(stem)
+        assert gene.symbol == cells["symbol"]
+        assert gene.dbd_family == cells["dbd_family"]
+        # Everything the publisher recorded beyond the uniform four, under its own names:
+        # the assessment, the binding mode, the motif status, the KRAB flag and the votes.
+        assert dict(gene.judgements) == {
+            name: cells[name] for name in census.columns[len(UNIFORM_COLUMNS) :]
+        }
+
+    def test_a_caller_can_tighten_on_the_assessment_the_census_recorded(
+        self, tmp_path: Path
+    ) -> None:
+        # The **TF assessment** is graded, and tightening to `Known motif` or loosening to
+        # include `Inferred motif` is a re-filter on what the answer already carries rather
+        # than a second flag this package invents.
+        known, inferred = _stem_assessed("Known motif"), _stem_assessed("Inferred motif")
+        registry = self._registry(tmp_path, _versioned(known), _versioned(inferred))
+
+        answer = registry.tf_gene_list("mine")
+
+        assert {gene.gene_id_stem for gene in answer.genes} == {known, inferred}
+        assert [
+            gene.gene_id_stem
+            for gene in answer.genes
+            if gene.judgements["tf_assessment"] == "Known motif"
+        ] == [known]
+
+    def test_the_verdict_travels_with_the_census_that_reached_it(self, tmp_path: Path) -> None:
+        registry = self._registry(tmp_path, _versioned(_census().assessed_positive[0]))
+
+        answer = registry.tf_gene_list("mine")
+
+        assert answer.provenance == _census().provenance
+        assert answer.provenance.publisher
+        assert answer.provenance.version
+        assert answer.provenance.pubmed_id
+        assert answer.species == assembly_metadata(_CENSUSED_ASSEMBLY).species
+
+    def test_stems_this_annotation_carries_no_gene_for_ride_back_on_the_answer(
+        self, tmp_path: Path
+    ) -> None:
+        census = _census()
+        carried, absent = census.assessed_positive[0], census.assessed_positive[1]
+        registry = self._registry(tmp_path, _versioned(carried))
+
+        answer = registry.tf_gene_list("mine")
+
+        assert [gene.gene_id_stem for gene in answer.genes] == [carried]
+        assert absent in answer.unresolved
+        # Every stem the census judged a transcription factor is accounted for one way or
+        # it holds and this annotation does not is visible rather than dropped.
+        assert len(answer.genes) + len(answer.unresolved) == len(census.assessed_positive)
+
+    def test_a_stem_naming_two_gene_ids_answers_with_both(self, tmp_path: Path) -> None:
+        assert _TF_PAR_STEM in _census().assessed_positive
+        registry = self._registry(tmp_path, _TF_PAR_Y, _TF_PAR_X)
+
+        answer = registry.tf_gene_list("mine")
+
+        assert [gene.gene_ids for gene in answer.genes] == [(_TF_PAR_X, _TF_PAR_Y)]
+        assert answer.gene_ids == [_TF_PAR_X, _TF_PAR_Y]
+
+    def test_the_species_follows_the_assembly_and_never_the_ids_the_gtf_holds(
+        self, tmp_path: Path
+    ) -> None:
+        # Human gene ids registered for a worm assembly. Asking for one species'
+        # transcription factors while holding another's assembly is not expressible, so this
+        # is answered about the assembly's own species and never about what is in the GTF.
+        registry = self._registry(tmp_path, _TF_PAR_X, assembly=_UNCENSUSED_ASSEMBLY)
+
+        with pytest.raises(NoTFCensusError) as excinfo:
+            registry.tf_gene_list("mine")
+
+        message = str(excinfo.value)
+        assert str(assembly_metadata(_UNCENSUSED_ASSEMBLY).species) in message
+        assert str(assembly_metadata(_CENSUSED_ASSEMBLY).species) in message
+
+    @pytest.mark.parametrize("assembly", [_CHIMERA, "tiny"])
+    def test_an_assembly_nothing_names_a_species_for_says_so_rather_than_guessing(
+        self, tmp_path: Path, assembly: str
+    ) -> None:
+        registry = self._registry(tmp_path, _TF_PAR_X, assembly=assembly)
+
+        with pytest.raises(UnknownSpeciesError) as excinfo:
+            registry.tf_gene_list("mine")
+
+        message = str(excinfo.value)
+        assert assembly in message
+        assert str(assembly_metadata(_CENSUSED_ASSEMBLY).species) in message
+
+    def test_the_two_absences_are_told_apart_by_type_and_caught_together(
+        self, tmp_path: Path
+    ) -> None:
+        # As the curated gene lists' pair already are: *no census ships for this species*
+        # and *nothing says what species this is* are different answers, both lookups, and
+        # neither is an empty collection.
+        uncensused = self._registry(tmp_path / "worm", _TF_PAR_X, assembly=_UNCENSUSED_ASSEMBLY)
+        unnamed = self._registry(tmp_path / "chimera", _TF_PAR_X, assembly=_CHIMERA)
+
+        with pytest.raises(LookupError) as no_census:
+            uncensused.tf_gene_list("mine")
+        with pytest.raises(LookupError) as no_species:
+            unnamed.tf_gene_list("mine")
+
+        assert isinstance(no_census.value, NoTFCensusError)
+        assert isinstance(no_species.value, UnknownSpeciesError)
+        assert not isinstance(no_census.value, UnknownSpeciesError)
+        assert not isinstance(no_species.value, NoTFCensusError)
+
+    def test_an_unregistered_name_earns_the_error_it_already_had(self, tmp_path: Path) -> None:
+        registry = AnnotationRegistry.locate(_CENSUSED_ASSEMBLY, tmp_path)
+
+        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
+            registry.tf_gene_list(_CURATED)
+
+        assert f"genome register-annotation {_CENSUSED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
+
+    def test_naming_no_annotation_asks_the_default_one(self, tmp_path: Path) -> None:
+        registry = self._registry(tmp_path, _TF_PAR_X, name=_CURATED)
+
+        assert registry.default == _CURATED
+        assert registry.tf_gene_list().annotation == _CURATED
+
+    def test_the_json_record_carries_the_genes_the_provenance_and_the_unresolved_stems(
+        self, tmp_path: Path
+    ) -> None:
+        # What ``--json`` has to be able to emit: the genes with their **TF assessment** and
+        # **DBD family**, the census's provenance, and the stems that resolved to nothing.
+        stem = _census().assessed_positive[0]
+        registry = self._registry(tmp_path, _versioned(stem))
+
+        payload = registry.tf_gene_list("mine").as_json()
+
+        assert payload["assembly"] == _CENSUSED_ASSEMBLY
+        assert payload["gene_ids"] == [_versioned(stem)]
+        assert payload["provenance"]["pubmed_id"] == _census().provenance.pubmed_id
+        assert payload["unresolved"]
+        gene = payload["genes"][0]
+        assert (gene["gene_id_stem"], gene["gene_ids"]) == (stem, [_versioned(stem)])
+        assert gene["dbd_family"] == _census_row(stem)["dbd_family"]
+        assert gene["judgements"]["tf_assessment"] == _census_row(stem)["tf_assessment"]
+        assert json.loads(json.dumps(payload)) == payload  # serializes as it stands
+
+    def test_it_answers_for_an_assembly_named_rather_than_opened(self, tmp_path: Path) -> None:
+        stem = _census().assessed_positive[0]
+        self._registry(tmp_path, _versioned(stem))
+
+        answer = tf_gene_list(_CENSUSED_ASSEMBLY, annotation="mine", cache_dir=tmp_path)
+
+        assert [gene.gene_id_stem for gene in answer.genes] == [stem]
+        assert answer.provenance == _census().provenance
 
 
 class TestAddressedByAssembly:
