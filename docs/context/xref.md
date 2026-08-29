@@ -12,8 +12,10 @@ source** that asserted it, so two publishers who disagree are two answers rather
 contradiction to resolve: NCBI and Ensembl agree on 57.5% of human gene-level (GeneID, ENSG) pairs,
 which makes the choice of publisher nearly half the answer.
 
-None of it is built. Every entry below is *(decided, not built — ADR-0017, ADR-0018)* in the sense
-the context map describes: use the word, do not call the API it describes.
+**Xref set**, **Xref source**, **Default xref source** and **Namespace** are built: `genome.xref`
+answers for human, mouse and worm off the Alliance of Genome Resources. **Symbol match** is still
+*(decided, not built — ADR-0018)* in the sense the context map describes — use the word, do not call
+the API it describes.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker** and the
 rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem**, the hub every entry

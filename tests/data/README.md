@@ -1,7 +1,8 @@
 # Test fixtures
 
 Small, subsampled **real** files — never a large genomic file. Every sequence byte here came from
-UCSC's `sacCer3` golden path and every motif byte from a published JASPAR release; both were cut
+UCSC's `sacCer3` golden path, every motif byte from a published JASPAR release and every
+cross-reference row from a published Alliance of Genome Resources release; all three were cut
 down on the lab cluster. Three fixtures depart from the source bytes and every departure is named
 below: names are this repo's where a fixture needs a spelling `sacCer3` does not have; two stretches
 are lower-cased; and `planted_motifs.fa` has **39 bases overwritten** with three JASPAR consensus
@@ -16,12 +17,14 @@ words, which is the one place a base here was chosen rather than found. Nothing 
 | `ensembl_style.gtf` | `tiny.gtf` with the `chr` prefix stripped (`I`, `II`, `III`) — an Ensembl-spelled annotation for the chromosome-name mismatch case |
 | `tiny_jaspar_transfac.txt` | Ten whole records of the JASPAR 2024 `all` union file, in its own order — see below |
 | `planted_motifs.fa` | Two 600-base windows of `tiny.fa` with three motif consensus words written into them at known positions and strands — see below |
+| `xref/alliance_genecrossreference_tiny.tsv.gz` | Fourteen whole genes of the Alliance of Genome Resources release 9.0.0 cross-reference file, copied verbatim — see below |
 
 Sources:
 
 - `https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz`
 - `https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz`
 - `https://jaspar.elixir.no/download/data/2024/CORE/JASPAR2024_CORE_non-redundant_pfms_transfac.txt`
+- `https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz`
 
 `tiny.gtf` coordinates are 1-based inclusive, as every GTF is; they convert at the I/O boundary and
 are never seen in that form inside the package.
@@ -142,3 +145,43 @@ None of this is prose to be trusted: `tests/test_chimera_fixtures.py` asserts ev
 wrap width and masked stretch against the committed bytes, and `CHIMERA_COMPONENTS` in
 `tests/conftest.py` is the same table as data, with a `chimera_component` fixture that registers one
 as an assembly.
+
+## `xref/alliance_genecrossreference_tiny.tsv.gz` — the cross-reference rows
+
+Fourteen whole genes of the Alliance of Genome Resources `GENECROSSREFERENCE_COMBINED` file of
+release 9.0.0 — every row those genes have, copied verbatim, under the file's own fourteen comment
+lines and its own header. Nothing is edited and nothing is synthesised: every duplicate row, every
+cross-reference to a database this package does not carry, and the file's own column order are what
+the Alliance published. 2.7 KB gzipped, against the publisher's 25 MB.
+
+Whole genes rather than sampled rows, because a gene's rows are what a slice is built from: the
+**Gene id stem** is the `ENSEMBL:` cross-reference on the gene, so half a gene's rows would be a
+gene this package could not resolve, which is a case the file genuinely has and one the fixture
+should not manufacture.
+
+| Gene | Species | The case it is here for |
+|---|---|---|
+| `HGNC:11998` (`TP53`) | human | The plain case: one Ensembl id, one Entrez id, one UniProt accession |
+| `HGNC:1100` (`BRCA1`) | human | Its `NCBI_Gene:672` pair is listed **twice**, under two different pages — the duplication, on real bytes |
+| `HGNC:13666` | human | **Two `ENSEMBL:` cross-references**, so one HGNC id and one Entrez id each name two stems and nothing may pick one |
+| `HGNC:7622` | human | The same again, reached from the other side: `NCBI_Gene:4661` names two stems |
+| `HGNC:10041` | human | A real human gene the Alliance lists with **no `ENSEMBL:` cross-reference at all**, so it has no hub and appears in no slice |
+| `MGI:98834` (`Trp53`) | mouse | Fourteen UniProt accessions on one stem — the reverse verb's many-valued answer |
+| `MGI:105105`, `MGI:1921534` | mouse | Two `ENSEMBL:` cross-references each, so the collision is not a human-only artefact |
+| `WB:WBGene00000001` (`aap-1`) | worm | The identity hop — its `ENSEMBL:` id **is** its WBGene id — and a `WB:aap-1` **symbol** row under the authority's own prefix, which is the trap the reader must not read as a gene id |
+| `WB:WBGene00000912` (`daf-16`) | worm | A second worm gene, so worm is not one row |
+| `WB:WBGene00003425/32/49/63` | worm | Four genes sharing `UniProtKB:P05634`, so one foreign id names **four** stems |
+
+Two things the fixture deliberately does **not** show, because the publisher's file does not:
+
+- **No versioned identifier.** Not one of the 43,867 human ids in release 9.0.0 carries a version
+  suffix. The ingest-side version stripping is covered instead by rows the test writes itself, in
+  `TestVersionsOnTheSourceSide`, and it is kept because other publishers do spell versions — NCBI's
+  `gene2ensembl` writes the gene id bare and the transcript id versioned in the same row.
+- **No duplicate whole rows.** A whole-row `uniq` removes nothing here, exactly as it removes
+  nothing from the full file: the duplication is on `(GeneID, GlobalCrossReferenceID, TaxonID)`,
+  where 2,659,704 rows reduce to 1,811,267 distinct.
+
+None of this is prose to be trusted: `TestFixtureBytes` in `tests/test_xref.py` asserts the header,
+the three taxa, the duplication's shape, the hub-less gene and the worm symbol row against the
+committed bytes, and `FIXTURE_SLICES` pins what each species' slice comes to.
