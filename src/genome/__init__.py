@@ -4,8 +4,13 @@ from importlib.metadata import PackageNotFoundError, version
 
 from genome.gene_list import GeneCategoryNotDeclaredError, NoGeneCategoriesError
 from genome.genome import Genome
-from genome.io.gtf import AnnotationRegistry, NoTFCensusError, UnknownSpeciesError
-from genome.io.results import GeneList, TFGeneList
+from genome.io.gtf import (
+    AnnotationRegistry,
+    NoCofactorTableError,
+    NoTFCensusError,
+    UnknownSpeciesError,
+)
+from genome.io.results import GeneList, TFCofactorList, TFGeneList
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.region import Region
 from genome.seq import DNA, RNA, Protein
@@ -24,10 +29,12 @@ __all__ = [
     "GeneCategoryNotDeclaredError",
     "GeneList",
     "Genome",
+    "NoCofactorTableError",
     "NoGeneCategoriesError",
     "NoTFCensusError",
     "Protein",
     "Region",
+    "TFCofactorList",
     "TFGeneList",
     "UnknownSpeciesError",
     "__version__",

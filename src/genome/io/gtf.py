@@ -100,6 +100,15 @@ nothing here decides what a transcription factor is, and the census's provenance
 on the answer. Two absences raise rather than answering emptily, as the gene categories'
 pair does: an assembly whose species has no census, and one nothing names a species for.
 
+**Its second caller asks the other half of the same question.**
+:meth:`AnnotationRegistry.tf_cofactor_list` resolves the **Cofactor table**
+:mod:`genome.tf.cofactor` ships for the species the same way, and answers in the same
+shape, so a caller who has read one answer has read both. It is a second caller of one
+resolver and not a second crossing: the two differ in which table is read and in what a
+row of it says, and in nothing else. The species is the assembly's own here too, and the
+absences are the same pair — with worm answering here while the census half raises for it,
+because a publisher assessed worm cofactors and none has released a worm TF census.
+
 Examples
 --------
 >>> from pathlib import Path
@@ -153,6 +162,8 @@ from genome.io.results import (
     GeneListSource,
     RegisteredAnnotation,
     ResolvedGeneIds,
+    TFCofactor,
+    TFCofactorList,
     TFGene,
     TFGeneList,
     annotation_register_command,
@@ -163,6 +174,13 @@ from genome.metadata import (
     assembly_metadata,
     list_annotation_metadata,
     lookup_annotation,
+)
+from genome.tf.cofactor import UNIFORM_COLUMNS as COFACTOR_UNIFORM_COLUMNS
+from genome.tf.cofactor import (
+    CofactorTable,
+    cofactor_metadata,
+    cofactor_species,
+    cofactor_table,
 )
 from genome.tf.gene import (
     TRUE_CELL,
@@ -452,52 +470,120 @@ class NoTFCensusError(LookupError):
         )
 
 
-class UnknownSpeciesError(LookupError):
-    """Nothing says what species this **Assembly** is, so no census can be chosen for it.
+class NoCofactorTableError(LookupError):
+    """Nobody has listed this **Assembly**'s species' cofactors, so no table can answer.
 
-    The second of the two absences, and a different fact from :class:`NoTFCensusError`:
-    the question was not *is there a census for this species* but *which species is this*,
-    and nothing answered it. Two ways in, and neither is a mistake — a **Chimera** is more
-    than one species by construction and no census answers for one, and an assembly the
-    curated table does not list carries no species at all, which is the ordinary state of
-    a free-form local key.
+    :class:`NoTFCensusError`'s counterpart on the cofactor half, and the same kind of
+    fact: nobody has published a cofactor list for this species, which is about the
+    literature and not about the genome, and must never be read as *this species has no
+    transcription cofactors*. Yeast and *E. coli* land here today.
 
-    The species is read from the assembly's own metadata and never passed in, so this is
-    what a caller gets instead of quietly being handed another species' census.
+    **Worm does not**, although :class:`NoTFCensusError` raises for the same assembly. A
+    publisher assessed worm cofactors and none has released a worm TF census, so the two
+    halves answer differently for one species — the publishers' shape, and not a defect.
+
+    A :class:`LookupError`, so it may be caught together with :class:`UnknownSpeciesError`
+    and still told apart, exactly as the census pair is.
 
     Parameters
     ----------
     assembly : str
-        The **Assembly** whose species nothing names.
-    censused : iterable of str
-        The species a census ships for.
+        The **Assembly** asked about.
+    species : str
+        The species its metadata row names, which is what no table ships for.
+    shipped_for : iterable of str
+        The species a **Cofactor table** does ship for.
 
     Attributes
     ----------
     assembly : str
         The assembly asked about.
-    censused : tuple of str
-        The species that have a census.
+    species : str
+        Its species.
+    shipped_for : tuple of str
+        The species that do have a cofactor table.
 
     Examples
     --------
     >>> try:
-    ...     raise UnknownSpeciesError("ce11_ecHT115", ["Homo sapiens"])
+    ...     raise NoCofactorTableError("sacCer3", "Saccharomyces cerevisiae", ["Mus musculus"])
+    ... except LookupError as error:
+    ...     print("Mus musculus" in str(error))
+    True
+    """
+
+    def __init__(self, assembly: str, species: str, shipped_for: Iterable[str]) -> None:
+        self.assembly = assembly
+        self.species = species
+        self.shipped_for: tuple[str, ...] = tuple(shipped_for)
+        super().__init__(
+            f"no cofactor table ships for {species!r}, which is the species the assembly "
+            f"table names for {assembly!r} — so which of its genes are transcription "
+            f"cofactors is unanswered here rather than answered with none. Cofactor tables "
+            f"ship for: {_elide(self.shipped_for) or '(none)'}. Answering for {species!r} "
+            f"means shipping a table for it, which scripts/build_tf_cofactor.py writes."
+        )
+
+
+class UnknownSpeciesError(LookupError):
+    """Nothing says what species this **Assembly** is, so no shipped table can be chosen.
+
+    The second absence both gene-keyed halves have, and a different fact from
+    :class:`NoTFCensusError` and :class:`NoCofactorTableError`: the question was not *has
+    anyone published for this species* but *which species is this*, and nothing answered
+    it. Two ways in, and neither is a mistake — a **Chimera** is more than one species by
+    construction and nothing published answers for one, and an assembly the curated table
+    does not list carries no species at all, which is the ordinary state of a free-form
+    local key.
+
+    The species is read from the assembly's own metadata and never passed in, so this is
+    what a caller gets instead of quietly being handed another species' answer.
+
+    One class for both halves because the fact is one fact: only what a caller can ask
+    about instead differs, and ``shipped_table`` is what says which of them was asked for.
+
+    Parameters
+    ----------
+    assembly : str
+        The **Assembly** whose species nothing names.
+    shipped_for : iterable of str
+        The species the table asked for does ship for.
+    shipped_table : str
+        What could not be chosen, named in the message — ``"TF census"`` or ``"cofactor
+        table"``. Keyword-only and required, so a message never says census over an
+        answer that was about cofactors.
+
+    Attributes
+    ----------
+    assembly : str
+        The assembly asked about.
+    shipped_for : tuple of str
+        The species the table asked for does ship for.
+    shipped_table : str
+        What could not be chosen.
+
+    Examples
+    --------
+    >>> try:
+    ...     raise UnknownSpeciesError(
+    ...         "ce11_ecHT115", ["Homo sapiens"], shipped_table="TF census"
+    ...     )
     ... except LookupError as error:
     ...     print("Homo sapiens" in str(error))
     True
     """
 
-    def __init__(self, assembly: str, censused: Iterable[str]) -> None:
+    def __init__(self, assembly: str, shipped_for: Iterable[str], *, shipped_table: str) -> None:
         self.assembly = assembly
-        self.censused: tuple[str, ...] = tuple(censused)
+        self.shipped_table = shipped_table
+        self.shipped_for: tuple[str, ...] = tuple(shipped_for)
         super().__init__(
-            f"nothing says what species {assembly!r} is, so no TF census can be chosen for "
-            f"it. The species comes from the assembly's own metadata row and is never passed "
-            f"in, which is what makes asking for one species' transcription factors while "
-            f"holding another's assembly impossible. A chimera is more than one species and "
-            f"no census answers for one; anything else needs a row naming its species in the "
-            f"assembly metadata table. Censuses ship for: {_elide(self.censused) or '(none)'}."
+            f"nothing says what species {assembly!r} is, so no {shipped_table} can be chosen "
+            f"for it. The species comes from the assembly's own metadata row and is never "
+            f"passed in, which is what makes asking about one species while holding another's "
+            f"assembly impossible. A chimera is more than one species and no {shipped_table} "
+            f"answers for one; anything else needs a row naming its species in the assembly "
+            f"metadata table. One ships for: {_elide(self.shipped_for) or '(none)'}."
         )
 
 
@@ -1514,7 +1600,7 @@ class AnnotationRegistry:
         """
         species = assembly_metadata(self.assembly).species
         if species is None:
-            raise UnknownSpeciesError(self.assembly, _censused_species())
+            raise UnknownSpeciesError(self.assembly, _censused_species(), shipped_table="TF census")
         census = tf_gene_table(species)
         if census is None:
             raise NoTFCensusError(self.assembly, species, _censused_species())
@@ -1527,6 +1613,91 @@ class AnnotationRegistry:
             species=species,
             provenance=census.provenance,
             genes=_tf_genes(census, resolved),
+            unresolved=resolved.unresolved,
+        )
+
+    def tf_cofactor_list(self, name: str | None = None) -> TFCofactorList:
+        """Return the genes a publisher lists as cofactors, in this annotation's ids.
+
+        The **Cofactor table** :mod:`genome.tf.cofactor` ships for this assembly's
+        species, met with one registered annotation, exactly as :meth:`tf_gene_list` meets
+        a census: every **Gene id stem** the table is keyed by is resolved through
+        :meth:`resolve_gene_ids` into the gene ids this annotation actually spells, so the
+        answer joins to a counts matrix with nothing left for the caller to normalise. A
+        stem naming two gene ids answers with both, and the stems this annotation carries
+        no gene for ride back on
+        :attr:`~genome.io.results.TFCofactorList.unresolved` rather than being dropped.
+
+        **The species is the assembly's own** — the curated metadata table's, read here
+        and never passed in, so asking for human cofactors while holding a mouse assembly
+        is not expressible (ADR-0003).
+
+        **Membership is this package's and classification is each publisher's.** A table
+        built from two publishers is a union nobody else published (ADR-0016), which is
+        why each entry says which publisher listed the gene in
+        :attr:`~genome.io.results.TFCofactor.source` and keeps every publisher's own
+        vocabulary under that publisher's namespaced column name in
+        :attr:`~genome.io.results.TFCofactor.classifications`. A ``source`` of ``both``
+        asserts agreement on membership only, never on classification.
+
+        There is no widening flag here, as there is on :meth:`tf_gene_list`: no publisher
+        shipping today releases a rejected set, so the table's listed genes are the whole
+        table. A source that did record rejections would ship them, and they would be left
+        out here rather than needing a second argument.
+
+        Parameters
+        ----------
+        name : str, optional
+            The **Registered name** to answer in the gene ids of. Omitted, this assembly's
+            **Default annotation** answers.
+
+        Returns
+        -------
+        genome.io.results.TFCofactorList
+            The cofactors, the publishers' provenance, and the stems that resolved to
+            nothing.
+
+        Raises
+        ------
+        UnknownSpeciesError
+            If nothing names this assembly's species — a chimera, or an assembly no
+            curated row lists.
+        NoCofactorTableError
+            If no cofactor table ships for that species; the message names the ones that
+            do. Worm has a table although no TF census covers it, so this and
+            :class:`NoTFCensusError` do not raise for the same set of assemblies.
+        ValueError
+            If ``name`` is omitted and no **Default annotation** is decided.
+        AnnotationNotRegisteredError
+            If nothing of that name is registered here.
+        NoGeneFeaturesError
+            If its database holds no gene at all.
+
+        Examples
+        --------
+        >>> registry = AnnotationRegistry.locate("mm39")                    # doctest: +SKIP
+        >>> answer = registry.tf_cofactor_list("gencode_vM39")              # doctest: +SKIP
+        >>> first = answer.cofactors[0]                                     # doctest: +SKIP
+        >>> first.symbol, first.classifications["animaltfdb_category"]      # doctest: +SKIP
+        ('Scmh1', 'Other Cofactors')
+        >>> answer.provenance.sources[0].publisher                          # doctest: +SKIP
+        'AnimalTFDB'
+        """
+        species = assembly_metadata(self.assembly).species
+        if species is None:
+            raise UnknownSpeciesError(
+                self.assembly, _cofactor_species(), shipped_table="cofactor table"
+            )
+        table = cofactor_table(species)
+        if table is None:
+            raise NoCofactorTableError(self.assembly, species, _cofactor_species())
+        resolved = self.resolve_gene_ids(table.cofactor_stems, name)
+        return TFCofactorList(
+            assembly=self.assembly,
+            annotation=resolved.annotation,
+            species=species,
+            provenance=table.provenance,
+            cofactors=_tf_cofactors(table, resolved),
             unresolved=resolved.unresolved,
         )
 
@@ -1811,6 +1982,56 @@ def tf_gene_list(
     )
 
 
+def tf_cofactor_list(
+    assembly: str,
+    *,
+    annotation: str | None = None,
+    cache_dir: str | Path | None = None,
+) -> TFCofactorList:
+    """Return the genes a publisher lists as transcription cofactors in ``assembly``.
+
+    :meth:`AnnotationRegistry.tf_cofactor_list` for an assembly named rather than opened,
+    built the way :func:`tf_gene_list` is: a registry for the length of the call, so a
+    shell surface over it adds no second code path. Nothing is prepared, fetched or built
+    to answer it, and the table is read from inside the package.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to ask about, e.g. ``"mm39"``. Its own metadata row names the
+        species, which is what selects the table.
+    annotation : str, optional
+        The **Registered name** to answer in the gene ids of; the **Default annotation**
+        when omitted.
+    cache_dir : str or pathlib.Path, optional
+        Override which assembly directory is inspected, as :func:`tf_gene_list` takes it.
+
+    Returns
+    -------
+    genome.io.results.TFCofactorList
+        The answer :meth:`AnnotationRegistry.tf_cofactor_list` describes.
+
+    Raises
+    ------
+    UnknownSpeciesError
+        If nothing names the assembly's species.
+    NoCofactorTableError
+        If no cofactor table ships for that species.
+    ValueError
+        If ``annotation`` is omitted and no **Default annotation** is decided.
+    AnnotationNotRegisteredError
+        If that annotation is not registered here.
+    NoGeneFeaturesError
+        If its database holds no gene at all.
+
+    Examples
+    --------
+    >>> tf_cofactor_list("mm39").species                     # doctest: +SKIP
+    'Mus musculus'
+    """
+    return AnnotationRegistry.locate(assembly, cache_dir).tf_cofactor_list(annotation)
+
+
 def _censused_species() -> tuple[str, ...]:
     """Return the species a census ships for, in the spelling an assembly's row uses.
 
@@ -1848,6 +2069,50 @@ def _tf_genes(census: TFGeneTable, resolved: ResolvedGeneIds) -> tuple[TFGene, .
             )
         )
     return tuple(genes)
+
+
+def _cofactor_species() -> tuple[str, ...]:
+    """Return the species a **Cofactor table** ships for, in an assembly row's spelling.
+
+    :func:`_censused_species` for the cofactor half, and answering the same question for
+    the same reason: it is what both absences name as the thing a caller can ask about
+    instead. The shipped files are what is enumerated, since one is what makes a species
+    answerable; the provenance table beside them is only read for the publisher's own
+    spelling, so a table shipping without a row is still named — badly, as its slug,
+    which is the state :func:`~genome.tf.cofactor.table.cofactor_table` raises over
+    anyway.
+    """
+    named = {species_slug(record.species): record.species for record in cofactor_metadata()}
+    return tuple(named.get(slug, slug) for slug in cofactor_species())
+
+
+def _tf_cofactors(table: CofactorTable, resolved: ResolvedGeneIds) -> tuple[TFCofactor, ...]:
+    """Return one entry per resolved stem, carrying the table's own row for that gene.
+
+    :func:`_tf_genes` for the cofactor half. The table's four uniform columns become
+    fields and everything after them stays under the publisher's own namespaced name,
+    because no two publishers carry the same columns and nothing here compares one's
+    vocabulary with another's (ADR-0014). The order is the table's own row order, which
+    is the order the stems were asked about.
+    """
+    publisher_columns = table.columns[len(COFACTOR_UNIFORM_COLUMNS) :]
+    rows = {row[0]: row for row in table.rows}
+    cofactors: list[TFCofactor] = []
+    for stem, gene_ids in resolved.resolved.items():
+        cells = dict(zip(table.columns, rows[stem], strict=True))
+        cofactors.append(
+            TFCofactor(
+                gene_id_stem=stem,
+                gene_ids=gene_ids,
+                symbol=cells["symbol"],
+                is_cofactor=cells["is_cofactor"] == TRUE_CELL,
+                # ``source`` is one of a closed vocabulary, checked as the file is read,
+                # so ``or ""`` only narrows the type of a cell that is always text.
+                source=cells["source"] or "",
+                classifications={name: cells[name] for name in publisher_columns},
+            )
+        )
+    return tuple(cofactors)
 
 
 def _contributors_of(directory: Path, name: str, assembly: str) -> tuple[_Contributor, ...]:

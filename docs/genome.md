@@ -313,6 +313,44 @@ except UnknownSpeciesError:
 Both are `LookupError`s, so `except LookupError` catches the pair, and each message names
 the species that do have a census.
 
+### Which genes are transcription cofactors
+
+The other half of the same question, answered the same way. A **transcription cofactor** —
+a chromatin remodeller, a histone-modifying enzyme, a Mediator subunit — acts on
+transcription without binding DNA sequence-specifically, so it has no motif, and a
+published table says which genes those are:
+
+```python
+mouse = Genome("mm39")
+answer = mouse.tf_cofactor_list()
+answer.gene_ids[:2]     # the annotation's own ids, as tf_gene_list answers in
+answer.unresolved       # the table's stems this annotation has no gene for
+answer.cofactors        # one entry per gene the table lists and this annotation has
+```
+
+Everything `tf_gene_list` promises holds here: the species comes from the assembly's own
+metadata row and is never passed in, a stem naming two gene ids answers with both, and the
+stems that resolve to nothing ride back on the answer. Each entry says which publisher
+listed the gene and keeps that publisher's own vocabulary under its own namespaced name:
+
+```python
+entry = answer.cofactors[0]
+entry.symbol, entry.source                       # ('Scmh1', 'animaltfdb')
+entry.classifications["animaltfdb_category"]     # 'Other Cofactors'
+print(answer.provenance.attribution())           # one line per publisher, to cite
+```
+
+**Membership is this package's; classification is each publisher's** (ADR-0016). A
+`source` of `both` says two publishers listed the gene and says nothing about how either
+of them classified it, so group within one publisher's vocabulary and never across two.
+
+An assembly whose species has no cofactor table raises `NoCofactorTableError`, and one
+nothing names a species for raises the same `UnknownSpeciesError` the census half does —
+both `LookupError`s, both naming the species that do have a table. **The two halves do not
+raise for the same assemblies:** `Genome("ce11").tf_cofactor_list()` answers while
+`.tf_gene_list()` raises, because a publisher assessed worm cofactors and none has
+released a worm TF census. That is the publishers' shape and not a defect here.
+
 ## Aligner indexes
 
 Two aligners ship, and they differ in whether an annotation is involved:
