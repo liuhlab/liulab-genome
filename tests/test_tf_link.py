@@ -7,9 +7,9 @@ proves a shipped table still matches JASPAR, and none can** — the counts below
 so that drift becomes a loud failure instead of a table that quietly stopped agreeing
 with the release it names, which is the most that is available (ADR-0015).
 
-The tables are read as the files they are — plain TSV, no quoting — rather than through
-any module, because there is no module yet and because reading them without importing
-this package is the property being defended.
+The tables are read as the files they are — gzipped TSV, no quoting — with :mod:`gzip`
+and :mod:`csv` rather than through any module of this package, because reading them
+without importing it is the property being defended.
 
 Every test that is about one table iterates over *every* shipped table. A second species
 or a third release is a file dropped into ``data/tf_link/``, and dropping one in must not
@@ -19,6 +19,7 @@ mean rewriting these.
 from __future__ import annotations
 
 import csv
+import gzip
 import re
 from importlib.resources import files
 from importlib.resources.abc import Traversable
@@ -34,11 +35,13 @@ from genome.tf.motif.jaspar import JASPAR_RELEASES
 LINK_SUBDIR = "data/tf_link"
 
 #: What one link table is called: the species slug, the release under this prefix, then
-#: the suffix — ``homo_sapiens.jaspar2026.motif_link_table.tsv``.
+#: the suffix — ``homo_sapiens.jaspar2026.motif_link_table.tsv.gz``.
 RELEASE_PREFIX = "jaspar"
-LINK_SUFFIX = ".motif_link_table.tsv"
+LINK_SUFFIX = ".motif_link_table.tsv.gz"
 
-#: The alias table beside them.
+#: The alias table beside them, which is **plain**: three curated rows, where the tables
+#: are bulk. Small metadata tables ship plain throughout this package and bulk tables
+#: ship gzipped, and this directory is where both conventions meet.
 ALIAS_FILE = "motif_name_alias.tsv"
 
 #: Every link table's columns, in table order. Identical across tables so that two of
@@ -100,6 +103,11 @@ _FUSION = "EWSR1-FLI1"
 #: because only assessed-positive genes receive links — not because anything is missing.
 _ASSESSED_NEGATIVE = ("homo_sapiens", "ENSG00000175387", "SMAD2")
 
+#: The mouse profile that looks like a rename and is not one, with the part of its
+#: **Motif name** an alias would have to carry. Unlinked because AnimalTFDB never
+#: assessed the gene it names — see the test below, which records the two accessions.
+_DIFFERENT_GENE = ("MA0611.3", "DUX")
+
 #: The published span of a matrix's total **Information content**, in bits, with room on
 #: both sides. A value outside it is a matrix read wrong rather than an unusual motif.
 _IC_RANGE = (1.0, 60.0)
@@ -128,18 +136,21 @@ def _shipped_tables() -> tuple[tuple[str, str], ...]:
     return tuple(sorted(found))
 
 
-def _read(slug: str, release: str) -> list[dict[str, str]]:
-    """Return one shipped table's rows, read as the plain TSV it is."""
+def _text(slug: str, release: str) -> str:
+    """Return one shipped table unpacked, which is the one place the gzip is undone here."""
     name = f"{slug}.{RELEASE_PREFIX}{release}{LINK_SUFFIX}"
-    text = _directory().joinpath(name).read_text(encoding="utf-8")
-    return list(csv.DictReader(text.splitlines(), delimiter="\t", quoting=csv.QUOTE_NONE))
+    return gzip.decompress(_directory().joinpath(name).read_bytes()).decode("utf-8")
+
+
+def _read(slug: str, release: str) -> list[dict[str, str]]:
+    """Return one shipped table's rows, read as the unquoted TSV it is."""
+    lines = _text(slug, release).splitlines()
+    return list(csv.DictReader(lines, delimiter="\t", quoting=csv.QUOTE_NONE))
 
 
 def _header(slug: str, release: str) -> tuple[str, ...]:
     """Return one shipped table's header line, split on tabs."""
-    name = f"{slug}.{RELEASE_PREFIX}{release}{LINK_SUFFIX}"
-    text = _directory().joinpath(name).read_text(encoding="utf-8")
-    return tuple(text.splitlines()[0].split("\t"))
+    return tuple(_text(slug, release).splitlines()[0].split("\t"))
 
 
 def _aliases() -> list[dict[str, str]]:
@@ -221,13 +232,27 @@ def test_every_table_is_named_for_a_census_and_a_release(slug: str, release: str
 
 
 @pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_table_ships_plain_rather_than_gzipped(slug: str, release: str) -> None:
-    # A curated artifact's value is its reviewable diff (ADR-0015), so the file is text
-    # that reads in R or a shell without a decompression step.
+def test_every_table_ships_gzipped_with_no_timestamp(slug: str, release: str) -> None:
+    # Bulk data ships gzipped, as the censuses beside it do. The gzip header carries
+    # ``mtime=0``, which is what lets two runs of the generator agree byte for byte —
+    # without it every rebuild would diff whether or not the links changed.
     name = f"{slug}.{RELEASE_PREFIX}{release}{LINK_SUFFIX}"
     raw = _directory().joinpath(name).read_bytes()
 
-    assert name.endswith(".tsv")
+    assert name.endswith(".tsv.gz")
+    assert raw.startswith(b"\x1f\x8b")
+    assert raw[4:8] == b"\x00\x00\x00\x00"
+    assert _text(slug, release).endswith("\n")
+
+
+def test_the_alias_table_ships_plain_beside_the_gzipped_tables() -> None:
+    # The convention, and this directory is where its two halves meet: bulk tables
+    # gzipped, small metadata tables plain — as `census_metadata.tsv` and the assembly
+    # and annotation metadata tables already are. Three hand-curated rows are worth more
+    # as a readable diff than as the couple of hundred bytes gzip would save.
+    raw = _directory().joinpath(ALIAS_FILE).read_bytes()
+
+    assert ALIAS_FILE.endswith(".tsv")
     assert not raw.startswith(b"\x1f\x8b")
     assert raw.endswith(b"\n")
 
@@ -507,6 +532,23 @@ def test_a_profile_that_names_no_gene_stays_unlinked(slug: str, release: str) ->
     # `EWSR1-FLI1` is an oncogenic fusion. It names no gene, and asserting one for it
     # would be inventing it — so it is absent by design rather than by omission.
     assert not [row for row in _read(slug, release) if row["motif_name"] == _FUSION]
+
+
+def test_the_profile_whose_symbol_only_looks_like_a_rename_stays_unlinked() -> None:
+    # JASPAR's `MA0611.3 Dux` is UniProt A1JVI8 — GeneID 664783, **MGI:3703875**.
+    # AnimalTFDB's `Duxf3` is ENSMUSG00000075046 — GeneID 74399, **MGI:1921649**. Two MGI
+    # accessions are two genes, so an alias joining them would assert an identity MGI
+    # denies; the only thing linking them is a secondary EntrezGene xref Ensembl carries
+    # on the `Duxf3` model, which is the Dux macrosatellite collapsing onto that locus.
+    # So this profile names a gene the census never assessed and is unlinked for the same
+    # structural reason `EWSR1-FLI1` is — a correct answer, not a gap. Pinned here
+    # because the symbols look alike, and guessing at symbol history got `SCAND3` wrong
+    # twice: an alias row for this is a regression, not a fix.
+    motif_id, name_part = _DIFFERENT_GENE
+
+    for _, release in [table for table in _TABLES if table[0] == "mus_musculus"]:
+        assert not [row for row in _read("mus_musculus", release) if row["motif_id"] == motif_id]
+    assert not [alias for alias in _aliases() if alias["motif_name_part"] == name_part]
 
 
 def test_a_gene_its_census_turned_down_receives_no_link() -> None:

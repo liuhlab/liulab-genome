@@ -90,7 +90,10 @@ CENSUS_SUBDIR = "data/tf_gene"
 CENSUS_SUFFIX = ".tf_gene_table.tsv.gz"
 
 #: The provenance table beside the censuses, in the shape ``assembly_metadata.tsv``
-#: and ``annotation_metadata.tsv`` already use.
+#: and ``annotation_metadata.tsv`` already use — and **plain**, where the censuses are
+#: gzipped. That is the convention for shipped data here: bulk gzipped, small metadata
+#: plain, because a file short enough to be read and edited by hand is worth more as a
+#: reviewable diff than as the bytes gzip would save.
 CENSUS_METADATA_RESOURCE = f"{CENSUS_SUBDIR}/census_metadata.tsv"
 
 #: The four columns every census carries under the same name and in the same place:

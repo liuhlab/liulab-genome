@@ -101,7 +101,7 @@ gene id (the versioned thing this is a stem *of*), ENSG (one publisher's spellin
 One row saying a JASPAR **Motif** answers for a **TF gene**: the **Motif id** and **Motif name**,
 the **Role** and the partners the profile also names, the profile's tax ids, its **Cross-species
 link** flag, the matrix's total **Information content**, and its rank under **Attribution
-specificity**. Links are shipped as plain TSVs, one per species per **Release** — data and not a
+specificity**. Links are shipped as gzipped TSVs, one per species per **Release** — data and not a
 rule (ADR-0015) — so the mapping is readable in R or a shell by collaborators who never import this
 package. Only assessed-positive genes receive links, and a profile naming no gene at all, such as an
 oncogenic fusion, stays unlinked rather than asserting one.
