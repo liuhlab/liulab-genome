@@ -112,8 +112,9 @@ The one answer every scan returns, whatever it was handed — a `DNA`, named seq
 **Region**s resolved against a **Genome**: one row per **Motif hit**, with a fixed column set and
 fixed compact dtypes that are part of the contract rather than an optimisation, so nothing
 downstream branches on how the scan was invoked. Its provenance travels on the frame — the
-**Background** used, the **Threshold**, the **Release**, the **Tax group**, and which motifs were
-scanned and which were skipped — because two tables missing any of those cannot be reconciled. A
+**Background** used, the **Threshold**, the **Release**, the **Tax group**, which motifs were
+scanned and which were skipped, and the **Assembly** when the scan was of **Region**s — because two
+tables missing any of those cannot be reconciled. A
 scan too large to hold streams to Parquet and hands back the path instead.
 _Avoid_: results, output, scan result, hits file, BED (the coordinates outlive the format); and
 never a bare frame passed on with its metadata dropped, which is the same table with its meaning

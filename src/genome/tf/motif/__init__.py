@@ -16,6 +16,7 @@ from genome.tf.motif.jaspar import (
     TransfacError,
     parse_transfac,
 )
+from genome.tf.motif.mixin import REGION_HIT_PROVENANCE, MotifScanMixin
 from genome.tf.motif.motif import (
     BASES,
     DEFAULT_SEQUENCE_NAME,
@@ -48,6 +49,7 @@ __all__ = [
     "JASPAR_RELEASES",
     "JASPAR_TAX_GROUPS",
     "MIN_MOTIF_LENGTH",
+    "REGION_HIT_PROVENANCE",
     "AmbiguousBaseIdError",
     "AmbiguousMotifNameError",
     "FastaFormatError",
@@ -56,6 +58,7 @@ __all__ = [
     "Motif",
     "MotifComparison",
     "MotifNotFoundError",
+    "MotifScanMixin",
     "MotifSet",
     "RaggedComparisonError",
     "TransfacError",
