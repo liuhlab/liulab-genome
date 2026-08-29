@@ -7,7 +7,7 @@ code instead of invisible in ours — and a query names exactly one **Xref sourc
 a property of the whole answer rather than a column on every row and merging two publishers is not
 expressible rather than merely discouraged. The convenient reading, one table over every source with
 the shortest path found for you, lost on what it would have to invent: NCBI and Ensembl agree on
-only 57.5% of human gene-level (GeneID, ENSG) pairs, so a merged table decides nearly half its rows
+only 57.6% of human gene-level (GeneID, ENSG) pairs, so a merged table decides nearly half its rows
 by a rule nobody published, and a composed answer inherits the fan-out of both hops with nothing on
 it saying so — Ensembl alone reaches 72 stems for one GeneID. The cost is real and is paid by the
 caller: two calls where one would read better, no union, vote or "best" mapping anywhere, and a

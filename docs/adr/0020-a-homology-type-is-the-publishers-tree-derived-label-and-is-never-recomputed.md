@@ -8,7 +8,7 @@ reading a table of pairs invites and it lost on what the label would then mean. 
 from the gene tree, so it survives slicing; a count over rows is an artefact of which per-species
 file was downloaded, which quality filter ran and which **Annotation** the stems resolved against,
 and it would change when the annotation changed while the evolution did not. The distinction is
-where the disagreement lives: across Compara, NCBI and Alliance, 24.6% of asserted human↔mouse pairs
-are claimed by exactly one source, yet the strict one-to-one subsets agree at Jaccard 0.91–0.93. The
+where the disagreement lives: across Compara, NCBI and Alliance, 31.3% of asserted human↔mouse pairs
+are claimed by exactly one source, yet the strict one-to-one subsets agree at Jaccard 0.83–0.91. The
 cost is that an answer can look one-to-one and still be labelled `ortholog_one2many`, so the
 **Dropped partner** count is reported beside it rather than the label being quietly corrected.
