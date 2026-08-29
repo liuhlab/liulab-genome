@@ -41,6 +41,7 @@ from genome.tf.motif.scan import (
     FastaFormatError,
 )
 from genome.tf.motif.thresholds import threshold_cache_dir
+from genome.tf.motif.workers import DEFAULT_WORKERS, SLURM_CPU_VARS, resolve_workers
 
 __all__ = [
     "BACKGROUND_FLOOR",
@@ -51,6 +52,7 @@ __all__ = [
     "DEFAULT_SEQUENCE_NAME",
     "DEFAULT_TAX_GROUP",
     "DEFAULT_THRESHOLD",
+    "DEFAULT_WORKERS",
     "FRAME_COLUMNS",
     "HIT_COLUMNS",
     "HIT_DTYPES",
@@ -59,6 +61,7 @@ __all__ = [
     "JASPAR_RELEASES",
     "JASPAR_TAX_GROUPS",
     "MIN_MOTIF_LENGTH",
+    "SLURM_CPU_VARS",
     "UNIFORM_BACKGROUND",
     "AmbiguousBaseIdError",
     "AmbiguousMotifNameError",
@@ -74,5 +77,6 @@ __all__ = [
     "TransfacError",
     "parse_transfac",
     "read_hits",
+    "resolve_workers",
     "threshold_cache_dir",
 ]

@@ -10,6 +10,24 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **A scan can use more than one core, and says the same thing when it does.** `workers=` on
+  `MotifSet.scan`, `scan_sequences` and `scan_fasta` shards the work across processes — MOODS holds
+  the GIL, so parallelism here means processes and not threads, each worker constructing its own
+  engine once and keeping it. **Serial and parallel produce the identical table**, row for row,
+  dtypes and provenance included: the shards of one sequence are put back into the order a serial
+  scan would have emitted them before the batch is handed on, so choosing two workers is a choice
+  about wall time and about nothing else. **The library default is one worker**, so importing this
+  package and scanning never starts a process unasked — under the spawn start method a pool
+  re-imports the caller's script, and an unguarded script would re-execute itself; the command-line
+  entry point will pass `None` instead, which resolves the count with `resolve_workers()`: **the
+  Slurm allocation first** (`SLURM_CPUS_PER_TASK`, then `SLURM_CPUS_ON_NODE`), then process
+  affinity, then the machine's cores — never the last alone, which would put fourteen workers into
+  a two-CPU job. A sequence long enough to be worth cutting is split with an **overlap of one less
+  than the longest matrix**, and each shard keeps only hits *starting* inside the region it owns, so
+  a hit lying across a boundary is reported exactly once. Shards are submitted a bounded number
+  ahead rather than all at once, so a genome FASTA is still streamed rather than cut up in advance.
+  The engine is also now built once per scan rather than once per sequence, which is the same
+  automaton and the same answer, built a thousand times less often on a thousand-record FASTA.
 - **A scan too large to hold streams to Parquet and hands back the path.** Passing `output=` to
   `MotifSet.scan`, `scan_sequences` or `scan_fasta` writes the hits to Parquet and returns the path
   rather than a table. Batches are written **as they are produced** — one row group per named

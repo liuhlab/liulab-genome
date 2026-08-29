@@ -65,6 +65,14 @@
 
 ::: genome.tf.motif.scan
 
+## `genome.tf.motif.workers`
+
+::: genome.tf.motif.workers
+
+## `genome.tf.motif.parallel`
+
+::: genome.tf.motif.parallel
+
 ## `genome.tf.motif.parquet`
 
 ::: genome.tf.motif.parquet

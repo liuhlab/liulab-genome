@@ -57,6 +57,7 @@ import numpy as np
 import numpy.typing as npt
 
 from genome.seq import DNA
+from genome.tf.motif.workers import DEFAULT_WORKERS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
     from pathlib import Path
@@ -1061,6 +1062,7 @@ class MotifSet:
         threshold: float = ...,
         background: BackgroundArg = ...,
         output: None = ...,
+        workers: int | None = ...,
     ) -> pd.DataFrame: ...
 
     @overload
@@ -1072,6 +1074,7 @@ class MotifSet:
         threshold: float = ...,
         background: BackgroundArg = ...,
         output: str | Path,
+        workers: int | None = ...,
     ) -> Path: ...
 
     def scan(
@@ -1082,6 +1085,7 @@ class MotifSet:
         threshold: float = DEFAULT_THRESHOLD,
         background: BackgroundArg = None,
         output: str | Path | None = None,
+        workers: int | None = DEFAULT_WORKERS,
     ) -> pd.DataFrame | Path:
         """Scan one sequence with every motif here and return the **Hit table**.
 
@@ -1122,6 +1126,15 @@ class MotifSet:
             guard, because a genome-scale scan is the caller's decision. Read it back with
             :func:`~genome.tf.motif.parquet.read_hits`, which restores the dtypes and the
             provenance both — :func:`pandas.read_parquet` alone drops the provenance.
+        workers : int, default 1
+            How many processes to shard the scan across. **One by default**, so importing
+            this package and calling a scan never starts a process unasked: under the spawn
+            start method a pool re-imports the caller's script, and an unguarded one would
+            re-execute itself. ``None`` resolves the count with
+            :func:`~genome.tf.motif.workers.resolve_workers` — the Slurm allocation first,
+            then process affinity, then the machine — which is what the command line
+            passes. **More than one produces the identical table**, row for row; the choice
+            is about wall time and nothing else.
 
         Returns
         -------
@@ -1164,7 +1177,11 @@ class MotifSet:
         (('MA9999.1',), 0.0001)
         """
         return self.scan_sequences(
-            {name: sequence}, threshold=threshold, background=background, output=output
+            {name: sequence},
+            threshold=threshold,
+            background=background,
+            output=output,
+            workers=workers,
         )
 
     @overload
@@ -1175,6 +1192,7 @@ class MotifSet:
         threshold: float = ...,
         background: BackgroundArg = ...,
         output: None = ...,
+        workers: int | None = ...,
     ) -> pd.DataFrame: ...
 
     @overload
@@ -1185,6 +1203,7 @@ class MotifSet:
         threshold: float = ...,
         background: BackgroundArg = ...,
         output: str | Path,
+        workers: int | None = ...,
     ) -> Path: ...
 
     def scan_sequences(
@@ -1194,6 +1213,7 @@ class MotifSet:
         threshold: float = DEFAULT_THRESHOLD,
         background: BackgroundArg = None,
         output: str | Path | None = None,
+        workers: int | None = DEFAULT_WORKERS,
     ) -> pd.DataFrame | Path:
         """Scan named sequences — a peak set in one call — and return the **Hit table**.
 
@@ -1214,6 +1234,9 @@ class MotifSet:
         output : str or pathlib.Path, optional
             Where to stream the hits as Parquet instead of building a table — see
             :meth:`scan`.
+        workers : int, default 1
+            How many processes to shard the scan across — see :meth:`scan`. Sequences are
+            distributed whole, so a peak set parallelises without any of them being cut.
 
         Returns
         -------
@@ -1245,7 +1268,12 @@ class MotifSet:
         from genome.tf.motif.scan import scan_stream
 
         return scan_stream(
-            self, sequences.items(), threshold=threshold, background=background, output=output
+            self,
+            sequences.items(),
+            threshold=threshold,
+            background=background,
+            output=output,
+            workers=workers,
         )
 
     @overload
@@ -1256,6 +1284,7 @@ class MotifSet:
         threshold: float = ...,
         background: BackgroundArg = ...,
         output: None = ...,
+        workers: int | None = ...,
     ) -> pd.DataFrame: ...
 
     @overload
@@ -1266,6 +1295,7 @@ class MotifSet:
         threshold: float = ...,
         background: BackgroundArg = ...,
         output: str | Path,
+        workers: int | None = ...,
     ) -> Path: ...
 
     def scan_fasta(
@@ -1275,6 +1305,7 @@ class MotifSet:
         threshold: float = DEFAULT_THRESHOLD,
         background: BackgroundArg = None,
         output: str | Path | None = None,
+        workers: int | None = DEFAULT_WORKERS,
     ) -> pd.DataFrame | Path:
         r"""Scan every record of a FASTA and return the **Hit table**.
 
@@ -1299,6 +1330,10 @@ class MotifSet:
             Where to stream the hits as Parquet instead of building a table — see
             :meth:`scan`. The whole-genome case this exists for: a FASTA in, a Parquet
             out, and nothing the size of either in memory.
+        workers : int, default 1
+            How many processes to shard the scan across — see :meth:`scan`. A record long
+            enough is cut into pieces with an overlap, so one chromosome still uses the
+            whole allocation.
 
         Returns
         -------
@@ -1334,7 +1369,12 @@ class MotifSet:
         from genome.tf.motif.scan import read_fasta, scan_stream
 
         return scan_stream(
-            self, read_fasta(path), threshold=threshold, background=background, output=output
+            self,
+            read_fasta(path),
+            threshold=threshold,
+            background=background,
+            output=output,
+            workers=workers,
         )
 
     # ------------------------------------------------------------------ comparison

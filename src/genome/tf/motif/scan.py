@@ -35,9 +35,10 @@ from disk on a repeat.
 
 Batches, not one array: :func:`scan_stream` consumes an iterable of named sequences and
 drains one frame per sequence, so the peak memory is set by the largest record rather than
-by the file. That shape is deliberate — :mod:`~genome.tf.motif.parquet`'s sink replaces the
-collector when an output path is given, and a parallel source replaces the iterable, with
-nothing between them changing.
+by the file. That shape is deliberate, and both ends of it are now used —
+:mod:`~genome.tf.motif.parquet`'s sink replaces the collector when an output path is given,
+and :mod:`~genome.tf.motif.parallel`'s pool replaces the source above one worker — with
+nothing between them changing, and the same batches in the same order either way.
 
 Examples
 --------
@@ -71,6 +72,7 @@ import pandas as pd
 from genome.tf.motif.background import BackgroundArg, resolve_background
 from genome.tf.motif.motif import DEFAULT_THRESHOLD, MIN_MOTIF_LENGTH, Motif
 from genome.tf.motif.thresholds import cutoffs_for
+from genome.tf.motif.workers import DEFAULT_WORKERS, resolve_workers
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the import runs the other way
     from genome.tf.motif.motif import MotifSet
@@ -117,6 +119,12 @@ _BITS_PER_NAT = 1.0 / math.log(2.0)
 #: matrices come first and their reverse complements follow, which is what makes the split
 #: an index comparison rather than anything stored.
 _STRANDS: tuple[str, str] = ("+", "-")
+
+#: How far ahead the engine's automaton looks. The engine's own default, and what
+#: ``MOODS.scan.scan_dna`` passes when it builds a scanner per call — the same number, so
+#: hoisting the construction out of the loop changes what is built and never what it says.
+#: Unrelated to :data:`~genome.tf.motif.motif.MIN_MOTIF_LENGTH`, which happens to be 7 too.
+_WINDOW_SIZE = 7
 
 
 class FastaFormatError(ValueError):
@@ -167,6 +175,7 @@ def scan_stream(
     threshold: float = ...,
     background: BackgroundArg = ...,
     output: None = ...,
+    workers: int | None = ...,
 ) -> pd.DataFrame: ...
 
 
@@ -178,6 +187,7 @@ def scan_stream(
     threshold: float = ...,
     background: BackgroundArg = ...,
     output: str | Path,
+    workers: int | None = ...,
 ) -> Path: ...
 
 
@@ -188,6 +198,7 @@ def scan_stream(
     threshold: float = DEFAULT_THRESHOLD,
     background: BackgroundArg = None,
     output: str | Path | None = None,
+    workers: int | None = DEFAULT_WORKERS,
 ) -> pd.DataFrame | Path:
     """Scan named sequences with a **Motif set** and collect one **Hit table**.
 
@@ -220,6 +231,11 @@ def scan_stream(
         is then scanned like the rest: the source is still drained exactly once.
     output : str or pathlib.Path, optional
         Where to stream the hits as Parquet. Omitted, the table comes back in memory.
+    workers : int, default 1
+        How many processes to shard the scan across. **One by default**, so importing this
+        and calling it never starts a process unasked; ``None`` resolves the machine's
+        allocation with :func:`~genome.tf.motif.parallel.resolve_workers`, which is what
+        the command line passes. More than one produces the identical table.
 
     Returns
     -------
@@ -256,9 +272,10 @@ def scan_stream(
     from genome.tf.motif.parquet import write_hits
 
     _check_threshold(threshold)
+    count = resolve_workers(workers)
     frequencies, remaining = resolve_background(background, sequences)
     prepared = _prepare(motifs, threshold=threshold, background=frequencies)
-    batches = _batches(prepared, remaining)
+    batches = _batches(prepared, remaining, count)
     if output is None:
         return _collect(batches, prepared)
     return write_hits(batches, output, _provenance(prepared))
@@ -395,27 +412,63 @@ def _prepare(
     )
 
 
-def _batches(prepared: _Prepared, sequences: Iterable[tuple[str, str]]) -> Iterator[pd.DataFrame]:
+def engine_for(prepared: _Prepared) -> MOODS.scan.Scanner:
+    """Build the scanner once for a whole scan — the setup ``scan_dna`` pays per call.
+
+    Exactly what ``MOODS.scan.scan_dna`` constructs internally, hoisted out of the loop so
+    that a thousand-record FASTA builds one automaton rather than a thousand, and so that a
+    parallel worker can build its own once and keep it for every shard it is given.
+    """
+    scanner = MOODS.scan.Scanner(_WINDOW_SIZE)
+    scanner.set_motifs(prepared.matrices, list(prepared.background), prepared.cutoffs)
+    return scanner
+
+
+def _batches(
+    prepared: _Prepared, sequences: Iterable[tuple[str, str]], workers: int = 1
+) -> Iterator[pd.DataFrame]:
     """Yield one **Hit table** batch per named sequence, in the order they arrive.
 
-    The seam a Parquet sink and a parallel source both attach to: the source is whatever
-    iterable was handed in, and the sink is whoever drains this.
+    The seam the Parquet sink and the parallel source both attach to: the source is
+    whatever iterable was handed in, and the sink is whoever drains this. Above one worker
+    the loop below is replaced wholesale by
+    :func:`~genome.tf.motif.parallel.parallel_batches`, which yields the same batches in
+    the same order — one per named sequence, however many shards it was cut into.
     """
+    if workers > 1:
+        # Imported here rather than at module scope: the parallel source is built on this
+        # module's engine, so naming it up there would be a cycle.
+        from genome.tf.motif.parallel import parallel_batches
+
+        yield from parallel_batches(prepared, sequences, workers)
+        return
+    engine = engine_for(prepared)
     for name, sequence in sequences:
-        yield _batch(prepared, name, sequence)
+        yield _batch(prepared, engine, name, sequence)
 
 
-def _batch(prepared: _Prepared, name: str, sequence: str) -> pd.DataFrame:
+def _batch(
+    prepared: _Prepared,
+    engine: MOODS.scan.Scanner,
+    name: str,
+    sequence: str,
+    *,
+    offset: int = 0,
+    owned: int | None = None,
+) -> pd.DataFrame:
     """Scan one named sequence and turn what the engine said into rows.
 
     Rows come out motif by motif in the set's own order, forward strand before reverse and
     ascending by position within each — the engine's own order, regrouped by the index
     split that recovers **Strand**.
+
+    ``offset`` and ``owned`` are what make a *shard* of a sequence report in the whole
+    sequence's frame: every position is reported as ``offset + position``, and a hit
+    starting at or past ``owned`` belongs to the next shard and is dropped here — so a hit
+    spanning a shard boundary is found once by the shard that owns its start and once only.
     """
     # Upper-cased here and nowhere else: soft-masking changes no answer (ADR-0012).
-    results = MOODS.scan.scan_dna(
-        sequence.upper(), prepared.matrices, list(prepared.background), prepared.cutoffs
-    )
+    results = engine.scan(sequence.upper())
     count = len(prepared.motifs)
     rows: list[tuple[str, str, str, int, int, str, float]] = []
     for index, motif in enumerate(prepared.motifs):
@@ -423,13 +476,15 @@ def _batch(prepared: _Prepared, name: str, sequence: str) -> pd.DataFrame:
         for half, strand in enumerate(_STRANDS):
             for hit in results[index + half * count]:
                 start = int(hit.pos)
+                if owned is not None and start >= owned:
+                    continue
                 rows.append(
                     (
                         motif.motif_id,
                         motif.motif_name,
                         name,
-                        start,
-                        start + length,
+                        offset + start,
+                        offset + start + length,
                         strand,
                         float(hit.score) * _BITS_PER_NAT,
                     )
