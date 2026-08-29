@@ -234,7 +234,7 @@ def scan_stream(
     workers : int, default 1
         How many processes to shard the scan across. **One by default**, so importing this
         and calling it never starts a process unasked; ``None`` resolves the machine's
-        allocation with :func:`~genome.tf.motif.parallel.resolve_workers`, which is what
+        allocation with :func:`~genome.tf.motif.workers.resolve_workers`, which is what
         the command line passes. More than one produces the identical table.
 
     Returns
