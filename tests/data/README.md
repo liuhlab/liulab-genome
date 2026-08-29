@@ -1,9 +1,10 @@
 # Test fixtures
 
-Small, subsampled **real** files — never a large genomic file. Every byte here came from UCSC's
-`sacCer3` golden path and was cut down on the lab cluster; no bases are synthesised. Names are
-this repo's where a fixture needs a spelling `sacCer3` does not have, and one 200-base stretch is
-lower-cased — both are called out below, and nothing else departs from the source bytes.
+Small, subsampled **real** files — never a large genomic file. Every sequence byte here came from
+UCSC's `sacCer3` golden path and every motif byte from a published JASPAR release; both were cut
+down on the lab cluster, and nothing is synthesised. Names are this repo's where a fixture needs a
+spelling `sacCer3` does not have, and one 200-base stretch is lower-cased — both are called out
+below, and nothing else departs from the source bytes.
 
 | File | What it is |
 |---|---|
@@ -12,14 +13,47 @@ lower-cased — both are called out below, and nothing else departs from the sou
 | `tiny.gtf` | The 85 `sacCer3.ensGene` features that fall wholly inside those three windows |
 | `tiny.gtf.gz` | `tiny.gtf`, gzipped |
 | `ensembl_style.gtf` | `tiny.gtf` with the `chr` prefix stripped (`I`, `II`, `III`) — an Ensembl-spelled annotation for the chromosome-name mismatch case |
+| `tiny_jaspar_transfac.txt` | Ten whole records of the JASPAR 2024 `all` union file, in its own order — see below |
 
 Sources:
 
 - `https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz`
 - `https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz`
+- `https://jaspar.elixir.no/download/data/2024/CORE/JASPAR2024_CORE_non-redundant_pfms_transfac.txt`
 
 `tiny.gtf` coordinates are 1-based inclusive, as every GTF is; they convert at the I/O boundary and
 are never seen in that form inside the package.
+
+## `tiny_jaspar_transfac.txt` — the motif records
+
+Ten records of the JASPAR 2024 `all` union file, copied whole and kept in that file's own order.
+Nothing is edited: every count, every annotation value and every blank annotation is what JASPAR
+published. Each one is here for a rule it breaks, and the union file is the source because only it
+holds every **Tax group** — five are represented, `diatoms` included, which is a group of exactly
+one motif in both releases.
+
+| Record | Name | Positions | Tax group | The rule it exists to break |
+|---|---|---|---|---|
+| `MA0119.1` | `NFIC::TLX1` | 14 | vertebrates | A **dimeric name**, and the record behind it carries **two** classes, **two** families and **two** UniProt accessions — semicolon separated, which is why those four annotations are tuples and not strings |
+| `MA0789.1` | `POU3F4` | 9 | vertebrates | **Two PubMed ids** on one matrix, so the plural id lists are exercised without a dimer |
+| `MA0079.5` | `SP1` | 9 | vertebrates | **Fractional counts** — `1.05485`, which the `.jaspar` serialization rounds away and this one keeps. The only record here whose counts are not whole |
+| `MA0139.2` | `CTCF` | 15 | vertebrates | The everyday case, and the **first of three motifs sharing one name** |
+| `MA1929.2` | `CTCF` | 31 | vertebrates | The second. Two would make a name ambiguous; three make the error list more than a pair |
+| `MA1930.2` | `CTCF` | 33 | vertebrates | The third, the **longest matrix in the release**, and the one with the **least informative flanks** — 0.36 and 0.31 bits, which trim at 0.4. It also carries twelve interior positions under 0.25 bits, so it is real data for the rule that trimming acts **only on the ends** |
+| `MA2355.1` | `PK06791.1` | 6 | plants | **Below the minimum scannable length**; its class is `C3H(C),C2HC zinc-fingers like factors`, one value **containing a comma**; and its UniProt list is **empty** |
+| `MA0261.1` | `lin-14` | 6 | nematodes | Below the minimum length again, and **both** its class and its family are blank — the source stated nothing, which is common and is not an error |
+| `MA0283.1` | `CHA4` | 8 | fungi | Its data type is `PBM, CSA and/or DIP-chip`: **one value containing a comma**, in the other annotation where that happens |
+| `MA1407.2` | `bZIP14` | 8 | diatoms | The release's **only diatom motif**, so the degenerate tax group is a case the fixture actually holds |
+
+**The separator is a semicolon and never a comma.** Four records above turn on that: two carry
+several values in one annotation, separated by `; `, and two carry a comma *inside* a single value.
+Splitting on the comma corrupts about fifty records per release and fails nothing while doing it,
+which is what these four are here to catch.
+
+None of this is prose to be trusted either: `tests/test_jaspar.py` asserts every row of the table —
+each id, name, length and tax group, each multi-valued and each blank annotation, the fractional
+counts, the two below-minimum lengths and the long record's flank bits — against the committed
+bytes.
 
 ## `chimera/` — the tiny component assemblies
 

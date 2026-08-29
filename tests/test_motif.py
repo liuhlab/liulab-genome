@@ -1,11 +1,11 @@
-"""Tests for genome.tf.motif.motif — the Motif type, with nothing else loaded.
+"""Tests for genome.tf.motif.motif — the Motif type and the Motif set, nothing else.
 
 No file, no download, no network, and no scan engine: a motif is built from a count
-matrix here and asked everything about itself. Hand-checkable cases for the answers a
-reader can verify by eye — a consensus, a spacer that survives trimming — and hypothesis
-for the invariants that must hold over every matrix: the counts to probabilities to
-information chain, the bits bounds, and what trimming may and may not do to a length and
-an offset.
+matrix here and asked everything about itself, and a motif set is built from motifs and
+asked to address them. Hand-checkable cases for the answers a reader can verify by eye —
+a consensus, a spacer that survives trimming — and hypothesis for the invariants that must
+hold over every matrix: the counts to probabilities to information chain, the bits bounds,
+and what trimming may and may not do to a length and an offset.
 
 The unit lane, unmarked. Plotting draws under a non-interactive backend, so no test opens
 a window, and every figure a test makes is closed again — the suite turns warnings into
@@ -26,7 +26,15 @@ import matplotlib.pyplot as plt  # must follow the backend choice above
 from matplotlib.axes import Axes
 
 from genome.seq import DNA
-from genome.tf.motif import BASES, MIN_MOTIF_LENGTH, Motif
+from genome.tf.motif import (
+    BASES,
+    MIN_MOTIF_LENGTH,
+    AmbiguousBaseIdError,
+    AmbiguousMotifNameError,
+    Motif,
+    MotifNotFoundError,
+    MotifSet,
+)
 
 # ---------------------------------------------------------------------------
 # Hand-built columns. Two kinds is all most of these tests need: one that says
@@ -130,22 +138,34 @@ class TestConstruction:
             word("ACGTACG"),
             offset=4,
             tax_group="vertebrates",
-            tf_class="C2H2 zinc finger factors",
-            tf_family="More than 3 adjacent zinc fingers",
+            tf_class=("C2H2 zinc finger factors",),
+            tf_family=("More than 3 adjacent zinc fingers",),
             uniprot_ids=("P49711",),
             pubmed_ids=("17512414", "27924024"),
             data_type="ChIP-seq",
         )
         assert (m.motif_id, m.motif_name, m.offset) == ("MA0139.2", "CTCF", 4)
         assert (m.tax_group, m.data_type) == ("vertebrates", "ChIP-seq")
+        assert m.tf_class == ("C2H2 zinc finger factors",)
+        assert m.tf_family == ("More than 3 adjacent zinc fingers",)
         assert m.uniprot_ids == ("P49711",)
         assert m.pubmed_ids == ("17512414", "27924024")
+
+    def test_a_dimer_carries_one_class_and_family_per_half(self) -> None:
+        # MA0119.1's shape: the source publishes two of each, semicolon separated.
+        m = motif(
+            word("ACGT"),
+            tf_class=("SMAD/NF-1 DNA-binding domain factors", "Homeo domain factors"),
+            tf_family=("Nuclear factor 1", "NK"),
+            uniprot_ids=("P08651", "P31314"),
+        )
+        assert len(m.tf_class) == len(m.tf_family) == len(m.uniprot_ids) == 2
 
     def test_offset_defaults_to_zero_and_annotations_to_nothing_stated(self) -> None:
         m = motif(word("ACGT"))
         assert m.offset == 0
-        assert (m.tax_group, m.tf_class, m.tf_family, m.data_type) == ("", "", "", "")
-        assert (m.uniprot_ids, m.pubmed_ids) == ((), ())
+        assert (m.tax_group, m.data_type) == ("", "")
+        assert (m.tf_class, m.tf_family, m.uniprot_ids, m.pubmed_ids) == ((), (), (), ())
 
     def test_counts_become_float_even_from_integers(self) -> None:
         # The source carries fractional counts, so the matrix is float, never int.
@@ -217,14 +237,20 @@ class TestConstruction:
         with pytest.raises(ValueError, match=r"no observations at position\(s\) 2"):
             motif(counts)
 
-    def test_a_bare_string_of_ids_is_refused(self) -> None:
+    @pytest.mark.parametrize("field", ["tf_class", "tf_family", "uniprot_ids", "pubmed_ids"])
+    def test_a_bare_string_in_a_plural_annotation_is_refused(self, field: str) -> None:
         # "P49711" would otherwise be stored letter by letter.
-        with pytest.raises(ValueError, match="iterable of ids"):
-            motif(word("ACGT"), uniprot_ids="P49711")
+        with pytest.raises(ValueError, match="iterable of values"):
+            motif(word("ACGT"), **{field: "P49711"})
 
-    def test_ids_are_frozen_into_a_tuple(self) -> None:
-        m = motif(word("ACGT"), pubmed_ids=["1", "2"])
+    def test_the_two_singular_annotations_take_a_string(self) -> None:
+        m = motif(word("ACGT"), tax_group="vertebrates", data_type="PBM, CSA and/or DIP-chip")
+        assert (m.tax_group, m.data_type) == ("vertebrates", "PBM, CSA and/or DIP-chip")
+
+    def test_plural_annotations_are_frozen_into_a_tuple(self) -> None:
+        m = motif(word("ACGT"), pubmed_ids=["1", "2"], tf_class=["Homeo domain factors"])
         assert m.pubmed_ids == ("1", "2")
+        assert m.tf_class == ("Homeo domain factors",)
 
 
 # ---------------------------------------------------------------------------
@@ -662,3 +688,236 @@ class TestPropertiesTrim:
         twice = m.trim(threshold).trim(threshold)
         taken = twice.offset - m.offset
         assert np.array_equal(twice.counts, m.counts[:, taken : taken + len(twice)])
+
+
+# ---------------------------------------------------------------------------
+# The Motif set: what it holds, what it is indexed by, and what it filters to
+# ---------------------------------------------------------------------------
+
+CTCF_15 = Motif(
+    "MA0139.2",
+    "CTCF",
+    word("GATTACAGATTACA"),
+    tax_group="vertebrates",
+    tf_class=("C2H2 zinc finger factors",),
+    tf_family=("More than 3 adjacent zinc fingers",),
+    uniprot_ids=("P49711",),
+    data_type="ChIP-seq",
+)
+CTCF_31 = Motif(
+    "MA1929.2",
+    "CTCF",
+    word("GATTACAGATTACAG"),
+    tax_group="vertebrates",
+    tf_class=("C2H2 zinc finger factors",),
+    uniprot_ids=("P49711",),
+    data_type="ChIP-seq",
+)
+DIMER_MOTIF = Motif(
+    "MA0119.1",
+    "NFIC::TLX1",
+    word("TGGCAGGCCA"),
+    tax_group="vertebrates",
+    tf_class=("SMAD/NF-1 DNA-binding domain factors", "Homeo domain factors"),
+    tf_family=("Nuclear factor 1", "NK"),
+    uniprot_ids=("P08651", "P31314"),
+    data_type="SELEX",
+)
+WORM = Motif(
+    "MA0261.1",
+    "lin-14",
+    word("GAAC"),
+    tax_group="nematodes",
+    uniprot_ids=("Q21446",),
+    data_type="SELEX",
+)
+
+
+@pytest.fixture
+def motif_set() -> MotifSet:
+    """Four motifs: two CTCFs sharing a name, a dimer, and a worm from another tax group."""
+    return MotifSet([CTCF_15, CTCF_31, DIMER_MOTIF, WORM])
+
+
+class TestMotifSetConstruction:
+    def test_built_from_arbitrary_motifs(self) -> None:
+        # A model's de novo matrices get the same container the release gets.
+        de_novo = [motif(word("GATTACA"), offset=0) for _ in range(1)]
+        assert len(MotifSet(de_novo)) == 1
+
+    def test_an_empty_set_is_allowed(self) -> None:
+        # A filter that matched nothing is a real answer, not an absence.
+        assert len(MotifSet([])) == 0
+
+    def test_order_is_the_order_it_was_given(self, motif_set: MotifSet) -> None:
+        assert motif_set.motif_ids == ("MA0139.2", "MA1929.2", "MA0119.1", "MA0261.1")
+        assert [m.motif_id for m in motif_set] == list(motif_set.motif_ids)
+
+    def test_names_are_one_per_motif_and_keep_their_duplicates(self, motif_set: MotifSet) -> None:
+        assert motif_set.motif_names == ("CTCF", "CTCF", "NFIC::TLX1", "lin-14")
+        assert len(motif_set.motif_names) == len(motif_set.motif_ids)
+
+    def test_two_motifs_sharing_an_id_are_refused(self) -> None:
+        with pytest.raises(ValueError, match=r"share the motif id 'MA0139\.2'"):
+            MotifSet([CTCF_15, CTCF_15])
+
+    def test_iterating_yields_motifs_and_not_keys(self, motif_set: MotifSet) -> None:
+        assert all(isinstance(m, Motif) for m in motif_set)
+        assert motif_set.motifs == tuple(motif_set)
+
+    def test_repr_names_the_size_and_not_the_motifs(self, motif_set: MotifSet) -> None:
+        assert repr(motif_set) == "MotifSet(motifs=4)"
+
+
+class TestMotifSetIndexing:
+    def test_by_motif_id(self, motif_set: MotifSet) -> None:
+        assert motif_set["MA0139.2"] is CTCF_15
+
+    def test_by_bare_base_id_without_the_version(self, motif_set: MotifSet) -> None:
+        assert motif_set["MA0139"] is CTCF_15
+
+    def test_by_a_unique_name(self, motif_set: MotifSet) -> None:
+        assert motif_set["lin-14"] is WORM
+
+    def test_a_dimeric_name_is_a_name_like_any_other(self, motif_set: MotifSet) -> None:
+        assert motif_set["NFIC::TLX1"] is DIMER_MOTIF
+
+    def test_always_exactly_one_motif_and_never_a_tuple(self, motif_set: MotifSet) -> None:
+        for key in ("MA0139.2", "MA0139", "lin-14"):
+            assert isinstance(motif_set[key], Motif)
+
+    def test_an_ambiguous_name_names_every_matching_id_and_the_call_for_them(
+        self, motif_set: MotifSet
+    ) -> None:
+        with pytest.raises(AmbiguousMotifNameError) as raised:
+            motif_set["CTCF"]
+        assert raised.value.motif_ids == ("MA0139.2", "MA1929.2")
+        message = str(raised.value)
+        assert "MA0139.2" in message
+        assert "MA1929.2" in message
+        assert "by_name('CTCF')" in message
+
+    def test_an_ambiguous_base_id_names_every_matching_id(self) -> None:
+        # Two versions of one matrix: what a non-redundant release never ships.
+        pair = MotifSet([CTCF_15, Motif("MA0139.1", "CTCF-old", word("GATTACA"))])
+        with pytest.raises(AmbiguousBaseIdError) as raised:
+            pair["MA0139"]
+        assert raised.value.motif_ids == ("MA0139.2", "MA0139.1")
+        assert "full motif id" in str(raised.value)
+
+    def test_an_unknown_key_raises_rather_than_answering_nothing(self, motif_set: MotifSet) -> None:
+        with pytest.raises(MotifNotFoundError, match="no motif is addressed by 'SOX2'"):
+            motif_set["SOX2"]
+
+    def test_an_empty_set_says_it_is_empty(self) -> None:
+        with pytest.raises(MotifNotFoundError, match="holds no motifs"):
+            MotifSet([])["CTCF"]
+
+    def test_every_ambiguity_and_absence_is_a_lookup_error(self, motif_set: MotifSet) -> None:
+        # Catchable as one, and still tellable apart.
+        for key in ("SOX2", "CTCF"):
+            with pytest.raises(LookupError):
+                motif_set[key]
+
+    def test_an_id_wins_over_a_base_id_and_a_name(self) -> None:
+        # A pathological set: one motif's id is another's name.
+        odd = MotifSet([Motif("CTCF", "shadow", word("GATTACA")), CTCF_15])
+        assert odd["CTCF"].motif_name == "shadow"
+
+    def test_membership_knows_every_key_it_can_be_asked(self, motif_set: MotifSet) -> None:
+        assert "MA0139.2" in motif_set
+        assert "MA0139" in motif_set
+        assert "lin-14" in motif_set
+        assert "SOX2" not in motif_set
+
+    def test_an_ambiguous_name_is_still_a_member(self, motif_set: MotifSet) -> None:
+        # Membership asks whether the set knows the key; indexing asks it to pick one.
+        assert "CTCF" in motif_set
+
+    def test_a_motif_is_a_member_when_it_is_the_one_held_under_its_id(
+        self, motif_set: MotifSet
+    ) -> None:
+        assert CTCF_15 in motif_set
+        assert Motif("MA0139.2", "CTCF", word("AAAAAAA")) not in motif_set
+        assert 5 not in motif_set
+
+
+class TestMotifSetByName:
+    def test_a_unique_name_still_returns_a_tuple(self, motif_set: MotifSet) -> None:
+        found = motif_set.by_name("lin-14")
+        assert found == (WORM,)
+
+    def test_a_shared_name_returns_all_of_them_in_order(self, motif_set: MotifSet) -> None:
+        assert motif_set.by_name("CTCF") == (CTCF_15, CTCF_31)
+
+    def test_an_unknown_name_raises_rather_than_returning_nothing(
+        self, motif_set: MotifSet
+    ) -> None:
+        with pytest.raises(MotifNotFoundError):
+            motif_set.by_name("SOX2")
+
+    def test_a_base_id_is_not_a_name(self, motif_set: MotifSet) -> None:
+        with pytest.raises(MotifNotFoundError):
+            motif_set.by_name("MA0139")
+
+
+class TestMotifSetFilter:
+    def test_by_one_annotation(self, motif_set: MotifSet) -> None:
+        assert motif_set.filter(tax_group="nematodes").motif_ids == ("MA0261.1",)
+
+    def test_prose_annotations_match_a_case_insensitive_substring(
+        self, motif_set: MotifSet
+    ) -> None:
+        assert motif_set.filter(tf_class="ZINC FINGER").motif_ids == ("MA0139.2", "MA1929.2")
+
+    def test_a_dimer_matches_on_either_half(self, motif_set: MotifSet) -> None:
+        assert motif_set.filter(tf_class="Homeo domain").motif_ids == ("MA0119.1",)
+        assert motif_set.filter(tf_family="Nuclear factor 1").motif_ids == ("MA0119.1",)
+
+    def test_id_annotations_match_exactly_and_never_by_substring(self, motif_set: MotifSet) -> None:
+        assert motif_set.filter(uniprot_ids="P49711").motif_ids == ("MA0139.2", "MA1929.2")
+        assert motif_set.filter(uniprot_ids="P497").motif_ids == ()
+
+    def test_several_alternatives_are_an_or(self, motif_set: MotifSet) -> None:
+        found = motif_set.filter(tax_group=("nematodes", "vertebrates"))
+        assert len(found) == 4
+
+    def test_several_keywords_are_an_and(self, motif_set: MotifSet) -> None:
+        assert motif_set.filter(tax_group="vertebrates", data_type="SELEX").motif_ids == (
+            "MA0119.1",
+        )
+
+    def test_by_an_arbitrary_predicate(self, motif_set: MotifSet) -> None:
+        assert motif_set.filter(lambda m: len(m) < 11).motif_ids == ("MA0119.1", "MA0261.1")
+
+    def test_a_predicate_and_a_keyword_both_hold(self, motif_set: MotifSet) -> None:
+        found = motif_set.filter(lambda m: len(m) > 10, tax_group="vertebrates")
+        assert found.motif_ids == ("MA0139.2", "MA1929.2")
+
+    def test_nothing_asked_keeps_everything(self, motif_set: MotifSet) -> None:
+        assert motif_set.filter().motif_ids == motif_set.motif_ids
+
+    def test_matching_nothing_is_an_empty_set_and_not_an_error(self, motif_set: MotifSet) -> None:
+        assert len(motif_set.filter(tax_group="diatoms")) == 0
+
+    def test_the_result_is_a_working_motif_set(self, motif_set: MotifSet) -> None:
+        # Filtering is not a dead end: everything a set does, the result still does.
+        vertebrates = motif_set.filter(tax_group="vertebrates")
+        assert vertebrates["MA0139"] is CTCF_15
+        assert vertebrates.by_name("CTCF") == (CTCF_15, CTCF_31)
+        assert vertebrates.filter(data_type="SELEX").motif_ids == ("MA0119.1",)
+
+    def test_a_filtered_set_keeps_the_order_of_the_one_it_came_from(
+        self, motif_set: MotifSet
+    ) -> None:
+        assert motif_set.filter(tax_group="vertebrates").motif_ids == (
+            "MA0139.2",
+            "MA1929.2",
+            "MA0119.1",
+        )
+
+    def test_an_unknown_annotation_names_the_ones_it_takes(self, motif_set: MotifSet) -> None:
+        with pytest.raises(TypeError, match="no annotation named 'species'"):
+            motif_set.filter(species="human")
+        with pytest.raises(TypeError, match="tax_group"):
+            motif_set.filter(motif_length="7")

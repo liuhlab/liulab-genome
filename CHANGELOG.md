@@ -10,6 +10,35 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **Name a JASPAR release and query it like a dictionary that filters itself.**
+  `JasparDatabase("2024", "vertebrates")` fetches that release's transfac file once into
+  `<LIULAB_DATA>/motif/jaspar/`, flat and with the release and tax group in the name, and every
+  construction after re-reads it and fetches nothing. Both releases (2024, 2026) and all eight tax
+  groups are supported, vertebrates by default, and `"all"` selects the union file — whose
+  published name drops the tax group, which is why the cached name is built rather than copied.
+  Motif data is the **first thing filed beside the assembly tree rather than inside it**, since a
+  motif belongs to no assembly. The transfac serialization is read rather than `.jaspar`: it
+  carries the count matrix and all six annotations in one file and does not round counts to
+  integers. **Annotation values are separated by a semicolon and never by a comma** — commas live
+  inside single values (`C3H(C),C2HC zinc-fingers like factors`, `PBM, CSA and/or DIP-chip`), so
+  splitting on one would silently corrupt about fifty records per release. A `MotifSet` holds the
+  motifs — built from *any* motifs, so a model's de novo matrices get the same API — and indexing
+  it resolves a matrix id, a bare base id or a unique factor name to **exactly one** motif, never a
+  union type. An ambiguous name raises `AmbiguousMotifNameError` naming every matching id and the
+  call that returns them all, since 66 names collide in 2024 and 71 in 2026; `by_name` always hands
+  back a tuple, of one where the name is unique, and absence raises rather than answering with
+  nothing. Filtering takes annotation keywords (prose matched as a case-insensitive substring, ids
+  matched exactly) or an arbitrary predicate and returns a plain `MotifSet`, because **a filtered
+  release is no longer that release**. There is **no completion record here and that is
+  deliberate** — the files are under 1 MB, so integrity is a download to a temporary name renamed
+  into place only on success, plus a parsed-motif count checked against a constant on every read,
+  which turns a truncated file into an error rather than half a release. A non-redundant release
+  shipping one version of each matrix is asserted rather than assumed, because it is what makes a
+  bare base id address one motif.
+- **`Motif.tf_class` and `Motif.tf_family` are tuples, not strings.** They are genuinely
+  multi-valued — a dimer carries one of each per half — so they join `uniprot_ids` and `pubmed_ids`
+  as plural annotations, and a bare string handed to any of the four is refused rather than stored
+  letter by letter. `tax_group` and `data_type` stay single strings.
 - **A motif, built from counts and able to answer for itself.** `genome.tf.motif.Motif` is a frozen
   4 × L count matrix plus the id and name it is addressed by and the six annotations JASPAR
   publishes — tax group, class, family, UniProt accessions, PubMed ids, data type — and it needs no

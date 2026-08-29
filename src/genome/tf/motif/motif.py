@@ -1,9 +1,16 @@
-"""The **Motif** — what one transcription factor recognises, held as counts.
+"""The **Motif** and the **Motif set** — what a factor recognises, and many held as one.
 
 A motif is a leaf, in the sense a :class:`~genome.seq.DNA` is: it names no **Assembly**, no
 **Region** and no **Strand**, and it holds no **Background**. Build one from a **Count
 matrix** and it can answer everything about itself with nothing else loaded — no file, no
 download, no network.
+
+A :class:`MotifSet` is many of them held as one addressable group, and the container every
+filter and — once they land — every scan and comparison is a method on. It is built from
+*any* motifs, so a model's de novo matrices get the whole API and not a smaller one; a
+**Release** read from disk is a motif set that also knows which release it is
+(:class:`~genome.tf.motif.jaspar.JasparDatabase`). Nothing here reads a file or reaches the
+network either: this module is still the pure core, and the loader is the edge.
 
 **The counts are the single source of truth.** Probabilities come from normalising a
 column; log-odds come from a background and a pseudocount, which are *arguments and never
@@ -36,11 +43,13 @@ Motif(motif_id='MA9999.1', motif_name='Gattaca', length=6, offset=0)
 DNA('GATTAC')
 >>> motif.information_content.round(3)
 array([2., 2., 2., 2., 2., 2.])
+>>> MotifSet([motif])["MA9999"]                      # the bare base id resolves too
+Motif(motif_id='MA9999.1', motif_name='Gattaca', length=6, offset=0)
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
@@ -55,6 +64,29 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays c
 #: The rows of a **Count matrix**, in order. The same order MOODS and logomaker use, so
 #: nothing between here and the scan engine has to permute anything.
 BASES: tuple[str, str, str, str] = ("A", "C", "G", "T")
+
+#: The four annotations a **Motif** holds several of, in :class:`Motif`'s field order. The
+#: source publishes one per half of a dimer and separates them with a semicolon, so each
+#: is a tuple; ``tax_group`` and ``data_type`` are single strings and are not here.
+PLURAL_ANNOTATIONS: tuple[str, str, str, str] = (
+    "tf_class",
+    "tf_family",
+    "uniprot_ids",
+    "pubmed_ids",
+)
+
+#: Every annotation :meth:`MotifSet.filter` takes as a keyword, mapped to whether its
+#: values are prose (matched as a case-insensitive substring, since nobody remembers how
+#: JASPAR spells a class) or ids (matched exactly, since a substring of an accession is
+#: not a weaker accession — it is a different one).
+_FILTERABLE: dict[str, bool] = {
+    "tax_group": True,
+    "tf_class": True,
+    "tf_family": True,
+    "data_type": True,
+    "uniprot_ids": False,
+    "pubmed_ids": False,
+}
 
 #: The shortest motif this package will scan with, and the floor :meth:`Motif.trim` will
 #: not go under. A 6-mer has only 4096 possible words, so its best possible match has
@@ -106,29 +138,42 @@ class Motif:
         source published it, so ``position_in_this_frame + offset`` is the position in the
         full frame. Non-zero only on the result of :meth:`trim`.
     tax_group : str, default ``""``
-        The **Tax group** the source filed this motif under — ``"vertebrates"``.
-    tf_class : str, default ``""``
-        The structural class of the factor, e.g. ``"C2H2 zinc finger factors"``.
-    tf_family : str, default ``""``
-        The family within that class, e.g. ``"More than 3 adjacent zinc fingers"``.
+        The **Tax group** the source filed this motif under — ``"vertebrates"``. One
+        value: a motif is filed under exactly one group.
+    tf_class : iterable of str, default ``()``
+        The structural classes of the factor, e.g. ``("C2H2 zinc finger factors",)``.
+        Plural because a dimer has one per half — ``MA0119.1``'s ``NFIC::TLX1`` is a
+        SMAD/NF-1 factor joined to a homeo domain factor — and the source separates them
+        with a semicolon. Stored as a tuple.
+    tf_family : iterable of str, default ``()``
+        The families within those classes, e.g. ``("Nuclear factor 1", "NK")``. Plural
+        for the same reason. Stored as a tuple.
     uniprot_ids : iterable of str, default ``()``
         UniProt accessions for the factor — several for a dimer. Stored as a tuple.
     pubmed_ids : iterable of str, default ``()``
         PubMed ids for the experiment behind the matrix. Stored as a tuple.
     data_type : str, default ``""``
-        How the matrix was measured, e.g. ``"ChIP-seq"``.
+        How the matrix was measured, e.g. ``"ChIP-seq"``. One value, and commas inside
+        it are part of it: ``"PBM, CSA and/or DIP-chip"`` names one method.
 
     Raises
     ------
     ValueError
-        If ``motif_id`` is empty, ``offset`` is negative, or the count matrix is not a
-        finite, non-negative 4 x L table with every column summing above zero.
+        If ``motif_id`` is empty, ``offset`` is negative, the count matrix is not a
+        finite, non-negative 4 x L table with every column summing above zero, or one of
+        the four plural annotations was given a bare string.
 
     Notes
     -----
     An empty string or an empty tuple in one of the six annotations means the source
     stated nothing there — a de novo matrix out of a model carries none of them, and
     everything on this class still works.
+
+    **Four of the six are plural and two are not.** ``tf_class``, ``tf_family``,
+    ``uniprot_ids`` and ``pubmed_ids`` hold a tuple, because the source publishes several
+    of each for a dimer and separates them with a semicolon; ``tax_group`` and
+    ``data_type`` hold one string each. A bare string handed to one of the plural four is
+    refused rather than stored letter by letter.
 
     Examples
     --------
@@ -153,8 +198,8 @@ class Motif:
     counts: npt.NDArray[np.float64]
     offset: int = 0
     tax_group: str = ""
-    tf_class: str = ""
-    tf_family: str = ""
+    tf_class: tuple[str, ...] = ()
+    tf_family: tuple[str, ...] = ()
     uniprot_ids: tuple[str, ...] = ()
     pubmed_ids: tuple[str, ...] = ()
     data_type: str = ""
@@ -175,8 +220,8 @@ class Motif:
         self._check_matrix(matrix)
         matrix.flags.writeable = False
         object.__setattr__(self, "counts", matrix)
-        object.__setattr__(self, "uniprot_ids", _as_id_tuple(self.uniprot_ids, "uniprot_ids"))
-        object.__setattr__(self, "pubmed_ids", _as_id_tuple(self.pubmed_ids, "pubmed_ids"))
+        for field in PLURAL_ANNOTATIONS:
+            object.__setattr__(self, field, _as_value_tuple(getattr(self, field), field))
 
     def _check_matrix(self, matrix: npt.NDArray[np.float64]) -> None:
         """Reject a count matrix that is the wrong shape, the wrong sign, or all zeros."""
@@ -555,14 +600,484 @@ class Motif:
         return ax
 
 
-def _as_id_tuple(ids: Iterable[str], field: str) -> tuple[str, ...]:
-    """Freeze an annotation's ids into a tuple, rejecting a bare string."""
-    if isinstance(ids, str):
-        raise ValueError(
-            f"{field} must be an iterable of ids, not the string {ids!r}: pass "
-            f"('{ids}',) for one, since a bare string would be read letter by letter."
+class MotifNotFoundError(LookupError):
+    """Nothing in this **Motif set** is addressed by that key.
+
+    The plain absence: the key is not a **Motif id**, not a bare base id, and not a
+    **Motif name** any motif in the set carries. Not an empty answer and never an empty
+    collection — a set that does not hold CTCF says so rather than handing back nothing.
+
+    A :class:`LookupError`, so it can be caught together with
+    :class:`AmbiguousMotifNameError` and :class:`AmbiguousBaseIdError` and still be told
+    apart from them: those two mean *too many*, and this one means *none*.
+
+    Parameters
+    ----------
+    key : str
+        The key that was asked for.
+    size : int
+        How many motifs the set holds, so an empty set explains itself.
+
+    Attributes
+    ----------
+    key : str
+        The key that was asked for.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> empty = MotifSet([])
+    >>> try:
+    ...     empty["CTCF"]
+    ... except LookupError as error:
+    ...     print("holds no motifs" in str(error))
+    True
+    """
+
+    def __init__(self, key: str, size: int) -> None:
+        self.key = key
+        held = (
+            "this motif set holds no motifs at all"
+            if size == 0
+            else f"none of the {size} motifs in this motif set is addressed by it"
         )
-    return tuple(ids)
+        super().__init__(
+            f"no motif is addressed by {key!r}: {held}. A motif is looked up by its full "
+            f"motif id ('MA0139.2'), by the bare base id ('MA0139'), or by a motif name "
+            f"that labels exactly one motif here ('CTCF'). Read `set.motif_ids` and "
+            f"`set.motif_names` for what this set can answer to."
+        )
+
+
+class AmbiguousMotifNameError(LookupError):
+    """A **Motif name** labels several motifs here, so it addresses none of them.
+
+    A name is a label and not a key: 66 names collide in the 2024 **Release** and 71 in
+    2026, so indexing a **Motif set** by one of them would have to pick one of four CTCFs
+    and say nothing about the other three. It raises instead, naming every matching
+    **Motif id** — which is what a caller addresses one by — and the call that hands back
+    all of them.
+
+    Parameters
+    ----------
+    name : str
+        The **Motif name** that labels several motifs.
+    motif_ids : iterable of str
+        Every matching **Motif id**, in the set's own order.
+
+    Attributes
+    ----------
+    name : str
+        The name that was asked for.
+    motif_ids : tuple of str
+        Every matching **Motif id**.
+
+    Examples
+    --------
+    >>> try:
+    ...     raise AmbiguousMotifNameError("CTCF", ["MA0139.2", "MA1929.2"])
+    ... except LookupError as error:
+    ...     print("MA1929.2" in str(error))
+    True
+    """
+
+    def __init__(self, name: str, motif_ids: Iterable[str]) -> None:
+        self.name = name
+        self.motif_ids: tuple[str, ...] = tuple(motif_ids)
+        listed = ", ".join(self.motif_ids)
+        super().__init__(
+            f"the motif name {name!r} labels {len(self.motif_ids)} motifs here, so it "
+            f"addresses none of them: {listed}. Index by the motif id of the one you mean, "
+            f"or call set.by_name({name!r}) for all of them — a name is a label and only a "
+            f"motif id is a key."
+        )
+
+
+class AmbiguousBaseIdError(LookupError):
+    """A bare base id matches several **Motif id**s here, so it addresses none of them.
+
+    Ordinarily impossible and checked anyway: a non-redundant **Release** ships exactly
+    one version of each matrix, which is what makes ``MA0139`` mean ``MA0139.2`` without a
+    caller having to remember the version. A set holding two versions of one matrix — a
+    hand-built comparison of ``MA0139.1`` against ``MA0139.2``, or a release that is not
+    the non-redundant one — breaks that, and it is said rather than resolved by whichever
+    came first.
+
+    Parameters
+    ----------
+    base_id : str
+        The bare base id, versionless.
+    motif_ids : iterable of str
+        Every **Motif id** sharing it, in the set's own order.
+
+    Attributes
+    ----------
+    base_id : str
+        The base id that was asked for.
+    motif_ids : tuple of str
+        Every **Motif id** sharing it.
+
+    Examples
+    --------
+    >>> try:
+    ...     raise AmbiguousBaseIdError("MA0139", ["MA0139.1", "MA0139.2"])
+    ... except LookupError as error:
+    ...     print("MA0139.1" in str(error))
+    True
+    """
+
+    def __init__(self, base_id: str, motif_ids: Iterable[str]) -> None:
+        self.base_id = base_id
+        self.motif_ids: tuple[str, ...] = tuple(motif_ids)
+        listed = ", ".join(self.motif_ids)
+        super().__init__(
+            f"the base id {base_id!r} matches {len(self.motif_ids)} motifs here: {listed}. "
+            f"Address the one you mean by its full motif id, version and all. A bare base "
+            f"id resolves only where one version of a matrix is present, which is what a "
+            f"non-redundant release guarantees and this set does not."
+        )
+
+
+class MotifSet:
+    """**Motif**s held as one addressable group: indexed, filtered, and nothing else read.
+
+    The container the whole motif API hangs off, and it is built from *any* motifs — a
+    **Release** parsed off disk, a filtered part of one, or the de novo matrices a model
+    found, which is what gives those everything a release can do rather than a smaller
+    API. It reads no file and reaches no network; preparing a release does, and that is
+    :class:`~genome.tf.motif.jaspar.JasparDatabase`.
+
+    **Indexing always returns exactly one motif, never a union type.** ``set[key]``
+    resolves a **Motif id**, then a bare base id, then a **Motif name** — in that order,
+    and the first that matches wins. A name labelling several motifs raises rather than
+    picking one of them; :meth:`by_name` is how all of them are had, and it hands back a
+    tuple whether the name labels four motifs or one.
+
+    Iterating yields :class:`Motif` objects rather than keys — the one place this reads
+    unlike a dict, and it reads like the collection of motifs it is. Order is the order
+    the motifs were given, everywhere: the tuple from :meth:`by_name`, the ids in an
+    ambiguity error, and what a filtered set holds.
+
+    Parameters
+    ----------
+    motifs : iterable of Motif
+        The motifs to hold, in the order they should be held. May be empty — a filter
+        that matched nothing is a real answer.
+
+    Raises
+    ------
+    ValueError
+        If two motifs share a **Motif id**. An id is what a motif is addressed by, so a
+        set holding two of one id could not answer for either.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> counts = np.array([[9.0, 1.0], [1.0, 1.0], [0.0, 7.0], [0.0, 1.0]])
+    >>> ctcf = Motif("MA0139.2", "CTCF", counts, tf_class=("C2H2 zinc finger factors",))
+    >>> prrx2 = Motif("MA0075.3", "PRRX2", counts, tf_class=("Homeo domain factors",))
+    >>> motifs = MotifSet([ctcf, prrx2])
+    >>> len(motifs)
+    2
+    >>> motifs["MA0139.2"] is motifs["MA0139"] is motifs["CTCF"]
+    True
+    >>> motifs.by_name("PRRX2")
+    (Motif(motif_id='MA0075.3', motif_name='PRRX2', length=2, offset=0),)
+    >>> motifs.filter(tf_class="zinc finger").motif_ids
+    ('MA0139.2',)
+    """
+
+    def __init__(self, motifs: Iterable[Motif]) -> None:
+        held = tuple(motifs)
+        by_id: dict[str, Motif] = {}
+        for motif in held:
+            if motif.motif_id in by_id:
+                raise ValueError(
+                    f"two motifs in this set share the motif id {motif.motif_id!r}, so "
+                    f"neither could be addressed by it. Give one of them an id of its own, "
+                    f"or drop the duplicate — a motif name may be shared and an id may not."
+                )
+            by_id[motif.motif_id] = motif
+        self._motifs = held
+        self._by_id = by_id
+        self._by_base = _group(held, base_id)
+        self._by_name = _group(held, lambda motif: motif.motif_name)
+
+    # ----------------------------------------------------------------- what is held
+
+    @property
+    def motifs(self) -> tuple[Motif, ...]:
+        """Every **Motif** held, in the order it was given.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> MotifSet([Motif("MA9999.1", "x", np.ones((4, 7)))]).motifs
+        (Motif(motif_id='MA9999.1', motif_name='x', length=7, offset=0),)
+        """
+        return self._motifs
+
+    @property
+    def motif_ids(self) -> tuple[str, ...]:
+        """Every **Motif id**, in the order the motifs were given. Unique, always.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> MotifSet([Motif("MA9999.1", "x", np.ones((4, 7)))]).motif_ids
+        ('MA9999.1',)
+        """
+        return tuple(self._by_id)
+
+    @property
+    def motif_names(self) -> tuple[str, ...]:
+        """Every **Motif name**, one per motif and parallel to :attr:`motif_ids`.
+
+        Duplicates are kept and never collapsed: a name labelling two motifs appears
+        twice, because these are labels and there are as many of them as motifs.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> counts = np.ones((4, 7))
+        >>> pair = [Motif("MA0139.2", "CTCF", counts), Motif("MA1929.2", "CTCF", counts)]
+        >>> MotifSet(pair).motif_names
+        ('CTCF', 'CTCF')
+        """
+        return tuple(motif.motif_name for motif in self._motifs)
+
+    def __len__(self) -> int:
+        """Return how many motifs are held."""
+        return len(self._motifs)
+
+    def __iter__(self) -> Iterator[Motif]:
+        """Iterate the **Motif**s themselves, in order — not their keys."""
+        return iter(self._motifs)
+
+    def __contains__(self, key: object) -> bool:
+        """Answer whether a key matches anything here, or whether a **Motif** is one of ours.
+
+        A key that matches *several* motifs is still in the set, though indexing by it
+        raises: membership asks whether the set knows the key, and indexing asks it to
+        name one motif.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> motifs = MotifSet([Motif("MA0139.2", "CTCF", np.ones((4, 7)))])
+        >>> "MA0139" in motifs, "CTCF" in motifs, "SOX2" in motifs
+        (True, True, False)
+        """
+        if isinstance(key, Motif):
+            return self._by_id.get(key.motif_id) == key
+        if not isinstance(key, str):
+            return False
+        return key in self._by_id or key in self._by_base or key in self._by_name
+
+    def __repr__(self) -> str:
+        """Return how many motifs are held, never the motifs themselves."""
+        return f"{type(self).__name__}(motifs={len(self._motifs)})"
+
+    # --------------------------------------------------------------------- lookup
+
+    def __getitem__(self, key: str) -> Motif:
+        """Return the one **Motif** ``key`` addresses — id, base id, or unique name.
+
+        Parameters
+        ----------
+        key : str
+            A **Motif id** (``"MA0139.2"``), a bare base id (``"MA0139"``), or a **Motif
+            name** labelling exactly one motif here (``"CTCF"``). Tried in that order.
+
+        Returns
+        -------
+        Motif
+            Exactly one motif, always — never a tuple and never a union type.
+
+        Raises
+        ------
+        MotifNotFoundError
+            If nothing here is addressed by ``key``.
+        AmbiguousMotifNameError
+            If ``key`` is a name labelling several motifs. It names every matching id.
+        AmbiguousBaseIdError
+            If ``key`` is a base id shared by several motifs, which a non-redundant
+            **Release** cannot produce.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> motifs = MotifSet([Motif("MA0139.2", "CTCF", np.ones((4, 7)))])
+        >>> motifs["MA0139"].motif_name
+        'CTCF'
+        """
+        found = self._by_id.get(key)
+        if found is not None:
+            return found
+        for index, ambiguity in (
+            (self._by_base, AmbiguousBaseIdError),
+            (self._by_name, AmbiguousMotifNameError),
+        ):
+            matches = index.get(key)
+            if matches is None:
+                continue
+            # Unpacked rather than indexed: a group always holds at least one motif, and
+            # this says so in a way that needs no comment to prove.
+            first, *others = matches
+            if others:
+                raise ambiguity(key, [motif.motif_id for motif in matches])
+            return first
+        raise MotifNotFoundError(key, len(self._motifs))
+
+    def by_name(self, name: str) -> tuple[Motif, ...]:
+        """Return every **Motif** labelled ``name``, always as a tuple.
+
+        A tuple of one where the name is unique, so a caller writes one code path for the
+        common case and the four-CTCFs case alike. Absence is not emptiness: a name
+        nothing here carries raises rather than handing back ``()``.
+
+        Parameters
+        ----------
+        name : str
+            The **Motif name** to look up, matched exactly.
+
+        Returns
+        -------
+        tuple of Motif
+            Every motif with that name, in the set's own order. Never empty.
+
+        Raises
+        ------
+        MotifNotFoundError
+            If no motif here carries that name.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> counts = np.ones((4, 7))
+        >>> pair = [Motif("MA0139.2", "CTCF", counts), Motif("MA1929.2", "CTCF", counts)]
+        >>> [motif.motif_id for motif in MotifSet(pair).by_name("CTCF")]
+        ['MA0139.2', 'MA1929.2']
+        """
+        matches = self._by_name.get(name)
+        if matches is None:
+            raise MotifNotFoundError(name, len(self._motifs))
+        return matches
+
+    # ------------------------------------------------------------------ filtering
+
+    def filter(
+        self, predicate: Callable[[Motif], bool] | None = None, **annotations: str | Iterable[str]
+    ) -> MotifSet:
+        """Return a plain :class:`MotifSet` of the motifs that match.
+
+        **A plain motif set, never a database**, even when called on one: a filtered
+        **Release** is no longer that release, and calling it one would let a **Hit
+        table** claim provenance it does not have. Everything a set does, the result
+        still does.
+
+        Every condition given must hold — the predicate *and* each annotation keyword.
+        With nothing given, every motif matches.
+
+        Parameters
+        ----------
+        predicate : callable, optional
+            Called with each :class:`Motif`; kept where it returns true. For anything the
+            keywords do not express — a length, a consensus, an information content.
+        **annotations
+            One or more of ``tax_group``, ``tf_class``, ``tf_family``, ``data_type``,
+            ``uniprot_ids`` and ``pubmed_ids``. Each value is one string or an iterable of
+            them, and a motif matches when *any* of them matches *any* value the motif
+            holds for that annotation. The four prose annotations match on a
+            case-insensitive substring, so ``tf_class="zinc finger"`` finds every spelling
+            of one; the two id annotations match exactly, since a substring of an
+            accession is a different accession rather than a looser one.
+
+        Returns
+        -------
+        MotifSet
+            The matching motifs, in this set's own order. Empty when nothing matched,
+            which is a real answer and not an absence.
+
+        Raises
+        ------
+        TypeError
+            If a keyword is not one of the six annotations. The message lists them.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> counts = np.ones((4, 9))
+        >>> zinc = Motif("MA0139.2", "CTCF", counts, tf_class=("C2H2 zinc finger factors",))
+        >>> homeo = Motif("MA0075.3", "PRRX2", counts, tf_class=("Homeo domain factors",))
+        >>> motifs = MotifSet([zinc, homeo])
+        >>> motifs.filter(tf_class="zinc finger").motif_ids
+        ('MA0139.2',)
+        >>> motifs.filter(lambda motif: len(motif) == 9).motif_ids
+        ('MA0139.2', 'MA0075.3')
+        >>> motifs.filter(tf_class=("zinc finger", "homeo")).motif_ids
+        ('MA0139.2', 'MA0075.3')
+        """
+        unknown = sorted(set(annotations) - set(_FILTERABLE))
+        if unknown:
+            raise TypeError(
+                f"filter() got no annotation named {', '.join(repr(key) for key in unknown)}. "
+                f"The annotations it filters on are: {', '.join(_FILTERABLE)}. Anything else "
+                f"— a length, a consensus — is what the predicate argument is for."
+            )
+        wanted = {key: _as_wanted(value) for key, value in annotations.items()}
+        kept = [
+            motif
+            for motif in self._motifs
+            if (predicate is None or predicate(motif))
+            and all(_matches(motif, key, values) for key, values in wanted.items())
+        ]
+        return MotifSet(kept)
+
+
+def base_id(motif: Motif) -> str:
+    """Return a **Motif id** without its version — ``MA0139.2`` becomes ``MA0139``.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> base_id(Motif("MA0139.2", "CTCF", np.ones((4, 7))))
+    'MA0139'
+    """
+    return motif.motif_id.split(".", 1)[0]
+
+
+def _group(motifs: tuple[Motif, ...], key: Callable[[Motif], str]) -> dict[str, tuple[Motif, ...]]:
+    """Index motifs by a key several of them may share, keeping the order they came in."""
+    grouped: dict[str, list[Motif]] = {}
+    for motif in motifs:
+        grouped.setdefault(key(motif), []).append(motif)
+    return {key_: tuple(group) for key_, group in grouped.items()}
+
+
+def _as_wanted(value: str | Iterable[str]) -> tuple[str, ...]:
+    """Read one filter keyword's value as the alternatives it offers."""
+    return (value,) if isinstance(value, str) else tuple(value)
+
+
+def _matches(motif: Motif, annotation: str, wanted: tuple[str, ...]) -> bool:
+    """Answer whether one motif's annotation matches any of the alternatives asked for."""
+    held = getattr(motif, annotation)
+    values = (held,) if isinstance(held, str) else held
+    if _FILTERABLE[annotation]:
+        return any(want.lower() in value.lower() for value in values for want in wanted)
+    return any(value in wanted for value in values)
+
+
+def _as_value_tuple(values: Iterable[str], field: str) -> tuple[str, ...]:
+    """Freeze one plural annotation into a tuple, rejecting a bare string."""
+    if isinstance(values, str):
+        raise ValueError(
+            f"{field} must be an iterable of values, not the string {values!r}: pass "
+            f"('{values}',) for one, since a bare string would be read letter by letter. "
+            f"{field} is plural because the source publishes several for a dimer."
+        )
+    return tuple(values)
 
 
 def _offending_columns(mask: npt.NDArray[np.bool_]) -> str:

@@ -49,6 +49,10 @@
 
 ::: genome.tf.motif.motif
 
+## `genome.tf.motif.jaspar`
+
+::: genome.tf.motif.jaspar
+
 ## `genome.external`
 
 ::: genome.external
