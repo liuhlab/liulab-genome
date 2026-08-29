@@ -29,6 +29,9 @@ pinned checksum — and an assembly or an annotation with no row is perfectly le
 Each dataclass declares its field list once: its table is read through those fields
 column by column, parsed by each field's own declared type, and a whole record is what
 :class:`~genome.genome.Genome` and the registration functions take to override the table.
+That last step is :func:`parse_cell`, which is public because it is the reader every
+curated table in this package shares — the two here, and the **Xref source** table
+:mod:`genome.xref.metadata` declares the same way.
 
 A row is a record's other spelling, and both directions are public:
 :func:`format_table_row` writes one, :meth:`AssemblyMetadata.from_row` and
@@ -228,7 +231,7 @@ class AssemblyMetadata:
         >>> AssemblyMetadata.from_row(row).species is None   # blank is unknown
         True
         """
-        return cls(**{name: _parse_cell(name, row, _FIELD_TYPES) for name in METADATA_FIELDS})
+        return cls(**{name: parse_cell(name, row, _FIELD_TYPES) for name in METADATA_FIELDS})
 
 
 #: Each metadata field's declared type, which parses that field's column of the table.
@@ -329,7 +332,7 @@ class AnnotationMetadata:
         True
         """
         return cls(
-            **{name: _parse_cell(name, row, _ANNOTATION_FIELD_TYPES) for name in ANNOTATION_FIELDS}
+            **{name: parse_cell(name, row, _ANNOTATION_FIELD_TYPES) for name in ANNOTATION_FIELDS}
         )
 
 
@@ -445,8 +448,12 @@ def _parse_flag(name: str, row: Mapping[str, object]) -> bool:
     )
 
 
-def _parse_cell(name: str, row: Mapping[str, object], types: Mapping[str, Any]) -> Any:
+def parse_cell(name: str, row: Mapping[str, object], types: Mapping[str, Any]) -> Any:
     """Parse the ``name`` column of ``row`` with that field's own declared type.
+
+    How every curated table in this package turns a cell into a field, so a table that
+    declares its columns as a frozen dataclass gets its reader for free — the assembly and
+    annotation tables here, and the **Xref source** table in :mod:`genome.xref.metadata`.
 
     A field declared optional (``T | None``) is parsed by ``T`` when its cell carries
     text, and is ``None`` when the cell is blank or its column is absent — a union is
@@ -454,6 +461,34 @@ def _parse_cell(name: str, row: Mapping[str, object], types: Mapping[str, Any]) 
     flag column, where an empty cell is a real answer (see :func:`_parse_flag`) rather
     than an unknown. Any other field is parsed by its declared type and has no unknown,
     so a blank cell there is a malformed row rather than the text ``'nan'``.
+
+    Parameters
+    ----------
+    name : str
+        The column to read, which is also the field it fills.
+    row : mapping of str to object
+        Column name to cell, as the shipped TSV spells one. An absent column is blank.
+    types : mapping of str to object
+        Each field's declared type, normally :func:`typing.get_type_hints` of the record.
+
+    Returns
+    -------
+    object
+        The cell parsed by its column's own type, or ``None`` for a blank cell in a column
+        that has an unknown.
+
+    Raises
+    ------
+    MetadataRowError
+        If the cell cannot be read as its column's type, or the column has no unknown and
+        the cell is blank. The message names the column.
+
+    Examples
+    --------
+    >>> parse_cell("ncbi_taxid", {"ncbi_taxid": "9606"}, {"ncbi_taxid": int})
+    9606
+    >>> parse_cell("species", {}, {"species": str | None}) is None
+    True
     """
     declared = types[name]
     if declared is bool:

@@ -235,6 +235,46 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   having said this package builds no ortholog or homology support at all, and the rule against
   assuming an assembly, a coordinate system or a strand is extended in place — a gene id never
   crosses species implicitly. Vocabulary and records only; no behaviour changes.
+- **A column of Entrez, UniProt, HGNC, MGI or WormBase ids reaches this package's answers, with no
+  assembly and no genome open.** `genome.xref` is a peer of `genome.tf`, and an **Xref set** is one
+  species, one **Xref source** and one pinned **Release**: `XrefSet("Homo sapiens")` fetches the
+  publisher's file once into `$LIULAB_DATA/xref/`, a sibling of the assembly tree beside `motif/`,
+  slices it to that species and re-reads it thereafter — the shape `JasparDatabase` established,
+  with a `cache_dir` override naming the directory itself. **Two verbs and only two** (ADR-0017):
+  `to_stems` toward the hub and `from_stems` away from it, so a caller wanting Entrez → HGNC makes
+  both calls and owns the join, and a query reads exactly one set, which makes merging two
+  publishers inexpressible rather than merely discouraged. Both answer in the shape
+  `resolve_gene_ids` already established — ask order kept, **every** id a key names and never a
+  chosen one, no resolved value ever empty, what named nothing riding back in `unresolved`, a
+  flattener that documents what flattening loses, and `as_json()` — and every answer names the
+  species, source and release that produced it, because an answer that did not would be
+  unreproducible a year later. **Alliance of Genome Resources 9.0.0 is the first source and the
+  default for all three species**, gene level only, across Ensembl, Entrez, UniProt and each
+  species' own authority; naming a release is enough to fetch it, the curated row in
+  `data/xref/xref_metadata.tsv` knowing the publisher, the version, the URL and the checksum. **The
+  three species' hops turn out to have three different shapes**, which is the argument for this
+  being an object a caller opens: for worm it is the identity — all 46,926 `WB:WBGene…` genes carry
+  `ENSEMBL:WBGene…`, the same string, with zero differing — for mouse a real join onto `ENSMUSG…`,
+  and for human a join through HGNC in which **2,535 of 40,665 genes carry two or more Ensembl
+  cross-references**, so 6.2% of HGNC ids name two stems and nothing picks one. **Every incoming id
+  is reduced to its Gene id stem on ingest**, a publisher's and a caller's alike, because joining a
+  versioned id to a bare one returns zero matches and says nothing — the most error-prone detail in
+  this landscape — and each **Namespace**'s CURIE prefix is accepted whether or not it is written,
+  so `HGNC:11998` and `11998` are one identifier. Alliance's duplication is deduplicated **on the
+  key and never on the row**: 2,659,704 rows reduce to 1,811,267 distinct
+  `(GeneID, GlobalCrossReferenceID, TaxonID)`, 31.9% redundant, and a whole-row `uniq` removes none
+  of it. **The stored form is a plain gzipped TSV** of `namespace`, `xref_id`, `gene_id_stem`,
+  sorted, unique and written with no gzip timestamp, so two machines slicing one release produce
+  identical bytes and a collaborator who does not use Python reads it in R. The **Completion
+  marker** beside it carries **both** checksums — the publisher's own md5 as provenance and the
+  slice's own sha256 as the integrity check, since what is stored is a derived slice rather than the
+  publisher's bytes — and either one disagreeing with what is on disk means unfinished rather than
+  present. The publisher's md5 is over its **unpacked** bytes (ADR-0006), which is Alliance's own
+  convention and a trap: hashing the `.tsv.gz` as it arrives mismatches every time. Four errors name
+  their next action: a set that is not downloaded names the call to make on a login node, an
+  unsupported species names the three that have a set, a **Namespace** the source does not carry
+  names the ones it does, and a file that does not match its pin refuses rather than answering with
+  silently fewer genes.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;

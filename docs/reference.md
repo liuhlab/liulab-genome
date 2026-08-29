@@ -97,6 +97,22 @@
 
 ::: genome.tf.link
 
+## `genome.xref.ids`
+
+::: genome.xref.ids
+
+## `genome.xref.metadata`
+
+::: genome.xref.metadata
+
+## `genome.xref.alliance`
+
+::: genome.xref.alliance
+
+## `genome.xref.xref`
+
+::: genome.xref.xref
+
 ## `genome.external`
 
 ::: genome.external

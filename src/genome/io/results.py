@@ -21,7 +21,10 @@ one published census against one annotation, one :class:`TFGene` per gene it nam
 carrying the census's own provenance so the verdict never travels without it.
 :class:`TFCofactorList` and :class:`TFCofactor` are that pair's counterpart for the genes
 a publisher lists as a **Transcription cofactor**, in the same shape and with the same
-rules, because a caller who has read one answer has read both.
+rules, because a caller who has read one answer has read both. :class:`ResolvedStems` and
+:class:`ResolvedXrefIds` are the two directions of an **Xref set**'s hop, and they are
+:class:`ResolvedGeneIds`'s shape again with one difference: what produced the answer is a
+publisher and a **Release** rather than an assembly and an annotation.
 
 **An answer knows how it reads.** :attr:`AnnotationStatusRow.state` and
 :attr:`AnnotationStatus.default_summary` are here rather than in the surface printing them,
@@ -653,6 +656,187 @@ class ResolvedGeneIds:
             "resolved": {stem: list(ids) for stem, ids in self.resolved.items()},
             "unresolved": list(self.unresolved),
             "gene_ids": self.gene_ids,
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedStems:
+    """The **Gene id stem**s one **Xref set** says a foreign id names.
+
+    :meth:`~genome.xref.xref.XrefSet.to_stems`'s answer — the hop *toward* the hub. Every
+    field before :attr:`resolved` says what produced it, because one publisher's
+    assertions are not another's: NCBI and Ensembl agree on 57.5% of human gene-level
+    (GeneID, ENSG) pairs, so an answer that did not name its **Xref source** and
+    **Release** would be unreproducible a year later. A query reads exactly one set
+    (ADR-0017), which is why the source is one field here rather than a column on every
+    row.
+
+    **A foreign id naming two stems answers with both**, and nothing picks one — the same
+    guarantee :class:`ResolvedGeneIds` gives for a stem naming two gene ids. **What named
+    nothing rides back** in :attr:`unresolved` rather than shortening the answer.
+
+    The keys are the caller's **own spelling** of the ids it asked about, so a versioned
+    and an unversioned spelling of one id are two keys with identical values and the
+    answer still zips against the caller's table row for row.
+
+    Attributes
+    ----------
+    species : str
+        The species this set is for, as the curated metadata table spells it.
+    source : str
+        The **Xref source** whose assertions these are.
+    release : str
+        The pinned **Release** of that source.
+    namespace : str
+        The **Namespace** the ids asked about belong to.
+    resolved : mapping of str to tuple of str
+        Every id that named at least one stem, in the order they were asked about, to the
+        stems it names, in ascending order. No value is ever an empty tuple — an id that
+        named nothing is in :attr:`unresolved` instead.
+    unresolved : tuple of str
+        The ids this release names no stem for, in the order they were asked about.
+
+    Examples
+    --------
+    >>> answer = ResolvedStems(
+    ...     species="Homo sapiens",
+    ...     source="alliance",
+    ...     release="8.4.0",
+    ...     namespace="entrez",
+    ...     resolved={"7157": ("ENSG00000141510",)},
+    ...     unresolved=("999999999",),
+    ... )
+    >>> answer.gene_id_stems
+    ['ENSG00000141510']
+    >>> answer.as_json()["source"]
+    'alliance'
+    """
+
+    species: str
+    source: str
+    release: str
+    namespace: str
+    resolved: Mapping[str, tuple[str, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_id_stems(self) -> list[str]:
+        """Every stem resolved, ask order and then stem order — a fresh list each call.
+
+        **Every** stem, not one per id. Flattening loses which id named which stem, and
+        with it the fact that an id named more than one: a reader taking the first stem of
+        each id would silently pick one of two genes a **Namespace** is ambiguous
+        between. :attr:`resolved` is what says which id a stem came from. It also loses
+        the ask order *of the ids*, since one id contributing two stems contributes two
+        entries here.
+        """
+        return [stem for stems in self.resolved.values() for stem in stems]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``species``, ``source``, ``release`` and ``namespace``, ``resolved`` as a
+            mapping of id to a list of stems, ``unresolved`` as a list, and the flattened
+            ``gene_id_stems``. The last is written out beside the mapping it is read from
+            for the reason :attr:`gene_id_stems` gives.
+        """
+        return {
+            "species": self.species,
+            "source": self.source,
+            "release": self.release,
+            "namespace": self.namespace,
+            "resolved": {asked: list(stems) for asked, stems in self.resolved.items()},
+            "unresolved": list(self.unresolved),
+            "gene_id_stems": self.gene_id_stems,
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedXrefIds:
+    """The foreign ids one **Xref set** says a **Gene id stem** names.
+
+    :meth:`~genome.xref.xref.XrefSet.from_stems`'s answer — the hop *away* from the hub,
+    and :class:`ResolvedStems`'s mirror in every respect: the same four provenance fields,
+    the same ask order, the same never-empty resolved value, and the same tuple of what
+    named nothing. Two verbs and only two, so a caller wanting one **Namespace** from
+    another makes both calls and owns the join (ADR-0017).
+
+    Attributes
+    ----------
+    species : str
+        The species this set is for, as the curated metadata table spells it.
+    source : str
+        The **Xref source** whose assertions these are.
+    release : str
+        The pinned **Release** of that source.
+    namespace : str
+        The **Namespace** the answering ids belong to.
+    resolved : mapping of str to tuple of str
+        Every stem that named at least one id in that namespace, in the order the stems
+        were asked about, to the ids it names, in ascending order. No value is ever an
+        empty tuple.
+    unresolved : tuple of str
+        The stems this release gives no id in that namespace, in the order they were asked
+        about. One bucket and not two: a stem this release never carried and a stem it
+        carries with no id in *this* namespace are both *this set answers nothing*, and no
+        id history is held that could tell a retired stem from an unknown one (ADR-0017).
+
+    Examples
+    --------
+    >>> answer = ResolvedXrefIds(
+    ...     species="Homo sapiens",
+    ...     source="alliance",
+    ...     release="8.4.0",
+    ...     namespace="hgnc",
+    ...     resolved={"ENSG00000141510": ("HGNC:11998",)},
+    ...     unresolved=("ENSG00000288541",),
+    ... )
+    >>> answer.xref_ids
+    ['HGNC:11998']
+    >>> answer.as_json()["namespace"]
+    'hgnc'
+    """
+
+    species: str
+    source: str
+    release: str
+    namespace: str
+    resolved: Mapping[str, tuple[str, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def xref_ids(self) -> list[str]:
+        """Every foreign id resolved, ask order and then id order — a fresh list each call.
+
+        **Every** id, not one per stem. Flattening loses which stem named which id, so a
+        reader taking the first id of each stem would hand a collaborator one of two
+        accessions a gene genuinely has without saying it had chosen; and a stem naming two
+        ids contributes two entries, so the flattened list no longer runs parallel to the
+        stems asked about. :attr:`resolved` is what says which stem an id came from.
+        """
+        return [xref_id for ids in self.resolved.values() for xref_id in ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``species``, ``source``, ``release`` and ``namespace``, ``resolved`` as a
+            mapping of stem to a list of ids, ``unresolved`` as a list, and the flattened
+            ``xref_ids``, written out for the reason :attr:`xref_ids` gives.
+        """
+        return {
+            "species": self.species,
+            "source": self.source,
+            "release": self.release,
+            "namespace": self.namespace,
+            "resolved": {stem: list(ids) for stem, ids in self.resolved.items()},
+            "unresolved": list(self.unresolved),
+            "xref_ids": self.xref_ids,
         }
 
 
