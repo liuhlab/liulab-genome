@@ -124,6 +124,27 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   arithmetic it re-runs on every build**, and fails loudly both when a family survives that map with
   no category and when the publisher's own counts stop reconciling — so a release that renames a
   family is a broken build rather than a quietly blanked column.
+- **An assembly's transcription cofactors, in its own annotation's gene ids.**
+  `Genome.tf_cofactor_list()` is the **TF cofactor list**, the counterpart of `tf_gene_list()` and
+  the same three layers: a method on the genome, one on the annotation registry taking a **Registered
+  name**, and a module-level `tf_cofactor_list(assembly)` for a caller who has not opened one — one
+  code path, so a shell surface over it adds no second. Every **Gene id stem** the **Cofactor
+  table** is keyed by is resolved through the annotation's own gene ids, so the answer joins to a
+  counts matrix with nothing left to normalise; a stem naming two gene ids answers with **both** and
+  never picks one; and the stems this annotation carries no gene for **ride back on the answer**
+  rather than being dropped. The species is read off the assembly's own metadata row and never
+  passed in, so asking for human cofactors while holding a mouse assembly is not expressible
+  (ADR-0003). Each entry carries the four uniform columns as fields of its own — the stem, the
+  symbol, the cofactor flag and which publisher listed the gene — with every publisher's own
+  vocabulary reachable beside them under that publisher's namespaced column name, exactly as a **TF
+  gene** carries its **DBD family** and the census's other judgements. **Absence is not emptiness
+  here either:** an assembly whose species has no cofactor table raises the new
+  `NoCofactorTableError` **naming the species that do**, rather than answering with none, so that
+  *nobody has published one for this species* can never be read as *this species has no cofactors*.
+  `UnknownSpeciesError` is now shared by both halves and says which of them was asked for. **The two
+  halves do not raise for the same assemblies**: a worm assembly answers here and raises from
+  `tf_gene_list()`, because a publisher assessed worm cofactors and none has released a worm TF
+  census.
 - **The words for transcription cofactors, settled before the code that will use them.** The TF gene
   context glossary now covers the whole TF context at `docs/context/tf.md`, and defines
   **Transcription cofactor**, **Cofactor table** and **TF cofactor list** — so that a bare

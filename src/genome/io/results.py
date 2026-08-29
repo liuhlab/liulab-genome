@@ -19,6 +19,9 @@ sets the **Gene id stem**s a caller asked about against the gene ids one annotat
 actually carries — including the stems it carries none for — and :class:`TFGeneList` sets
 one published census against one annotation, one :class:`TFGene` per gene it named here,
 carrying the census's own provenance so the verdict never travels without it.
+:class:`TFCofactorList` and :class:`TFCofactor` are that pair's counterpart for the genes
+a publisher lists as a **Transcription cofactor**, in the same shape and with the same
+rules, because a caller who has read one answer has read both.
 
 **An answer knows how it reads.** :attr:`AnnotationStatusRow.state` and
 :attr:`AnnotationStatus.default_summary` are here rather than in the surface printing them,
@@ -44,6 +47,7 @@ from typing import Any
 
 from genome.io.completion import CompletionRecord
 from genome.io.components import ChimeraDetails
+from genome.tf.cofactor import CofactorProvenance
 from genome.tf.gene import CensusProvenance
 
 #: What answered *which digest should this FASTA have?* — the assembly's curated
@@ -831,6 +835,207 @@ class TFGeneList:
             "species": self.species,
             "provenance": asdict(self.provenance),
             "genes": [gene.as_json() for gene in self.genes],
+            "gene_ids": self.gene_ids,
+            "unresolved": list(self.unresolved),
+        }
+
+
+@dataclass(frozen=True)
+class TFCofactor:
+    """One gene a publisher lists as a cofactor, named in one **Annotation**'s gene ids.
+
+    An entry of a :class:`TFCofactorList`, and the counterpart of :class:`TFGene`. The
+    table's four uniform columns are fields of their own — the **Gene id stem** it is
+    keyed by, the symbol, the cofactor flag and which publisher listed the gene — and
+    everything each publisher classified it with stays under that publisher's own
+    namespaced name in :attr:`classifications`, because no two publishers carry the same
+    columns and nothing here compares one's vocabulary with another's (ADR-0014).
+
+    ``gene_ids`` is a tuple for the reason :class:`TFGene`'s is: one stem may name more
+    than one gene id in one annotation and this never picks one. It is never empty — a
+    stem the annotation carries no gene for is in :attr:`TFCofactorList.unresolved`
+    instead of here.
+
+    Attributes
+    ----------
+    gene_id_stem : str
+        The **Gene id stem** the **Cofactor table** is keyed by.
+    gene_ids : tuple of str
+        Every gene id this annotation spells that stem with, ascending.
+    symbol : str or None
+        The gene symbol the table records, or ``None`` where it records none.
+    is_cofactor : bool
+        The table's own cofactor flag. ``True`` for every entry of a **TF cofactor
+        list**, since no publisher shipping here releases a rejected set — a source that
+        did would ship rejected rows, and they would be excluded rather than arriving
+        here saying ``False``.
+    source : str
+        Which publisher listed the gene, in the table's own closed vocabulary —
+        ``animaltfdb``, ``epifactors``, or ``both`` for a gene two of them listed. ``both``
+        is agreement on **membership only** and never on how either classified it.
+    classifications : mapping of str to (str or None)
+        Every other column the table records for this gene, under the publisher's own
+        namespaced snake_case name: ``animaltfdb_family`` and ``animaltfdb_category``
+        for a gene AnimalTFDB listed, and the EpiFactors function, target, modification
+        and complex name for one EpiFactors did. ``None`` is a cell that publisher left
+        blank — which, for a gene the other publisher listed, is that publisher saying
+        nothing rather than a value being lost.
+
+    Examples
+    --------
+    >>> cofactor = TFCofactor(
+    ...     gene_id_stem="ENSMUSG00000000085",
+    ...     gene_ids=("ENSMUSG00000000085.16",),
+    ...     symbol="Scmh1",
+    ...     is_cofactor=True,
+    ...     source="animaltfdb",
+    ...     classifications={"animaltfdb_category": "Other Cofactors"},
+    ... )
+    >>> cofactor.classifications["animaltfdb_category"]
+    'Other Cofactors'
+    >>> cofactor.as_json()["gene_ids"]
+    ['ENSMUSG00000000085.16']
+    """
+
+    gene_id_stem: str
+    gene_ids: tuple[str, ...]
+    symbol: str | None
+    is_cofactor: bool
+    source: str
+    classifications: Mapping[str, str | None]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this cofactor as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            The fields above under their own names, with ``gene_ids`` as a list and
+            ``classifications`` as a plain mapping under the publishers' own column names.
+        """
+        return {
+            "gene_id_stem": self.gene_id_stem,
+            "gene_ids": list(self.gene_ids),
+            "symbol": self.symbol,
+            "is_cofactor": self.is_cofactor,
+            "source": self.source,
+            "classifications": dict(self.classifications),
+        }
+
+
+@dataclass(frozen=True)
+class TFCofactorList:
+    """One **Assembly**'s **Transcription cofactor**s, in its annotation's own gene ids.
+
+    :meth:`~genome.io.gtf.AnnotationRegistry.tf_cofactor_list`'s answer, and the
+    counterpart of :class:`TFGeneList` in the same shape: the **Cofactor table**'s **Gene
+    id stem**s resolved against one registered annotation, so the ids join to a counts
+    matrix with nothing left to normalise.
+
+    **Membership is this package's and classification is each publisher's.** A table built
+    from two publishers is a union nobody else published, which is why :attr:`provenance`
+    carries a record per publisher rather than one, and why a ``source`` of ``both`` on an
+    entry says the two agreed the gene is a cofactor and nothing about how either
+    classified it (ADR-0016).
+
+    **What the table holds and this annotation does not is visible.** A stem no gene id
+    here is of comes back in :attr:`unresolved` rather than being dropped.
+
+    There is no empty one, for the reasons an absent table would give: an assembly whose
+    species has no cofactor table, and one nothing names a species for, each raise a
+    :class:`LookupError` of their own.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** asked about.
+    annotation : str
+        The **Registered name** whose own gene ids these are.
+    species : str
+        The species the assembly's own metadata row names, which is what selected the
+        table. Never passed in by a caller, so asking for one species' cofactors while
+        holding another species' assembly is not expressible (ADR-0003).
+    provenance : genome.tf.cofactor.table.CofactorProvenance
+        Where the table came from: one record per publisher that contributed to it, plus
+        the digest of the shipped bytes.
+        :meth:`~genome.tf.cofactor.table.CofactorProvenance.attribution` renders the line
+        to print beside anything it answered.
+    cofactors : tuple of TFCofactor
+        One entry per **Gene id stem** that named at least one gene id here, in the
+        table's own row order.
+    unresolved : tuple of str
+        The stems this annotation carries no gene for, in table row order.
+
+    Examples
+    --------
+    >>> from genome.tf.cofactor import cofactor_table
+    >>> answer = TFCofactorList(
+    ...     assembly="mm39",
+    ...     annotation="gencode_vM39",
+    ...     species="Mus musculus",
+    ...     provenance=cofactor_table("Mus musculus").provenance,
+    ...     cofactors=(
+    ...         TFCofactor(
+    ...             "ENSMUSG00000000085",
+    ...             ("ENSMUSG00000000085.16",),
+    ...             "Scmh1",
+    ...             True,
+    ...             "animaltfdb",
+    ...             {},
+    ...         ),
+    ...     ),
+    ...     unresolved=("ENSMUSG00000000275",),
+    ... )
+    >>> answer.gene_ids
+    ['ENSMUSG00000000085.16']
+    >>> answer.provenance.sources[0].publisher
+    'AnimalTFDB'
+    >>> answer.as_json()["unresolved"]
+    ['ENSMUSG00000000275']
+    """
+
+    assembly: str
+    annotation: str
+    species: str
+    provenance: CofactorProvenance
+    cofactors: tuple[TFCofactor, ...]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_ids(self) -> list[str]:
+        """Every gene id, cofactor order then id order — a fresh list each call.
+
+        **Every** id, not one per gene, for the reason :attr:`TFGeneList.gene_ids` gives:
+        flattening is where a reader would take the first id of a stem that names two and
+        lose the other. :attr:`cofactors` is what says which gene an id came from, and
+        what the publisher said about it.
+        """
+        return [gene_id for cofactor in self.cofactors for gene_id in cofactor.gene_ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``assembly``, ``annotation``, ``species``, the table's ``provenance`` under
+            its own field names with one entry per publisher under ``sources``,
+            ``cofactors`` as a list of :meth:`TFCofactor.as_json` entries, the flattened
+            ``gene_ids``, and ``unresolved`` as a list — the keys :class:`TFGeneList` uses,
+            with the entries named for what they are.
+        """
+        provenance = asdict(self.provenance)
+        # ``asdict`` leaves a tuple field a tuple and JSON has no tuple, so the ragged
+        # per-publisher records — the one such field here — are written out as the list
+        # they serialize to. A payload that did not survive its own round trip would be
+        # one whose shape depended on whether anybody had serialized it yet.
+        provenance["sources"] = list(provenance["sources"])
+        return {
+            "assembly": self.assembly,
+            "annotation": self.annotation,
+            "species": self.species,
+            "provenance": provenance,
+            "cofactors": [cofactor.as_json() for cofactor in self.cofactors],
             "gene_ids": self.gene_ids,
             "unresolved": list(self.unresolved),
         }

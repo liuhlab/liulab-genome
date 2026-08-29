@@ -38,7 +38,7 @@ from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import AnnotationRegistry
 from genome.io.registration import AssemblyDir
-from genome.io.results import GeneList, TFGeneList
+from genome.io.results import GeneList, TFCofactorList, TFGeneList
 from genome.io.twobit import TwoBit
 from genome.metadata import AssemblyMetadata, assembly_metadata
 from genome.region import Region, parse_region
@@ -437,6 +437,62 @@ class Genome(AlignerMixin, MotifScanMixin):
         Lambert et al. 2018 v_1.01 (PMID 29425488) — https://humantfs.ccbr.utoronto.ca/...
         """
         return self._registry.tf_gene_list(annotation, include_rejected=include_rejected)
+
+    def tf_cofactor_list(self, annotation: str | None = None) -> TFCofactorList:
+        """Return the genes a publisher lists as transcription cofactors in this genome.
+
+        The everyday way to a **TF cofactor list**, and the counterpart of
+        :meth:`tf_gene_list` in the same shape: the **Cofactor table** shipped for this
+        assembly's own species, resolved into one registered annotation's gene ids, so the
+        answer joins to a counts matrix with nothing left to normalise. Each entry carries
+        which publisher listed the gene and that publisher's own classification of it —
+        membership is this package's and classification is theirs (ADR-0016).
+
+        A cofactor recognises no sequence of its own and so has no motif; this says which
+        genes are cofactors, not what they bind, and nothing here ranks one above another.
+
+        The species is this assembly's, read from its metadata row and never passed in.
+        An assembly whose species has no cofactor table, and one nothing names a species
+        for, raise rather than answering with nothing. Worm has a table although no TF
+        census covers it, so a worm genome answers here and raises from
+        :meth:`tf_gene_list`.
+
+        Parameters
+        ----------
+        annotation : str, optional
+            The **Registered name** to answer in the gene ids of. Omitted,
+            :attr:`default_gtf` answers.
+
+        Returns
+        -------
+        genome.io.results.TFCofactorList
+            The cofactors, the publishers' provenance, and the stems that resolved to
+            nothing.
+
+        Raises
+        ------
+        genome.io.gtf.UnknownSpeciesError
+            If nothing names this assembly's species.
+        genome.io.gtf.NoCofactorTableError
+            If no cofactor table ships for that species; the message names the ones that
+            do.
+        ValueError
+            If ``annotation`` is omitted and this genome has no **Default annotation**.
+        genome.io.gtf.AnnotationNotRegisteredError
+            If that annotation is not registered here.
+        genome.io.gtf.NoGeneFeaturesError
+            If its database holds no gene at all.
+
+        Examples
+        --------
+        >>> mouse = Genome("mm39")                                  # doctest: +SKIP
+        >>> answer = mouse.tf_cofactor_list()                       # doctest: +SKIP
+        >>> len(answer.cofactors), len(answer.unresolved)           # doctest: +SKIP
+        (968, 2)
+        >>> print(answer.provenance.attribution())                  # doctest: +SKIP
+        AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/...
+        """
+        return self._registry.tf_cofactor_list(annotation)
 
     @property
     def default_gtf_path(self) -> Path | None:

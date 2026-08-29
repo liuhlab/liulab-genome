@@ -43,6 +43,7 @@ from genome.io.gtf import (
     ChromosomeMismatchError,
     GtfAnnotation,
     MergeSource,
+    NoCofactorTableError,
     NoGeneFeaturesError,
     NoTFCensusError,
     UnknownSpeciesError,
@@ -58,12 +59,15 @@ from genome.io.gtf import (
     register_annotation,
     register_gtf,
     register_merged_gtf,
+    tf_cofactor_list,
     tf_gene_list,
 )
 from genome.io.registration import AssemblyDir
 from genome.io.results import chromosome_check_summary
 from genome.io.utils import ChecksumMismatchError
 from genome.metadata import AnnotationMetadata, assembly_metadata
+from genome.tf.cofactor import UNIFORM_COLUMNS as COFACTOR_UNIFORM_COLUMNS
+from genome.tf.cofactor import CofactorTable, cofactor_table
 from genome.tf.gene import UNIFORM_COLUMNS, TFGeneTable, tf_gene_table
 
 from .conftest import FakeFetch
@@ -1757,6 +1761,23 @@ def _gtf_declaring(*gene_ids: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _registry_declaring(
+    tmp_path: Path, *gene_ids: str, assembly: str, name: str = "mine"
+) -> AnnotationRegistry:
+    """Register a GTF declaring ``gene_ids`` under ``name`` and open the registry.
+
+    The setup both shipped-table surfaces share — a census against an annotation and a
+    cofactor table against one differ in which file is read and in nothing about the
+    annotation, so they register the same way. ``assembly`` is required: which species an
+    assembly is is exactly what those tests are about, and a default would hide it.
+    """
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    source = tmp_path / f"{name}.gtf"
+    source.write_text(_gtf_declaring(*gene_ids))
+    _register_by_path(tmp_path, source, name, assembly=assembly)
+    return AnnotationRegistry.locate(assembly, tmp_path)
+
+
 class TestResolveGeneIds:
     """``AnnotationRegistry.resolve_gene_ids`` — a **Gene id stem** against real gene ids.
 
@@ -1987,11 +2008,7 @@ class TestTFGeneList:
         name: str = "mine",
     ) -> AnnotationRegistry:
         """Register a GTF declaring ``gene_ids`` under ``name`` and open the registry."""
-        tmp_path.mkdir(parents=True, exist_ok=True)
-        source = tmp_path / f"{name}.gtf"
-        source.write_text(_gtf_declaring(*gene_ids))
-        _register_by_path(tmp_path, source, name, assembly=assembly)
-        return AnnotationRegistry.locate(assembly, tmp_path)
+        return _registry_declaring(tmp_path, *gene_ids, assembly=assembly, name=name)
 
     def test_the_census_arrives_in_this_annotations_own_gene_ids(self, tmp_path: Path) -> None:
         # The whole point of the surface: the answer joins to a counts matrix keyed by this
@@ -2194,6 +2211,258 @@ class TestTFGeneList:
 
         assert [gene.gene_id_stem for gene in answer.genes] == [stem]
         assert answer.provenance == _census().provenance
+
+
+# ---------------------------------------------------------------------------------------
+# Which of an annotation's genes a publisher lists as transcription cofactors
+# ---------------------------------------------------------------------------------------
+
+#: An assembly whose species has a cofactor table, one whose species has none, and the
+#: worm — which has a table although no publisher has released a worm TF census, so it is
+#: the one assembly the two halves answer differently for. Named rather than derived, for
+#: the reason the census pairing above is: which species ships what is what these tests
+#: are about. Yeast rather than human is the untabled one on purpose: human has no table
+#: only until one is built for it, and a test pinned to that would go green by accident.
+_TABLED_ASSEMBLY = "mm39"
+_UNTABLED_ASSEMBLY = "sacCer3"
+_WORM_ASSEMBLY = "ce11"
+
+
+def _cofactors(assembly: str = _TABLED_ASSEMBLY) -> CofactorTable:
+    """The **Cofactor table** shipped for that assembly's species.
+
+    Read off the shipped file rather than named, exactly as the census is: which genes a
+    publisher lists as cofactors is the publisher's judgement, and no fixture may stand
+    in for it.
+    """
+    species = assembly_metadata(assembly).species
+    assert species is not None, f"{assembly} has no species in the assembly table"
+    table = cofactor_table(species)
+    assert table is not None, f"no cofactor table ships for {species}"
+    return table
+
+
+def _cofactor_row(stem: str, assembly: str = _TABLED_ASSEMBLY) -> dict[str, str | None]:
+    """The table's own row for one **Gene id stem**, keyed by its own column names."""
+    table = _cofactors(assembly)
+    row = table.rows[table.gene_id_stems.index(stem)]
+    return dict(zip(table.columns, row, strict=True))
+
+
+class TestTFCofactorList:
+    """``AnnotationRegistry.tf_cofactor_list`` — a shipped cofactor table meets an annotation.
+
+    The counterpart of :class:`TestTFGeneList`, registering its fixture annotations the
+    same way and asserting the same crossing: the table's **Gene id stem**s arriving as
+    this annotation's own gene ids, what rode back unresolved, and that an assembly no
+    published table can answer for raises rather than answering with nothing. The shipped
+    table answers throughout; what it holds is its publisher's business.
+
+    Nothing here prepares an assembly, fetches anything or reads the **Data dir**: every
+    test registers one small GTF into ``tmp_path`` and asks, and the suite's autouse
+    network guard is what says the answer never left the wheel.
+    """
+
+    def _registry(
+        self,
+        tmp_path: Path,
+        *gene_ids: str,
+        assembly: str = _TABLED_ASSEMBLY,
+        name: str = "mine",
+    ) -> AnnotationRegistry:
+        """Register a GTF declaring ``gene_ids`` under ``name`` and open the registry."""
+        return _registry_declaring(tmp_path, *gene_ids, assembly=assembly, name=name)
+
+    def test_the_table_arrives_in_this_annotations_own_gene_ids(self, tmp_path: Path) -> None:
+        # The whole point of the surface: the answer joins to a counts matrix keyed by this
+        # annotation's ids, with no normalisation left for the caller.
+        stems = _cofactors().cofactor_stems[:2]
+        gene_ids = [_versioned(stem) for stem in stems]
+        registry = self._registry(tmp_path, *gene_ids)
+
+        answer = registry.tf_cofactor_list("mine")
+
+        assert (answer.assembly, answer.annotation) == (_TABLED_ASSEMBLY, "mine")
+        assert [entry.gene_id_stem for entry in answer.cofactors] == list(stems)
+        assert answer.gene_ids == gene_ids
+
+    def test_an_entry_carries_the_uniform_columns_and_the_publishers_own_beside_them(
+        self, tmp_path: Path
+    ) -> None:
+        table = _cofactors()
+        stem = table.cofactor_stems[0]
+        registry = self._registry(tmp_path, _versioned(stem))
+
+        entry = registry.tf_cofactor_list("mine").cofactors[0]
+
+        cells = _cofactor_row(stem)
+        assert (entry.symbol, entry.source) == (cells["symbol"], cells["source"])
+        assert entry.is_cofactor is True
+        # Everything the publisher classified it with, under that publisher's own
+        # namespaced name — the AnimalTFDB family and the category joined onto it.
+        assert dict(entry.classifications) == {
+            name: cells[name] for name in table.columns[len(COFACTOR_UNIFORM_COLUMNS) :]
+        }
+        assert "animaltfdb_family" in entry.classifications
+
+    def test_membership_travels_with_the_publishers_that_listed_the_gene(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path, _versioned(_cofactors().cofactor_stems[0]))
+
+        answer = registry.tf_cofactor_list("mine")
+
+        assert answer.provenance == _cofactors().provenance
+        assert answer.provenance.sources
+        assert all(source.publisher and source.pubmed_id for source in answer.provenance.sources)
+        assert answer.species == assembly_metadata(_TABLED_ASSEMBLY).species
+
+    def test_stems_this_annotation_carries_no_gene_for_ride_back_on_the_answer(
+        self, tmp_path: Path
+    ) -> None:
+        table = _cofactors()
+        carried, absent = table.cofactor_stems[0], table.cofactor_stems[1]
+        registry = self._registry(tmp_path, _versioned(carried))
+
+        answer = registry.tf_cofactor_list("mine")
+
+        assert [entry.gene_id_stem for entry in answer.cofactors] == [carried]
+        assert absent in answer.unresolved
+        # Every stem the table lists is accounted for one way or the other, so what the
+        # publisher holds and this annotation does not is visible rather than dropped.
+        assert len(answer.cofactors) + len(answer.unresolved) == len(table.cofactor_stems)
+
+    def test_a_stem_naming_two_gene_ids_answers_with_both(self, tmp_path: Path) -> None:
+        # The collision is what is under test rather than the biology: two gene ids that
+        # reduce to one stem, in the shape GENCODE's pseudoautosomal copies have, so a
+        # resolver taking the first would hand back one of them without saying it chose.
+        stem = _cofactors().cofactor_stems[0]
+        first, second = _versioned(stem), f"{_versioned(stem)}_PAR_Y"
+        registry = self._registry(tmp_path, second, first)
+
+        answer = registry.tf_cofactor_list("mine")
+
+        assert [entry.gene_ids for entry in answer.cofactors] == [(first, second)]
+        assert answer.gene_ids == [first, second]
+
+    def test_the_species_follows_the_assembly_and_never_the_ids_the_gtf_holds(
+        self, tmp_path: Path
+    ) -> None:
+        # Mouse gene ids registered for a yeast assembly. Asking for one species' cofactors
+        # while holding another's assembly is not expressible, so this is answered about the
+        # assembly's own species and never about what is in the GTF.
+        stem = _cofactors().cofactor_stems[0]
+        registry = self._registry(tmp_path, _versioned(stem), assembly=_UNTABLED_ASSEMBLY)
+
+        with pytest.raises(NoCofactorTableError) as excinfo:
+            registry.tf_cofactor_list("mine")
+
+        message = str(excinfo.value)
+        assert str(assembly_metadata(_UNTABLED_ASSEMBLY).species) in message
+        assert str(assembly_metadata(_TABLED_ASSEMBLY).species) in message
+
+    @pytest.mark.parametrize("assembly", [_CHIMERA, "tiny"])
+    def test_an_assembly_nothing_names_a_species_for_says_so_rather_than_guessing(
+        self, tmp_path: Path, assembly: str
+    ) -> None:
+        stem = _cofactors().cofactor_stems[0]
+        registry = self._registry(tmp_path, _versioned(stem), assembly=assembly)
+
+        with pytest.raises(UnknownSpeciesError) as excinfo:
+            registry.tf_cofactor_list("mine")
+
+        message = str(excinfo.value)
+        assert assembly in message
+        assert "cofactor table" in message
+        assert str(assembly_metadata(_TABLED_ASSEMBLY).species) in message
+
+    def test_the_two_absences_are_told_apart_by_type_and_caught_together(
+        self, tmp_path: Path
+    ) -> None:
+        # As the census half's pair is: *nobody has published a table for this species* and
+        # *nothing says what species this is* are different answers, both lookups, and
+        # neither is an empty collection.
+        stem = _cofactors().cofactor_stems[0]
+        untabled = self._registry(tmp_path / "yeast", _versioned(stem), assembly=_UNTABLED_ASSEMBLY)
+        unnamed = self._registry(tmp_path / "chimera", _versioned(stem), assembly=_CHIMERA)
+
+        with pytest.raises(LookupError) as no_table:
+            untabled.tf_cofactor_list("mine")
+        with pytest.raises(LookupError) as no_species:
+            unnamed.tf_cofactor_list("mine")
+
+        assert isinstance(no_table.value, NoCofactorTableError)
+        assert isinstance(no_species.value, UnknownSpeciesError)
+        assert not isinstance(no_table.value, UnknownSpeciesError)
+        assert not isinstance(no_species.value, NoCofactorTableError)
+
+    def test_the_worm_answers_here_although_the_census_half_raises_for_it(
+        self, tmp_path: Path
+    ) -> None:
+        # The asymmetry, pinned: AnimalTFDB assessed worm cofactors and nobody has released
+        # a worm TF census, so one assembly gets two different answers. That is the
+        # publishers' shape and not a defect, and a test says so where it would otherwise
+        # be filed as one.
+        stem = _cofactors(_WORM_ASSEMBLY).cofactor_stems[0]
+        registry = self._registry(tmp_path, _versioned(stem), assembly=_WORM_ASSEMBLY)
+
+        answer = registry.tf_cofactor_list("mine")
+
+        assert [entry.gene_id_stem for entry in answer.cofactors] == [stem]
+        with pytest.raises(NoTFCensusError):
+            registry.tf_gene_list("mine")
+
+    def test_an_unregistered_name_earns_the_error_it_already_had(self, tmp_path: Path) -> None:
+        registry = AnnotationRegistry.locate(_TABLED_ASSEMBLY, tmp_path)
+
+        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
+            registry.tf_cofactor_list("gencode_vM39")
+
+        assert f"genome register-annotation {_TABLED_ASSEMBLY} gencode_vM39" in str(excinfo.value)
+
+    def test_naming_no_annotation_asks_the_default_one(self, tmp_path: Path) -> None:
+        stem = _cofactors().cofactor_stems[0]
+        registry = self._registry(tmp_path, _versioned(stem), name="gencode_vM39")
+
+        assert registry.default == "gencode_vM39"
+        assert registry.tf_cofactor_list().annotation == "gencode_vM39"
+
+    def test_the_json_record_carries_the_cofactors_the_provenance_and_the_unresolved_stems(
+        self, tmp_path: Path
+    ) -> None:
+        # What ``--json`` has to be able to emit, in the shape the TF gene list's answer
+        # already uses: the entries with the publisher's own classification of each, the
+        # provenance to cite, and the stems that resolved to nothing.
+        stem = _cofactors().cofactor_stems[0]
+        registry = self._registry(tmp_path, _versioned(stem))
+
+        payload = registry.tf_cofactor_list("mine").as_json()
+
+        assert payload["assembly"] == _TABLED_ASSEMBLY
+        assert payload["gene_ids"] == [_versioned(stem)]
+        assert payload["provenance"]["sources"][0]["pubmed_id"] == (
+            _cofactors().provenance.sources[0].pubmed_id
+        )
+        assert payload["unresolved"]
+        entry = payload["cofactors"][0]
+        assert (entry["gene_id_stem"], entry["gene_ids"]) == (stem, [_versioned(stem)])
+        assert entry["source"] == _cofactor_row(stem)["source"]
+        assert (
+            entry["classifications"]["animaltfdb_family"]
+            == (_cofactor_row(stem)["animaltfdb_family"])
+        )
+        assert json.loads(json.dumps(payload)) == payload  # serializes as it stands
+
+    def test_it_answers_for_an_assembly_named_rather_than_opened(self, tmp_path: Path) -> None:
+        # One code path, asserted whole rather than sampled: the module-level function and
+        # the method reach the same answer, so a shell surface over either says one thing.
+        stem = _cofactors().cofactor_stems[0]
+        registry = self._registry(tmp_path, _versioned(stem))
+
+        answer = tf_cofactor_list(_TABLED_ASSEMBLY, annotation="mine", cache_dir=tmp_path)
+
+        assert [entry.gene_id_stem for entry in answer.cofactors] == [stem]
+        assert answer == registry.tf_cofactor_list("mine")
 
 
 class TestAddressedByAssembly:
