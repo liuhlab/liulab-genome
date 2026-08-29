@@ -12,9 +12,11 @@ field — :class:`RegisteredAssembly` and :class:`RegisteredAnnotation` — so e
 question is answered off the record in hand instead of by opening the directory again. The
 rest are reports assembled from more than one source: :class:`VerifiedAssembly` sets a
 digest against what pinned it, :class:`AnnotationStatus` sets what the annotation table
-offers against what this machine holds, one :class:`AnnotationStatusRow` per name, and
+offers against what this machine holds, one :class:`AnnotationStatusRow` per name,
 :class:`GeneList` sets one **Gene category**'s genes against the **Curated gene list**s
-that contributed them, one :class:`GeneListSource` apiece.
+that contributed them, one :class:`GeneListSource` apiece, and :class:`ResolvedGeneIds`
+sets the **Gene id stem**s a caller asked about against the gene ids one annotation
+actually carries — including the stems it carries none for.
 
 **An answer knows how it reads.** :attr:`AnnotationStatusRow.state` and
 :attr:`AnnotationStatus.default_summary` are here rather than in the surface printing them,
@@ -562,6 +564,88 @@ class GeneList:
             "category": self.category,
             "gene_ids": self.gene_ids,
             "sources": [source.as_json() for source in self.sources],
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedGeneIds:
+    """The gene ids one **Annotation** carries for the **Gene id stem**s it was asked about.
+
+    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`'s answer. A stem is a gene
+    id with its version dropped, and inside one annotation it may name more than one gene
+    id — nine do in ``gencode_v50lift37``, eight of them pseudoautosomal-Y — so every stem
+    answers with **all** of them and nothing here picks one. Two stems never name the same
+    gene id, since an id has exactly one stem.
+
+    **What was asked about and is not there rides back on the answer.** A caller holding a
+    few thousand stems gets the ones this annotation carries no gene for in
+    :attr:`unresolved` rather than a shorter list than it passed, so what the thing it was
+    holding contains and this annotation does not is visible instead of dropped.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** asked about.
+    annotation : str
+        The **Registered name** whose own gene ids these are.
+    resolved : mapping of str to tuple of str
+        Every stem that named at least one gene id, in the order the stems were asked
+        about, to the ids it names, in ascending order. No value is ever an empty tuple —
+        a stem that named nothing is in :attr:`unresolved` instead.
+    unresolved : tuple of str
+        The stems no gene id in the annotation is of, in the order they were asked about.
+
+    Examples
+    --------
+    >>> answer = ResolvedGeneIds(
+    ...     assembly="hg19",
+    ...     annotation="gencode_v50lift37",
+    ...     resolved={
+    ...         "ENSG00000182378": ("ENSG00000182378.14", "ENSG00000182378.14_PAR_Y"),
+    ...         "ENSG00000141510": ("ENSG00000141510.18",),
+    ...     },
+    ...     unresolved=("ENSG00000288541",),
+    ... )
+    >>> answer.gene_ids
+    ['ENSG00000182378.14', 'ENSG00000182378.14_PAR_Y', 'ENSG00000141510.18']
+    >>> answer.as_json()["unresolved"]
+    ['ENSG00000288541']
+    """
+
+    assembly: str
+    annotation: str
+    resolved: Mapping[str, tuple[str, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_ids(self) -> list[str]:
+        """Every gene id resolved, stem order and then id order — a fresh list each call.
+
+        **Every** id, not one per stem. Flattening is exactly where a reader would take
+        the first id of each stem and lose the second, which is the pseudoautosomal gene
+        this answer's shape exists to keep; :attr:`resolved` is what says which stem an id
+        came from.
+        """
+        return [gene_id for ids in self.resolved.values() for gene_id in ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``assembly``, ``annotation``, ``resolved`` as a mapping of stem to a list of
+            gene ids, ``unresolved`` as a list, and the flattened ``gene_ids``. The last
+            is written out beside the mapping it is read from for the reason
+            :attr:`gene_ids` gives: a reader assembling it is a reader who might take one
+            id per stem.
+        """
+        return {
+            "assembly": self.assembly,
+            "annotation": self.annotation,
+            "resolved": {stem: list(ids) for stem, ids in self.resolved.items()},
+            "unresolved": list(self.unresolved),
+            "gene_ids": self.gene_ids,
         }
 
 

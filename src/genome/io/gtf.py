@@ -81,6 +81,15 @@ one whose list does not declare the category asked for raise errors of their own
 caller acts differently on those two facts and a silent zero is what that surface exists to
 prevent.
 
+**And which of its own gene ids a caller's stems name.**
+:meth:`AnnotationRegistry.resolve_gene_ids` matches a **Gene id stem** — a gene id with
+its version dropped — against the stem of every gene id in the **Annotation database**,
+which makes it the first thing in this package to open the database registering an
+annotation has always built. It answers with *every* gene id a stem names and never picks
+one, and the stems that named nothing come back on the answer rather than being dropped.
+It is general: nothing about it knows what the stems it is handed are a list *of*, and a
+caller holding a few thousand of them resolves the lot in one pass.
+
 Examples
 --------
 >>> from pathlib import Path
@@ -133,6 +142,7 @@ from genome.io.results import (
     GeneList,
     GeneListSource,
     RegisteredAnnotation,
+    ResolvedGeneIds,
     annotation_register_command,
 )
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
@@ -160,6 +170,19 @@ _MERGED_FROM_KEY = "merged_from"
 #: Keys of one entry under :data:`_MERGED_FROM_KEY`.
 _MERGED_COMPONENT_KEY = "component"
 _MERGED_ANNOTATION_KEY = "annotation"
+
+#: What is asked of an **Annotation database** to resolve **Gene id stem**s: the id of
+#: every gene feature, ascending, and nothing else. That id is the table's primary key —
+#: so the ordering is an index walk — and for a GTF it is the ``gene_id`` gffutils keys
+#: gene features by, which is the annotation's own spelling of its gene ids. It goes
+#: through gffutils' own ``execute`` and is read a row at a time off the cursor: building
+#: a feature object per row would parse an attribute blob per gene for a value already in
+#: hand, and a GENCODE annotation has some 78,000 of them.
+_GENE_IDS_QUERY = "SELECT id FROM features WHERE featuretype = 'gene' ORDER BY id"
+
+#: What separates a gene id from its version — ``ENSG00000123456.7`` — and therefore what
+#: a **Gene id stem** is everything before. An id carrying none is its own stem.
+_VERSION_SEPARATOR = "."
 
 
 class ChromosomeMismatchError(ValueError):
@@ -300,6 +323,54 @@ class AnnotationNotRegisteredError(KeyError):
         super().__init__(
             f"no annotation {name!r} is registered for {assembly!r}. Registered here: "
             f"{_elide(self.registered) or '(none)'}. {next_step}"
+        )
+
+
+class NoGeneFeaturesError(LookupError):
+    """An annotation's database holds no gene at all, so no gene id can be resolved.
+
+    The absence a caller must never read as *this annotation carries none of my genes*.
+    A GTF that declares only exons registers as exons alone —
+    :meth:`AnnotationRegistry.register` leaves **Feature inference** off, and rightly, since
+    it is gffutils' slow path and the publishers who matter declare their genes — so an
+    annotation like that would answer every stem with *not found* while looking perfectly
+    healthy. It says so instead, and names the argument that rebuilds it with the genes in.
+
+    A :class:`LookupError`, as the other absences on this surface are.
+
+    Parameters
+    ----------
+    annotation : str
+        The **Registered name** that was asked about.
+    assembly : str
+        The **Assembly** it is registered for.
+
+    Attributes
+    ----------
+    annotation : str
+        The name asked about.
+    assembly : str
+        The assembly it is registered for.
+
+    Examples
+    --------
+    >>> try:
+    ...     raise NoGeneFeaturesError("mine", "tiny")
+    ... except LookupError as error:
+    ...     print("--infer-genes" in str(error))
+    True
+    """
+
+    def __init__(self, annotation: str, assembly: str) -> None:
+        self.annotation = annotation
+        self.assembly = assembly
+        super().__init__(
+            f"the annotation {annotation!r} registered for {assembly!r} has no gene features "
+            f"in its database, so there is nothing to resolve gene ids against. This is not "
+            f"a gene it happens to lack: its GTF declares no gene lines at all, and "
+            f"reconstructing them from the exons is off by default. Register it again with "
+            f"that turned on — --infer-genes from a shell, disable_infer_genes=False from "
+            f"Python — or register an annotation whose GTF declares its genes."
         )
 
 
@@ -800,16 +871,7 @@ class AnnotationRegistry:
         >>> registry.path("ensgene_v101")              # doctest: +SKIP
         PosixPath('/data/genome/sacCer3/gtf/ensgene_v101/ensgene_v101.gtf')
         """
-        annotation = self._registered.get(name)
-        if annotation is None:
-            raise AnnotationNotRegisteredError(
-                self.assembly,
-                name,
-                self._registered,
-                [record.name for record in self._offered],
-                broken=self._broken.get(name),
-            )
-        return annotation.gtf
+        return self._annotation(name).gtf
 
     def register(
         self,
@@ -1170,6 +1232,109 @@ class AnnotationRegistry:
             for category in _declared_categories(contributors)
         )
 
+    def resolve_gene_ids(self, stems: Iterable[str], name: str | None = None) -> ResolvedGeneIds:
+        """Return the gene ids one registered annotation carries for each **Gene id stem**.
+
+        A stem is a gene id with its version dropped — ``ENSG00000123456`` for
+        ``ENSG00000123456.7`` — which is how every published table keyed by gene arrives,
+        and never how a GENCODE **Annotation** spells the same gene. This is the crossing:
+        every gene id in the **Annotation database** is reduced to its own stem, and a stem
+        answers with every gene id that reduced to it. An id carrying no version is its own
+        stem, so an annotation whose ids were never versioned — WormBase's, SGD's — resolves
+        each of its genes to itself and is untouched by an Ensembl-shaped assumption.
+
+        **Every id, and never a chosen one.** One stem naming two gene ids is not a
+        malformed annotation: ``gencode_v50lift37`` has nine such stems, eight of them
+        pseudoautosomal genes carrying a ``_PAR_Y`` copy, and a resolver taking the first
+        would hand back the X copy of a Y gene without saying it had chosen. So the answer
+        is a mapping to *all* of them, ascending.
+
+        **Nothing is dropped.** Stems this annotation carries no gene for come back in
+        :attr:`~genome.io.results.ResolvedGeneIds.unresolved`, so a caller resolving a few
+        thousand at once can see which of them this annotation does not have rather than
+        counting the answer and wondering.
+
+        The annotation must be **registered here**, and a **Merged annotation** is read
+        exactly as any other: it has one database of its own, holding both components' gene
+        features under the components' own gene ids — a merge rewrites seqnames and never a
+        ``gene_id`` — so a stem naming a gene in each component answers with both, which is
+        the same rule as the pseudoautosomal one and needs no attribution to apply it.
+
+        One indexed pass over the database's gene features answers the whole call, however
+        many stems it was handed; nothing reads the GTF, and no annotation is held in
+        memory.
+
+        Parameters
+        ----------
+        stems : iterable of str
+            The **Gene id stem**s to resolve, in the order they should come back. Repeats
+            are asked once. Pass them all at once: the cost is the pass, not the stem.
+        name : str, optional
+            The **Registered name** to resolve against. Omitted, this assembly's **Default
+            annotation** answers.
+
+        Returns
+        -------
+        genome.io.results.ResolvedGeneIds
+            The stems that named gene ids, mapped to every id each names, and the stems
+            that named none.
+
+        Raises
+        ------
+        ValueError
+            If ``name`` is omitted and no **Default annotation** is decided; the message
+            names the argument that chooses one.
+        AnnotationNotRegisteredError
+            If nothing of that name is registered here.
+        NoGeneFeaturesError
+            If its database holds no gene at all — every stem would otherwise resolve to
+            nothing, which is a different fact and must not be reported as this one.
+
+        Examples
+        --------
+        >>> registry = AnnotationRegistry.locate("hg19")             # doctest: +SKIP
+        >>> answer = registry.resolve_gene_ids(                      # doctest: +SKIP
+        ...     ["ENSG00000182378", "ENSG00000141510"], "gencode_v50lift37"
+        ... )
+        >>> answer.resolved["ENSG00000182378"]                       # doctest: +SKIP
+        ('ENSG00000182378.14', 'ENSG00000182378.14_PAR_Y')
+        """
+        resolved_name = self._named(name)
+        annotation = self._annotation(resolved_name)
+        # Asked once each and answered in the order they arrived, so a caller can read its
+        # own list against the answer.
+        asked = tuple(dict.fromkeys(stems))
+        if not asked:
+            return ResolvedGeneIds(
+                assembly=self.assembly, annotation=resolved_name, resolved={}, unresolved=()
+            )
+        found, any_genes = _gene_ids_by_stem(annotation.db, frozenset(asked))
+        if not any_genes:
+            raise NoGeneFeaturesError(resolved_name, self.assembly)
+        return ResolvedGeneIds(
+            assembly=self.assembly,
+            annotation=resolved_name,
+            resolved={stem: tuple(found[stem]) for stem in asked if stem in found},
+            unresolved=tuple(stem for stem in asked if stem not in found),
+        )
+
+    def _annotation(self, name: str) -> GtfAnnotation:
+        """Return the files of the annotation registered as ``name``, or raise for it.
+
+        Every question about one registered annotation comes through here, so a name
+        nothing registered earns one error with one next action wherever it was asked.
+        """
+        annotation = self._registered.get(name)
+        if annotation is None:
+            raise AnnotationNotRegisteredError(
+                self.assembly,
+                name,
+                self._registered,
+                [record.name for record in self._offered],
+                broken=self._broken.get(name),
+            )
+        return annotation
+
     def _gene_list_contributors(
         self, name: str | None
     ) -> tuple[str, tuple[tuple[_Contributor, CuratedGeneList], ...]]:
@@ -1415,6 +1580,47 @@ def _declared_categories(
     for _contributor, listed in contributors:
         declared.update(dict.fromkeys(listed.categories))
     return tuple(declared)
+
+
+def _gene_id_stem(gene_id: str) -> str:
+    """Return ``gene_id`` with its version dropped — its **Gene id stem**.
+
+    Everything before the first separator, and the whole id when it carries none, which is
+    what makes an unversioned annotation's gene its own stem. GENCODE's pseudoautosomal
+    ``ENSG00000182378.14_PAR_Y`` stems to ``ENSG00000182378`` alongside the copy it is of,
+    which is the collision the caller is handed both halves of.
+    """
+    stem, separator, _version = gene_id.partition(_VERSION_SEPARATOR)
+    return stem if separator else gene_id
+
+
+def _gene_ids_by_stem(database: Path, wanted: Container[str]) -> tuple[dict[str, list[str]], bool]:
+    """Return the gene ids in ``database`` under each wanted stem, and whether it has any.
+
+    One pass, a row at a time off a cursor over the gene features alone: the database is
+    queried rather than read, so a GENCODE-sized annotation costs an index walk of its gene
+    rows and holds only what matched. The ids under a stem arrive ascending because the
+    query does, so two machines answer in one order.
+
+    The second half of the answer is *whether the database holds a gene at all*, because
+    **no genes** and **no matching genes** are different facts that the mapping alone
+    cannot tell apart, and the caller says something different about each.
+    """
+    found: dict[str, list[str]] = {}
+    any_genes = False
+    handle = gffutils.FeatureDB(str(database))
+    try:
+        for row in handle.execute(_GENE_IDS_QUERY):
+            any_genes = True
+            gene_id = str(row["id"])
+            stem = _gene_id_stem(gene_id)
+            if stem in wanted:
+                found.setdefault(stem, []).append(gene_id)
+    finally:
+        # The registry hands back an answer and not a handle, so the SQLite connection
+        # this opened closes here — including on the way out of an exception.
+        handle.conn.close()
+    return found, any_genes
 
 
 def _status_row(
