@@ -13,6 +13,11 @@ positions `tests/data/README.md` documents and `tests/test_scan.py` asserts agai
 committed bytes. That is what makes an exact expected coordinate available: the site at
 `plantedI[100, 115)` is there because it was put there.
 
+The other half of what is asserted here is that a region scan is not a *smaller* scan:
+every argument a **Motif set** scan takes is forwarded — the **Background** and the worker
+count included, which is what the HPC case is made of — and the one that cannot be,
+an output path, is refused by name rather than by an unexpected keyword.
+
 Preparing it needs the native tools, so the fixture skips when they are absent; nothing
 here needs STAR or chromap, so these are unit-lane tests and unmarked. Nothing reaches
 the network: the assembly is seeded from a committed file behind the same guard the
@@ -23,6 +28,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -38,6 +44,7 @@ from genome.tf.motif import (
     HIT_COLUMNS,
     HIT_DTYPES,
     REGION_HIT_PROVENANCE,
+    UNIFORM_BACKGROUND,
     Motif,
     MotifScanMixin,
     MotifSet,
@@ -361,6 +368,76 @@ class TestTheTable:
         assert hits.attrs["assembly"] == ASSEMBLY
 
 
+# ---------------------------------------------------------------------------
+# What a region scan may be asked for, and the one thing it may not
+# ---------------------------------------------------------------------------
+
+
+class TestTheScanArgumentsReachTheScan:
+    """Everything a **Motif set** scan takes is forwarded, so a region scan is not a
+    smaller scan: the HPC case — a derived **Background** and the whole allocation — is
+    reachable from here or it is reachable nowhere.
+    """
+
+    def test_the_background_defaults_to_uniform_under_the_floor(
+        self, assembly: Genome, ctcf: MotifSet
+    ) -> None:
+        # 600 bases is far under the derivation floor, so 'auto' stays uniform — which is
+        # what makes the derived answer below a different number and not a coincidence.
+        hits = assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"))
+
+        assert hits.attrs["background"] == UNIFORM_BACKGROUND
+
+    def test_a_derived_background_is_the_regions_own_composition(
+        self, assembly: Genome, ctcf: MotifSet
+    ) -> None:
+        # The mode reaches the scan, and what it derives from is the very bases the scan
+        # saw: the same region scanned region-locally records the same background.
+        region = Region("plantedI", 0, LENGTH, "+")
+        local = ctcf.scan(assembly.fetch_sequence(region), region.chrom, background="derive")
+
+        hits = assembly.scan_regions(ctcf, region, background="derive")
+
+        assert hits.attrs["background"] == local.attrs["background"] != UNIFORM_BACKGROUND
+
+    def test_four_frequencies_are_forwarded_as_given(
+        self, assembly: Genome, ctcf: MotifSet
+    ) -> None:
+        hits = assembly.scan_regions(
+            ctcf, Region("plantedI", 0, LENGTH, "+"), background=[0.4, 0.1, 0.1, 0.4]
+        )
+
+        assert hits.attrs["background"] == (0.4, 0.1, 0.1, 0.4)
+
+    def test_a_background_that_is_not_one_is_refused(
+        self, assembly: Genome, ctcf: MotifSet
+    ) -> None:
+        with pytest.raises(ValueError, match="auto, uniform, derive"):
+            assembly.scan_regions(
+                ctcf,
+                Region("plantedI", 0, LENGTH, "+"),
+                background="gc",  # type: ignore[arg-type]
+            )
+
+    def test_two_workers_answer_with_the_identical_table(
+        self, assembly: Genome, dense: MotifSet
+    ) -> None:
+        # The property the whole parallel design is verified by, held after the lift as
+        # well as before it: identical means row for row, dtypes and provenance included.
+        regions = [Region("plantedI", 0, LENGTH, "-"), Region("plantedII", 0, LENGTH, "+")]
+
+        shared = assembly.scan_regions(dense, regions, workers=2)
+        serial = assembly.scan_regions(dense, regions, workers=1)
+
+        assert rows(shared) == rows(serial) != []
+        assert [str(dtype) for dtype in shared.dtypes] == list(HIT_DTYPES.values())
+        assert shared.attrs == serial.attrs
+
+    def test_zero_workers_is_refused(self, assembly: Genome, ctcf: MotifSet) -> None:
+        with pytest.raises(ValueError, match="at least 1"):
+            assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"), workers=0)
+
+
 class TestSeveralRegions:
     def test_two_regions_on_one_chromosome_are_both_scanned(
         self, assembly: Genome, ctcf: MotifSet
@@ -450,6 +527,27 @@ class TestRefusals:
     ) -> None:
         with pytest.raises(ValueError, match="p-value"):
             assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"), threshold=5.0)
+
+    def test_an_output_path_is_refused_and_names_both_ways_to_write_one(
+        self, assembly: Genome, ctcf: MotifSet, tmp_path: Path
+    ) -> None:
+        # The one scan argument that cannot be forwarded: Parquet hands back a path, and a
+        # path holds nothing to lift. Refused by name rather than by an unexpected keyword,
+        # and refused before anything is fetched or scanned.
+        with pytest.raises(TypeError, match="write_hits"):
+            assembly.scan_regions(
+                ctcf, Region("plantedI", 0, LENGTH, "+"), output=tmp_path / "hits.parquet"
+            )
+
+    def test_the_refusal_comes_before_any_sequence_is_fetched(
+        self, assembly: Genome, ctcf: MotifSet, tmp_path: Path
+    ) -> None:
+        # A region this assembly could not fetch would raise its own error first if the
+        # refusal came later, which would tell the caller about the wrong problem.
+        with pytest.raises(TypeError, match="scan_regions cannot stream"):
+            assembly.scan_regions(
+                ctcf, Region("chrNope", 0, 100, "+"), output=tmp_path / "hits.parquet"
+            )
 
 
 # ---------------------------------------------------------------------------

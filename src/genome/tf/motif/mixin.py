@@ -31,19 +31,22 @@ Examples
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
-import numpy.typing as npt
 import pandas as pd
 
 from genome.region import Region
 from genome.tf.motif.motif import DEFAULT_THRESHOLD
 from genome.tf.motif.scan import HIT_DTYPES, HIT_PROVENANCE
+from genome.tf.motif.workers import DEFAULT_WORKERS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the dependency runs one way
+    from pathlib import Path
+
     from genome.genome import Genome
+    from genome.tf.motif.background import BackgroundArg
     from genome.tf.motif.motif import MotifSet
 
 #: What a **Hit table** scanned from **Region**s carries on ``frame.attrs``: everything
@@ -70,7 +73,9 @@ class MotifScanMixin:
         regions: Region | Iterable[Region],
         *,
         threshold: float = DEFAULT_THRESHOLD,
-        background: Sequence[float] | npt.NDArray[np.float64] | None = None,
+        background: BackgroundArg = None,
+        workers: int | None = DEFAULT_WORKERS,
+        output: str | Path | None = None,
     ) -> pd.DataFrame:
         """Scan **Region**s of this genome and return the **Hit table**, in its coordinates.
 
@@ -116,10 +121,26 @@ class MotifScanMixin:
         threshold : float, default 1e-4
             The **Threshold**: one per-position p-value, converted per motif against
             ``background`` into the score that motif must clear. In ``(0, 1)``.
-        background : sequence of float, optional
+        background : sequence of float or {"auto", "uniform", "derive"}, optional
             The **Background**: four frequencies over
-            :data:`~genome.tf.motif.motif.BASES`, above zero and summing to 1. Uniform
-            when omitted.
+            :data:`~genome.tf.motif.motif.BASES`, above zero and summing to 1, or one of
+            the three modes. **Automatic when omitted** — derived from the regions' own
+            bases when they hold at least
+            :data:`~genome.tf.motif.background.BACKGROUND_FLOOR` unambiguous ones, uniform
+            below that. A GC-rich peak set is therefore scored against its own composition
+            rather than against a null it does not follow, and whichever background it was
+            is recorded on the result.
+        workers : int, default 1
+            How many processes to shard the scan across — see
+            :meth:`~genome.tf.motif.motif.MotifSet.scan_sequences`. **One by default**, as
+            everywhere in the library; ``None`` resolves the count with
+            :func:`~genome.tf.motif.workers.resolve_workers`, which is what an allocation
+            on a cluster is read by. Regions are distributed whole, so **more than one
+            produces the identical table**, lifted coordinates included.
+        output : None
+            **Refused**, and the one scan argument that is: a scan handed an output path
+            streams to Parquet and answers with the path, and a path holds no coordinates
+            to lift into this assembly's frame. The refusal names what to do instead.
 
         Returns
         -------
@@ -134,11 +155,12 @@ class MotifScanMixin:
         Raises
         ------
         TypeError
-            If ``regions`` holds anything that is not a :class:`~genome.region.Region`.
+            If ``regions`` holds anything that is not a :class:`~genome.region.Region`, or
+            if ``output`` is given.
         ValueError
             If a region names a chromosome this assembly does not carry or falls outside
-            it; or if ``threshold`` is not in ``(0, 1)`` or ``background`` is not four
-            positive frequencies summing to 1.
+            it; or if ``threshold`` is not in ``(0, 1)``, ``background`` is neither a mode
+            nor four positive frequencies summing to 1, or ``workers`` is below 1.
 
         See Also
         --------
@@ -155,6 +177,7 @@ class MotifScanMixin:
         >>> sorted(set(hits["sequence_name"]))                       # doctest: +SKIP
         ['chrI', 'chrII']
         """
+        _refuse_output(output)
         genome = cast("Genome", self)
         wanted = _as_regions(regions)
         # Keyed by position and not by chromosome: two regions on one chromosome are the
@@ -164,8 +187,32 @@ class MotifScanMixin:
         sequences = {
             str(index): genome.fetch_sequence(region) for index, region in enumerate(wanted)
         }
-        hits = motifs.scan_sequences(sequences, threshold=threshold, background=background)
+        hits = motifs.scan_sequences(
+            sequences, threshold=threshold, background=background, workers=workers
+        )
         return _lifted(hits, wanted, genome.assembly)
+
+
+def _refuse_output(output: str | Path | None) -> None:
+    """Refuse an output path, naming the two ways to get one written.
+
+    Every other scan argument is forwarded; this one cannot be. A scan handed an output
+    path streams to Parquet and hands back the path, and a path is not a table: there is
+    nothing in it to add a region's start to and nothing to flip for a ``-`` region, so
+    forwarding it would answer in region-local coordinates under a method whose whole
+    purpose is that they are not.
+    """
+    if output is None:
+        return
+    raise TypeError(
+        f"scan_regions cannot stream to {output}: a scan given an output path hands back "
+        f"the path, and a path holds no coordinates to lift into this assembly's frame. "
+        f"Write the table this returns yourself — "
+        f"genome.tf.motif.parquet.write_hits([hits], path, hits.attrs) keeps its "
+        f"provenance, the assembly included — or scan the bases with "
+        f"MotifSet.scan_fasta(..., output=...) when region coordinates are not what you "
+        f"need."
+    )
 
 
 def _as_regions(regions: Region | Iterable[Region]) -> tuple[Region, ...]:

@@ -10,6 +10,14 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **Scanning regions takes the same arguments every other scan does.**
+  `Genome.scan_regions` now forwards `background=` and `workers=` to the scan underneath it,
+  so the case an HPC user hits first — a background derived from the peak set's own composition,
+  scanned across the whole allocation — is reachable from a region scan and not only from a
+  sequence one. Two workers produce the **identical table** a serial scan does after the lift as
+  well as before it. `output=` is the one argument that is *not* forwarded and is now refused by
+  name: a scan that streams to Parquet hands back a path, and a path holds no coordinates to lift
+  into the assembly's frame, so the refusal names both ways to get one written instead.
 - **A scan can use more than one core, and says the same thing when it does.** `workers=` on
   `MotifSet.scan`, `scan_sequences` and `scan_fasta` shards the work across processes — MOODS holds
   the GIL, so parallelism here means processes and not threads, each worker constructing its own
