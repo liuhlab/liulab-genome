@@ -34,7 +34,11 @@ the motif itself and never what a **Motif hit** matched; pattern, TF, factor, "t
 The key one **Motif** is addressed by — JASPAR's versioned matrix accession, `MA0139.2`. A **Motif
 set** resolves the bare base id, `MA0139`, to the same motif, unambiguously, because a non-redundant
 **Release** ships exactly one version of each. It is the identifier a lookup can never be ambiguous
-about, which is why it is what an error names when a **Motif name** is.
+about, which is why it is what an error names when a **Motif name** is. Unambiguous is not the same
+as stable, though: a base id addresses whichever version the **Release** ships, and that version is
+not guaranteed to describe the same factor — or even the same organism — as another version of the
+same base id cited elsewhere. Both releases ship `MA0095.4`, mouse `Yy1`, so `db["MA0095"]` answers
+with the mouse factor to someone who came looking for the human `MA0095.1`.
 _Avoid_: accession, matrix name, key; and **Motif name** as a synonym — one addresses a motif, the
 other labels it
 
