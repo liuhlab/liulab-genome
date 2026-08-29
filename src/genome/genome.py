@@ -43,9 +43,10 @@ from genome.io.twobit import TwoBit
 from genome.metadata import AssemblyMetadata, assembly_metadata
 from genome.region import Region, parse_region
 from genome.seq import DNA
+from genome.tf.motif.mixin import MotifScanMixin
 
 
-class Genome(AlignerMixin):
+class Genome(AlignerMixin, MotifScanMixin):
     """A reference genome and the operations over it.
 
     Constructing a ``Genome`` ensures the assembly's reference files exist

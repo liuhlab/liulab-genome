@@ -81,6 +81,10 @@
 
 ::: genome.tf.motif.compare
 
+## `genome.tf.motif.mixin`
+
+::: genome.tf.motif.mixin
+
 ## `genome.external`
 
 ::: genome.external

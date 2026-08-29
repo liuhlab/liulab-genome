@@ -65,6 +65,29 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   genome share an entry. A cache is a speed-up and never a dependency: a corrupt, truncated or
   older entry is a miss, and a data root that cannot be written to makes a scan slow rather than
   broken.
+- **Scan regions of a genome and get hits in that assembly's own coordinates.**
+  `Genome.scan_regions(motifs, regions)` fetches each region's bases, scans them with a motif set
+  and lifts every hit into the assembly's frame, so the translation that used to be redone in every
+  notebook — and is where the off-by-ones live — exists in exactly one place. `sequence_name`
+  carries the chromosome as *this* assembly spells it, and a region naming one the assembly does not
+  carry raises rather than being reconciled. **The arithmetic is written out in the docstring so a
+  reader can check it without running it**: for a `+` region (and a `.` one with it) a hit found at
+  local `[s, e)` is at `[S + s, S + e)` and keeps its strand; for a `-` region, whose bases are
+  fetched reverse-complemented, it is at `[E - e, E - s)` with the hit strand flipped — the two ends
+  swap, and the `- 1`s cancel exactly because coordinates are 0-based half-open, which is why the
+  same flip written for a 1-based inclusive interval is wrong. An unknown strand is **not** promoted
+  to `+`: the fetch hands back forward bases for it, so there is nothing to flip. Regions may
+  overlap and several may sit on one chromosome — each is scanned in its own right, and a hit seen
+  from two regions is two rows, since deduplicating would be deciding for the caller which peak a
+  site belongs to. A locus *string* is refused, because it carries no strand and the strand is the
+  whole question. It arrives as a mixin on `Genome`, following the aligner's, and **the dependency
+  runs Genome to motif and never back** — the motif modules name `Genome` under type checking alone,
+  since a motif belongs to no assembly and a motif set is usable with no genome open. **The raw form
+  is untouched**: scanning a mapping of sequences still answers in region-local coordinates and
+  names no assembly. What comes back is the same hit table with the same columns and dtypes, and its
+  provenance is **extended rather than replaced** — the assembly joins the background, threshold,
+  release, tax group and the two motif lists on `frame.attrs`, because a chromosome name and an
+  interval mean nothing until something says which reference they are in (ADR-0003).
 - **Scan DNA with a motif set and get one hit table back, whatever you scanned.**
   `MotifSet.scan(sequence, name="sequence")`, `MotifSet.scan_sequences({name: bases})` and
   `MotifSet.scan_fasta(path)` answer with the same table — the same columns, in the same order,
