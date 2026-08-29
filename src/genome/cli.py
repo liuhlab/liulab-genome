@@ -28,6 +28,7 @@ from genome.io.gtf import gene_list as _gene_list
 from genome.io.gtf import gene_lists as _gene_lists
 from genome.io.gtf import register_annotation as _register_annotation
 from genome.io.gtf import register_gtf as _register_gtf
+from genome.io.gtf import tf_gene_list as _tf_gene_list
 from genome.io.results import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
 from genome.io.results import GeneList as _GeneList
@@ -57,10 +58,14 @@ from genome.tf.motif.workers import resolve_workers as _resolve_workers
 #: ``ChecksumMismatchError`` is a ``ValueError``; a failed download is an ``OSError``.
 _ASSEMBLY_ERRORS = (ValueError, OSError, RuntimeError)
 
-#: What a failed gene-category command raises, on top of the above. An annotation that
-#: ships no curated gene list, and one whose list does not declare the category asked for,
-#: are lookups that found nothing rather than bad values — so they are ``LookupError``s,
-#: which :data:`_ASSEMBLY_ERRORS` does not cover.
+#: What a failed gene-list command raises, on top of the above — the gene-category pair
+#: and the TF gene list alike. An annotation that ships no curated gene list, one whose
+#: list does not declare the category asked for, a species no census ships for and an
+#: assembly nothing names a species for are lookups that found nothing rather than bad
+#: values — so they are ``LookupError``s, which :data:`_ASSEMBLY_ERRORS` does not cover,
+#: and so is the ``KeyError`` an unregistered annotation has always raised. One list for
+#: all three commands because they are alike by construction: each asks one registered
+#: annotation a question a shipped file answers, and each absence on the way is a lookup.
 _GENE_LIST_ERRORS = (*_ASSEMBLY_ERRORS, LookupError)
 
 #: What a failed motif scan raises. The same three, and each already says what to do: a
@@ -577,6 +582,65 @@ def _category_row(answer: _GeneList, *, name_width: int, count_width: int) -> st
         if source.component is not None
     )
     return f"{line}  ({split})" if split else line
+
+
+@app.command("tf-gene-list")
+def tf_gene_list(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'hg38'."),
+    annotation: str | None = typer.Option(None, "--annotation", help=_ANNOTATION_HELP),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Print the gene ids a published census judges transcription factors, one per line.
+
+    Nothing here decides what a transcription factor is. The verdict is the census's —
+    Lambert et al. 2018 for human, AnimalTFDB 4.0 for mouse — and which one spoke is
+    printed beside the answer, since citing it is the condition on shipping it. The
+    species comes from the assembly's own metadata row and is never passed in, so asking
+    for human transcription factors while holding a mouse assembly is not expressible.
+
+    A census is keyed by gene id stems — gene ids with the version suffix dropped — and a
+    registered annotation is not, so every stem is resolved into the ids that annotation
+    actually spells and the output joins to a counts matrix with nothing left to
+    normalise. A stem naming two genes prints both rather than one of them.
+
+    Only the ids go to stdout, so the output pipes: the heading, the census's attribution
+    and the counts go to stderr, the last of them saying how many stems this annotation
+    carries no gene for. `--json` carries the whole record — every gene with the census's
+    own assessment and DBD family, the provenance to cite, and those unresolved stems.
+
+    Assessed-positive genes only, and there is no flag to widen it: a gene the census
+    assessed and turned down is a verdict too, but a bare id list has nowhere to say which
+    of the two an id is, and a pipeline would read the rejected ones as transcription
+    factors. `Genome(<assembly>).tf_gene_list(include_rejected=True)` is where that answer
+    is expressible, because there each id travels with the verdict reached on it.
+
+    Exits with code 1 when the annotation is not registered here, when no census ships for
+    the assembly's species, and when nothing says what species the assembly is — three
+    different facts, each with its own message, and none of them an empty list of genes.
+    """
+    try:
+        listed = _tf_gene_list(assembly, annotation=annotation)
+    except _GENE_LIST_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(listed.as_json()))
+        return
+    # Attribution to stderr, ids to stdout, for the reason `gene-list` splits them: a bare
+    # id list is what a shell pipeline wants, and a reader needs to know whose judgement
+    # it is. The counts join the attribution because what the census holds and this
+    # annotation does not is the one thing a plain id list cannot show.
+    gene_ids = listed.gene_ids
+    typer.echo(f"TF genes for {listed.assembly} / {listed.annotation} ({listed.species})", err=True)
+    typer.echo(f"  {listed.provenance.attribution()}", err=True)
+    typer.echo(
+        f"  {len(listed.genes)} genes, {len(gene_ids)} gene ids, "
+        f"{len(listed.unresolved)} stems this annotation carries no gene for",
+        err=True,
+    )
+    for gene_id in gene_ids:
+        typer.echo(gene_id)
 
 
 @app.command()

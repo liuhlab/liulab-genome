@@ -173,6 +173,58 @@ categories for ce11_ecHT115 / wormbase_ws298+refseq_rs_2025_06_26
 `--json` emits every category with its gene ids and its sources — the same answer
 `genome gene-list` gives for one of them, for all of them at once.
 
+## `genome tf-gene-list <assembly>`
+
+Print the gene ids a published census judges transcription factors, one per line — Lambert
+et al. 2018 for human, AnimalTFDB 4.0 for mouse, chosen by the species the assembly's own
+metadata row names and never by anything you pass. Only the ids go to stdout, so the
+output pipes; the heading and the census's attribution go to stderr.
+
+```console
+$ genome tf-gene-list hg38 > tf_genes.txt
+TF genes for hg38 / gencode_v50 (Homo sapiens)
+  Lambert et al. 2018 v_1.01 (PMID 29425488) — https://humantfs.ccbr.utoronto.ca/download/v_1.01/DatabaseExtract_v_1.01.csv
+```
+
+A third stderr line closes the account: how many genes and gene ids those came to, and how
+many gene id stems this annotation carries no gene for. A census is keyed by *stems* —
+gene ids with the version suffix dropped — and a registered annotation is not, so each
+stem is resolved into the ids that annotation actually spells (one naming two genes prints
+both, rather than whichever came first), and every one of Lambert's 1,639 assessed-positive
+stems is either a gene on stdout or on that count, never quietly dropped.
+
+Nothing here decides what a transcription factor is. The verdict is the census's, which is
+why whose it is prints beside the answer; and the two censuses classify domain families
+under their own publishers' vocabularies, which are not crosswalked — group by
+`dbd_family` within a species, never across two.
+
+`--annotation NAME` asks a registered annotation other than the assembly's default one.
+`--json` carries the whole record: every gene with the census's own assessment and DBD
+family, the provenance to cite, and the stems that resolved to nothing.
+
+```console
+$ genome tf-gene-list hg38 --json
+{"assembly": "hg38", "annotation": "gencode_v50", "species": "Homo sapiens",
+ "provenance": {"publisher": "Lambert et al. 2018", "version": "v_1.01", "pubmed_id": 29425488, …},
+ "genes": [{"gene_id_stem": "ENSG00000137203", "gene_ids": ["ENSG00000137203.12"],
+            "symbol": "TFAP2A", "is_tf": true, "dbd_family": "AP-2",
+            "judgements": {"tf_assessment": "Known motif", …}}, …],
+ "gene_ids": ["ENSG00000137203.12", …], "unresolved": […]}
+```
+
+The mouse census records nothing beyond the four columns every census shares, so a mouse
+gene's `judgements` is empty rather than spelled differently — read it with `.get`.
+
+Assessed-positive genes only, and there is no flag to widen it: a bare id list has nowhere
+to say which of the two an id is, and a pipeline would read the rejected ones as
+transcription factors. `Genome("hg38").tf_gene_list(include_rejected=True)` is where the
+genes a census assessed and turned down are expressible, because there each id travels
+with the verdict reached on it.
+
+Exits `1` when the annotation is not registered here, when no census ships for the
+assembly's species, and when nothing says what species the assembly is — three different
+facts, each with its own message. None of them prints an empty list of genes.
+
 ## `genome verify <assembly>`
 
 Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is
