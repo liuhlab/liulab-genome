@@ -93,5 +93,6 @@ from. It is the source of truth rather than the **GTF**'s own biotype attribute,
 publishers spell two ways over three disagreeing taxonomies and one omits altogether (ADR-0011); an
 annotation no list ships for is unanswerable, which is not the same fact as one whose category is
 empty.
-_Avoid_: biotype table, gene type table, allow-list, whitelist; and never "the gene list", which
-names no annotation
+_Avoid_: biotype table, gene type table, allow-list, whitelist; and never the bare "the gene list",
+which names no annotation — the ban is on the bare phrase and not on a qualified compound, so the TF
+context's **TF gene list**, which names one, is a legal term

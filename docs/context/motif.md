@@ -3,9 +3,9 @@
 What a transcription factor recognises, and where a scan says it occurs. This context covers
 `tf/motif/*`: the **Motif** and **Motif set** types, the JASPAR loader, the scan-engine adapter, and
 the mixin that gives a **Genome** one scan method. It is the motif half of the TF context — keyed by
-motif, where the gene half is keyed by gene and carries no vocabulary yet. A motif belongs to no
-**Assembly**: it is a pattern and not a place, which is why its files are the first thing under the
-**Data dir** filed outside the assembly tree.
+motif, where the [gene half](./tf-gene.md) is keyed by gene. A motif belongs to no **Assembly**: it
+is a pattern and not a place, which is why its files are the first thing under the **Data dir**
+filed outside the assembly tree.
 
 The package is a scaffold today and its modules land one at a time. The words are settled first, so
 that every issue, test name, error message and docstring on the way uses one set.

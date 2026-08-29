@@ -4,9 +4,10 @@
 query — a locus into bases, a GTF into a registered annotation, a FASTA into an aligner index. Its
 vocabulary splits by bounded context: each file below is the glossary for one part of the source
 tree, and the shared kernel at the bottom holds the words every context uses. The glossaries live
-under `docs/context/`, not beside the code — only two contexts are directories, so co-locating them
-would put three of the five in arbitrary places. Rules live in `CLAUDE.md`; this map and the five
-files it lists are a glossary and nothing else.
+under `docs/context/`, not beside the code — only two of the six map cleanly onto a directory, and
+TF gene straddles `tf/gene/` and a module beside it, so co-locating them would put four in arbitrary
+places. Rules live in `CLAUDE.md`; this map and the six files it lists are a glossary and nothing
+else.
 
 **Use these words.** When your output names a domain concept — an issue title, a refactor proposal,
 a hypothesis, a test name — use the term as defined, not a synonym an entry lists under *Avoid*. A
@@ -36,6 +37,9 @@ substitute for *module*.
   it can map, and how a finished build is told from an abandoned one
 - [Motif](./docs/context/motif.md) — covers `tf/motif/*`: what a transcription factor recognises,
   stored as counts and belonging to no assembly, and where a scan says it occurs
+- [TF gene](./docs/context/tf-gene.md) — covers `tf/gene/*` and `tf/link.py`: which genes a published
+  census judges transcription factors, in a registered annotation's own gene ids, and which motifs
+  answer for them
 
 `io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
 It is the return types the API hands back and the CLI renders, so it carries the vocabulary of
@@ -67,6 +71,18 @@ whichever context asked.
   sequences, or a FASTA on disk — and Sequence stays the leaf it is, so nothing crosses back.
   Scanning upper-cases what it is handed: **Soft-masking** does not survive the crossing, and there
   is no option to honour it.
+- **TF gene → Annotation**: a census is keyed by **Gene id stem** and answers in a registered
+  **Annotation**'s own gene ids — the registry resolves the stems, hands back every gene id a stem
+  names rather than picking one, and carries the stems that resolved to nothing on the answer.
+  Resolution is a general mechanism on the registry and the first thing to read the **Annotation
+  database** this package has always built; TF genes are its first caller. The species is read from
+  the **Assembly**'s own metadata and never passed in, and an assembly whose species has no census
+  raises and names the ones that do.
+- **TF gene ↔ Motif**: the join is many-to-many — one gene has several matrices, one dimer matrix
+  answers for several genes — so neither half owns it. It lives in `tf/link.py`, which imports both
+  halves and is imported by neither, and it ships as a plain table per species per **Release** rather
+  than being computed from a **Motif name** (ADR-0015). Nothing crosses into the motif half: no field
+  on **Motif**, no change to the JASPAR loader or the scan path.
 
 ## Shared kernel
 
