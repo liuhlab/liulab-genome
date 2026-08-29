@@ -1,5 +1,11 @@
 """TF binding motifs — the matrices themselves, and finding where they occur."""
 
+from genome.tf.motif.compare import (
+    COMPARISON_VARIABLES,
+    FRAME_COLUMNS,
+    MotifComparison,
+    RaggedComparisonError,
+)
 from genome.tf.motif.jaspar import (
     DEFAULT_RELEASE,
     DEFAULT_TAX_GROUP,
@@ -30,10 +36,12 @@ from genome.tf.motif.scan import (
 
 __all__ = [
     "BASES",
+    "COMPARISON_VARIABLES",
     "DEFAULT_RELEASE",
     "DEFAULT_SEQUENCE_NAME",
     "DEFAULT_TAX_GROUP",
     "DEFAULT_THRESHOLD",
+    "FRAME_COLUMNS",
     "HIT_COLUMNS",
     "HIT_DTYPES",
     "HIT_PROVENANCE",
@@ -46,8 +54,10 @@ __all__ = [
     "JasparDatabase",
     "JasparReleaseError",
     "Motif",
+    "MotifComparison",
     "MotifNotFoundError",
     "MotifSet",
+    "RaggedComparisonError",
     "TransfacError",
     "parse_transfac",
 ]

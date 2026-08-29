@@ -123,6 +123,36 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   alignment. Every value is set by hand and none is derived from an annotation, whose longest intron
   is a floor on what the organism does rather than a ceiling on it (ADR-0010). Nothing in this
   package reads either column; they are curated here for whoever configures the aligner.
+- **Ask what a motif looks like: `MotifSet.compare`.** Hand it one `Motif`, several, or a whole
+  `MotifSet` and it compares them against the motifs of the set it is called on — read
+  `release.compare(de_novo)` as *compare these against this release*. The use case is naming: a
+  chromBPNet or TF-MoDISco run hands back matrices with no names on them, and this says which
+  published motif each one most resembles. The comparison is `memelite`'s `tomtom`, handed the same
+  4 × L probability matrices `Motif.probabilities` already produces, so **nothing transposes,
+  permutes or rescales on the way in**; this is the only place `memelite` is used, its scanner
+  having been measured against MOODS and rejected. What comes back is a `MotifComparison` wrapping
+  an `xarray.Dataset` **indexed by motif id on both axes**, so `data.sel(query="pattern_0",
+  target="MA0139.2")` asks about one pair and `data["neg_log10_p"]` is a similarity matrix ready to
+  cluster; it carries negative log10 p, score, offset, overlap and strand, the strand always `+` or
+  `-` because a comparison knows which of the two it aligned. **Negative log10 p is stored and raw
+  p never is**: the array holds half precision, whose smallest normal value is 6.1e-5, so a p of
+  1e-20 stored raw would flush to zero and take every motif's best match down with it — stored as
+  20.0 it is an ordinary small number, and an underflowed p reads back as infinite rather than as a
+  warning. `to_frame()` flattens to one row per pair, defaulting to the single best target per
+  query and taking a larger limit or none at all, ranked by p with score and then the target set's
+  own order breaking ties — which is also the order the engine's fast path returns, so the two
+  agree on which target is best. **Passing `top=n` is not a convenience over the complete answer**:
+  it takes `tomtom`'s nearest-neighbour path, which never scores the targets that lose, so the
+  result is *ragged* — dimensions `(query, rank)` with the target ids riding along as a variable,
+  because rank 0 names a different motif for each query. Such a result **cannot be widened without
+  recomputing, and that is accepted rather than a defect**; `RaggedComparisonError` says so and
+  names the call that would. A `top` above the number of targets is refused up front, because the
+  engine answers that one with a `SystemError` out of numba that names nothing a caller can act on.
+  **A motif compared against itself aligns to itself perfectly** — offset 0, the whole length
+  overlapping, on `+`, and no target scores higher. It is usually ranked first too, and the
+  exception is documented rather than papered over: TOMTOM's p-value rewards a short dense
+  alignment, so a long motif that embeds a shorter one can rank the shorter one above itself, which
+  both of the 31- and 33-column CTCF matrices do with the 15-column `MA0139.2` inside them.
 
 ## [2026.8.0] - 2026-08-17
 

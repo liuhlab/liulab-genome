@@ -57,6 +57,10 @@
 
 ::: genome.tf.motif.scan
 
+## `genome.tf.motif.compare`
+
+::: genome.tf.motif.compare
+
 ## `genome.external`
 
 ::: genome.external
