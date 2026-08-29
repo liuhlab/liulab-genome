@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+from collections.abc import Mapping, Sequence
 from importlib.resources import files
 
 import pytest
@@ -23,13 +24,16 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from genome.metadata import assembly_table
+from genome.tf import VALUE_SEPARATOR
 from genome.tf.cofactor import (
     ANIMALTFDB,
     BOTH,
+    CITED_SOURCES,
     COFACTOR_SUBDIR,
     COFACTOR_SUFFIX,
     EPIFACTORS,
     FALSE_CELL,
+    HGNC,
     SOURCES,
     TRUE_CELL,
     UNIFORM_COLUMNS,
@@ -61,6 +65,14 @@ _PINNED: dict[str, dict[str, int]] = {
         EPIFACTORS: 0,
         BOTH: 0,
     },
+    "homo_sapiens": {
+        "rows": 1466,
+        "families": 85,
+        "categories": 6,
+        ANIMALTFDB: 670,
+        EPIFACTORS: 442,
+        BOTH: 354,
+    },
     "mus_musculus": {
         "rows": 970,
         "families": 84,
@@ -73,6 +85,57 @@ _PINNED: dict[str, dict[str, int]] = {
 
 #: AnimalTFDB's own two columns, which every shipped table carries today.
 _FAMILY, _CATEGORY = "animaltfdb_family", "animaltfdb_category"
+
+#: EpiFactors' own four columns, which only the human table carries.
+_FUNCTION = "epifactors_function"
+_TARGET = "epifactors_target"
+_MODIFICATION = "epifactors_modification"
+_COMPLEX = "epifactors_complex_name"
+_EPIFACTORS_COLUMNS = (_FUNCTION, _TARGET, _MODIFICATION, _COMPLEX)
+
+#: How many *atomic* values each EpiFactors vocabulary holds once a multi-valued cell is
+#: split — the number that matters to a caller grouping by one of them, and not the
+#: number of distinct cells, which counts every combination separately. Pinned because a
+#: split on the wrong character shows up here first: splitting the complex names on a
+#: bare comma rather than on this package's separator invents complexes called ``2`` and
+#: ``4`` out of ``COMPASS-like MLL1,2`` and ``COMPASS-like MLL3,4``.
+_EPIFACTORS_VOCABULARIES = {_FUNCTION: 19, _TARGET: 7, _MODIFICATION: 24, _COMPLEX: 70}
+
+#: The five genes EpiFactors gives two rows each — not duplicates, but a histone
+#: annotation on one row and an RNA one on the other — by the stem HGNC gives them.
+#: They ship as one row apiece with their cells unioned; ``ALKBH1`` is the clearest,
+#: carrying a function from each of its two rows.
+_DOUBLE_ROWED = {
+    "ENSG00000100601": "ALKBH1",
+    "ENSG00000204389": "HSPA1A",
+    "ENSG00000204388": "HSPA1B",
+    "ENSG00000135372": "NAT10",
+    "ENSG00000011304": "PTBP1",
+}
+
+#: Three genes EpiFactors still spells by a name HGNC has retired, and the spelling HGNC
+#: approves today. The executable record that the join goes through the HGNC id: matching
+#: on ``ACINU``, ``ARNTL`` or ``C11orf30`` would key these genes wrongly or drop them,
+#: and 31 of EpiFactors' 801 rows are in that position.
+_RENAMED_BY_HGNC = {
+    "ENSG00000100813": "ACIN1",
+    "ENSG00000133794": "BMAL1",
+    "ENSG00000158636": "EMSY",
+}
+
+#: How many human stems are both a Lambert-positive **TF gene** and a **Transcription
+#: cofactor**, and how many arrive from each publisher's side (28 from both, so the two
+#: do not add up to the total). ADR-0016's central number: the two lists overlap, and a
+#: caller who unions the two answers double-counts these genes.
+_DUAL_CLASSIFIED, _DUAL_ANIMALTFDB, _DUAL_EPIFACTORS = 151, 57, 122
+
+#: Three of them, named so that a failure says which genes moved rather than only how
+#: many. TBP is a cofactor on the AnimalTFDB side alone; KMT2A and DNMT1 on both sides.
+_DUAL_GENES = {
+    "ENSG00000112592": "TBP",
+    "ENSG00000118058": "KMT2A",
+    "ENSG00000130816": "DNMT1",
+}
 
 #: The species a cofactor table ships for that the assembly metadata table does not name.
 #: A table keyed to a spelling no assembly uses could never be reached, since the species
@@ -106,6 +169,24 @@ def _column(slug: str, column: str) -> tuple[str | None, ...]:
 def _values(slug: str, column: str) -> set[str]:
     """Return the distinct non-blank values one shipped table records under ``column``."""
     return {cell for cell in _column(slug, column) if cell}
+
+
+def _atomic(slug: str, column: str) -> set[str]:
+    """Return one column's vocabulary once every multi-valued cell is split."""
+    return {
+        value for cell in _column(slug, column) if cell for value in cell.split(VALUE_SEPARATOR)
+    }
+
+
+def _by_stem(slug: str) -> dict[str, dict[str, str | None]]:
+    """Return one shipped table keyed by **Gene id stem**, each row a column-to-cell map."""
+    table = _shipped(slug)
+    return {row[0] or "": dict(zip(table.columns, row, strict=True)) for row in table.rows}
+
+
+def _filled(row: Mapping[str, str | None], columns: Sequence[str]) -> bool:
+    """Return whether one publisher's group of columns says anything on this row."""
+    return any(row[column] for column in columns)
 
 
 def _source(**overrides: object) -> CofactorSource:
@@ -257,7 +338,7 @@ def test_every_table_says_who_published_it_and_what_to_cite(slug: str) -> None:
     for source in provenance.sources:
         assert source.publisher
         assert source.pubmed_id > 0
-        assert source.source in SOURCES
+        assert source.source in CITED_SOURCES
         assert source.source_url.startswith("http")
         assert source.publisher in provenance.attribution()
         assert str(source.pubmed_id) in provenance.attribution()
@@ -321,9 +402,8 @@ def test_the_worm_table_ships_although_no_publisher_censused_worm_transcription_
 @pytest.mark.parametrize(
     "species",
     [
-        # Three species the assembly metadata table names and no cofactor table answers
+        # Two species the assembly metadata table names and no cofactor table answers
         # for, spelled as that table spells them, plus one nobody has ever registered.
-        "Homo sapiens",
         "Saccharomyces cerevisiae",
         "Escherichia coli HT115",
         "no such species",
@@ -598,3 +678,189 @@ def test_a_cofactor_table_is_frozen() -> None:
 def test_the_flag_spellings_and_the_source_vocabulary_are_the_ones_a_table_uses() -> None:
     assert {TRUE_CELL, FALSE_CELL} == {"yes", "no"}
     assert SOURCES == ("animaltfdb", "epifactors", "both")
+
+
+def test_the_two_source_vocabularies_differ_in_both_directions_on_purpose() -> None:
+    # A row of a table says which publisher listed the gene; a provenance row says which
+    # source a table owes a citation to. `both` belongs only to the first — it describes
+    # a row and no publisher — and `hgnc` only to the second, since HGNC lists no gene
+    # and only makes one readable. One vocabulary would have to admit both mistakes.
+    assert CITED_SOURCES == ("animaltfdb", "epifactors", "hgnc")
+    assert BOTH in SOURCES
+    assert BOTH not in CITED_SOURCES
+    assert HGNC in CITED_SOURCES
+    assert HGNC not in SOURCES
+
+
+def test_a_provenance_row_describing_no_publisher_raises() -> None:
+    # `both` is the one value the two vocabularies disagree about most sharply: a
+    # provenance row spelled that way names nobody to cite.
+    row = {
+        "species": "Tiny beast",
+        "source": BOTH,
+        "publisher": "Someone et al. 1999",
+        "version": "v1",
+        "pubmed_id": "2",
+        "source_url": "https://example.org/beast",
+    }
+
+    with pytest.raises(CofactorTableError, match="a provenance row is spelled from"):
+        CofactorSource.from_row(row, origin="cofactor_source_metadata.tsv")
+
+
+def test_a_source_that_lists_no_gene_can_still_be_cited() -> None:
+    # The stems of 442 human genes exist only because HGNC said so, so an identifier
+    # crosswalk is a source with a row of its own rather than an implementation detail.
+    row = {
+        "species": "Tiny beast",
+        "source": HGNC,
+        "publisher": "HGNC",
+        "version": "2026-08-07",
+        "pubmed_id": "2",
+        "source_url": "https://example.org/archive",
+    }
+
+    assert CofactorSource.from_row(row, origin="cofactor_source_metadata.tsv").source == HGNC
+
+
+# ---------------------------------------------------------------------------------------
+# Human: the union this package publishes, and nobody else's verdict
+# ---------------------------------------------------------------------------------------
+
+
+def test_the_human_table_carries_both_publishers_namespaced_columns() -> None:
+    # A table built from two publishers is more columns and one more provenance row,
+    # never a change of format: the uniform four still lead, and each publisher's group
+    # follows under its own namespace with nothing crosswalked between them (ADR-0014).
+    table = _shipped("homo_sapiens")
+
+    assert table.columns == (
+        *UNIFORM_COLUMNS,
+        _FAMILY,
+        _CATEGORY,
+        _FUNCTION,
+        _TARGET,
+        _MODIFICATION,
+        _COMPLEX,
+    )
+
+
+def test_membership_is_unioned_and_classification_is_not() -> None:
+    # A gene either publisher lists is a row; its AnimalTFDB columns are filled only if
+    # AnimalTFDB listed it and its EpiFactors columns only if EpiFactors did. `source`
+    # reads `both` exactly when both groups say something, so a caller can tell an
+    # agreement about membership from a blank one publisher never filled.
+    for stem, row in _by_stem("homo_sapiens").items():
+        animaltfdb = _filled(row, (_FAMILY, _CATEGORY))
+        epifactors = _filled(row, _EPIFACTORS_COLUMNS)
+
+        assert (row["source"] == BOTH) == (animaltfdb and epifactors), stem
+        assert animaltfdb == (row["source"] in (ANIMALTFDB, BOTH)), stem
+        # Not an equivalence in this direction, and deliberately not asserted as one:
+        # HSFX3 is a gene EpiFactors lists and records nothing whatever about.
+        if epifactors:
+            assert row["source"] in (EPIFACTORS, BOTH), stem
+
+
+def test_the_epifactors_vocabularies_are_pinned_as_atomic_values() -> None:
+    # Counted after the split, which is the count a caller grouping by one of them sees.
+    for column, pinned in _EPIFACTORS_VOCABULARIES.items():
+        assert len(_atomic("homo_sapiens", column)) == pinned, column
+
+
+def test_a_multi_valued_cell_splits_on_the_separator_the_whole_package_uses() -> None:
+    # The same character `interpro_ids` and a Motif link's partners already use, so a
+    # caller never has to remember which column uses which. A value that arrived with one
+    # inside it would split into two here, which is what the build refuses to write.
+    complexes = _atomic("homo_sapiens", _COMPLEX)
+
+    assert VALUE_SEPARATOR == ";"
+    assert "COMPASS-like MLL1,2" in complexes
+    assert "COMPASS-like MLL3,4" in complexes
+    assert not any(value.strip() != value or not value for value in complexes)
+
+
+def test_the_five_double_rowed_genes_ship_as_one_row_with_their_cells_unioned() -> None:
+    # EpiFactors gives each of these two rows, and they are not duplicates: one carries a
+    # histone-modification annotation and the other an RNA-modification one. One row per
+    # stem is required, so the cells are unioned and deduplicated within a cell as well
+    # as across the two rows — the cost being that for these five the pairing between a
+    # function and its own modification is gone, which ATTRIBUTION.md states.
+    rows = _by_stem("homo_sapiens")
+
+    for stem, symbol in _DOUBLE_ROWED.items():
+        row = rows[stem]
+        assert row["symbol"] == symbol
+        for column in _EPIFACTORS_COLUMNS:
+            values = (row[column] or "").split(VALUE_SEPARATOR)
+            assert len(values) == len(set(values)), f"{symbol}: {column} repeats a value"
+
+    alkbh1 = rows["ENSG00000100601"]
+    assert (alkbh1[_FUNCTION] or "").split(VALUE_SEPARATOR) == [
+        "Histone modification",
+        "RNA modification",
+        "DNA modification",
+    ]
+    assert (alkbh1[_TARGET] or "").split(VALUE_SEPARATOR) == ["histone", "DNA", "RNA"]
+
+
+def test_the_human_symbol_is_hgncs_spelling_and_not_the_publishers_retired_one() -> None:
+    # Why the build joins EpiFactors on its HGNC id and never on its symbol, made
+    # executable: 31 of the publisher's 801 rows name a gene by a symbol HGNC has since
+    # retired, so matching on the name would key those genes wrongly or drop them. These
+    # three ship under the name HGNC approves, which a symbol match could not have found.
+    rows = _by_stem("homo_sapiens")
+
+    for stem, symbol in _RENAMED_BY_HGNC.items():
+        assert rows[stem]["symbol"] == symbol
+
+
+def test_the_human_table_cites_three_sources_including_the_one_that_lists_no_gene() -> None:
+    # Two publishers of membership and one of identifiers. HGNC gets a row of its own
+    # because the stems of 442 genes exist only because it said so.
+    sources = {source.source: source for source in _shipped("homo_sapiens").provenance.sources}
+
+    assert sorted(sources) == sorted(CITED_SOURCES)
+    assert sources[ANIMALTFDB].publisher == "AnimalTFDB"
+    assert sources[EPIFACTORS].publisher == "EpiFactors"
+    assert sources[EPIFACTORS].version == "v2.0"
+    # A dated monthly archive and never the rolling current file, so that the 442 stems
+    # only HGNC can supply are reproducible. The date is the release identifier, and it
+    # is the file the URL names rather than one constructed from a date.
+    assert sources[HGNC].version == "2026-08-07"
+    assert sources[HGNC].version in sources[HGNC].source_url
+
+
+def test_the_genes_that_are_both_a_tf_and_a_cofactor_are_pinned() -> None:
+    # ADR-0016's central number, and the one cost of publishing a union that a caller
+    # feels: the TF gene list and the cofactor list overlap, so unioning the two answers
+    # double-counts these genes. Read through the census's own public API rather than off
+    # the file, so that a change to either shipped table is caught here.
+    from genome.tf.gene import tf_gene_table
+
+    census = tf_gene_table("Homo sapiens")
+    assert census is not None
+    positives = set(census.assessed_positive)
+    rows = _by_stem("homo_sapiens")
+    animaltfdb = {stem for stem, row in rows.items() if row["source"] in (ANIMALTFDB, BOTH)}
+    epifactors = {stem for stem, row in rows.items() if row["source"] in (EPIFACTORS, BOTH)}
+
+    assert len(positives & set(rows)) == _DUAL_CLASSIFIED
+    assert len(positives & animaltfdb) == _DUAL_ANIMALTFDB
+    assert len(positives & epifactors) == _DUAL_EPIFACTORS
+    for stem, symbol in _DUAL_GENES.items():
+        assert stem in positives, symbol
+        assert stem in rows, symbol
+        assert rows[stem]["symbol"] == symbol
+
+
+def test_being_a_cofactor_never_removes_a_gene_from_the_census() -> None:
+    # The two answers are independent verdicts about different questions, so a second
+    # shipped table never suppresses one the census already reached.
+    from genome.tf.gene import tf_gene_table
+
+    census = tf_gene_table("Homo sapiens")
+    assert census is not None
+
+    assert "ENSG00000118058" in set(census.assessed_positive)
+    assert "ENSG00000118058" in set(_shipped("homo_sapiens").cofactor_stems)

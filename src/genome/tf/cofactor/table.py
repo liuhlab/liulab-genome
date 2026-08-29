@@ -1,9 +1,15 @@
 """The shipped cofactor tables — which genes a publisher lists as transcription cofactors.
 
-**Attribution.** Every table that ships today is AnimalTFDB 4.0, Shen *et al.*,
-*Nucleic Acids Research* 51(D1):D39-D45, 2023 (PMID 36268869), redistributed from
-https://guolab.wchscu.cn/. Membership and classification are its publisher's and
-none of it is this package's. Cite the publisher whose table you used;
+**Attribution.** Three publishers ship here. AnimalTFDB 4.0, Shen *et al.*,
+*Nucleic Acids Research* 51(D1):D39-D45, 2023 (PMID 36268869), from
+https://guolab.wchscu.cn/, lists cofactors for every species that ships; EpiFactors
+v2.0, Marakulina *et al.*, *Nucleic Acids Research* 51(D1):D564-D570, 2023 (PMID
+36350659), from https://epifactors.autosome.org/, lists human's beside it; and a
+pinned dated HGNC monthly archive (PMID 41287213), from https://www.genenames.org/,
+supplies the **Gene id stem** of every gene EpiFactors names. Every classification
+is the publisher's who reached it. **Human membership is this package's own** — the
+union of the two lists, and so nobody's verdict but ours (ADR-0016) — where mouse
+and worm relay one publisher unchanged. Cite the publishers whose table you used;
 :meth:`CofactorProvenance.attribution` renders the line to print, and the two
 provenance tables beside the data carry the same facts for every table that ships.
 
@@ -27,17 +33,23 @@ into one underscore, exactly as a census's file is named, and
 Four columns are uniform across every table and lead every file — the **Gene id
 stem**, the symbol, the cofactor flag and the source (:data:`UNIFORM_COLUMNS`).
 Everything after them is one publisher's own column under a namespaced snake_case
-name — ``animaltfdb_family``, ``animaltfdb_category`` — so a table built from two
-publishers is more columns and one more provenance row, never a change to the
-format, and two publishers' vocabularies are never compared (ADR-0014). A blank
-cell is that publisher recording nothing and reads back as ``None``.
+name — ``animaltfdb_family``, ``animaltfdb_category``, ``epifactors_function`` — so
+a table built from two publishers is more columns and one more provenance row,
+never a change to the format, and two publishers' vocabularies are never compared
+(ADR-0014). A blank cell is that publisher recording nothing and reads back as
+``None``, and a cell recording more than one value spells them apart with ``;``,
+the separator every multi-valued cell in this package uses.
 
 :data:`SOURCES` is a closed vocabulary, validated as the file is read: it says which
 publisher listed the gene, and it asserts agreement on **membership only**, never on
-classification. ``is_cofactor`` reads ``yes`` on every row that ships today, because
-no publisher here releases a rejected set — and it is kept anyway. Dropping it would
-make presence in the file the verdict, at which point a future source could not
-record a rejection without a format change.
+classification. :data:`CITED_SOURCES` is the vocabulary of the *provenance* table's
+own ``source`` column and is a different list on purpose — ``both`` is a fact about a
+row of a table and describes no publisher, while ``hgnc`` describes a publisher that
+contributes identifiers and no membership, so it is cited in its own right and names
+no gene's source. ``is_cofactor`` reads ``yes`` on every row that ships today,
+because no publisher here releases a rejected set — and it is kept anyway. Dropping
+it would make presence in the file the verdict, at which point a future source could
+not record a rejection without a format change.
 
 **Worm ships although no publisher has released a worm TF census.** A worm assembly
 answers here while the TF gene half raises for it. That asymmetry is the publishers'
@@ -68,7 +80,10 @@ True
 'AnimalTFDB'
 >>> len(cofactor_table("Caenorhabditis elegans"))
 317
->>> cofactor_table("Homo sapiens") is None
+>>> human = cofactor_table("Homo sapiens")
+>>> len(human), len(human.provenance.sources)
+(1466, 3)
+>>> cofactor_table("Danio rerio") is None
 True
 """
 
@@ -121,6 +136,18 @@ UNIFORM_COLUMNS: tuple[str, ...] = ("gene_id_stem", "symbol", "is_cofactor", "so
 #: on how either of them classified it.
 ANIMALTFDB, EPIFACTORS, BOTH = "animaltfdb", "epifactors", "both"
 SOURCES: tuple[str, ...] = (ANIMALTFDB, EPIFACTORS, BOTH)
+
+#: A source that supplies identifiers and no membership: it makes a stem readable and
+#: lists nobody, so it never spells a row's ``source`` and is only ever cited.
+HGNC = "hgnc"
+
+#: What the *provenance* table's own ``source`` column may say — every source a table
+#: was built from and owes a citation to. A different list from :data:`SOURCES` on
+#: purpose, in both directions: ``both`` is a fact about a row of a table and describes
+#: no publisher, and ``hgnc`` describes a publisher that listed no gene. Human's 442
+#: EpiFactors-only stems exist only because HGNC said so, which is why identifiers earn
+#: a citation of their own rather than passing as an implementation detail.
+CITED_SOURCES: tuple[str, ...] = (ANIMALTFDB, EPIFACTORS, HGNC)
 
 #: Where the cofactor flag and the source sit in every table, which the uniform four fix.
 _IS_COFACTOR = UNIFORM_COLUMNS.index("is_cofactor")
@@ -184,9 +211,10 @@ class CofactorSource:
     species : str
         The species, as the assembly metadata table spells it.
     source : str
-        Which publisher this row is about, spelled as the uniform ``source`` column
-        spells it. One of :data:`SOURCES`, and never ``both``: ``both`` is a fact about
-        a *row* of the table, and a provenance row describes one publisher.
+        Which source this row is about, spelled as the uniform ``source`` column spells
+        one where the two vocabularies meet. One of :data:`CITED_SOURCES`: never
+        ``both``, which is a fact about a *row* of the table rather than a publisher,
+        and possibly ``hgnc``, which lists no gene and supplies identifiers only.
     publisher : str
         Who published it, and who is to be cited for it.
     version : str
@@ -230,8 +258,8 @@ class CofactorSource:
         ------
         CofactorTableError
             If a column is missing or blank, a numeric column holds something
-            :class:`int` cannot read, or the source is outside :data:`SOURCES`. The
-            message names the column.
+            :class:`int` cannot read, or the source is outside :data:`CITED_SOURCES`.
+            The message names the column.
 
         Examples
         --------
@@ -249,13 +277,14 @@ class CofactorSource:
         record = cls(
             **{name: _parse_cell(name, row, origin=origin) for name in _SOURCE_METADATA_COLUMNS}
         )
-        if record.source not in SOURCES:
+        if record.source not in CITED_SOURCES:
             raise CofactorTableError(
                 f"{origin} names the source {record.source!r} for {record.species!r}, and the "
-                f"vocabulary is {list(SOURCES)}. A provenance row describes one publisher, so "
-                f"it is spelled the way that publisher's rows spell themselves. Re-run "
-                f"{_REBUILD} for that species, which writes the table and its provenance rows "
-                f"together."
+                f"vocabulary a provenance row is spelled from is {list(CITED_SOURCES)}. A row "
+                f"here describes one source and what to cite for it, so {BOTH!r} — which is a "
+                f"fact about a row of the table and about no publisher — is not one of them. "
+                f"Re-run {_REBUILD} for that species, which writes the table and its provenance "
+                f"rows together."
             )
         return record
 
@@ -299,13 +328,17 @@ class CofactorProvenance:
         Digest of the **unpacked** table — the TSV inside the gzip, not the gzip bytes,
         so a copy recompressed elsewhere still matches (ADR-0006).
     sources : tuple of CofactorSource
-        One record per publisher that contributed to this species' table.
+        One record per source this species' table was built from and owes a citation
+        to — every publisher that listed genes, and any that only made a stem
+        readable. Human has three where mouse and worm have one.
 
     Examples
     --------
     >>> provenance = cofactor_table("Caenorhabditis elegans").provenance
     >>> provenance.ncbi_taxid, len(provenance.sources)
     (6239, 1)
+    >>> [source.source for source in cofactor_table("Homo sapiens").provenance.sources]
+    ['animaltfdb', 'epifactors', 'hgnc']
     """
 
     species: str
@@ -558,7 +591,7 @@ def cofactor_species() -> tuple[str, ...]:
     Examples
     --------
     >>> cofactor_species()
-    ('caenorhabditis_elegans', 'mus_musculus')
+    ('caenorhabditis_elegans', 'homo_sapiens', 'mus_musculus')
     """
     directory = files("genome").joinpath(COFACTOR_SUBDIR)
     if not directory.is_dir():
