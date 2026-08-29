@@ -17,7 +17,14 @@ import pandas as pd
 import pytest
 
 import genome.genome as genome_mod
-from genome import DNA, AnnotationRegistry, Genome, NoGeneCategoriesError, Region
+from genome import (
+    DNA,
+    AnnotationRegistry,
+    Genome,
+    NoGeneCategoriesError,
+    NoTFCensusError,
+    Region,
+)
 from genome.gene_list import curated_gene_list
 from genome.io.completion import (
     RegistrationMismatchError,
@@ -634,3 +641,10 @@ class TestGeneCategories:
                 g.gene_lists()
             with pytest.raises(NoGeneCategoriesError):
                 g.gene_list("rRNA")
+
+
+def test_tf_gene_list_delegates_to_the_registry(yeast_dir: Path) -> None:
+    # One line on the genome object, and it reaches the registry bound to this assembly:
+    # no census ships for yeast, which is the registry's answer and not the genome's.
+    with Genome("sacCer3", cache_dir=yeast_dir) as g, pytest.raises(NoTFCensusError):
+        g.tf_gene_list()

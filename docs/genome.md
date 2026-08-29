@@ -253,6 +253,66 @@ rrna.gene_ids     # both components', concatenated in that order and never de-du
 A component whose annotation no curated list ships for is simply left out of `sources`
 rather than raised over — an omission, not a failure.
 
+### Which genes are transcription factors
+
+Ask an assembly for the genes a published census judges transcription factors and get them
+back in the registered annotation's own gene ids, so the answer joins to a counts matrix
+with nothing left to normalise:
+
+```python
+human = Genome("hg38")
+tfs = human.tf_gene_list()
+tfs.gene_ids[:2]     # ['ENSG00000137203.12', ...] — versioned, as GENCODE spells them
+tfs.unresolved       # the census's stems this annotation has no gene for, never dropped
+```
+
+**Nothing here decides what a transcription factor is.** The verdict travels with the
+census that reached it — Lambert et al. 2018 for human — and one ships per species, so
+which species can be asked about is data:
+
+```python
+print(tfs.provenance.attribution())
+# Lambert et al. 2018 v_1.01 (PMID 29425488) — https://humantfs.ccbr.utoronto.ca/...
+```
+
+The species comes from the assembly's own metadata row and is never passed in, so human
+transcription factors cannot be asked for while holding a mouse assembly.
+
+Each gene carries the census's own judgements under the publisher's own column names, so
+tightening or loosening is a filter over what you already hold rather than a second call:
+
+```python
+gene = tfs.genes[0]
+gene.symbol, gene.dbd_family        # ('TFAP2A', 'AP-2')
+gene.judgements["tf_assessment"]    # 'Known motif'
+known = [g for g in tfs.genes if g.judgements["tf_assessment"] == "Known motif"]
+```
+
+Group by `dbd_family` **within** a species and never across two: the publishers did not
+harmonise their vocabularies and neither does this package (ADR-0014).
+
+Only the genes the census judged transcription factors are carried, because the common
+case is not 2,765 rows to filter down to 1,639. `include_rejected=True` carries the ones
+it assessed and turned down as well, each saying so in `is_tf`; a gene it never assessed
+is in neither answer, which is a third fact and not a quieter version of the second.
+
+**An assembly no census can answer for raises** rather than handing back nothing, and the
+two ways it cannot are separate errors, because you act differently on them:
+
+```python
+from genome import NoTFCensusError, UnknownSpeciesError
+
+try:
+    worm_tfs = Genome("ce11").tf_gene_list()
+except NoTFCensusError:
+    ...      # the species is known and nobody has published a census for it
+except UnknownSpeciesError:
+    ...      # nothing says what species this is — a chimera, or an unlisted local key
+```
+
+Both are `LookupError`s, so `except LookupError` catches the pair, and each message names
+the species that do have a census.
+
 ## Aligner indexes
 
 Two aligners ship, and they differ in whether an annotation is involved:

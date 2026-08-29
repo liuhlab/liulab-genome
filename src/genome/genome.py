@@ -38,7 +38,7 @@ from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import AnnotationRegistry
 from genome.io.registration import AssemblyDir
-from genome.io.results import GeneList
+from genome.io.results import GeneList, TFGeneList
 from genome.io.twobit import TwoBit
 from genome.metadata import AssemblyMetadata, assembly_metadata
 from genome.region import Region, parse_region
@@ -383,6 +383,60 @@ class Genome(AlignerMixin, MotifScanMixin):
         ['rRNA', 'rRNA_pseudogene', 'Mt_rRNA']
         """
         return self._registry.gene_lists(annotation)
+
+    def tf_gene_list(
+        self, annotation: str | None = None, *, include_rejected: bool = False
+    ) -> TFGeneList:
+        """Return the genes a published census judges transcription factors in this genome.
+
+        The everyday way to a **TF gene list**: the census shipped for this assembly's own
+        species, resolved into one registered annotation's gene ids, so the answer joins to
+        a counts matrix with nothing left to normalise. Assessed-positive by default, with
+        the census's **DBD family** and every judgement it recorded on each gene, and the
+        provenance that says whose verdict it is — nothing here decides what a
+        transcription factor is.
+
+        The species is this assembly's, read from its metadata row and never passed in, so
+        asking for another species' factors is not expressible. An assembly whose species
+        has no census, and one nothing names a species for, raise rather than answering
+        with nothing.
+
+        Parameters
+        ----------
+        annotation : str, optional
+            The **Registered name** to answer in the gene ids of. Omitted,
+            :attr:`default_gtf` answers.
+        include_rejected : bool, default False
+            Carry the genes the census assessed and turned down as well, each saying so.
+
+        Returns
+        -------
+        genome.io.results.TFGeneList
+            The genes, the census's provenance, and the stems that resolved to nothing.
+
+        Raises
+        ------
+        genome.io.gtf.UnknownSpeciesError
+            If nothing names this assembly's species.
+        genome.io.gtf.NoTFCensusError
+            If no census ships for that species; the message names the ones that do.
+        ValueError
+            If ``annotation`` is omitted and this genome has no **Default annotation**.
+        genome.io.gtf.AnnotationNotRegisteredError
+            If that annotation is not registered here.
+        genome.io.gtf.NoGeneFeaturesError
+            If its database holds no gene at all.
+
+        Examples
+        --------
+        >>> human = Genome("hg38")                                # doctest: +SKIP
+        >>> answer = human.tf_gene_list()                         # doctest: +SKIP
+        >>> len(answer.genes), len(answer.unresolved)             # doctest: +SKIP
+        (1638, 1)
+        >>> print(answer.provenance.attribution())                # doctest: +SKIP
+        Lambert et al. 2018 v_1.01 (PMID 29425488) — https://humantfs.ccbr.utoronto.ca/...
+        """
+        return self._registry.tf_gene_list(annotation, include_rejected=include_rejected)
 
     @property
     def default_gtf_path(self) -> Path | None:
