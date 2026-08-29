@@ -6,7 +6,13 @@ factors, and the DNA-binding-domain family it classifies each one under — and 
 it is keyed by gene. :mod:`genome.tf.motif` is about the *sequence a factor
 recognises* — the count matrix and where it occurs in an assembly — and so it is
 keyed by motif. The mapping between the two is many-to-many, which is why neither
-half owns it. Cofactors are out of scope and nothing here answers for them.
+half owns it.
+
+Cofactors are a carve-out and not a gap. :mod:`genome.tf.cofactor` is the third
+subpackage, keyed by gene as :mod:`genome.tf.gene` is, and it answers which genes
+a publisher lists as cofactors of transcription rather than as transcription
+factors. A cofactor recognises no sequence of its own, so it has no motif and
+nothing here scans for one.
 
 The join itself is :mod:`genome.tf.link`, which lives here rather than in either
 half because it imports both and neither imports it. It is re-exported from this

@@ -97,6 +97,20 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   build tooling. The link generator reads JASPAR's SQLite dump for per-profile species, which is
   why **the motif subpackage needed no change at all**: no new field on **Motif**, no change to the
   loader, parser or scan path.
+- **The words for transcription cofactors, settled before the code that will use them.** The TF gene
+  context glossary now covers the whole TF context at `docs/context/tf.md`, and defines
+  **Transcription cofactor**, **Cofactor table** and **TF cofactor list** — so that a bare
+  "cofactor", which names NAD+ and heme to most of biology, never stands on its own in an issue, a
+  test name or an error message, and so that a table saying two publishers listed a gene is read as
+  agreement on membership only and never on classification. **`genome.tf` no longer says cofactors
+  are out of scope**: they are a carve-out with a subpackage named for them, `genome.tf.cofactor`,
+  and the reason a cofactor has no motif is that it recognises no sequence — not that nothing here
+  knows about it. ADR-0016 records that **this package publishes the human cofactor list**, the
+  first place it decides anything rather than relaying a publisher's verdict: 1,466 genes unioned
+  from AnimalTFDB 4.0 and EpiFactors v2.0, whose stems come through a pinned dated HGNC archive,
+  with both costs stated rather than smoothed over — 151 human genes are both a **TF gene** and a
+  cofactor, and the two classification vocabularies are deliberately not crosswalked (ADR-0014).
+  Vocabulary and records only; no behaviour changes.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;

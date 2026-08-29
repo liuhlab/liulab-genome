@@ -1,21 +1,27 @@
-# TF gene
+# TF
 
-Which genes a published census judges transcription factors, and which JASPAR motifs answer for
-them. This context covers `tf/gene/*` — the shipped censuses, the loader that reads them, and the
-**TF gene list** an **Annotation** answers with — and `tf/link.py` beside it, which holds the
-**Motif link** join. It is the gene half of the TF context, keyed by gene where the **Motif** half
-is keyed by motif; the join between the two is many-to-many, so `tf/link.py` imports both halves and
-neither half imports it.
+Which genes a published source judges transcription factors, which ones it lists as cofactors of
+transcription instead, and which JASPAR motifs answer for a factor. This context covers `tf/gene/*`
+— the shipped censuses, the loader that reads them, and the **TF gene list** an **Annotation**
+answers with — `tf/cofactor/*`, the same shape for the genes a publisher lists as a **Transcription
+cofactor**, and `tf/link.py` beside them, which holds the **Motif link** join. Those two are the
+gene-keyed halves of this context and they ask different questions — is this a transcription factor
+and of what **DBD family**, against is this a cofactor and of what class — where the [motif
+half](./motif.md) is keyed by motif and keeps its own glossary. The join between a gene and a motif
+is many-to-many, so `tf/link.py` imports the gene and motif halves and neither of them imports it.
 
 Nothing here decides what a transcription factor is. Every verdict travels with the census that
 reached it — Lambert et al. 2018 for human, AnimalTFDB 4.0 for mouse — so two censuses that classify
 one factor differently are two answers rather than a contradiction to resolve, and this package's
-job is to say which one is speaking.
+job is to say which one is speaking. Cofactor membership is the one exception, and it is recorded as
+one: the human list is a union of two publishers and so nobody's verdict but this package's
+(ADR-0016), while every cofactor's classification stays the publisher's who reached it.
 
-Nothing in this half is built at the time of writing. The words are settled first, as the motif
-half's were, so that every issue, test name, error message and docstring on the way uses one set —
-which is why no entry below carries the *(decided, not built)* marker the context map describes:
-every one of them would. Use the words; do not call the API they describe until its module lands.
+The gene half and its join to motifs are built; the cofactor half is not. Its words are settled
+first, as this half's and the motif half's were, so that every issue, test name, error message and
+docstring on the way uses one set. The cofactor entries below therefore describe an API that has not
+landed — use the words, do not call it — and they carry no *(decided, not built)* marker of the kind
+the context map describes, because this paragraph says it once for all three.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir** and the rest — are defined once
 in the repo-root `CONTEXT-MAP.md`. **Annotation**, **Registered name**, **Annotation database** and
@@ -94,6 +100,44 @@ always built; TF genes are merely its first caller.
 _Avoid_: base id — that already names a **Motif id** with its version dropped, `MA0139` for
 `MA0139.2`, and one term must not name two things inside one package; unversioned id, stripped id,
 gene id (the versioned thing this is a stem *of*), ENSG (one publisher's spelling)
+
+### Cofactors
+
+**Transcription cofactor**:
+A gene a published source lists as a cofactor of transcription rather than as a **TF gene** — a
+chromatin remodeller, a histone-modifying enzyme, a Mediator subunit — classified in that source's
+own vocabulary and recognising no sequence of its own, so it has no **Motif** and asking for one is
+answered with that reason rather than with a census's silence. The two are not exclusive: 151 human
+genes are both, and being a cofactor never suppresses the motifs a census already reached
+(ADR-0016).
+_Avoid_: the bare word cofactor outside the `genome.tf.cofactor` namespace — to most of biology it
+names NAD+ and heme, a small molecule an enzyme needs and not a gene at all; co-activator and
+corepressor, which between them name one of AnimalTFDB's six categories rather than the whole class;
+epigenetic factor, which is EpiFactors' word for EpiFactors' list and narrower than what ships;
+chromatin factor, accessory factor, transcriptional regulator
+
+**Cofactor table**:
+One species' **Transcription cofactor**s as shipped data, in the shape a **TF gene table** already
+has — keyed by **Gene id stem**, uniform columns first, every other column keeping a namespaced
+spelling of its publisher's own, and provenance in a metadata table beside it. Membership is this
+package's and classification is each publisher's: a row saying that two publishers listed the gene
+asserts agreement on membership only and never on classification, and the AnimalTFDB category it
+carries is a join this package performed onto that publisher's family rather than anything the
+published gene list itself says.
+_Avoid_: cofactor database, cofactor catalogue, epigenetic factor table; **TF cofactor list**, which
+is what an **Annotation** answers with rather than what ships; annotation, which names a registered
+GTF here
+
+**TF cofactor list**:
+One **Assembly**'s **Transcription cofactor**s: a **Cofactor table**'s **Gene id stem**s resolved
+into the registered **Annotation**'s own gene ids, carrying the stems that resolved to nothing, and
+the counterpart of **TF gene list** in the same shape and the same layers. The species comes from
+the assembly's own metadata and is never passed in (ADR-0003), and a species with no shipped table
+raises and names the ones that have one — worm answers here while **TF gene list** raises for it,
+because a publisher assessed worm cofactors and none has released a worm TF census.
+_Avoid_: cofactor set, cofactor panel, cofactor universe; **Cofactor table**, which is the shipped
+file this resolves rather than the answer; and the bare phrase "the cofactor list", which does not
+say whose gene ids the answer is in
 
 ### The join to motifs
 
