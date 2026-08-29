@@ -40,10 +40,12 @@ already set. :func:`motif_link_table` answers ``None`` for a species, **Release*
 **Tax group** no table ships for — the raw absence, and the one place ``None`` is how it
 is said, because this is the layer below the one a caller touches.
 :func:`motif_links` turns that into :class:`NoMotifLinkTableError`, and a gene no census
-assessed into :class:`GeneNotAssessedError`; neither is ever an empty collection. A gene
-that *is* assessed and has no motif is a real answer and comes back with no links —
-:attr:`MotifLinks.is_tf` is what tells a gene its census turned down from one JASPAR has
-no profile for.
+assessed into :class:`GeneNotAssessedError` — narrowed to
+:class:`TranscriptionCofactorError` where a publisher lists that gene as a **Transcription
+cofactor**, which is the same absence with a reason attached to it. None of them is ever an
+empty collection. A gene that *is* assessed and has no motif is a real answer and comes
+back with no links — :attr:`MotifLinks.is_tf` is what tells a gene its census turned down
+from one JASPAR has no profile for.
 
 Examples
 --------
@@ -72,6 +74,7 @@ from types import MappingProxyType
 
 import pandas as pd
 
+from genome.tf.cofactor import BOTH, SOURCES, UNIFORM_COLUMNS, CofactorTable, cofactor_table
 from genome.tf.gene import FALSE_CELL, TRUE_CELL, TFGeneTable, species_slug, tf_gene_table
 from genome.tf.motif.jaspar import DEFAULT_RELEASE, DEFAULT_TAX_GROUP
 
@@ -128,6 +131,13 @@ VALUE_SEPARATOR = ";"
 #: is one — so a name of this shape is a symbol first and a versioned id second.
 _VERSIONED_GENE_ID = re.compile(r"(?P<stem>[^.]+)\.\d+\w*")
 
+#: Where a **Cofactor table** keeps the flag and the publisher, among the uniform columns
+#: every such table leads with. Read off that tuple rather than written down again, so the
+#: two modules cannot drift apart: the flag says whether the publisher listed the gene as a
+#: cofactor or recorded a rejection, and the source says who listed it.
+_COFACTOR_FLAG = UNIFORM_COLUMNS.index("is_cofactor")
+_COFACTOR_SOURCE = UNIFORM_COLUMNS.index("source")
+
 
 class MotifLinkTableError(ValueError):
     r"""A shipped **Motif link** table cannot be read, so it is not allowed to answer.
@@ -180,7 +190,8 @@ class GeneNotAssessedError(LookupError):
     verdict, and comes back with no links and :attr:`MotifLinks.is_tf` ``False``. This is
     the gene the census never looked at — a symbol it does not spell, a **Gene id stem**
     of another species, or a typo — and answering it emptily would read as *this gene has
-    no motifs*.
+    no motifs*. A gene a publisher lists as a **Transcription cofactor** raises the narrower
+    :class:`TranscriptionCofactorError` instead, which is this absence with a reason.
 
     The message names the species and the census that speaks for it.
 
@@ -190,6 +201,33 @@ class GeneNotAssessedError(LookupError):
     ...     motif_links("ENSMUSG00000005698", "Homo sapiens")
     ... except GeneNotAssessedError as error:
     ...     print("Lambert et al. 2018" in str(error))
+    True
+    """
+
+
+class TranscriptionCofactorError(GeneNotAssessedError):
+    """No census assessed that gene, and a publisher lists it as a **Transcription cofactor**.
+
+    The same absence with something known in its place: a cofactor acts on transcription
+    without recognising a sequence of its own, so there is **no motif to look for** rather
+    than one nobody has found yet, and the census's plain silence would read as *nothing here
+    knows this gene*.
+
+    It subclasses :class:`GeneNotAssessedError` because that is literally true — no TF census
+    assessed this gene — so an ``except`` clause written before this error existed keeps
+    covering every gene it covered. The is-a is about the censuses and not about biology: a
+    cofactor is not a kind of transcription factor, and being one never suppresses the motifs
+    a census already reached, which is why the census is asked first (ADR-0016).
+
+    The message names the census that did not assess the gene, the publisher that lists it as
+    a cofactor, and that there is no motif here to look for.
+
+    Examples
+    --------
+    >>> try:
+    ...     motif_links("WDR5", "Homo sapiens")
+    ... except TranscriptionCofactorError as error:
+    ...     print("transcription cofactor" in str(error))
     True
     """
 
@@ -533,6 +571,9 @@ class MotifLinkTable:
         ------
         GeneNotAssessedError
             If this species' census never assessed that gene.
+        TranscriptionCofactorError
+            If it never assessed that gene and a publisher lists it as a **Transcription
+            cofactor**; a narrowing of the error above.
         VersionedGeneIdError
             If ``gene`` is a versioned gene id whose stem the census does assess.
         MotifLinkTableError
@@ -790,6 +831,16 @@ def motif_links(
     to — deriving one from the other is the guess ADR-0003 exists to forbid. A caller
     holding an assembly has its species already, in the assembly's own metadata row.
 
+    **The census is asked first, and the order is what keeps this correct.** A gene the
+    census assessed is answered whatever else is known about it — the 151 human genes that
+    are both a **TF gene** and a **Transcription cofactor**, TBP and KMT2A and DNMT1 among
+    them, come back exactly as they always did, because a second table must never suppress
+    an answer the census already reached. Only then is that species' **Cofactor table**
+    asked, and a gene it lists raises :class:`TranscriptionCofactorError`: a cofactor
+    recognises no sequence of its own, so *no motif to look for* is a truer answer than the
+    census's silence. A gene neither knows raises :class:`GeneNotAssessedError`, as it
+    always has, and so does every gene of a species that ships no cofactor table.
+
     Parameters
     ----------
     gene : str
@@ -819,6 +870,10 @@ def motif_links(
         does.
     GeneNotAssessedError
         If that species' census never assessed that gene.
+    TranscriptionCofactorError
+        If it never assessed that gene and a publisher lists it as a **Transcription
+        cofactor**; a narrowing of the error above, so an ``except`` clause written for
+        that one catches this too.
     VersionedGeneIdError
         If ``gene`` is a versioned gene id whose stem the census does assess.
 
@@ -994,6 +1049,21 @@ def _resolve_gene(census: TFGeneTable, gene: str) -> tuple[str, str, bool]:
             f"did not."
         )
     known = versioned["stem"] if versioned is not None else gene
+    # The census is asked first and this second, so a gene it assessed is answered whatever
+    # any other table says about it — the 151 human genes that are both a TF gene and a
+    # cofactor never reach here. A species with no cofactor table finds nobody and falls
+    # through to the error below, exactly as every species did before this table existed.
+    publishers = _cofactor_publishers(census.species, known)
+    if publishers is not None:
+        raise TranscriptionCofactorError(
+            f"{census.provenance.publisher} never assessed {known!r} as a transcription factor, "
+            f"and it is listed as a transcription cofactor by {publishers}. A cofactor acts on "
+            f"transcription without recognising a sequence of its own, so it has no motif and "
+            f"none is missing here — which is a different answer from a gene nobody has "
+            f"assessed. Stop looking for a motif, and see "
+            f"genome.tf.cofactor.cofactor_table({census.species!r}) for the class it is listed "
+            f"under."
+        )
     raise GeneNotAssessedError(
         f"{census.provenance.publisher} never assessed {known!r}, so nothing here says whether "
         f"it is a transcription factor and no motif can answer for it. That census speaks for "
@@ -1001,3 +1071,30 @@ def _resolve_gene(census: TFGeneTable, gene: str) -> tuple[str, str, bool]:
         f"check the species you named, and see genome.tf.gene.tf_gene_table({census.species!r}) "
         f"for what it does assess. Absent from a census is not the same as judged not a TF."
     )
+
+
+def _cofactor_publishers(species: str, gene: str) -> str | None:
+    """Return who lists that gene as a **Transcription cofactor**, or ``None`` if nobody does."""
+    table = cofactor_table(species)
+    if table is None:
+        return None
+    wanted = gene.upper()
+    for row in table.rows:
+        named = row[0] == gene or (row[1] or "").upper() == wanted
+        # A publisher recording a rejection is not a publisher listing the gene, so the flag
+        # is read rather than the row's presence. It says `yes` on every row that ships today.
+        if named and row[_COFACTOR_FLAG] == TRUE_CELL:
+            return _publishers_of(table, row[_COFACTOR_SOURCE] or "")
+    return None
+
+
+def _publishers_of(table: CofactorTable, source: str) -> str:
+    """Return the publishers one row's source cell names, as a phrase to print."""
+    # A row spelled `both` names every publisher of that table that lists genes, which is
+    # every source it cites but one supplying identifiers alone — HGNC lists nobody.
+    listed = [
+        entry.publisher
+        for entry in table.provenance.sources
+        if entry.source == source or (source == BOTH and entry.source in SOURCES)
+    ]
+    return " and ".join(listed) or source
