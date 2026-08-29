@@ -1,0 +1,2 @@
+species	ncbi_taxid	file	publisher	version	pubmed_id	family_column	source_url	sha256
+Homo sapiens	9606	homo_sapiens.tf_gene_table.tsv.gz	Lambert et al. 2018	v_1.01	29425488	DBD	https://humantfs.ccbr.utoronto.ca/download/v_1.01/DatabaseExtract_v_1.01.csv	2c0be5d72f787e7e2a08feaed342e2ec00ae1f9cc8a954d11b6af0c121b65958
