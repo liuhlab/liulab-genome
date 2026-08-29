@@ -10,6 +10,20 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **The motif libraries, in every environment.** MOODS, logomaker, matplotlib and xarray join the
+  core conda dependency table and `memelite` the PyPI one, ahead of the motif subpackage that will
+  import them. None gets its own feature or environment: what earns a feature is a binary the
+  package does not ship and checks for at call time, which a library is not, and the GTF library
+  already sits in the core table on the same reasoning — so **the suite stays two lanes**. It is
+  `matplotlib-base` rather than `matplotlib`, which is what logomaker itself depends on and drops a
+  GUI stack nothing here opens. None of them is added to the PEP 621 `dependencies`, following
+  `gffutils`: that list is what `pip install liulab-genome` can actually satisfy, and MOODS
+  publishes no wheel — only an sdist needing SWIG and a C++ toolchain — so declaring it there would
+  turn a working install into a failing build. **The scan engine was chosen by measurement**, not
+  preference: `memelite`'s `fimo` silently returns zero hits for 97 of the 879 JASPAR 2024
+  vertebrate motifs, never scans the final window of a sequence, and cannot be driven without
+  holding the whole file; MOODS is also 9.7× faster per core once thresholds are prepared. The
+  numbers and the method are in `docs/research/motif-scan-engine-2026-08-28.md`.
 - **An annotation can name the genes in a category.** `Genome.gene_list("rRNA")` returns the gene
   ids, and `Genome.gene_lists()` every category that annotation declares — from the CLI, `genome
   gene-list <assembly> <category>` and `genome gene-categories <assembly>`, both with `--json`.
