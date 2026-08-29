@@ -97,6 +97,120 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   build tooling. The link generator reads JASPAR's SQLite dump for per-profile species, which is
   why **the motif subpackage needed no change at all**: no new field on **Motif**, no change to the
   loader, parser or scan path.
+- **The human cofactor list, and it is this package that publishes it.** `cofactor_table("Homo
+  sapiens")` answers with **1,466 genes — 354 both publishers list, 670 AnimalTFDB 4.0 alone, 442
+  EpiFactors v2.0 alone** — a union neither publisher releases and therefore, uniquely in
+  `genome.tf`, **nobody's verdict but ours** (ADR-0016). Everywhere else here a verdict travels with
+  the census that reached it, and classification still does: the row carries AnimalTFDB's family and
+  category *and* EpiFactors' function, target, modification and complex under namespaced columns,
+  filled only by the publisher that actually named the gene, with **nothing crosswalked between the
+  two in either direction** (ADR-0014) — so a `source` of `both` is agreement about membership and
+  about nothing else. EpiFactors keys on HGNC ids and publishes no Ensembl ids at all, so the stems
+  of the 442 genes only it lists come from **a pinned dated HGNC monthly archive** and never the
+  rolling current file, which is what makes them reproducible; the join is on the id and **never on
+  the symbol**, because 31 of EpiFactors' 801 rows still name their gene by a symbol HGNC has
+  retired — `ACINU` for `ACIN1`, `ARNTL` for `BMAL1` — and human's `symbol` column is HGNC's
+  approved spelling throughout. Five genes carry two EpiFactors rows each and ship as one with their
+  cells unioned and deduplicated, at a cost stated rather than hidden: for those five the pairing
+  between a function and its own modification is lost. **The TF list and the cofactor list overlap —
+  151 human genes are both a Lambert-positive TF gene and a cofactor**, 57 from the AnimalTFDB side
+  and 122 from the EpiFactors side, so a caller who unions the two answers double-counts them; being
+  a cofactor never suppresses a motif the census already reached. Human's provenance carries **three**
+  source rows, HGNC's among them, because a source that earns 442 stems earns a citation. Multi-valued
+  cells split on `;`, the separator the rest of this package already uses, and the build refuses a
+  published value that already contains one. Every curation rule lives in
+  `scripts/build_tf_cofactor.py` and none of it in the wheel.
+- **Which genes a publisher lists as transcription cofactors, answered by a table that ships in the
+  wheel.** `genome.tf.cofactor` is the third part of the TF context and a peer of the gene and motif
+  halves: the gene half answers whether a gene is a **TF gene** and of what **DBD family**, this one
+  answers whether it is a **Transcription cofactor** and of what class. It is keyed the same way, by
+  **Gene id stem**. Mouse and worm ship **AnimalTFDB 4.0** (PMID 36268869) — 970 genes across 84 of
+  the publisher's own families, *C. elegans* 317 across 57, and the same six categories in each — as
+  gzipped TSVs under `data/tf_cofactor/`, found by enumerating that directory so that adding a
+  species is dropping in a file. **Nothing here decides what a cofactor is** for those two:
+  membership and classification both travel with the publisher that reached them, and the answer
+  names the publisher, version and PubMed id to cite. Four uniform columns lead every table —
+  the stem, the symbol, the cofactor flag and a closed-vocabulary `source` validated on read — and
+  everything after them is one publisher's own column under a namespaced name, never compared with
+  another's (ADR-0014). `is_cofactor` reads `yes` on every row today and is kept anyway: dropping it
+  would make presence in the file the verdict, and a future source could then not record a rejection
+  without a format change. **Worm ships although no publisher has censused worm transcription
+  factors**, so a worm assembly answers here while the TF gene half has nothing to say — the
+  publishers' shape and not a defect, stated beside the data and pinned in the tests. Provenance is
+  **two** plain tables rather than one, keyed by species and by species-and-source, because one row
+  cannot describe a table built from several publishers and joining them positionally inside a cell
+  is the shape that breaks quietly. `parse_cofactor_table` is public and takes the table as text, so
+  every way a shipped file can be malformed is reachable without writing a broken one into the
+  package, and every refusal names the file and the command that regenerates it.
+  `scripts/build_tf_cofactor.py` is the third committed generator: it takes file paths and downloads
+  nothing, joins AnimalTFDB's own two files through five hand-written family spellings **whose
+  arithmetic it re-runs on every build**, and fails loudly both when a family survives that map with
+  no category and when the publisher's own counts stop reconciling — so a release that renames a
+  family is a broken build rather than a quietly blanked column.
+- **An assembly's transcription cofactors, in its own annotation's gene ids.**
+  `Genome.tf_cofactor_list()` is the **TF cofactor list**, the counterpart of `tf_gene_list()` and
+  the same three layers: a method on the genome, one on the annotation registry taking a **Registered
+  name**, and a module-level `tf_cofactor_list(assembly)` for a caller who has not opened one — one
+  code path, so a shell surface over it adds no second. Every **Gene id stem** the **Cofactor
+  table** is keyed by is resolved through the annotation's own gene ids, so the answer joins to a
+  counts matrix with nothing left to normalise; a stem naming two gene ids answers with **both** and
+  never picks one; and the stems this annotation carries no gene for **ride back on the answer**
+  rather than being dropped. The species is read off the assembly's own metadata row and never
+  passed in, so asking for human cofactors while holding a mouse assembly is not expressible
+  (ADR-0003). Each entry carries the four uniform columns as fields of its own — the stem, the
+  symbol, the cofactor flag and which publisher listed the gene — with every publisher's own
+  vocabulary reachable beside them under that publisher's namespaced column name, exactly as a **TF
+  gene** carries its **DBD family** and the census's other judgements. **Absence is not emptiness
+  here either:** an assembly whose species has no cofactor table raises the new
+  `NoCofactorTableError` **naming the species that do**, rather than answering with none, so that
+  *nobody has published one for this species* can never be read as *this species has no cofactors*.
+  `UnknownSpeciesError` is now shared by both halves and says which of them was asked for. **The two
+  halves do not raise for the same assemblies**: a worm assembly answers here and raises from
+  `tf_gene_list()`, because a publisher assessed worm cofactors and none has released a worm TF
+  census.
+- **`genome tf-cofactor-list <assembly>` prints an assembly's transcription cofactors**, shaped
+  exactly like `genome tf-gene-list` because a caller who learned one has learned the other. Gene
+  ids to stdout one per line, the heading and the publishers' attribution to stderr so the output
+  pipes; `--annotation` names which registered annotation to ask; `--json` emits the whole record —
+  every gene with the publisher that listed it and that publisher's own classification, one
+  provenance entry per publisher to cite, and the unresolved **Gene id stem**s. Non-zero exit with a
+  message naming the next action for each of three distinct failures: the annotation is not
+  registered, no cofactor table ships for this assembly's species — **and the message names the
+  species that do** — and nothing says what species the assembly is. The command computes nothing:
+  `tf_cofactor_list()` is the one code path, so the shell and a notebook cannot drift. **A worm
+  assembly is answered here and refused by `genome tf-gene-list`**, pinned in a test of its own so
+  that the asymmetry is not mistaken for a bug and quietly "fixed".
+- **Asking a transcription cofactor for its motifs now answers that it is one.** `motif_links()`
+  met every gene no census assessed with the same `GeneNotAssessedError` — *this census never
+  assessed this gene* — which reads as *nothing here knows this gene* when a publisher does list it,
+  as a **Transcription cofactor** that recognises no sequence of its own and so has no motif to look
+  for. The lookup now has an **order**, and the order is what keeps it correct. The census is asked
+  first, so the **151 human genes that are both a TF gene and a cofactor** — TBP, KMT2A and DNMT1
+  among them — come back with exactly the links they always did, because a second table must never
+  suppress an answer the census already reached; a gene it assessed and turned down still answers
+  with that verdict. Only then is that species' **Cofactor table** asked, and a gene it lists raises
+  the new `TranscriptionCofactorError`, whose message names the census that did not assess the gene,
+  the publisher that lists it as a cofactor and that there is no motif here to look for. A gene
+  neither knows raises `GeneNotAssessedError` unchanged, and so does every gene of a species that
+  ships no cofactor table. **The new error subclasses the old one**, so an `except` clause written
+  before any cofactor table shipped keeps covering every gene it covered — a sibling under
+  `LookupError` would read more cleanly and would silently stop covering exactly the genes this
+  added knowledge about. The subclass relation is literally true, no TF census having assessed the
+  gene, and claims nothing about biology: a cofactor is not a kind of transcription factor.
+- **The words for transcription cofactors, settled before the code that will use them.** The TF gene
+  context glossary now covers the whole TF context at `docs/context/tf.md`, and defines
+  **Transcription cofactor**, **Cofactor table** and **TF cofactor list** — so that a bare
+  "cofactor", which names NAD+ and heme to most of biology, never stands on its own in an issue, a
+  test name or an error message, and so that a table saying two publishers listed a gene is read as
+  agreement on membership only and never on classification. **`genome.tf` no longer says cofactors
+  are out of scope**: they are a carve-out with a subpackage named for them, `genome.tf.cofactor`,
+  and the reason a cofactor has no motif is that it recognises no sequence — not that nothing here
+  knows about it. ADR-0016 records that **this package publishes the human cofactor list**, the
+  first place it decides anything rather than relaying a publisher's verdict: 1,466 genes unioned
+  from AnimalTFDB 4.0 and EpiFactors v2.0, whose stems come through a pinned dated HGNC archive,
+  with both costs stated rather than smoothed over — 151 human genes are both a **TF gene** and a
+  cofactor, and the two classification vocabularies are deliberately not crosswalked (ADR-0014).
+  Vocabulary and records only; no behaviour changes.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;

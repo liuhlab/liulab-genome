@@ -49,6 +49,10 @@
 
 ::: genome.tf.gene.census
 
+## `genome.tf.cofactor.table`
+
+::: genome.tf.cofactor.table
+
 ## `genome.tf.motif.motif`
 
 ::: genome.tf.motif.motif

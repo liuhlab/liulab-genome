@@ -29,6 +29,7 @@ from genome.tf import (
     MotifLinkTable,
     MotifLinkTableError,
     NoMotifLinkTableError,
+    TranscriptionCofactorError,
     VersionedGeneIdError,
     motif_link_table,
     motif_links,
@@ -81,6 +82,35 @@ _JUN_STEM, _JUN_SYMBOL, _JUN_LOWER = "ENSG00000177606", "JUN", "jun"
 #: A gene id of one species handed to another species' census. Absent from that census,
 #: which is a different answer from judged not to be a TF.
 _FOREIGN_STEM = "ENSMUSG00000005698"
+
+#: The dual-classified case: a gene Lambert judged a transcription factor that a publisher
+#: also lists as a **Transcription cofactor**. 151 human genes are both, and TBP is the one
+#: of them with a profile — so it is what proves a second table never suppresses an answer
+#: the census already reached.
+_DUAL_CLASSIFIED = ("TBP", "Homo sapiens", ("MA0108.3",))
+
+#: Two more of the 151, judged transcription factors and linked to no profile on this
+#: release. They are the pair a lookup that asked the cofactor table first would break:
+#: their answer is empty, and an empty answer is not an absence.
+_DUAL_UNLINKED = ("KMT2A", "DNMT1")
+
+#: A cofactor Lambert assessed and turned *down*. Assessed is assessed, so it answers with
+#: the census's verdict and never with the cofactor error.
+_ASSESSED_NEGATIVE_COFACTOR = ("EP300", "Homo sapiens")
+
+#: Cofactors no census assessed, with the **Gene id stem** one of them is also named by and
+#: the publishers each is listed by. Human's table is built from two publishers, so a gene
+#: both of them list names both and a gene one lists names one — which is what the message
+#: has to get right. Mouse's table is one publisher's throughout, and that publisher is also
+#: mouse's census: it assessed the gene as a cofactor and never as a transcription factor,
+#: which is exactly the sentence the message makes.
+_COFACTOR_BOTH = ("WDR5", "Homo sapiens", "AnimalTFDB and EpiFactors")
+_COFACTOR_BOTH_STEM = "ENSG00000196363"
+_COFACTOR_ONE = ("CCNC", "Homo sapiens", "AnimalTFDB")
+_MOUSE_COFACTOR = ("Smarcb1", "Mus musculus", "AnimalTFDB")
+
+#: A name no census assessed and no publisher lists as a cofactor, in any species.
+_KNOWN_TO_NOBODY = "not-a-gene-in-any-table"
 
 #: One well-formed row, and the header above it. Built by the tests that are about a
 #: malformed one, so that every way a table can be wrong is one changed cell.
@@ -435,6 +465,105 @@ def test_the_two_absences_are_told_apart_by_the_error_they_raise() -> None:
     assert isinstance(no_table.value, NoMotifLinkTableError)
     assert isinstance(no_gene.value, GeneNotAssessedError)
     assert not isinstance(no_table.value, GeneNotAssessedError)
+
+
+# ---------------------------------------------------------------------------------------
+# A transcription cofactor, told apart from a gene nothing assessed
+# ---------------------------------------------------------------------------------------
+
+
+def test_a_gene_the_census_assessed_answers_although_a_publisher_calls_it_a_cofactor() -> None:
+    # The property the lookup order exists for: the census is asked first, so the 151 human
+    # genes that are both keep every link they had. TBP is the one of them with a profile.
+    gene, species, expected = _DUAL_CLASSIFIED
+    links = motif_links(gene, species)
+
+    assert links.motif_ids == expected
+    assert links.is_tf is True
+
+
+@pytest.mark.parametrize("gene", _DUAL_UNLINKED)
+def test_a_dual_classified_gene_jaspar_has_no_profile_for_still_answers_emptily(gene: str) -> None:
+    # The pair that would break under the other order. Their answer is empty and their
+    # verdict is positive — an empty answer is a real answer and never one of the absences,
+    # so a second table calling them cofactors must not turn either into an error.
+    links = motif_links(gene, "Homo sapiens")
+
+    assert len(links) == 0
+    assert links.is_tf is True
+
+
+def test_a_cofactor_the_census_turned_down_answers_with_that_verdict() -> None:
+    # Assessed is assessed, whichever way the verdict went: a gene the census looked at and
+    # rejected comes back with its verdict rather than with anything the cofactor table says.
+    gene, species = _ASSESSED_NEGATIVE_COFACTOR
+    links = motif_links(gene, species)
+
+    assert len(links) == 0
+    assert links.is_tf is False
+
+
+def test_a_cofactor_no_census_assessed_says_so_rather_than_that_nothing_knows_it() -> None:
+    # The whole point: *no census assessed this* reads as *nothing here knows this gene*,
+    # where the honest answer is that a cofactor recognises no sequence of its own and there
+    # is no motif to look for. The message carries all three facts and the next action.
+    gene, species, publishers = _COFACTOR_BOTH
+    with pytest.raises(TranscriptionCofactorError) as raised:
+        motif_links(gene, species)
+
+    message = str(raised.value)
+    assert "Lambert et al. 2018" in message
+    assert publishers in message
+    assert "no motif" in message
+    assert f"cofactor_table({species!r})" in message
+
+
+@pytest.mark.parametrize(
+    ("gene", "species", "publishers"), [_COFACTOR_BOTH, _COFACTOR_ONE, _MOUSE_COFACTOR]
+)
+def test_the_message_names_the_publishers_that_list_the_gene(
+    gene: str, species: str, publishers: str
+) -> None:
+    # Whoever listed it, and only them: both of human's publishers for a gene both list, one
+    # for a gene one lists. Mouse's census and its cofactor table are the same publisher,
+    # which is a sentence about two of its lists rather than a contradiction.
+    with pytest.raises(TranscriptionCofactorError) as raised:
+        motif_links(gene, species)
+
+    assert f"transcription cofactor by {publishers}." in str(raised.value)
+
+
+def test_a_cofactor_answers_to_its_gene_id_stem_as_well_as_to_its_symbol() -> None:
+    # The cofactor table is keyed by stem and carries the symbol beside it, as the census
+    # does, so both spellings of one gene reach the same answer.
+    _, species, publishers = _COFACTOR_BOTH
+    with pytest.raises(TranscriptionCofactorError) as raised:
+        motif_links(_COFACTOR_BOTH_STEM, species)
+
+    assert publishers in str(raised.value)
+
+
+def test_an_except_clause_written_for_the_older_error_still_catches_a_cofactor() -> None:
+    # The reason it subclasses rather than sitting beside: a caller who wrote
+    # `except GeneNotAssessedError` before any cofactor table shipped keeps covering every
+    # gene they covered, and the narrower type is what tells them which absence this is.
+    gene, species, _ = _COFACTOR_BOTH
+    with pytest.raises(GeneNotAssessedError) as raised:
+        motif_links(gene, species)
+
+    assert isinstance(raised.value, TranscriptionCofactorError)
+
+
+@pytest.mark.parametrize(("slug", "release"), _TABLES)
+def test_a_gene_neither_table_knows_raises_the_error_it_always_did(slug: str, release: str) -> None:
+    # Total over every shipped table, so a species that ships a link table and *no* cofactor
+    # table — none does today — is covered the day one arrives: with nobody listing the gene
+    # the lookup falls through to the census's own silence, unnarrowed.
+    with pytest.raises(GeneNotAssessedError) as raised:
+        motif_links(_KNOWN_TO_NOBODY, slug, release=release)
+
+    assert type(raised.value) is GeneNotAssessedError
+    assert "never assessed" in str(raised.value)
 
 
 # ---------------------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from genome import (
     DNA,
     AnnotationRegistry,
     Genome,
+    NoCofactorTableError,
     NoGeneCategoriesError,
     NoTFCensusError,
     Region,
@@ -648,3 +649,10 @@ def test_tf_gene_list_delegates_to_the_registry(yeast_dir: Path) -> None:
     # no census ships for yeast, which is the registry's answer and not the genome's.
     with Genome("sacCer3", cache_dir=yeast_dir) as g, pytest.raises(NoTFCensusError):
         g.tf_gene_list()
+
+
+def test_tf_cofactor_list_delegates_to_the_registry(yeast_dir: Path) -> None:
+    # The same one line for the cofactor half, reaching the same registry: nobody has
+    # published a cofactor table for yeast either, and saying so is the registry's job.
+    with Genome("sacCer3", cache_dir=yeast_dir) as g, pytest.raises(NoCofactorTableError):
+        g.tf_cofactor_list()

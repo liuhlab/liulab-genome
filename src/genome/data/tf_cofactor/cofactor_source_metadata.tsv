@@ -1,0 +1,6 @@
+species	source	publisher	version	pubmed_id	source_url
+Caenorhabditis elegans	animaltfdb	AnimalTFDB	4.0	36268869	https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Caenorhabditis_elegans_Cof
+Homo sapiens	animaltfdb	AnimalTFDB	4.0	36268869	https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Homo_sapiens_Cof
+Homo sapiens	epifactors	EpiFactors	v2.0	36350659	https://epifactors.autosome.org/public_data/v2.0/EpiGenes_main.csv
+Homo sapiens	hgnc	HGNC	2026-08-07	41287213	https://storage.googleapis.com/public-download-files/hgnc/archive/archive/monthly/tsv/hgnc_complete_set_2026-08-07.txt
+Mus musculus	animaltfdb	AnimalTFDB	4.0	36268869	https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Mus_musculus_Cof

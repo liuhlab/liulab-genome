@@ -5,9 +5,9 @@ query — a locus into bases, a GTF into a registered annotation, a FASTA into a
 vocabulary splits by bounded context: each file below is the glossary for one part of the source
 tree, and the shared kernel at the bottom holds the words every context uses. The glossaries live
 under `docs/context/`, not beside the code — only two of the six map cleanly onto a directory, and
-TF gene straddles `tf/gene/` and a module beside it, so co-locating them would put four in arbitrary
-places. Rules live in `CLAUDE.md`; this map and the six files it lists are a glossary and nothing
-else.
+TF straddles `tf/gene/`, `tf/cofactor/` and a module beside them, so co-locating them would put four
+in arbitrary places. Rules live in `CLAUDE.md`; this map and the six files it lists are a glossary
+and nothing else.
 
 **Use these words.** When your output names a domain concept — an issue title, a refactor proposal,
 a hypothesis, a test name — use the term as defined, not a synonym an entry lists under *Avoid*. A
@@ -37,9 +37,9 @@ substitute for *module*.
   it can map, and how a finished build is told from an abandoned one
 - [Motif](./docs/context/motif.md) — covers `tf/motif/*`: what a transcription factor recognises,
   stored as counts and belonging to no assembly, and where a scan says it occurs
-- [TF gene](./docs/context/tf-gene.md) — covers `tf/gene/*` and `tf/link.py`: which genes a published
-  census judges transcription factors, in a registered annotation's own gene ids, and which motifs
-  answer for them
+- [TF](./docs/context/tf.md) — covers `tf/gene/*`, `tf/cofactor/*` and `tf/link.py`: which genes a
+  published census judges transcription factors and which a publisher lists as cofactors of
+  transcription, in a registered annotation's own gene ids, and which motifs answer for them
 
 `io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
 It is the return types the API hands back and the CLI renders, so it carries the vocabulary of

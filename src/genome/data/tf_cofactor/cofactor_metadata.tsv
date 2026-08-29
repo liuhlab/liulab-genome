@@ -1,0 +1,4 @@
+species	ncbi_taxid	file	sha256
+Caenorhabditis elegans	6239	caenorhabditis_elegans.cofactor_table.tsv.gz	727b7ec61bc65c19258203d127240a857b397892fac2de13563e777d8fa41a56
+Homo sapiens	9606	homo_sapiens.cofactor_table.tsv.gz	8c23c180016f53ee12a1666e132b1aae2fd2ab9268f369fc3caf24eb90f2b6d3
+Mus musculus	10090	mus_musculus.cofactor_table.tsv.gz	7181f7e16512b5d8aa154fa172e2db9fa2dbd870362529c2fe046cc0a47e3c43
