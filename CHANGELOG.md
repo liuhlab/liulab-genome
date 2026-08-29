@@ -97,16 +97,39 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   build tooling. The link generator reads JASPAR's SQLite dump for per-profile species, which is
   why **the motif subpackage needed no change at all**: no new field on **Motif**, no change to the
   loader, parser or scan path.
+- **The human cofactor list, and it is this package that publishes it.** `cofactor_table("Homo
+  sapiens")` answers with **1,466 genes — 354 both publishers list, 670 AnimalTFDB 4.0 alone, 442
+  EpiFactors v2.0 alone** — a union neither publisher releases and therefore, uniquely in
+  `genome.tf`, **nobody's verdict but ours** (ADR-0016). Everywhere else here a verdict travels with
+  the census that reached it, and classification still does: the row carries AnimalTFDB's family and
+  category *and* EpiFactors' function, target, modification and complex under namespaced columns,
+  filled only by the publisher that actually named the gene, with **nothing crosswalked between the
+  two in either direction** (ADR-0014) — so a `source` of `both` is agreement about membership and
+  about nothing else. EpiFactors keys on HGNC ids and publishes no Ensembl ids at all, so the stems
+  of the 442 genes only it lists come from **a pinned dated HGNC monthly archive** and never the
+  rolling current file, which is what makes them reproducible; the join is on the id and **never on
+  the symbol**, because 31 of EpiFactors' 801 rows still name their gene by a symbol HGNC has
+  retired — `ACINU` for `ACIN1`, `ARNTL` for `BMAL1` — and human's `symbol` column is HGNC's
+  approved spelling throughout. Five genes carry two EpiFactors rows each and ship as one with their
+  cells unioned and deduplicated, at a cost stated rather than hidden: for those five the pairing
+  between a function and its own modification is lost. **The TF list and the cofactor list overlap —
+  151 human genes are both a Lambert-positive TF gene and a cofactor**, 57 from the AnimalTFDB side
+  and 122 from the EpiFactors side, so a caller who unions the two answers double-counts them; being
+  a cofactor never suppresses a motif the census already reached. Human's provenance carries **three**
+  source rows, HGNC's among them, because a source that earns 442 stems earns a citation. Multi-valued
+  cells split on `;`, the separator the rest of this package already uses, and the build refuses a
+  published value that already contains one. Every curation rule lives in
+  `scripts/build_tf_cofactor.py` and none of it in the wheel.
 - **Which genes a publisher lists as transcription cofactors, answered by a table that ships in the
   wheel.** `genome.tf.cofactor` is the third part of the TF context and a peer of the gene and motif
   halves: the gene half answers whether a gene is a **TF gene** and of what **DBD family**, this one
   answers whether it is a **Transcription cofactor** and of what class. It is keyed the same way, by
-  **Gene id stem**. Two **Cofactor table**s ship, both **AnimalTFDB 4.0** (PMID 36268869) — mouse
-  with 970 genes across 84 of the publisher's own families, *C. elegans* with 317 across 57, and the
-  same six categories in each — as gzipped TSVs under `data/tf_cofactor/`, found by enumerating that
-  directory so that adding a species is dropping in a file. **Nothing here decides what a cofactor
-  is**: membership and classification both travel with the publisher that reached them, and the
-  answer names the publisher, version and PubMed id to cite. Four uniform columns lead every table —
+  **Gene id stem**. Mouse and worm ship **AnimalTFDB 4.0** (PMID 36268869) — 970 genes across 84 of
+  the publisher's own families, *C. elegans* 317 across 57, and the same six categories in each — as
+  gzipped TSVs under `data/tf_cofactor/`, found by enumerating that directory so that adding a
+  species is dropping in a file. **Nothing here decides what a cofactor is** for those two:
+  membership and classification both travel with the publisher that reached them, and the answer
+  names the publisher, version and PubMed id to cite. Four uniform columns lead every table —
   the stem, the symbol, the cofactor flag and a closed-vocabulary `source` validated on read — and
   everything after them is one publisher's own column under a namespaced name, never compared with
   another's (ADR-0014). `is_cofactor` reads `yes` on every row today and is kept anyway: dropping it
