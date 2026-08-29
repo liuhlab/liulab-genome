@@ -61,6 +61,8 @@ from genome.seq import DNA
 if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
     from matplotlib.axes import Axes
 
+    from genome.tf.motif.compare import MotifComparison
+
 #: The rows of a **Count matrix**, in order. The same order MOODS and logomaker use, so
 #: nothing between here and the scan engine has to permute anything.
 BASES: tuple[str, str, str, str] = ("A", "C", "G", "T")
@@ -1033,6 +1035,79 @@ class MotifSet:
             and all(_matches(motif, key, values) for key, values in wanted.items())
         ]
         return MotifSet(kept)
+
+    # ------------------------------------------------------------------ comparison
+
+    def compare(
+        self, queries: Motif | Iterable[Motif], *, top: int | None = None
+    ) -> MotifComparison:
+        """Ask what one or more motifs look like, against the motifs held here.
+
+        **The motifs held here are the targets, and the argument is the queries** — read
+        it as *compare these against this release*. The use case is naming: a chromBPNet
+        or TF-MoDISco run hands back matrices with no names on them, and
+        ``release.compare(de_novo)`` says which published motif each one most resembles.
+
+        The comparison is tomtom's, from `memelite`, handed the same 4 x L probability
+        matrices :attr:`Motif.probabilities` produces. What comes back is a labelled
+        array indexed by **Motif id** on both axes; see :class:`MotifComparison` for its
+        two shapes and :meth:`MotifComparison.to_frame` for the flat table.
+
+        Parameters
+        ----------
+        queries : Motif or iterable of Motif
+            One motif, several, or a whole :class:`MotifSet`. Two queries sharing a
+            **Motif id** are refused: the array's query axis is labelled with them, so a
+            repeated label could answer for neither.
+        top : int, optional
+            Keep only this many targets per query, best first. It is *not* a convenience
+            over the complete answer — it sends the work down tomtom's faster
+            nearest-neighbour path, which never scores the targets that lose. The result
+            is then **ragged**: its target axis is per query, and it **cannot be widened
+            without recomputing**, which is accepted rather than a defect. Omit it for
+            the complete query x target array.
+
+        Returns
+        -------
+        MotifComparison
+            The labelled array and the methods that read it.
+
+        Raises
+        ------
+        ValueError
+            If ``queries`` is empty, two queries share a **Motif id**, this set holds no
+            motifs, or ``top`` is below 1 or above the number of motifs held here.
+
+        Notes
+        -----
+        **A motif compared against itself aligns to itself perfectly** — offset 0, the
+        whole length overlapping, on the ``+`` strand, and no target scores higher. It is
+        usually ranked first too, and the exception is worth knowing: TOMTOM's p-value
+        rewards a short dense alignment, so a long motif that embeds a shorter one can
+        rank the shorter one above itself. Both of the fixture's 31- and 33-column CTCF
+        matrices do exactly that with the 15-column ``MA0139.2`` they contain. That is a
+        property of the statistic, not of this wrapper, and it is what a caller naming a
+        de novo pattern should expect to see from a family of nested matrices.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> def spelled(motif_id, bases):
+        ...     columns = [[19.0 if b == l else 1.0 for l in bases] for b in BASES]
+        ...     return Motif(motif_id, "", np.array(columns))
+        >>> published = MotifSet([spelled("MA0001.1", "ACGTACGTA"),
+        ...                       spelled("MA0002.1", "TTTTTTTTT")])
+        >>> published.compare(spelled("pattern_0", "ACGTACGTA")).to_frame()["target"]
+        0    MA0001.1
+        Name: target, dtype: object
+        >>> published.compare(published, top=1).is_ragged
+        True
+        """
+        # Imported here, not at module scope: the comparison engine pulls in numba, and
+        # `import genome` must not pay for it — the same reason plot() defers logomaker.
+        from genome.tf.motif.compare import _compare
+
+        return _compare(queries, self, top=top)
 
 
 def base_id(motif: Motif) -> str:
