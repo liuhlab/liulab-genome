@@ -168,6 +168,23 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   halves do not raise for the same assemblies**: a worm assembly answers here and raises from
   `tf_gene_list()`, because a publisher assessed worm cofactors and none has released a worm TF
   census.
+- **Asking a transcription cofactor for its motifs now answers that it is one.** `motif_links()`
+  met every gene no census assessed with the same `GeneNotAssessedError` — *this census never
+  assessed this gene* — which reads as *nothing here knows this gene* when a publisher does list it,
+  as a **Transcription cofactor** that recognises no sequence of its own and so has no motif to look
+  for. The lookup now has an **order**, and the order is what keeps it correct. The census is asked
+  first, so the **151 human genes that are both a TF gene and a cofactor** — TBP, KMT2A and DNMT1
+  among them — come back with exactly the links they always did, because a second table must never
+  suppress an answer the census already reached; a gene it assessed and turned down still answers
+  with that verdict. Only then is that species' **Cofactor table** asked, and a gene it lists raises
+  the new `TranscriptionCofactorError`, whose message names the census that did not assess the gene,
+  the publisher that lists it as a cofactor and that there is no motif here to look for. A gene
+  neither knows raises `GeneNotAssessedError` unchanged, and so does every gene of a species that
+  ships no cofactor table. **The new error subclasses the old one**, so an `except` clause written
+  before any cofactor table shipped keeps covering every gene it covered — a sibling under
+  `LookupError` would read more cleanly and would silently stop covering exactly the genes this
+  added knowledge about. The subclass relation is literally true, no TF census having assessed the
+  gene, and claims nothing about biology: a cofactor is not a kind of transcription factor.
 - **The words for transcription cofactors, settled before the code that will use them.** The TF gene
   context glossary now covers the whole TF context at `docs/context/tf.md`, and defines
   **Transcription cofactor**, **Cofactor table** and **TF cofactor list** — so that a bare
