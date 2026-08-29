@@ -37,7 +37,14 @@ The parent specification listed this as an open item: *whether worm `WBGene…` 
 the worm annotation the lab registers on ce11*, unverified, and explicitly not a reason to withhold
 the table. It is now measured, and the answer is that they all do.
 
-**One caveat worth carrying forward.** WS298 is the most recent WormBase release published — the
-EBI mirror's release listing ends there on this date — so a later release could move this number in
-either direction, and nothing here is pinned against that. Today the set of AnimalTFDB worm ids the
-annotation does not carry is empty.
+**This number cannot drift, which is unusual.** WS298 is not merely the latest WormBase release but
+its **final** one: the project announced that WS298 "will be the final major WormBase release" and
+that the site would afterwards be "anchored to the WS298 database release and entered into an
+archival maintenance mode", with ongoing *C. elegans* curation moving to the Alliance of Genome
+Resources —
+<https://community.alliancegenome.org/t/announcing-the-final-release-of-wormbase/8461>, 2025-07-24.
+The announcement is a separate post and is **not** in `letter.WS298`, which reads like an ordinary
+release letter; the wormbase.org blog original returns 403 to automated clients, so cite the Alliance
+copy. So 317 of 317 is a permanent fact about this annotation rather than a reading that a later
+release could move, and pinning worm to WS298 is permanently equivalent to pinning it to the latest.
+Anything built on worm after this should look to the Alliance, not to a WS299 that will not come.
