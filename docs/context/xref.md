@@ -16,11 +16,11 @@ None of it is built. Every entry below is *(decided, not built — ADR-0017, ADR
 the context map describes: use the word, do not call the API it describes.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker** and the
-rest — are defined once in the repo-root `CONTEXT-MAP.md`. **Gene id stem**, the hub every entry
-below hangs off, is defined once in the [TF](./tf.md) glossary; **Annotation**, **Registered name**
-and **Annotation database** belong to [Annotation](./annotation.md); **Release**, **Motif set** and
-**Motif name** to [Motif](./motif.md), and a release here is the same word it is there — one dated,
-versioned publication of the source a downloaded set is pinned to.
+rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem**, the hub every entry
+below hangs off, among them. **Annotation**, **Registered name** and **Annotation database** belong
+to [Annotation](./annotation.md); **Release**, **Motif set** and **Motif name** to
+[Motif](./motif.md), and a release here is the same word it is there — one dated, versioned
+publication of the source a downloaded set is pinned to.
 
 ## Language
 

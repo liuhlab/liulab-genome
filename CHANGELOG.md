@@ -234,7 +234,9 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   label and is never recomputed after filtering. ADR-0014 gains a `**Status.**` line, its cost line
   having said this package builds no ortholog or homology support at all, and the rule against
   assuming an assembly, a coordinate system or a strand is extended in place — a gene id never
-  crosses species implicitly. Vocabulary and records only; no behaviour changes.
+  crosses species implicitly. **The shared kernel gains an eleventh word**: **Gene id stem** moves
+  out of the TF glossary, four contexts now keying on the identifier every **Xref set** hangs off,
+  and its definition is unchanged. Vocabulary and records only; no behaviour changes.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;
