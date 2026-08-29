@@ -51,7 +51,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -1052,6 +1052,28 @@ class MotifSet:
 
     # ------------------------------------------------------------------- scanning
 
+    @overload
+    def scan(
+        self,
+        sequence: str,
+        name: str = ...,
+        *,
+        threshold: float = ...,
+        background: BackgroundArg = ...,
+        output: None = ...,
+    ) -> pd.DataFrame: ...
+
+    @overload
+    def scan(
+        self,
+        sequence: str,
+        name: str = ...,
+        *,
+        threshold: float = ...,
+        background: BackgroundArg = ...,
+        output: str | Path,
+    ) -> Path: ...
+
     def scan(
         self,
         sequence: str,
@@ -1059,7 +1081,8 @@ class MotifSet:
         *,
         threshold: float = DEFAULT_THRESHOLD,
         background: BackgroundArg = None,
-    ) -> pd.DataFrame:
+        output: str | Path | None = None,
+    ) -> pd.DataFrame | Path:
         """Scan one sequence with every motif here and return the **Hit table**.
 
         The quick case — one locus, checked once. It answers with exactly the table
@@ -1093,15 +1116,21 @@ class MotifSet:
             :data:`~genome.tf.motif.background.BACKGROUND_FLOOR` unambiguous bases,
             uniform below that. ``"uniform"`` pins it; ``"derive"`` derives whatever the
             input holds, floor or no floor. Whichever it is, it is recorded on the result.
+        output : str or pathlib.Path, optional
+            Where to stream the hits as Parquet instead of building a table. **A scan too
+            large to hold goes to disk and hands back the path**; there is no row-count
+            guard, because a genome-scale scan is the caller's decision. Read it back with
+            :func:`~genome.tf.motif.parquet.read_hits`, which restores the dtypes and the
+            provenance both — :func:`pandas.read_parquet` alone drops the provenance.
 
         Returns
         -------
-        pandas.DataFrame
+        pandas.DataFrame or pathlib.Path
             One row per **Motif hit**: ``motif_id``, ``motif_name``, ``sequence_name``,
             ``start``, ``end``, ``strand``, ``score`` — the score in bits, not a p-value.
             The scan's provenance is on ``frame.attrs``: the background, the threshold, the
             **Release** and **Tax group** where the set knows them, and which motifs were
-            scanned and which were skipped.
+            scanned and which were skipped. With ``output``, the path written.
 
         Raises
         ------
@@ -1134,7 +1163,29 @@ class MotifSet:
         >>> hits.attrs["motifs_scanned"], hits.attrs["threshold"]
         (('MA9999.1',), 0.0001)
         """
-        return self.scan_sequences({name: sequence}, threshold=threshold, background=background)
+        return self.scan_sequences(
+            {name: sequence}, threshold=threshold, background=background, output=output
+        )
+
+    @overload
+    def scan_sequences(
+        self,
+        sequences: Mapping[str, str],
+        *,
+        threshold: float = ...,
+        background: BackgroundArg = ...,
+        output: None = ...,
+    ) -> pd.DataFrame: ...
+
+    @overload
+    def scan_sequences(
+        self,
+        sequences: Mapping[str, str],
+        *,
+        threshold: float = ...,
+        background: BackgroundArg = ...,
+        output: str | Path,
+    ) -> Path: ...
 
     def scan_sequences(
         self,
@@ -1142,7 +1193,8 @@ class MotifSet:
         *,
         threshold: float = DEFAULT_THRESHOLD,
         background: BackgroundArg = None,
-    ) -> pd.DataFrame:
+        output: str | Path | None = None,
+    ) -> pd.DataFrame | Path:
         """Scan named sequences — a peak set in one call — and return the **Hit table**.
 
         The same table :meth:`scan` returns, with ``sequence_name`` carrying the mapping's
@@ -1159,11 +1211,15 @@ class MotifSet:
         background : sequence of float or {"auto", "uniform", "derive"}, optional
             The **Background**. Automatic when omitted — see :meth:`scan`. Deciding reads
             a bounded prefix of ``sequences``, which is then scanned like the rest.
+        output : str or pathlib.Path, optional
+            Where to stream the hits as Parquet instead of building a table — see
+            :meth:`scan`.
 
         Returns
         -------
-        pandas.DataFrame
-            The **Hit table**, empty of rows but not of schema when nothing matched.
+        pandas.DataFrame or pathlib.Path
+            The **Hit table**, empty of rows but not of schema when nothing matched. With
+            ``output``, the path written.
 
         Raises
         ------
@@ -1188,7 +1244,29 @@ class MotifSet:
         # module, so naming it up there would be a cycle — and this stays the pure core.
         from genome.tf.motif.scan import scan_stream
 
-        return scan_stream(self, sequences.items(), threshold=threshold, background=background)
+        return scan_stream(
+            self, sequences.items(), threshold=threshold, background=background, output=output
+        )
+
+    @overload
+    def scan_fasta(
+        self,
+        path: str | Path,
+        *,
+        threshold: float = ...,
+        background: BackgroundArg = ...,
+        output: None = ...,
+    ) -> pd.DataFrame: ...
+
+    @overload
+    def scan_fasta(
+        self,
+        path: str | Path,
+        *,
+        threshold: float = ...,
+        background: BackgroundArg = ...,
+        output: str | Path,
+    ) -> Path: ...
 
     def scan_fasta(
         self,
@@ -1196,7 +1274,8 @@ class MotifSet:
         *,
         threshold: float = DEFAULT_THRESHOLD,
         background: BackgroundArg = None,
-    ) -> pd.DataFrame:
+        output: str | Path | None = None,
+    ) -> pd.DataFrame | Path:
         r"""Scan every record of a FASTA and return the **Hit table**.
 
         The same table :meth:`scan` returns. Records are read and scanned one at a time,
@@ -1216,11 +1295,16 @@ class MotifSet:
             The **Background**. Automatic when omitted — see :meth:`scan`. Deciding reads
             records off the front of the file, which are then scanned like the rest, so
             the file is still read exactly once.
+        output : str or pathlib.Path, optional
+            Where to stream the hits as Parquet instead of building a table — see
+            :meth:`scan`. The whole-genome case this exists for: a FASTA in, a Parquet
+            out, and nothing the size of either in memory.
 
         Returns
         -------
-        pandas.DataFrame
+        pandas.DataFrame or pathlib.Path
             The **Hit table**, with ``sequence_name`` carrying the truncated record names.
+            With ``output``, the path written.
 
         Raises
         ------
@@ -1249,7 +1333,9 @@ class MotifSet:
         """
         from genome.tf.motif.scan import read_fasta, scan_stream
 
-        return scan_stream(self, read_fasta(path), threshold=threshold, background=background)
+        return scan_stream(
+            self, read_fasta(path), threshold=threshold, background=background, output=output
+        )
 
     # ------------------------------------------------------------------ comparison
 

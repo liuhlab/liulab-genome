@@ -65,6 +65,10 @@
 
 ::: genome.tf.motif.scan
 
+## `genome.tf.motif.parquet`
+
+::: genome.tf.motif.parquet
+
 ## `genome.tf.motif.compare`
 
 ::: genome.tf.motif.compare

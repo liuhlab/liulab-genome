@@ -10,6 +10,21 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **A scan too large to hold streams to Parquet and hands back the path.** Passing `output=` to
+  `MotifSet.scan`, `scan_sequences` or `scan_fasta` writes the hits to Parquet and returns the path
+  rather than a table. Batches are written **as they are produced** — one row group per named
+  sequence — so the whole result is never materialised: hg38 against a full vertebrate release is
+  about 550 million rows, which at the 19 bytes a row the fixed dtypes cost is 10.5 GB and is not a
+  DataFrame on any machine in the lab. **There is no row-count guard and no refusal**; a
+  genome-scale scan is the caller's decision. `read_hits(path)` reads one back and is the reader to
+  use: what comes off the disk equals the in-memory table for the same scan, **dtypes included**,
+  down to the order of a categorical column's categories — the writer pins `int32` dictionary
+  indices so batches of four sequence names and of four hundred agree on one schema, and the reader
+  sorts the categories back into the order `astype("category")` produces. **The provenance travels
+  in the file**, under its own key in the Parquet metadata, because `frame.attrs` does not survive
+  pandas' round trip: `pandas.read_parquet` gives the rows and drops what the scan was, and
+  `read_hits` puts the background, threshold, release, tax group and motif lists back on `attrs`.
+  This adds `pyarrow` to the core dependency table.
 - **A scan derives its background from what it was handed, and stops converting the same
   thresholds twice.** The background is now **automatic**: derived from the input when the input
   holds at least 10 000 unambiguous bases, uniform below that, since a composition estimated from

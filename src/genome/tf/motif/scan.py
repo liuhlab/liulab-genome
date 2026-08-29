@@ -35,8 +35,9 @@ from disk on a repeat.
 
 Batches, not one array: :func:`scan_stream` consumes an iterable of named sequences and
 drains one frame per sequence, so the peak memory is set by the largest record rather than
-by the file. That shape is deliberate — a Parquet sink replaces the collector and a
-parallel source replaces the iterable, with nothing between them changing.
+by the file. That shape is deliberate — :mod:`~genome.tf.motif.parquet`'s sink replaces the
+collector when an output path is given, and a parallel source replaces the iterable, with
+nothing between them changing.
 
 Examples
 --------
@@ -60,7 +61,7 @@ from collections.abc import Hashable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any, overload
 
 import MOODS.scan
 import MOODS.tools
@@ -158,18 +159,45 @@ class _Prepared:
     tax_group: str | None
 
 
+@overload
+def scan_stream(
+    motifs: MotifSet,
+    sequences: Iterable[tuple[str, str]],
+    *,
+    threshold: float = ...,
+    background: BackgroundArg = ...,
+    output: None = ...,
+) -> pd.DataFrame: ...
+
+
+@overload
+def scan_stream(
+    motifs: MotifSet,
+    sequences: Iterable[tuple[str, str]],
+    *,
+    threshold: float = ...,
+    background: BackgroundArg = ...,
+    output: str | Path,
+) -> Path: ...
+
+
 def scan_stream(
     motifs: MotifSet,
     sequences: Iterable[tuple[str, str]],
     *,
     threshold: float = DEFAULT_THRESHOLD,
     background: BackgroundArg = None,
-) -> pd.DataFrame:
+    output: str | Path | None = None,
+) -> pd.DataFrame | Path:
     """Scan named sequences with a **Motif set** and collect one **Hit table**.
 
     The one path every scan takes. ``sequences`` is drained once, one **Motif hit** batch
     per named sequence, and the batches are concatenated at the end — so the peak cost is
     the largest sequence rather than all of them.
+
+    **Given an output path the batches go to Parquet instead** and the path comes back in
+    place of the table, so the whole result is never held: 550 million rows is what hg38
+    against a full vertebrate release comes to, and no guard here decides that is too many.
 
     Parameters
     ----------
@@ -190,13 +218,17 @@ def scan_stream(
         hold at least :data:`~genome.tf.motif.background.BACKGROUND_FLOOR` unambiguous
         bases, uniform below that. Deciding reads a bounded prefix of ``sequences``, which
         is then scanned like the rest: the source is still drained exactly once.
+    output : str or pathlib.Path, optional
+        Where to stream the hits as Parquet. Omitted, the table comes back in memory.
 
     Returns
     -------
-    pandas.DataFrame
+    pandas.DataFrame or pathlib.Path
         The **Hit table**: :data:`HIT_COLUMNS` with :data:`HIT_DTYPES`, and
         :data:`HIT_PROVENANCE` on ``frame.attrs``. Empty when nothing cleared its cutoff,
-        which is a real answer and carries its provenance like any other.
+        which is a real answer and carries its provenance like any other. With ``output``,
+        the path written — read it back with
+        :func:`~genome.tf.motif.parquet.read_hits`, which restores both.
 
     Raises
     ------
@@ -218,10 +250,18 @@ def scan_stream(
     >>> hits.attrs["background"]                  # under the floor, so uniform — and said so
     (0.25, 0.25, 0.25, 0.25)
     """
+    # Imported here rather than at module scope: the sink is built on this module's schema,
+    # so naming it up there would be a cycle — the same shape motif.py's import of this one
+    # takes, and for the same reason.
+    from genome.tf.motif.parquet import write_hits
+
     _check_threshold(threshold)
     frequencies, remaining = resolve_background(background, sequences)
     prepared = _prepare(motifs, threshold=threshold, background=frequencies)
-    return _collect(_batches(prepared, remaining), prepared)
+    batches = _batches(prepared, remaining)
+    if output is None:
+        return _collect(batches, prepared)
+    return write_hits(batches, output, _provenance(prepared))
 
 
 def read_fasta(path: str | Path) -> Iterator[tuple[str, str]]:
