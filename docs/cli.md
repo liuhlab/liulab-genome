@@ -221,3 +221,72 @@ sacCer3	Saccharomyces cerevisiae	sacCer3	R64-1-1	GCF_000146045.2	559292	https://
 
 A chimera exits `1` before anything is downloaded: its row carries the name and nothing
 else, so there is no row here to compute. Check one with `genome verify` instead.
+
+## `genome motif-scan <fasta> <output>`
+
+Scan a FASTA with a JASPAR release, write the hits to Parquet, and print a summary of the
+run. The batch case — a shell script, a scheduler job — and the only motif command there
+is: listing, plotting and comparing motifs are notebook work.
+
+```console
+$ genome motif-scan peaks.fa hits.parquet --release 2024 --tax-group all
+scanned 41255 sequences with 2338 motifs from JASPAR 2024 all
+  background  0.293, 0.207, 0.207, 0.293
+  threshold   0.0001
+  skipped     8 under 7 positions, so not scanned: MA0261.1, MA2355.1, …
+  workers     16
+  hits        2841193 -> hits.parquet
+```
+
+**The hits go to the named file and the summary to standard output**, so `--json` is never
+corrupted by table data and a pipeline can consume the one while a downstream step reads
+the other:
+
+```console
+$ genome motif-scan peaks.fa hits.parquet --release 2024 --tax-group all --json
+{"release": "2024", "tax_group": "all", "motifs_scanned": 2338,
+ "motifs_skipped": ["MA0261.1", "MA2355.1", …], "background": [0.293, 0.207, 0.207, 0.293],
+ "threshold": 0.0001, "sequences_scanned": 41255, "hits_written": 2841193,
+ "workers": 16, "output": "hits.parquet"}
+```
+
+A motif under seven positions is named there rather than scanned: a 6-mer's best possible
+word has p = 2.44e-4, so it cannot reach the default threshold at all, and an engine asked
+for it anyway would fall back to that matrix's best attainable cutoff and over-call in
+silence.
+
+Read the hits back with `genome.tf.motif.read_hits(path)`, which restores the compact
+dtypes and the provenance — `pandas.read_parquet` gives the rows and drops what the scan
+was.
+
+| Option | Effect |
+|---|---|
+| `--release` | Which JASPAR release: `2024` or `2026` (default) |
+| `--tax-group` | Which taxonomic group's file: `vertebrates` (default) through `all` |
+| `--threshold` | The per-position p-value each motif's cutoff is converted from; `1e-4` by default |
+| `--background` | `auto` (default), `uniform`, or `derive` — see below |
+| `--workers` | How many processes; every core the allocation granted by default |
+
+`--background` decides the answer more than any other option: `auto` derives the base
+composition from the input when it holds at least 10 000 unambiguous bases and stays
+uniform below that, `uniform` pins it, and `derive` derives whatever the input holds.
+Whichever it was is in the summary and on the hits. Four frequencies of your own are a
+Python call (`scan_fasta(background=[…])`) rather than a flag — a mistyped one on a
+command line would change every cutoff and look like a scan that simply found fewer hits.
+
+**It defaults to every core the allocation granted** — `SLURM_CPUS_PER_TASK`, then
+`SLURM_CPUS_ON_NODE`, then this process's CPU affinity, then the machine — where the
+library defaults to one worker. A console script is a proper entry point, so the
+process-pool hazard behind that library default does not apply here. `--workers 1` scans
+serially and produces the identical table.
+
+**Prepare the release from a login node.** Naming a release prepares it, and the first
+time that is a download. The lab's CPU cluster compute nodes have no internet, so run this
+once on a login node before submitting a job that needs it; every run afterwards reads the
+cached file out of `<LIULAB_DATA>/motif/jaspar/`, shared by every project on the machine.
+
+Exits `1` when the FASTA is not there or is not FASTA, when the release or tax group is
+not one this package prepares, when the threshold is not a p-value in `(0, 1)`, when the
+worker count is below 1, and when the release is not cached here and cannot be fetched —
+which is what a compute node with no internet looks like. A `--background` that is not one
+of the three modes is refused by the parser with `2`, before anything is fetched or read.

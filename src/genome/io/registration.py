@@ -17,6 +17,11 @@ and the subtrees other contexts own — because every one of those steps is expr
 it and it cannot be read from anywhere else without a cycle. The names stay importable
 from :mod:`genome.io.download`, which is where they used to live.
 
+Most of the **Data dir** is that assembly tree, and not all of it: :func:`motif_data_dir`
+is the first thing filed *beside* it rather than inside it, because a motif belongs to no
+assembly. It is here so that what lives under the data root is legible in one file — what
+lives under ``motif/`` is the Motif context's business and is spelled there.
+
 :class:`AssemblyDir` is that layout as a **value**: where an assembly lives is settled
 once, by :meth:`AssemblyDir.locate`, and then carried. A caller holding one — a
 :class:`~genome.genome.Genome`, an :class:`~genome.aligner.aligner.Aligner` asking that
@@ -62,6 +67,15 @@ DEFAULT_LIULAB_DATA_PATHS = [
     "/share/lhqlab/liulab_data",
     "/large_storage/zhoulab/hanliu/liulab_data",
 ]
+
+#: Subdirectory of the **Data dir** holding the assembly tree — one directory per
+#: **Assembly** under it, and most of the data root.
+ASSEMBLIES_SUBDIR = "genome"
+
+#: Subdirectory of the **Data dir** holding motif data, and the first thing filed as a
+#: *sibling* of the assembly tree rather than inside it: a **Motif** belongs to no
+#: assembly, so there is no assembly directory it could go under.
+MOTIF_SUBDIR = "motif"
 
 #: Subdirectory of an **Assembly dir** holding its annotations. The Assembly context
 #: owns the layout, so the name lives here and the Annotation context reads it.
@@ -132,7 +146,32 @@ def assembly_data_dir(assembly: str) -> Path:
     PosixPath('/scratch/liulab/genome/hg38')
     >>> del os.environ["LIULAB_DATA"]
     """
-    return liulab_data_dir() / "genome" / assembly
+    return liulab_data_dir() / ASSEMBLIES_SUBDIR / assembly
+
+
+def motif_data_dir() -> Path:
+    """Return the directory holding motif data, which belongs to no assembly.
+
+    ``<liulab_data>/motif/``, a **sibling** of the assembly tree rather than a tenant of
+    it: a **Motif** is a pattern and not a place, so it names no **Assembly** and there is
+    no per-assembly directory it could be filed under. Shared by every project on the
+    machine, exactly as an assembly is. Nothing is created here — the caller that writes
+    creates what it needs.
+
+    Returns
+    -------
+    pathlib.Path
+        ``<liulab_data>/motif``.
+
+    Examples
+    --------
+    >>> import os
+    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
+    >>> motif_data_dir()
+    PosixPath('/scratch/liulab/motif')
+    >>> del os.environ["LIULAB_DATA"]
+    """
+    return liulab_data_dir() / MOTIF_SUBDIR
 
 
 def assembly_repair_command(assembly: str, source: str | Path | None = None) -> str:

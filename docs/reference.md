@@ -45,6 +45,46 @@
 
 ::: genome.gene_list
 
+## `genome.tf.motif.motif`
+
+::: genome.tf.motif.motif
+
+## `genome.tf.motif.jaspar`
+
+::: genome.tf.motif.jaspar
+
+## `genome.tf.motif.background`
+
+::: genome.tf.motif.background
+
+## `genome.tf.motif.thresholds`
+
+::: genome.tf.motif.thresholds
+
+## `genome.tf.motif.scan`
+
+::: genome.tf.motif.scan
+
+## `genome.tf.motif.workers`
+
+::: genome.tf.motif.workers
+
+## `genome.tf.motif.parallel`
+
+::: genome.tf.motif.parallel
+
+## `genome.tf.motif.parquet`
+
+::: genome.tf.motif.parquet
+
+## `genome.tf.motif.compare`
+
+::: genome.tf.motif.compare
+
+## `genome.tf.motif.mixin`
+
+::: genome.tf.motif.mixin
+
 ## `genome.external`
 
 ::: genome.external

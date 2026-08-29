@@ -306,6 +306,37 @@ Neither aligner is in the default environment — install what you need with `pi
 / `pixi add chromap`, or use the project's `aligners` environment
 (`pixi run -e aligners ...`). A missing binary fails fast with the install command.
 
+## Scanning motifs
+
+A prepared genome scans [`Region`](#regions)s with JASPAR motifs and answers in the
+assembly's own coordinates, which is the one thing a genome adds to a scan:
+
+```python
+from genome import Genome, Region
+from genome.tf.motif import JasparDatabase
+
+jaspar = JasparDatabase()                      # 2026 vertebrates; fetched once, then cached
+peaks = [Region("chrIV", 1000, 1500, "+"), Region("chrIV", 9000, 9500, "-")]
+
+hits = sacCer3.scan_regions(jaspar, peaks)     # chromosome coordinates, not region-local
+hits.attrs["background"]                       # what the scores were actually taken against
+```
+
+Hits are 0-based half-open in the forward frame with a real strand, and a `-` strand
+region's hits are flipped back into that frame for you — the off-by-one this method exists
+to own. `background=` and `workers=` are forwarded to the scan underneath it; an output
+path is not, because a scan that streams to Parquet hands back a path and a path holds no
+coordinates to lift. For that — the whole-genome case — scan the sequences themselves with
+`jaspar.scan_fasta(path, output=...)`, or [`genome motif-scan`](cli.md#genome-motif-scan-fasta-output)
+from a shell.
+
+!!! warning "Prepare the release from a login node"
+    Constructing a `JasparDatabase` downloads the release the first time. **The lab's CPU
+    cluster compute nodes have no internet**, so that first construction fails on one: do
+    it once from a login node — `genome motif-scan`, or `JasparDatabase(...)` in Python —
+    and every job afterwards reads the cached file out of `<LIULAB_DATA>/motif/jaspar/`,
+    which every project on the machine shares.
+
 ## Chimera assemblies
 
 A **chimera** is one reference concatenated from assemblies you have already prepared — a

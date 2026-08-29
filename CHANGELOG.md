@@ -10,6 +10,197 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
+  batch case, and the one motif operation that belongs in a shell script and a scheduler job;
+  listing, plotting and comparing motifs get no command, because they are notebook work. It takes
+  the FASTA and the output path, plus `--release`, `--tax-group`, `--threshold`, `--background`
+  and `--workers`, and prints what the run was — release, tax group, motifs scanned, motifs
+  skipped, the background actually used, the threshold, sequences scanned, hits written, workers,
+  and where the hits went. **The hits go to the named file and the summary to standard output**,
+  so `--json` is never corrupted by table data, and any progress display is suppressed under it.
+  **It defaults to every core the allocation granted** — the Slurm allocation first, then process
+  affinity, then the machine — where the library defaults to one worker: a console script is a
+  proper entry point, so the process-pool hazard behind that default does not apply here.
+  `--background` takes the three modes; four frequencies of your own stay a Python call, since a
+  mistyped one on a command line would change every cutoff and look like a scan that simply found
+  fewer hits. The summary is read off the Parquet footer and never by reading the hits back, which
+  is what `provenance_of(path)` and `hit_count(path)` are for — what a written scan was, and how
+  many hits it holds, at the same cost on 550 million rows as on none.
+- **Scanning regions takes the same arguments every other scan does.**
+  `Genome.scan_regions` now forwards `background=` and `workers=` to the scan underneath it,
+  so the case an HPC user hits first — a background derived from the peak set's own composition,
+  scanned across the whole allocation — is reachable from a region scan and not only from a
+  sequence one. Two workers produce the **identical table** a serial scan does after the lift as
+  well as before it. `output=` is the one argument that is *not* forwarded and is now refused by
+  name: a scan that streams to Parquet hands back a path, and a path holds no coordinates to lift
+  into the assembly's frame, so the refusal names both ways to get one written instead.
+- **A scan can use more than one core, and says the same thing when it does.** `workers=` on
+  `MotifSet.scan`, `scan_sequences` and `scan_fasta` shards the work across processes — MOODS holds
+  the GIL, so parallelism here means processes and not threads, each worker constructing its own
+  engine once and keeping it. **Serial and parallel produce the identical table**, row for row,
+  dtypes and provenance included: the shards of one sequence are put back into the order a serial
+  scan would have emitted them before the batch is handed on, so choosing two workers is a choice
+  about wall time and about nothing else. **The library default is one worker**, so importing this
+  package and scanning never starts a process unasked — under the spawn start method a pool
+  re-imports the caller's script, and an unguarded script would re-execute itself; the command-line
+  entry point will pass `None` instead, which resolves the count with `resolve_workers()`: **the
+  Slurm allocation first** (`SLURM_CPUS_PER_TASK`, then `SLURM_CPUS_ON_NODE`), then process
+  affinity, then the machine's cores — never the last alone, which would put fourteen workers into
+  a two-CPU job. A sequence long enough to be worth cutting is split with an **overlap of one less
+  than the longest matrix**, and each shard keeps only hits *starting* inside the region it owns, so
+  a hit lying across a boundary is reported exactly once. Shards are submitted a bounded number
+  ahead rather than all at once, so a genome FASTA is still streamed rather than cut up in advance.
+  The engine is also now built once per scan rather than once per sequence, which is the same
+  automaton and the same answer, built a thousand times less often on a thousand-record FASTA.
+- **A scan too large to hold streams to Parquet and hands back the path.** Passing `output=` to
+  `MotifSet.scan`, `scan_sequences` or `scan_fasta` writes the hits to Parquet and returns the path
+  rather than a table. Batches are written **as they are produced** — one row group per named
+  sequence — so the whole result is never materialised: hg38 against a full vertebrate release is
+  about 550 million rows, which at the 19 bytes a row the fixed dtypes cost is 10.5 GB and is not a
+  DataFrame on any machine in the lab. **There is no row-count guard and no refusal**; a
+  genome-scale scan is the caller's decision. `read_hits(path)` reads one back and is the reader to
+  use: what comes off the disk equals the in-memory table for the same scan, **dtypes included**,
+  down to the order of a categorical column's categories — the writer pins `int32` dictionary
+  indices so batches of four sequence names and of four hundred agree on one schema, and the reader
+  sorts the categories back into the order `astype("category")` produces. **The provenance travels
+  in the file**, under its own key in the Parquet metadata, because `frame.attrs` does not survive
+  pandas' round trip: `pandas.read_parquet` gives the rows and drops what the scan was, and
+  `read_hits` puts the background, threshold, release, tax group and motif lists back on `attrs`.
+  This adds `pyarrow` to the core dependency table.
+- **A scan derives its background from what it was handed, and stops converting the same
+  thresholds twice.** The background is now **automatic**: derived from the input when the input
+  holds at least 10 000 unambiguous bases, uniform below that, since a composition estimated from
+  fewer would distort the very cutoffs it sets — at that floor the standard error on each base
+  frequency is about 0.004, which moves a per-position log-odds term by under 0.02 nats. This
+  matters more than any other scan parameter: switching from uniform to a real chromosome's
+  composition changed the hit count by 2.5% but turned over **26%** of the hit set. `background=`
+  still takes four frequencies and now also takes `"uniform"` to pin it, `"derive"` to derive
+  whatever the input holds, and `"auto"`, which is what omitting it means; **whichever it was, the
+  background actually used is recorded on the result**, so handing the recorded value back
+  reproduces the scan exactly. Deriving reads a **bounded prefix** of the input and hands those
+  records back in front of the rest, so a FASTA is still read once and a generator source is still
+  drained once — the estimate is a head sample rather than the whole input, which is exactly the
+  accuracy the floor was chosen for. Every background, however it arrived, is **rounded onto a
+  0.001 grid** and that one value builds the matrices, sets the cutoffs, keys the cache and is what
+  gets recorded. Converting the threshold into one cutoff per motif is the engine's one slow step —
+  a few seconds for a full vertebrate release — and a pure function of `(matrices, background, p)`,
+  so it is **cached on disk** under `<LIULAB_DATA>/motif/thresholds/`, shared by every project on
+  the machine exactly as the JASPAR files are; the rounding is what lets two peak sets from one
+  genome share an entry. A cache is a speed-up and never a dependency: a corrupt, truncated or
+  older entry is a miss, and a data root that cannot be written to makes a scan slow rather than
+  broken.
+- **Scan regions of a genome and get hits in that assembly's own coordinates.**
+  `Genome.scan_regions(motifs, regions)` fetches each region's bases, scans them with a motif set
+  and lifts every hit into the assembly's frame, so the translation that used to be redone in every
+  notebook — and is where the off-by-ones live — exists in exactly one place. `sequence_name`
+  carries the chromosome as *this* assembly spells it, and a region naming one the assembly does not
+  carry raises rather than being reconciled. **The arithmetic is written out in the docstring so a
+  reader can check it without running it**: for a `+` region (and a `.` one with it) a hit found at
+  local `[s, e)` is at `[S + s, S + e)` and keeps its strand; for a `-` region, whose bases are
+  fetched reverse-complemented, it is at `[E - e, E - s)` with the hit strand flipped — the two ends
+  swap, and the `- 1`s cancel exactly because coordinates are 0-based half-open, which is why the
+  same flip written for a 1-based inclusive interval is wrong. An unknown strand is **not** promoted
+  to `+`: the fetch hands back forward bases for it, so there is nothing to flip. Regions may
+  overlap and several may sit on one chromosome — each is scanned in its own right, and a hit seen
+  from two regions is two rows, since deduplicating would be deciding for the caller which peak a
+  site belongs to. A locus *string* is refused, because it carries no strand and the strand is the
+  whole question. It arrives as a mixin on `Genome`, following the aligner's, and **the dependency
+  runs Genome to motif and never back** — the motif modules name `Genome` under type checking alone,
+  since a motif belongs to no assembly and a motif set is usable with no genome open. **The raw form
+  is untouched**: scanning a mapping of sequences still answers in region-local coordinates and
+  names no assembly. What comes back is the same hit table with the same columns and dtypes, and its
+  provenance is **extended rather than replaced** — the assembly joins the background, threshold,
+  release, tax group and the two motif lists on `frame.attrs`, because a chromosome name and an
+  interval mean nothing until something says which reference they are in (ADR-0003).
+- **Scan DNA with a motif set and get one hit table back, whatever you scanned.**
+  `MotifSet.scan(sequence, name="sequence")`, `MotifSet.scan_sequences({name: bases})` and
+  `MotifSet.scan_fasta(path)` answer with the same table — the same columns, in the same order,
+  with the same compact dtypes (`motif_id`, `motif_name`, `sequence_name` and `strand` categorical,
+  `start` and `end` `int32`, `score` `float16`) — so nothing downstream branches on how the scan was
+  called. **The dtypes are the contract and not an optimisation**: 19 bytes a row against about 100
+  for what pandas would infer. Coordinates are **0-based half-open and always in the forward frame**,
+  both strands are scanned, and the strand is `+` or `-` and never unknown, because a scan knows
+  which of the two it scored. The engine is MOODS, which has no strand concept: the adapter doubles
+  the matrix list with reverse complements, computes a cutoff per entry, and splits the results back
+  by index — and a position reported for a reverse-complement matrix is already a forward-frame
+  start, which the suite asserts against the engine rather than trusting. **The threshold is a
+  per-position p-value**, 1e-4 by default, converted per motif against the background; the `score`
+  column carries log-odds **in bits** (MOODS scores in nats and the one conversion lives in the
+  adapter) and no per-hit p-value is computed. **Motifs shorter than 7 positions are not scanned and
+  are named on the result** rather than called at a looser cutoff than was asked for: a 6-mer has
+  4096 possible words, so its best match has p = 2.44e-4, and an engine asked for 1e-4 anyway clamps
+  and over-calls in silence on roughly 98 of 879 vertebrate motifs. **Input is upper-cased, so a
+  soft-masked sequence yields exactly the hits its upper-case equivalent does**, with no option to
+  honour the masking — the one place a scan contradicts a shared-kernel term, recorded as ADR-0012.
+  A FASTA record's name is its header **up to the first whitespace**, matching what STAR and chromap
+  write into an alignment made from the same file, so a hit table joins against that alignment with
+  nobody renaming anything; plain or gzipped, and records are read one at a time. The table carries
+  its provenance on `frame.attrs` — the background, the threshold, the release, the tax group, and
+  which motifs were scanned and which skipped — read off the set, so a `JasparDatabase` names its
+  release and a filtered one answers `None` for both, since a filtered release is no longer that
+  release. This release is serial with a uniform background; the scan produces batches internally,
+  one per named sequence, so a Parquet sink and a parallel source attach without restructuring it.
+- **Name a JASPAR release and query it like a dictionary that filters itself.**
+  `JasparDatabase("2024", "vertebrates")` fetches that release's transfac file once into
+  `<LIULAB_DATA>/motif/jaspar/`, flat and with the release and tax group in the name, and every
+  construction after re-reads it and fetches nothing. Both releases (2024, 2026) and all eight tax
+  groups are supported, vertebrates by default, and `"all"` selects the union file — whose
+  published name drops the tax group, which is why the cached name is built rather than copied.
+  Motif data is the **first thing filed beside the assembly tree rather than inside it**, since a
+  motif belongs to no assembly. The transfac serialization is read rather than `.jaspar`: it
+  carries the count matrix and all six annotations in one file and does not round counts to
+  integers. **Annotation values are separated by a semicolon and never by a comma** — commas live
+  inside single values (`C3H(C),C2HC zinc-fingers like factors`, `PBM, CSA and/or DIP-chip`), so
+  splitting on one would silently corrupt about fifty records per release. A `MotifSet` holds the
+  motifs — built from *any* motifs, so a model's de novo matrices get the same API — and indexing
+  it resolves a matrix id, a bare base id or a unique factor name to **exactly one** motif, never a
+  union type. An ambiguous name raises `AmbiguousMotifNameError` naming every matching id and the
+  call that returns them all, since 66 names collide in 2024 and 71 in 2026; `by_name` always hands
+  back a tuple, of one where the name is unique, and absence raises rather than answering with
+  nothing. Filtering takes annotation keywords (prose matched as a case-insensitive substring, ids
+  matched exactly) or an arbitrary predicate and returns a plain `MotifSet`, because **a filtered
+  release is no longer that release**. There is **no completion record here and that is
+  deliberate** — the files are under 1 MB, so integrity is a download to a temporary name renamed
+  into place only on success, plus a parsed-motif count checked against a constant on every read,
+  which turns a truncated file into an error rather than half a release. A non-redundant release
+  shipping one version of each matrix is asserted rather than assumed, because it is what makes a
+  bare base id address one motif.
+- **`Motif.tf_class` and `Motif.tf_family` are tuples, not strings.** They are genuinely
+  multi-valued — a dimer carries one of each per half — so they join `uniprot_ids` and `pubmed_ids`
+  as plural annotations, and a bare string handed to any of the four is refused rather than stored
+  letter by letter. `tax_group` and `data_type` stay single strings.
+- **A motif, built from counts and able to answer for itself.** `genome.tf.motif.Motif` is a frozen
+  4 × L count matrix plus the id and name it is addressed by and the six annotations JASPAR
+  publishes — tax group, class, family, UniProt accessions, PubMed ids, data type — and it needs no
+  file, no download and no network to be built or asked anything. **The counts are the single
+  source of truth**: probabilities are a column normalisation, and log-odds take a background and a
+  pseudocount as *arguments and never fields*, so one motif scored against two backgrounds stays
+  one motif and two motifs sharing an id can never differ. Counts are float rather than int,
+  because the source's own records carry fractional values. It reports its information content per
+  position in bits, its consensus as a typed `DNA` rather than a `str`, and its sequence logo
+  through `plot()`, which takes an optional axes and returns the axes so a grid of motifs is one
+  figure — with the y-axis in bits, the same quantity trimming thresholds on. **Trimming acts only
+  on the ends**, so a degenerate spacer in the middle of a dimer can never split it in two; it
+  honours an optional maximum length, never goes below the minimum scannable length of 7 — a 6-mer
+  has 4096 possible words, so its best match has p = 2.44e-4 and cannot reach the default 1e-4
+  threshold — and returns a motif with the same id, the same name and an offset such that a
+  position in the trimmed frame plus the offset is the position in the full one. Trimming a trimmed
+  motif composes. The matrix is copied and marked read-only at construction, so a frozen motif is
+  frozen all the way down.
+- **The motif libraries, in every environment.** MOODS, logomaker, matplotlib and xarray join the
+  core conda dependency table and `memelite` the PyPI one, ahead of the motif subpackage that will
+  import them. None gets its own feature or environment: what earns a feature is a binary the
+  package does not ship and checks for at call time, which a library is not, and the GTF library
+  already sits in the core table on the same reasoning — so **the suite stays two lanes**. It is
+  `matplotlib-base` rather than `matplotlib`, which is what logomaker itself depends on and drops a
+  GUI stack nothing here opens. None of them is added to the PEP 621 `dependencies`, following
+  `gffutils`: that list is what `pip install liulab-genome` can actually satisfy, and MOODS
+  publishes no wheel — only an sdist needing SWIG and a C++ toolchain — so declaring it there would
+  turn a working install into a failing build. **The scan engine was chosen by measurement**, not
+  preference: `memelite`'s `fimo` silently returns zero hits for 97 of the 879 JASPAR 2024
+  vertebrate motifs, never scans the final window of a sequence, and cannot be driven without
+  holding the whole file; MOODS is also 9.7× faster per core once thresholds are prepared. The
+  numbers and the method are in `docs/research/motif-scan-engine-2026-08-28.md`.
 - **An annotation can name the genes in a category.** `Genome.gene_list("rRNA")` returns the gene
   ids, and `Genome.gene_lists()` every category that annotation declares — from the CLI, `genome
   gene-list <assembly> <category>` and `genome gene-categories <assembly>`, both with `--json`.
@@ -34,6 +225,36 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   alignment. Every value is set by hand and none is derived from an annotation, whose longest intron
   is a floor on what the organism does rather than a ceiling on it (ADR-0010). Nothing in this
   package reads either column; they are curated here for whoever configures the aligner.
+- **Ask what a motif looks like: `MotifSet.compare`.** Hand it one `Motif`, several, or a whole
+  `MotifSet` and it compares them against the motifs of the set it is called on — read
+  `release.compare(de_novo)` as *compare these against this release*. The use case is naming: a
+  chromBPNet or TF-MoDISco run hands back matrices with no names on them, and this says which
+  published motif each one most resembles. The comparison is `memelite`'s `tomtom`, handed the same
+  4 × L probability matrices `Motif.probabilities` already produces, so **nothing transposes,
+  permutes or rescales on the way in**; this is the only place `memelite` is used, its scanner
+  having been measured against MOODS and rejected. What comes back is a `MotifComparison` wrapping
+  an `xarray.Dataset` **indexed by motif id on both axes**, so `data.sel(query="pattern_0",
+  target="MA0139.2")` asks about one pair and `data["neg_log10_p"]` is a similarity matrix ready to
+  cluster; it carries negative log10 p, score, offset, overlap and strand, the strand always `+` or
+  `-` because a comparison knows which of the two it aligned. **Negative log10 p is stored and raw
+  p never is**: the array holds half precision, whose smallest normal value is 6.1e-5, so a p of
+  1e-20 stored raw would flush to zero and take every motif's best match down with it — stored as
+  20.0 it is an ordinary small number, and an underflowed p reads back as infinite rather than as a
+  warning. `to_frame()` flattens to one row per pair, defaulting to the single best target per
+  query and taking a larger limit or none at all, ranked by p with score and then the target set's
+  own order breaking ties — which is also the order the engine's fast path returns, so the two
+  agree on which target is best. **Passing `top=n` is not a convenience over the complete answer**:
+  it takes `tomtom`'s nearest-neighbour path, which never scores the targets that lose, so the
+  result is *ragged* — dimensions `(query, rank)` with the target ids riding along as a variable,
+  because rank 0 names a different motif for each query. Such a result **cannot be widened without
+  recomputing, and that is accepted rather than a defect**; `RaggedComparisonError` says so and
+  names the call that would. A `top` above the number of targets is refused up front, because the
+  engine answers that one with a `SystemError` out of numba that names nothing a caller can act on.
+  **A motif compared against itself aligns to itself perfectly** — offset 0, the whole length
+  overlapping, on `+`, and no target scores higher. It is usually ranked first too, and the
+  exception is documented rather than papered over: TOMTOM's p-value rewards a short dense
+  alignment, so a long motif that embeds a shorter one can rank the shorter one above itself, which
+  both of the 31- and 33-column CTCF matrices do with the 15-column `MA0139.2` inside them.
 
 ## [2026.8.0] - 2026-08-17
 

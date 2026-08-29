@@ -6,6 +6,7 @@ import json as _json
 import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 
 import gffutils
 import pytest
@@ -29,8 +30,15 @@ from genome.io.gtf import (
 )
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.seq import DNA
+from genome.tf.motif import MIN_MOTIF_LENGTH, hit_count, provenance_of, read_hits
+from genome.tf.motif import jaspar as jaspar_mod
+from genome.tf.motif.jaspar import MOTIF_COUNTS
 
 from .conftest import CHIMERA_COMPONENTS, COMPONENT_ANNOTATION, FakeFetch
+from .test_jaspar import FIXTURE as _MOTIF_FIXTURE
+from .test_jaspar import FIXTURE_COUNT as _MOTIF_COUNT
+from .test_jaspar import FIXTURE_MOTIFS as _MOTIF_RECORDS
+from .test_scan import FIXTURE as _PLANTED_FASTA
 
 runner = CliRunner()
 _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
@@ -56,6 +64,16 @@ _TINY_ANNOTATION = AnnotationMetadata(
     sha256=_TINY_GTF_SHA256,
     default=True,
 )
+
+#: Which of the committed motifs a scan leaves out, and how many are left to scan with.
+#: Read off the fixture table rather than written down again, so a changed fixture moves the
+#: expected summary with it: a motif under the minimum length cannot reach the default
+#: **Threshold** at all, and is named among the skipped rather than called at something looser.
+_MOTIFS_TOO_SHORT = [
+    motif_id for motif_id, _name, length, _tax in _MOTIF_RECORDS if length < MIN_MOTIF_LENGTH
+]
+_MOTIFS_LONG_ENOUGH = _MOTIF_COUNT - len(_MOTIFS_TOO_SHORT)
+
 
 # A bare exon-level GTF — exon lines and nothing else, which is what gene/transcript
 # inference exists for. Built with inference off, its database holds exons alone.
@@ -121,6 +139,27 @@ def offline_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(download_mod, "prepare_fasta", fake_prepare_fasta)
     monkeypatch.setattr(download_mod.requests, "head", lambda url, **kwargs: _OkResponse())
+
+
+@pytest.fixture
+def motif_release(fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> FakeFetch:
+    """Serve the committed transfac records as whichever **Release** is asked for.
+
+    The arrangement ``tests/test_jaspar.py`` uses: the count check that stands where a
+    **Completion marker** stands elsewhere is never switched off, only pointed at what the
+    fake fetch actually serves.
+    """
+    monkeypatch.setattr(
+        jaspar_mod, "MOTIF_COUNTS", MappingProxyType(dict.fromkeys(MOTIF_COUNTS, _MOTIF_COUNT))
+    )
+    fake_fetch.serve(_MOTIF_FIXTURE)
+    return fake_fetch
+
+
+@pytest.fixture
+def planted_fasta(data_dir: Path) -> Path:
+    """The committed FASTA with motifs planted at positions ``tests/data/README.md`` lists."""
+    return data_dir / _PLANTED_FASTA
 
 
 class TestVersion:
@@ -1460,3 +1499,251 @@ class TestChimeraFromTheCommandLine:
 
         assert repaired.exit_code == 0, _output(repaired)
         assert "  components  tinyCe, tinySc" in repaired.stdout
+
+
+# ---------------------------------------------------------------------------
+# `genome motif-scan` — a FASTA in, a Parquet file out, a summary on stdout
+# ---------------------------------------------------------------------------
+
+
+class TestMotifScan:
+    """The batch scan: what the summary says, where each half of the answer goes.
+
+    Offline like every other test here — the ``fake_fetch`` fixture serves the committed
+    transfac records as whatever release is asked for, with the count check pointed at
+    them — and unmarked, since a process pool is not a binary this package ships.
+    """
+
+    def _summary(self, result: object) -> dict[str, object]:
+        """Parse the JSON summary, which is the whole of what the command puts on stdout."""
+        payload = _json.loads(getattr(result, "stdout", ""))
+        assert isinstance(payload, dict)
+        return payload
+
+    def test_the_json_summary_carries_the_run(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        output = tmp_path / "hits.parquet"
+
+        result = runner.invoke(
+            app,
+            [
+                "motif-scan",
+                str(planted_fasta),
+                str(output),
+                "--release",
+                "2024",
+                "--tax-group",
+                "all",
+                "--workers",
+                "1",
+                "--json",
+            ],
+        )
+
+        assert result.exit_code == 0, _output(result)
+        summary = self._summary(result)
+        assert summary == {
+            "release": "2024",
+            "tax_group": "all",
+            "motifs_scanned": _MOTIFS_LONG_ENOUGH,
+            "motifs_skipped": _MOTIFS_TOO_SHORT,
+            # Two 600-base records are far under the derivation floor, so 'auto' is uniform
+            # — and says so rather than leaving it to be assumed.
+            "background": [0.25, 0.25, 0.25, 0.25],
+            "threshold": 1e-4,
+            "sequences_scanned": 2,
+            "hits_written": hit_count(output),
+            "workers": 1,
+            "output": str(output),
+        }
+
+    def test_the_summary_goes_to_stdout_and_the_hits_to_the_named_file(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        # The whole reason the hits are written rather than printed: stdout is one JSON
+        # document and nothing else, whatever the scan found.
+        output = tmp_path / "hits.parquet"
+
+        result = runner.invoke(
+            app, ["motif-scan", str(planted_fasta), str(output), "--workers", "1", "--json"]
+        )
+
+        summary = self._summary(result)
+        written = read_hits(output)
+        assert len(written) > 0
+        assert summary["hits_written"] == len(written)
+        assert "plantedI" in set(written["sequence_name"])
+        # The table's own provenance is what the summary was read off, so the two agree.
+        assert written.attrs["release"] == summary["release"]
+
+    def test_the_human_summary_says_what_was_scanned_and_where_it_went(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        output = tmp_path / "hits.parquet"
+
+        result = runner.invoke(
+            app, ["motif-scan", str(planted_fasta), str(output), "--workers", "1"]
+        )
+
+        assert result.exit_code == 0, _output(result)
+        assert f"scanned 2 sequences with {_MOTIFS_LONG_ENOUGH} motifs" in result.stdout
+        assert str(output) in result.stdout
+        # Which motifs were left out is printed, not silently dropped: an absent factor is
+        # explainable only if the scan says it never scanned for it.
+        for motif_id in _MOTIFS_TOO_SHORT:
+            assert motif_id in result.stdout
+
+    def test_a_scan_that_found_nothing_still_writes_a_file_and_says_so(
+        self, motif_release: FakeFetch, tmp_path: Path
+    ) -> None:
+        empty = tmp_path / "unreadable.fa"
+        empty.write_text(">nothing\n" + "N" * 400 + "\n")
+        output = tmp_path / "hits.parquet"
+
+        result = runner.invoke(
+            app, ["motif-scan", str(empty), str(output), "--workers", "1", "--json"]
+        )
+
+        assert result.exit_code == 0, _output(result)
+        assert self._summary(result)["hits_written"] == 0
+        assert output.is_file()
+
+    def test_a_missing_fasta_exits_non_zero_naming_the_file(
+        self, motif_release: FakeFetch, tmp_path: Path
+    ) -> None:
+        missing = tmp_path / "nowhere.fa"
+        output = tmp_path / "hits.parquet"
+
+        result = runner.invoke(
+            app, ["motif-scan", str(missing), str(output), "--workers", "1", "--json"]
+        )
+
+        assert result.exit_code == 1
+        assert "not found" in _output(result)
+        assert str(missing) in _output(result)
+        # Nothing half-written to be mistaken for an answer.
+        assert not output.exists()
+
+    def test_a_release_this_package_does_not_prepare_is_refused_by_name(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        result = runner.invoke(
+            app,
+            ["motif-scan", str(planted_fasta), str(tmp_path / "hits.parquet"), "--release", "2019"],
+        )
+
+        assert result.exit_code == 1
+        assert "2024, 2026" in _output(result)
+
+    def test_a_threshold_that_is_not_a_p_value_is_refused(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        result = runner.invoke(
+            app,
+            ["motif-scan", str(planted_fasta), str(tmp_path / "hits.parquet"), "--threshold", "5"],
+        )
+
+        assert result.exit_code == 1
+        assert "p-value" in _output(result)
+
+    def test_zero_workers_is_refused_before_anything_is_scanned(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        output = tmp_path / "hits.parquet"
+
+        result = runner.invoke(
+            app, ["motif-scan", str(planted_fasta), str(output), "--workers", "0"]
+        )
+
+        assert result.exit_code == 1
+        assert "at least 1" in _output(result)
+        assert not output.exists()
+
+    def test_a_background_mode_reaches_the_scan(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        # The parameter that decides the answer more than any other, and the summary
+        # reports the one actually used rather than the one asked for.
+        output = tmp_path / "hits.parquet"
+
+        result = runner.invoke(
+            app,
+            [
+                "motif-scan",
+                str(planted_fasta),
+                str(output),
+                "--background",
+                "derive",
+                "--workers",
+                "1",
+                "--json",
+            ],
+        )
+
+        background = self._summary(result)["background"]
+        assert background != [0.25, 0.25, 0.25, 0.25]
+        assert list(provenance_of(output)["background"]) == background
+
+    def test_a_background_that_is_not_a_mode_is_refused_before_anything_runs(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        output = tmp_path / "hits.parquet"
+
+        result = runner.invoke(
+            app, ["motif-scan", str(planted_fasta), str(output), "--background", "gc"]
+        )
+
+        assert result.exit_code == 2
+        assert not output.exists()
+        assert not motif_release.calls  # not even the release was fetched
+
+    def test_the_worker_count_defaults_to_the_allocation(
+        self,
+        motif_release: FakeFetch,
+        planted_fasta: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # The one place the command deliberately differs from the library, which defaults
+        # to serial: a console script is a proper entry point, so it takes what it was
+        # given — the allocation first, and never the machine's cores over it.
+        monkeypatch.setenv("SLURM_CPUS_PER_TASK", "2")
+        shared, serial = tmp_path / "shared.parquet", tmp_path / "serial.parquet"
+
+        allocated = runner.invoke(app, ["motif-scan", str(planted_fasta), str(shared), "--json"])
+        alone = runner.invoke(
+            app, ["motif-scan", str(planted_fasta), str(serial), "--workers", "1", "--json"]
+        )
+
+        assert self._summary(allocated)["workers"] == 2
+        assert self._summary(alone)["workers"] == 1
+        # And the choice is about wall time and nothing else.
+        assert read_hits(shared).equals(read_hits(serial))
+
+    def test_the_progress_display_is_suppressed_under_the_json_flag(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        runner.invoke(
+            app,
+            [
+                "motif-scan",
+                str(planted_fasta),
+                str(tmp_path / "hits.parquet"),
+                "--workers",
+                "1",
+                "--json",
+            ],
+        )
+
+        assert motif_release.last.progressbar is False
+
+    def test_the_progress_display_is_drawn_without_it(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
+    ) -> None:
+        runner.invoke(
+            app,
+            ["motif-scan", str(planted_fasta), str(tmp_path / "hits.parquet"), "--workers", "1"],
+        )
+
+        assert motif_release.last.progressbar is True

@@ -4,8 +4,8 @@
 query — a locus into bases, a GTF into a registered annotation, a FASTA into an aligner index. Its
 vocabulary splits by bounded context: each file below is the glossary for one part of the source
 tree, and the shared kernel at the bottom holds the words every context uses. The glossaries live
-under `docs/context/`, not beside the code — only one context is a directory, so co-locating them
-would put three of the four in arbitrary places. Rules live in `CLAUDE.md`; this map and the four
+under `docs/context/`, not beside the code — only two contexts are directories, so co-locating them
+would put three of the five in arbitrary places. Rules live in `CLAUDE.md`; this map and the five
 files it lists are a glossary and nothing else.
 
 **Use these words.** When your output names a domain concept — an issue title, a refactor proposal,
@@ -34,6 +34,8 @@ substitute for *module*.
   which of its genes are in a category
 - [Index](./docs/context/index.md) — covers `aligner/*`: what one external mapper needs built before
   it can map, and how a finished build is told from an abandoned one
+- [Motif](./docs/context/motif.md) — covers `tf/motif/*`: what a transcription factor recognises,
+  stored as counts and belonging to no assembly, and where a scan says it occurs
 
 `io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
 It is the return types the API hands back and the CLI renders, so it carries the vocabulary of
@@ -56,6 +58,15 @@ whichever context asked.
 - **Index → Assembly**: an index lives *inside* the assembly it indexes, at
   `<assembly dir>/index/<name>/`, so the assembly's layout owns where indexes go. Both contexts
   assert a finished build with a **Completion marker**.
+- **Genome → Motif**: scanning **Region**s is the one place a motif's region-local positions become
+  **Chromosome** coordinates — the interval and the hit **Strand** both flipped for a `-` strand
+  region, so nobody does that arithmetic twice. The edge runs one way only: the scan method is mixed
+  into `Genome`, and the motif modules import `Genome` under type checking alone, since a motif
+  belongs to no **Assembly** and a **Motif set** is usable with no genome open.
+- **Motif → Sequence**: a scan consumes bases and nothing else — a `DNA`, a mapping of named
+  sequences, or a FASTA on disk — and Sequence stays the leaf it is, so nothing crosses back.
+  Scanning upper-cases what it is handed: **Soft-masking** does not survive the crossing, and there
+  is no option to honour it.
 
 ## Shared kernel
 
@@ -104,14 +115,16 @@ both halves of the convention or neither
 **Soft-masking**:
 Lower-case bases marking repeat-masked regions. It is data, not formatting: it survives fetching,
 slicing and reverse-complement, and is discarded only by asking, since `TwoBit(masked=True)` is the
-default.
+default. Scanning is the one exception and discards it unasked — ADR-0012.
 _Avoid_: case, lowercase, formatting; bare "masking" — hard-masking writes `N` and is a different
 thing
 
 **Data dir**:
-The root of all lab reference data, read from `$LIULAB_DATA` (`src/genome/io/registration.py`), under
-which each **Assembly** owns exactly one directory. That per-assembly directory is the layout every
-other context files into — annotations at `gtf/<name>/`, indexes at `index/<name>/`.
+The root of all lab reference data, read from `$LIULAB_DATA` (`src/genome/io/registration.py`). Most
+of it is the assembly tree at `genome/`, under which each **Assembly** owns exactly one directory,
+and that per-assembly directory is the layout most other contexts file into — annotations at
+`gtf/<name>/`, indexes at `index/<name>/`. Not all of it: data belonging to no assembly is a sibling
+of that tree rather than a tenant of it, and the **Motif** files under `motif/` are the first.
 _Avoid_: cache, cache dir (a cache may be evicted; this may not — though it is spelled `cache_dir` in
 code), data root, download dir, workdir
 

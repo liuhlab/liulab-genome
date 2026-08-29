@@ -33,7 +33,7 @@ moves between directories and its number does not; `—` means no record cites t
 
 ## Where to read next
 
-- **A term, or a synonym to avoid** — [`CONTEXT-MAP.md`](CONTEXT-MAP.md) and the four per-context
+- **A term, or a synonym to avoid** — [`CONTEXT-MAP.md`](CONTEXT-MAP.md) and the five per-context
   glossaries it lists under [`docs/context/`](docs/context/).
 - **A decision — why it is this way, and what lost** — [`docs/adr/`](docs/adr/).
 - **A measurement — a number, and the method that produced it** — [`docs/research/`](docs/research/),
