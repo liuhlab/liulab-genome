@@ -17,11 +17,10 @@ job is to say which one is speaking. Cofactor membership is the one exception, a
 one: the human list is a union of two publishers and so nobody's verdict but this package's
 (ADR-0016), while every cofactor's classification stays the publisher's who reached it.
 
-The gene half and its join to motifs are built; the cofactor half is not. Its words are settled
-first, as this half's and the motif half's were, so that every issue, test name, error message and
-docstring on the way uses one set. The cofactor entries below therefore describe an API that has not
-landed — use the words, do not call it — and they carry no *(decided, not built)* marker of the kind
-the context map describes, because this paragraph says it once for all three.
+All three halves are built. The cofactor half's words were settled before its code, as this half's
+and the motif half's were, so that every issue, test name, error message and docstring on the way
+used one set — which is why no entry below carries a *(decided, not built)* marker of the kind the
+context map describes.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir** and the rest — are defined once
 in the repo-root `CONTEXT-MAP.md`. **Annotation**, **Registered name**, **Annotation database** and
