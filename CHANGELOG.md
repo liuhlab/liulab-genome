@@ -10,6 +10,93 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **Which genes are transcription factors, answered by a published census that ships in the
+  wheel.** `genome.tf.gene` is the gene half of the TF context, keyed by gene where the motif half
+  is keyed by motif. Name an assembly and `Genome.tf_gene_list()` answers with the genes one census
+  judges transcription factors, **in that annotation's own gene ids**, so the answer joins to a
+  counts matrix with nothing left to normalise. Human is **Lambert et al. 2018** v_1.01 (2,765
+  genes, 1,639 judged transcription factors, PMID 29425488) and mouse is **AnimalTFDB 4.0** (1,611
+  genes, all positive, PMID 36268869) — not human TFs mapped through orthologs, which reaches at
+  best 88.6% and loses 236 C2H2 zinc fingers (ADR-0014). **Nothing here decides what a TF is**: every
+  verdict travels with the census that reached it, and the answer names the publisher, version and
+  PubMed id to cite. **Absence is not emptiness** throughout — a gene the census never assessed and
+  one it assessed and rejected are different answers, the 1,126 rejected genes ship so that "is this
+  a TF?" can be answered *no*, and an assembly whose species has no census **raises and names the
+  species that do** rather than returning an empty list. The species is read off the assembly's own
+  metadata row and never passed in, so asking for human transcription factors while holding a mouse
+  assembly is not expressible (ADR-0003). Thirteen of Lambert's twenty-nine published columns ship,
+  gzipped, at 52 KB against the publisher's 326 KB; the four uniform across every census — the
+  **Gene id stem**, the symbol, the TF flag and the **DBD family** — lead every table, and every
+  other column keeps a snake_case spelling of its own publisher's name and is **never compared
+  across tables**. The two family vocabularies are deliberately un-crosswalked: 75 values under
+  Lambert's `DBD`, 72 under AnimalTFDB's `Family`, and `ARID/BRIGHT` and `ARID` are not asserted
+  equivalent.
+- **An annotation resolves a Gene id stem into the gene ids it actually spells.**
+  `AnnotationRegistry.resolve_gene_ids()` is general and not TF-specific, and is the first thing in
+  this package to open the annotation database every registration has always built — one indexed
+  query, a row at a time, never the whole annotation in memory. **It answers with every gene id a
+  stem names and never picks one**: measured against the registered annotations, `gencode_v50` and
+  `gencode_vM39` collide for none and `gencode_v50lift37` names two gene ids for nine stems, eight
+  of them pseudoautosomal-Y, where taking the first would be wrong nine times and silently. A stem
+  carrying no version resolves to itself, so an annotation whose ids are not Ensembl-shaped is
+  untouched by an Ensembl-shaped assumption. **Stems that resolve to nothing ride back on the
+  answer** rather than being dropped, which is how the three entries Lambert records as UniProt
+  entry names rather than Ensembl ids stay visible instead of vanishing.
+- **Which JASPAR motifs answer for a TF gene, in a stated order.** `genome.tf.link` is the join
+  neither half owns — it imports both and neither imports it — and `motif_links(gene, species)`
+  hands back one gene's **Motif link**s, each saying what it is a motif *of*: `monomer` where the
+  profile names one gene, `complex` otherwise with its partners recorded, so a heterodimer matrix
+  is never read as a monomer's, and AHR, DDIT3, TAL1 and TLX1 are linked rather than reported
+  motif-less. Links arrive in **Attribution specificity** order — monomer before complex,
+  species-matched before **Cross-species link**, then higher total **Information content**, then
+  **Motif id** — which is total and stable, so "the motif for this factor" means the same thing on
+  two machines and in two releases. **It is an ordering and not a quality score**, and no quality
+  score is computed or shipped anywhere here: JASPAR publishes none, matrix depth is normalised per
+  assay so ranking on it ranks the assay, and the canonical AP-1 motif is a complex that describes
+  JUN's binding better than any JUN monomer matrix. A caller who disagrees re-sorts on the
+  attributes the link already carries. **Cross-species profiles are kept and marked, not excluded**
+  (ADR-0013) — JASPAR files an orthologous pair's matrix under whichever species was assayed, so
+  excluding them costs human 108 genes and mouse 552 of 689 — and `cross_species=False` drops them
+  for a question that demands species-matched profiles. **Provenance is captured before any
+  filtering**, since what comes out of a filter is no longer the release it came from. A versioned
+  gene id is **refused rather than stemmed**, because a stem may name two gene ids and this package
+  never picks a gene the caller did not name.
+- **The TF-to-motif mapping ships as a plain table, curated rather than computed** (ADR-0015). One
+  TSV per species per **Release** under `data/tf_link/` — human and mouse × JASPAR 2024 and 2026,
+  CORE vertebrates — readable in R or a shell **without importing this package**, because a
+  TF-to-motif mapping is wanted outside here as often as inside. Plain rather than gzipped: a
+  curated artifact's value is its reviewable diff. Twelve columns carrying the release and species
+  on every row so tables concatenate. The link is made by upper-casing the **Motif name**, splitting
+  on `::` and matching each part against the census's own symbol column, with a three-row alias
+  table keyed on **gene id** and not on symbol for the profiles JASPAR renamed after Lambert was
+  published — `TBXT` for `T`, `SCAND3` for `ZBED9`, `ZFTA` for `C11orf95`. The `EWSR1-FLI1` fusion
+  names no gene and stays unlinked by design. Only assessed-positive genes receive links: human 876
+  genes / 1,085 links on 2026 and 745 / 946 on 2024, mouse 693 / 896 and 653 / 851, with 732 of
+  mouse's 896 cross-species — which is the coverage argument made concrete. **No test proves a
+  shipped table still matches JASPAR and none can**, since regenerating one needs a download CI
+  cannot make; the pinned counts convert a silent drift into a loud failure, which is the most that
+  is available, and it is written down rather than papered over.
+- **`genome tf-gene-list <assembly>` prints an assembly's TF genes**, shaped exactly like
+  `gene-list` because a caller who learned one has learned the other. Gene ids to stdout one per
+  line, the heading and the census attribution to stderr so the output pipes; `--annotation` names
+  which registered annotation to ask; `--json` emits the whole record — the genes with their **TF
+  assessment** and **DBD family**, the census's provenance, and the unresolved **Gene id stem**s.
+  Non-zero exit with a message naming the next action for each of three distinct failures: the
+  annotation is not registered, no census ships for this assembly's species, and nothing says what
+  species the assembly is. There is deliberately **no `--include-rejected` flag** — stdout is a bare
+  id list with nowhere to carry which verdict an id holds, so the flag would feed assessed-negative
+  ids into a pipeline that reads them as TFs; the widened answer is expressible in Python, where
+  each id travels with its flag. And **no command wraps the Motif link table**, which is already a
+  file anyone can read — the reason for shipping it.
+- **The censuses and the link tables are rebuilt by committed generators**, `scripts/build_tf_census.py`
+  and `scripts/build_tf_links.py`, so a publisher's re-release or a new JASPAR release is a re-run
+  and a reviewable diff rather than a manual edit. They **fail loudly and name the column** when a
+  publisher re-spells one rather than dropping it, write **byte-stable** output so an unchanged input
+  produces no diff, and live outside the shipped package — the wheel carries the data and not the
+  build tooling. The link generator reads JASPAR's SQLite dump for per-profile species, which is
+  why **the motif subpackage needed no change at all**: no new field on **Motif**, no change to the
+  loader, parser or scan path.
+
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;
   listing, plotting and comparing motifs get no command, because they are notebook work. It takes
