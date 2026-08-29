@@ -37,12 +37,22 @@ from genome.tf.gene import (
 )
 from genome.tf.gene.census import _read_census, _read_metadata
 
-#: What each shipped census must contain: (genes assessed, genes judged TFs). Pinned
-#: because the biology is the shipped data's problem — a regeneration that silently
-#: changed either number is exactly the drift there is no other way to catch. Keyed by
-#: the species slug a census's file is named by, and checked to cover every census
-#: that ships, so adding one without pinning it fails here rather than passing quietly.
-_PINNED: dict[str, tuple[int, int]] = {"homo_sapiens": (2765, 1639)}
+#: What each shipped census must contain: (genes assessed, genes judged TFs, distinct
+#: **DBD family** values). Pinned because the biology is the shipped data's problem — a
+#: regeneration that silently changed any of the three is exactly the drift there is no
+#: other way to catch. Keyed by the species slug a census's file is named by, and checked
+#: to cover every census that ships, so adding one without pinning it fails here rather
+#: than passing quietly. The two family counts sit side by side and are never compared:
+#: 75 values under Lambert's ``DBD``, 72 under AnimalTFDB's ``Family``, two vocabularies
+#: deliberately not crosswalked (ADR-0014). AnimalTFDB lists none but the genes it
+#: accepts, which is why mouse's second number is its first.
+_PINNED: dict[str, tuple[int, int, int]] = {
+    "homo_sapiens": (2765, 1639, 75),
+    "mus_musculus": (1611, 1611, 72),
+}
+
+#: Where the **DBD family** sits in every census, which the uniform four fix.
+_DBD_FAMILY = UNIFORM_COLUMNS.index("dbd_family")
 
 #: The species a census ships for that the assembly metadata table does not name. A
 #: census keyed to a spelling no assembly uses could never be reached, since the
@@ -58,6 +68,12 @@ def _shipped(slug: str) -> TFGeneTable:
     census = tf_gene_table(slug)
     assert census is not None, f"no {slug}{CENSUS_SUFFIX} ships in the package"
     return census
+
+
+def _families(slug: str) -> set[str]:
+    """Return the distinct **DBD family** values one shipped census classifies genes under."""
+    families = (row[_DBD_FAMILY] for row in _shipped(slug).rows)
+    return {family for family in families if family}
 
 
 def _provenance(**overrides: object) -> CensusProvenance:
@@ -150,23 +166,51 @@ def test_every_gene_id_stem_is_unique_within_its_census(slug: str) -> None:
 
 
 @pytest.mark.parametrize("slug", census_species())
-def test_the_row_and_assessed_positive_counts_are_pinned(slug: str) -> None:
+def test_the_row_assessed_positive_and_family_counts_are_pinned(slug: str) -> None:
     census = _shipped(slug)
-    rows, positive = _PINNED[slug]
+    rows, positive, families = _PINNED[slug]
 
     assert len(census) == rows
     assert len(census.assessed_positive) == positive
+    assert len(_families(slug)) == families
 
 
 @pytest.mark.parametrize("slug", census_species())
 def test_a_rejected_gene_and_an_unassessed_one_stay_different_answers(slug: str) -> None:
     # The whole reason the rejected genes ship: a stem that is here and not in
     # assessed_positive was looked at and turned down, which is a verdict. A stem that
-    # is in neither was never assessed, and only the first is the census speaking.
+    # is in neither was never assessed, and only the first is the census speaking. The
+    # containment is deliberately not strict: a publisher that lists none but the genes
+    # it accepts has no rejected set to ship, and inventing one would be the fabrication
+    # this distinction exists to prevent.
     census = _shipped(slug)
 
     assert set(census.assessed_positive) <= set(census.gene_id_stems)
     assert "no_such_gene" not in census.gene_id_stems
+
+
+def test_a_census_that_lists_none_but_the_genes_it_accepts_is_read_as_a_census() -> None:
+    # AnimalTFDB publishes no rejected set, so mouse is all yes. That is the publisher
+    # saying nothing at all about the genes it left out, never this package writing a
+    # `no` for them — so an all-positive census is a census's shape and not a defect.
+    census = _read(_census_text("g1\tA\tyes\tX", "g2\tB\tyes\tY"))
+
+    assert census.assessed_positive == census.gene_id_stems
+
+
+def test_the_two_family_vocabularies_are_the_publishers_and_are_not_crosswalked() -> None:
+    # Uniform in position and deliberately not in content (ADR-0014). Lambert spells the
+    # ARID family `ARID/BRIGHT` and AnimalTFDB spells its own `ARID`, and nothing here
+    # asserts they are one family: inventing an equivalence nobody has checked is worse
+    # than shipping two vocabularies that each say who spelled them.
+    human, mouse = _families("homo_sapiens"), _families("mus_musculus")
+
+    assert "ARID/BRIGHT" in human
+    assert "ARID/BRIGHT" not in mouse
+    assert "ARID" in mouse
+    assert "ARID" not in human
+    assert _shipped("homo_sapiens").provenance.family_column == "DBD"
+    assert _shipped("mus_musculus").provenance.family_column == "Family"
 
 
 @pytest.mark.parametrize("slug", census_species())
@@ -209,9 +253,15 @@ def test_every_censused_species_is_one_the_assembly_table_names(slug: str) -> No
     assert census.species in _TABLE_SPECIES or census.species in _UNREACHABLE_SPECIES
 
 
-def test_the_species_spelling_the_assembly_table_uses_finds_its_census() -> None:
-    assert tf_gene_table("Homo sapiens") is not None
-    assert tf_gene_table("Homo sapiens") == tf_gene_table("homo_sapiens")
+@pytest.mark.parametrize("slug", census_species())
+def test_the_species_spelling_the_assembly_table_uses_finds_its_census(slug: str) -> None:
+    # An assembly carries its species in the metadata table's spelling and never a slug,
+    # so that spelling has to reach the census the slug names. Equal and not identical:
+    # the two spellings are two entries in the lookup's cache, and a census is frozen, so
+    # value equality is the whole of what a caller can tell about them.
+    census = _shipped(slug)
+
+    assert tf_gene_table(census.species) == census
 
 
 # ---------------------------------------------------------------------------------------
@@ -219,9 +269,19 @@ def test_the_species_spelling_the_assembly_table_uses_finds_its_census() -> None
 # ---------------------------------------------------------------------------------------
 
 
-def test_a_species_no_census_ships_for_is_none() -> None:
-    assert tf_gene_table("Caenorhabditis elegans") is None
-    assert tf_gene_table("no such species") is None
+@pytest.mark.parametrize(
+    "species",
+    [
+        # Three species the assembly metadata table names and no census answers for,
+        # spelled as that table spells them, plus one nobody has ever registered.
+        "Caenorhabditis elegans",
+        "Saccharomyces cerevisiae",
+        "Escherichia coli HT115",
+        "no such species",
+    ],
+)
+def test_a_species_no_census_ships_for_is_none(species: str) -> None:
+    assert tf_gene_table(species) is None
 
 
 def test_a_species_name_that_is_a_path_reaches_nothing() -> None:

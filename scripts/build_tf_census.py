@@ -11,7 +11,12 @@ Attribution
 ``lambert2018`` — Lambert *et al.*, "The Human Transcription Factors", *Cell*
 172(4):650-665, 2018 (PMID 29425488). Database extract v_1.01, downloaded from
 https://humantfs.ccbr.utoronto.ca/download/v_1.01/DatabaseExtract_v_1.01.csv.
-Cite the paper when you use the census.
+
+``animaltfdb4_mouse`` — Shen *et al.*, "AnimalTFDB 4.0", *Nucleic Acids Research*
+51(D1):D39-D45, 2023 (PMID 36268869). Mouse TF list, downloaded from
+https://guolab.wchscu.cn/AnimalTFDB4_static/download/TF_list_final/Mus_musculus_TF.
+
+Cite the publisher whose census you use.
 
 What it does
 ------------
@@ -31,7 +36,8 @@ written with no quoting, the line terminator is ``\n``, and gzip is given
 
 Usage
 -----
-``python scripts/build_tf_census.py lambert2018 <the publisher's file>``
+``python scripts/build_tf_census.py <census> <the publisher's file>``, where
+``<census>`` names one of :data:`RECIPES`.
 
 Add ``--data-dir`` to write somewhere other than ``src/genome/data/tf_gene``.
 """
@@ -84,7 +90,11 @@ _ABSENT_CELLS = frozenset({"None"})
 
 
 class CensusSourceError(ValueError):
-    """The publisher's file is not the file this recipe was written against."""
+    """The census asked for cannot be built.
+
+    Either the publisher's file is not the file the recipe was written against, or the
+    recipe is not the shape a recipe has.
+    """
 
 
 @dataclass(frozen=True)
@@ -115,9 +125,14 @@ class Recipe:
     published : tuple of str
         Every column that release publishes, in order and with trailing whitespace
         stripped. The header is held to exactly this.
-    shipped : tuple of tuple of str
+    shipped : tuple of tuple of (str or None) and str
         ``(published name, shipped name)`` for the columns that ship, in shipped
-        order. The first four must be :data:`UNIFORM_COLUMNS`.
+        order. The first four must be :data:`UNIFORM_COLUMNS`. A published name of
+        ``None`` means this script supplies the column because the publisher has no
+        such column, which is legal for the TF flag and nothing else: a publisher
+        that lists none but the genes it accepts publishes no rejected set, so every
+        row it does publish is a ``yes``, and writing ``no`` rows for the genes it
+        left out would fabricate a verdict nobody reached (ADR-0014).
     """
 
     species: str
@@ -129,7 +144,27 @@ class Recipe:
     family_column: str
     separator: str
     published: tuple[str, ...]
-    shipped: tuple[tuple[str, str], ...]
+    shipped: tuple[tuple[str | None, str], ...]
+
+    def __post_init__(self) -> None:
+        """Refuse a recipe that supplies any column but the TF flag out of thin air.
+
+        Raises
+        ------
+        CensusSourceError
+            If ``shipped`` sources anything else from ``None``. Every other column
+            carries the publisher's own content, and a supplied one would carry this
+            script's — a whole column of invented cells that nothing downstream could
+            tell from published ones.
+        """
+        supplied = [name for published, name in self.shipped if published is None]
+        if supplied not in ([], ["is_tf"]):
+            raise CensusSourceError(
+                f"the {self.species} recipe supplies the columns {supplied} rather than reading "
+                f"them from the publisher's file. Only the TF flag may be supplied, and only for "
+                f"a publisher that lists none but the genes it accepts. Name each of those "
+                f"columns' published spelling in this script's 'shipped' list."
+            )
 
     @property
     def slug(self) -> str:
@@ -216,8 +251,44 @@ LAMBERT_2018 = Recipe(
     ),
 )
 
+ANIMALTFDB4_MOUSE = Recipe(
+    species="Mus musculus",
+    ncbi_taxid=10090,
+    publisher="AnimalTFDB",
+    version="4.0",
+    pubmed_id=36268869,
+    source_url=(
+        "https://guolab.wchscu.cn/AnimalTFDB4_static/download/TF_list_final/Mus_musculus_TF"
+    ),
+    family_column="Family",
+    separator="\t",
+    # Six columns, none of them carrying trailing whitespace and none of them a TF
+    # flag: AnimalTFDB lists the genes it judges transcription factors and no others.
+    published=("Species", "Symbol", "Ensembl", "Family", "Protein", "Entrez_ID"),
+    # Four ship, which is every judgement AnimalTFDB makes about a gene — that it is a
+    # transcription factor, and of which family — and nothing else. Dropped: ``Species``,
+    # the same word on all 1,611 rows and already the provenance row's; and the two
+    # identifier cross-references, ``Protein`` (a semicolon-joined blob of Ensembl 105
+    # protein ids, the class Lambert's ``Pfam Domains (By ENSP ID)`` was dropped for) and
+    # ``Entrez_ID`` (NCBI's own id, already ``NA`` for 109 of the genes). The asymmetry
+    # against Lambert's thirteen is the two publishers' and not this script's.
+    shipped=(
+        ("Ensembl", "gene_id_stem"),
+        ("Symbol", "symbol"),
+        # Supplied, because AnimalTFDB publishes no flag and no rejected set. Every gene
+        # in the file is one it accepts, and the genes it left out are ones it says
+        # nothing about — so mouse has no assessed-negative rows rather than fabricated
+        # ones, and that absence is the census's shape rather than a defect (ADR-0014).
+        (None, "is_tf"),
+        ("Family", "dbd_family"),
+    ),
+)
+
 #: Every census this script knows how to build, by the name given on the command line.
-RECIPES: dict[str, Recipe] = {"lambert2018": LAMBERT_2018}
+RECIPES: dict[str, Recipe] = {
+    "lambert2018": LAMBERT_2018,
+    "animaltfdb4_mouse": ANIMALTFDB4_MOUSE,
+}
 
 
 def read_source(path: Path, recipe: Recipe) -> pd.DataFrame:
@@ -268,9 +339,19 @@ def build_table(frame: pd.DataFrame, recipe: Recipe) -> pd.DataFrame:
     already deterministic, which is all byte-stability needs, and Lambert's file is
     ordered by domain family — sorting it costs 8 KB of gzip because it scatters
     exactly the runs that compress.
+
+    A column the recipe sources from ``None`` is supplied as ``yes`` on every row,
+    which the recipe holds to the TF flag alone.
     """
     shipped = pd.DataFrame(
-        {name: frame[published].map(clean_cell) for published, name in recipe.shipped}
+        {
+            name: (
+                frame[published].map(clean_cell)
+                if published is not None
+                else pd.Series(TRUE_CELL, index=frame.index, dtype=object)
+            )
+            for published, name in recipe.shipped
+        }
     )
     shipped["is_tf"] = shipped["is_tf"].str.lower()
     check_table(shipped, origin=recipe.file_name)

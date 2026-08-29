@@ -2,10 +2,13 @@
 
 **Attribution.** The human census is Lambert *et al.*, "The Human Transcription
 Factors", *Cell* 172(4):650-665, 2018 (PMID 29425488), database extract v_1.01,
-redistributed here from https://humantfs.ccbr.utoronto.ca/. Every verdict in it is
-that panel's and none of it is this package's. Cite the paper when you use the
-census; :meth:`CensusProvenance.attribution` renders the line to print, and the
-provenance table beside the data carries the same facts for every census that ships.
+redistributed here from https://humantfs.ccbr.utoronto.ca/. The mouse census is
+AnimalTFDB 4.0, Shen *et al.*, *Nucleic Acids Research* 51(D1):D39-D45, 2023
+(PMID 36268869), redistributed from https://guolab.wchscu.cn/. Every verdict in
+either is its publisher's and none of it is this package's. Cite the publisher whose
+census you used; :meth:`CensusProvenance.attribution` renders the line to print, and
+the provenance table beside the data carries the same facts for every census that
+ships.
 
 One **TF gene table** per species ships inside the package under
 ``data/tf_gene/<species>.tf_gene_table.tsv.gz``, and they are found by enumerating
@@ -22,14 +25,21 @@ Four columns are uniform across every census and lead every file — the **Gene 
 stem**, the symbol, the TF flag and the **DBD family** (:data:`UNIFORM_COLUMNS`).
 Everything after them is its publisher's own column under a snake_case spelling of
 its published name, and is never compared with another publisher's: the family
-vocabularies in particular are deliberately not crosswalked (ADR-0014). A blank
-cell is the publisher recording nothing and reads back as ``None``, the reading
-every other table in this package gives a blank cell.
+vocabularies in particular are deliberately not crosswalked (ADR-0014), so
+Lambert's ``ARID/BRIGHT`` and AnimalTFDB's ``ARID`` are two publishers' spellings
+and not one family asserted twice. How many columns follow the four is the
+publisher's business too — Lambert publishes judgements to spare and AnimalTFDB
+publishes none beyond the family, so mouse ships the uniform four and nothing else.
+A blank cell is the publisher recording nothing and reads back as ``None``, the
+reading every other table in this package gives a blank cell.
 
 **Absence is not emptiness**, and this module is where the distinction starts. A
 gene the census never assessed and a gene it assessed and rejected are different
 answers, so the rejected genes ship too: Lambert assessed 2,765 genes and judged
-1,639 of them TFs, and the other 1,126 are a verdict rather than a silence.
+1,639 of them TFs, and the other 1,126 are a verdict rather than a silence. Whether
+a census *has* rejections is its publisher's shape and not this package's — every
+gene AnimalTFDB lists is one it accepts, so mouse's 1,611 rows are all positive and
+the genes it left out get no verdict at all rather than a fabricated ``no``.
 :func:`tf_gene_table` answers ``None`` for a species no census ships for — the raw
 absence, and the one place ``None`` is how it is said, exactly as
 :func:`genome.gene_list.curated_gene_list` says it, because this is the layer below
@@ -53,6 +63,9 @@ True
 (2765, 1639)
 >>> census.provenance.publisher
 'Lambert et al. 2018'
+>>> mouse = tf_gene_table("Mus musculus")
+>>> len(mouse), len(mouse.assessed_positive)
+(1611, 1611)
 >>> tf_gene_table("Caenorhabditis elegans") is None
 True
 """

@@ -1,2 +1,3 @@
 species	ncbi_taxid	file	publisher	version	pubmed_id	family_column	source_url	sha256
 Homo sapiens	9606	homo_sapiens.tf_gene_table.tsv.gz	Lambert et al. 2018	v_1.01	29425488	DBD	https://humantfs.ccbr.utoronto.ca/download/v_1.01/DatabaseExtract_v_1.01.csv	2c0be5d72f787e7e2a08feaed342e2ec00ae1f9cc8a954d11b6af0c121b65958
+Mus musculus	10090	mus_musculus.tf_gene_table.tsv.gz	AnimalTFDB	4.0	36268869	Family	https://guolab.wchscu.cn/AnimalTFDB4_static/download/TF_list_final/Mus_musculus_TF	9556b13e98e73da9828bcf86d3bda663ecbd4d4bb3aa61753ba86d900d533f47
