@@ -302,7 +302,7 @@ def test_an_answer_says_which_release_tax_group_and_file_it_came_from() -> None:
         "2024",
         LINK_TAX_GROUP,
     )
-    assert links.source.endswith("homo_sapiens.jaspar2024.motif_link_table.tsv")
+    assert links.source.endswith("homo_sapiens.jaspar2024.motif_link_table.tsv.gz")
 
 
 def test_an_answer_a_filter_emptied_still_says_which_release_found_nothing() -> None:
@@ -495,7 +495,7 @@ def test_a_table_says_which_species_release_and_tax_group_it_is(slug: str, relea
 
     assert (table.release, table.tax_group) == (release, LINK_TAX_GROUP)
     assert table.species
-    assert table.source.endswith(f"{slug}.jaspar{release}.motif_link_table.tsv")
+    assert table.source.endswith(f"{slug}.jaspar{release}.motif_link_table.tsv.gz")
 
 
 @pytest.mark.parametrize(("slug", "release"), _TABLES)

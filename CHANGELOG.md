@@ -61,13 +61,14 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   filtering**, since what comes out of a filter is no longer the release it came from. A versioned
   gene id is **refused rather than stemmed**, because a stem may name two gene ids and this package
   never picks a gene the caller did not name.
-- **The TF-to-motif mapping ships as a plain table, curated rather than computed** (ADR-0015). One
-  TSV per species per **Release** under `data/tf_link/` — human and mouse × JASPAR 2024 and 2026,
-  CORE vertebrates — readable in R or a shell **without importing this package**, because a
-  TF-to-motif mapping is wanted outside here as often as inside. Plain rather than gzipped: a
-  curated artifact's value is its reviewable diff. Twelve columns carrying the release and species
-  on every row so tables concatenate. The link is made by upper-casing the **Motif name**, splitting
-  on `::` and matching each part against the census's own symbol column, with a three-row alias
+- **The TF-to-motif mapping ships as a curated table rather than a computed rule** (ADR-0015). One
+  gzipped TSV per species per **Release** under `data/tf_link/` — human and mouse × JASPAR 2024 and
+  2026, CORE vertebrates, 70 KB in all — readable in R or a shell **without importing this
+  package**, because a TF-to-motif mapping is wanted outside here as often as inside. Bulk ships
+  gzipped and small metadata ships plain, as everywhere else in this package's data, so the
+  three-row alias table beside them stays a readable diff. Twelve columns carrying the release and
+  species on every row so tables concatenate. The link is made by upper-casing the **Motif name**,
+  splitting on `::` and matching each part against the census's own symbol column, with an alias
   table keyed on **gene id** and not on symbol for the profiles JASPAR renamed after Lambert was
   published — `TBXT` for `T`, `SCAND3` for `ZBED9`, `ZFTA` for `C11orf95`. The `EWSR1-FLI1` fusion
   names no gene and stays unlinked by design. Only assessed-positive genes receive links: human 876

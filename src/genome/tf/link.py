@@ -5,14 +5,21 @@ motif half, :mod:`genome.tf.motif`, and neither of them imports it: the two are 
 differently — one by gene, one by motif — and the mapping between them is many-to-many,
 so it belongs beside both rather than inside either.
 
-**The mapping is data and not a rule** (ADR-0015). One plain TSV ships per species per
+**The mapping is data and not a rule** (ADR-0015). One gzipped TSV ships per species per
 **Release**, CORE ``vertebrates`` only, under ``data/tf_link/<species
-slug>.jaspar<release>.motif_link_table.tsv``; this module reads them and nothing more. It
-is a leaf: it belongs to no **Assembly**, needs no **Data dir** and reaches no network,
+slug>.jaspar<release>.motif_link_table.tsv.gz``; this module reads them and nothing more.
+It is a leaf: it belongs to no **Assembly**, needs no **Data dir** and reaches no network,
 and the tables it reads are readable in R or a shell by collaborators who never import
-this package — which was the reason for shipping them. ``ATTRIBUTION.md`` beside the
-files records how the join was made, what it deliberately leaves unlinked, and the counts
-that are pinned.
+this package — which was the reason for shipping them, and gzip is what every such tool
+already opens. ``ATTRIBUTION.md`` beside the files records how the join was made, what it
+deliberately leaves unlinked, and the counts that are pinned.
+
+**Bulk ships gzipped; small metadata ships plain.** That is the convention across every
+data directory in this package, and this one is where both halves of it are visible: the
+four link tables are gzipped and the three-row ``motif_name_alias.tsv`` beside them is
+not, exactly as ``census_metadata.tsv`` and the assembly and annotation metadata tables
+are not. A file small enough to be curated by hand is worth more as a readable diff than
+as the bytes gzip would save; a few hundred kilobytes of generated rows is not.
 
 **Order is Attribution specificity, and it is not a quality score.** A gene's links come
 back **Role** ``monomer`` before ``complex``, species-matched before a **Cross-species
@@ -55,6 +62,7 @@ Examples
 
 from __future__ import annotations
 
+import gzip
 import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -72,13 +80,15 @@ from genome.tf.motif.jaspar import DEFAULT_RELEASE, DEFAULT_TAX_GROUP
 LINK_SUBDIR = "data/tf_link"
 
 #: What names one of those files: the species slug, this prefix and the **Release**, then
-#: :data:`LINK_SUFFIX` — ``homo_sapiens.jaspar2026.motif_link_table.tsv``. Two keys name
-#: one table, so both are in the name and neither is enumerated in code: a new species or
-#: a new release is a file dropped in, exactly as it is for a census.
+#: :data:`LINK_SUFFIX` — ``homo_sapiens.jaspar2026.motif_link_table.tsv.gz``. Two keys
+#: name one table, so both are in the name and neither is enumerated in code: a new
+#: species or a new release is a file dropped in, exactly as it is for a census.
 RELEASE_PREFIX = "jaspar"
 
-#: The end of every link table's name, and what enumerating the directory matches on.
-LINK_SUFFIX = ".motif_link_table.tsv"
+#: The end of every link table's name, and what enumerating the directory matches on. The
+#: tables are gzipped, as the censuses beside them are, and the decompression happens at
+#: the resource boundary so :func:`parse_motif_link_table` stays a pure function of text.
+LINK_SUFFIX = ".motif_link_table.tsv.gz"
 
 #: The one **Tax group** the shipped tables cover, and the reason it is not in a file
 #: name: JASPAR's CORE ``vertebrates``, which is where every human and mouse profile is.
@@ -654,7 +664,9 @@ def motif_link_table(
         LINK_SUBDIR, f"{slug}.{RELEASE_PREFIX}{release}{LINK_SUFFIX}"
     )
     origin = str(resource)
-    table = parse_motif_link_table(resource.read_text(encoding="utf-8"), source=origin)
+    table = parse_motif_link_table(
+        gzip.decompress(resource.read_bytes()).decode("utf-8"), source=origin
+    )
     if species_slug(table.species) != slug or table.release != release:
         raise MotifLinkTableError(
             f"{origin} is named for {slug!r} and release {release!r} and its rows say "
@@ -668,10 +680,13 @@ def motif_link_table(
 def parse_motif_link_table(text: str, *, source: str) -> MotifLinkTable:
     r"""Read one **Motif link** table's text into links, holding it to what a table promises.
 
-    A pure function from text to links: it opens nothing and downloads nothing. Separate
-    from the resource it came out of, as :func:`~genome.tf.motif.jaspar.parse_transfac`
-    is, so every way a file can be wrong is reachable without writing a broken one into
-    the package.
+    A pure function from text to links: it opens nothing, downloads nothing and
+    decompresses nothing. Separate from the resource it came out of, as
+    :func:`~genome.tf.motif.jaspar.parse_transfac` is, so every way a file can be wrong is
+    reachable without writing a broken one into the package. The shipped tables are
+    gzipped and :func:`motif_link_table` unpacks them at the resource boundary, which is
+    where :func:`~genome.tf.gene.tf_gene_table` unpacks a census too — the seam is between
+    the bytes and the format, and it does not move because the bytes are compressed.
 
     The **Release** and the species are read off the rows rather than passed in, and every
     row must agree about both — they are on each row so that two tables concatenate into
@@ -682,7 +697,8 @@ def parse_motif_link_table(text: str, *, source: str) -> MotifLinkTable:
     Parameters
     ----------
     text : str
-        The whole table. These are a few hundred kilobytes, so they are read whole.
+        The whole table, unpacked. These are a few hundred kilobytes, so they are read
+        whole.
     source : str
         Where the text came from; named in every message, since regenerating that file is
         the only repair.

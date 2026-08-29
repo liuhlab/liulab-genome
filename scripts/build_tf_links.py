@@ -23,8 +23,7 @@ its own attribution: see ``src/genome/data/tf_gene/ATTRIBUTION.md``.
 What it does
 ------------
 Reads one **Release**'s SQLite dump and one shipped census, joins them by name, and
-writes a plain TSV — plain rather than gzipped, since a curated artifact's value is
-its reviewable diff (ADR-0015).
+writes a gzipped TSV, as ``build_tf_census.py`` writes a census (ADR-0015).
 
 *The join.* Upper-case the **Motif name**, split it on ``::``, and match each part
 against the census's own symbol column. Only assessed-positive genes receive links.
@@ -58,8 +57,8 @@ error rather than a short table.
 
 *It writes byte-stable output.* Rows are sorted by **Gene id stem** and then by rank,
 cells are written with no quoting, the total information content is rendered to a
-fixed number of decimals, and the line terminator is ``\n`` — so re-running on an
-unchanged input produces no diff.
+fixed number of decimals, the line terminator is ``\n``, and gzip is given ``mtime=0``
+— so re-running on an unchanged input produces no diff.
 
 Usage
 -----
@@ -73,6 +72,7 @@ Add ``--data-dir`` to write somewhere other than ``src/genome/data/tf_link``.
 from __future__ import annotations
 
 import argparse
+import gzip
 import sqlite3
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -89,14 +89,18 @@ from genome.tf.motif.motif import BASES, Motif
 DATA_SUBDIR = Path("src") / "genome" / "data" / "tf_link"
 
 #: What one link table is called: the species slug, the release under this prefix, then
-#: :data:`LINK_SUFFIX` — ``homo_sapiens.jaspar2026.motif_link_table.tsv``. Two keys name
-#: one table, so both are in the name and a new release or a new species is a file drop.
+#: :data:`LINK_SUFFIX` — ``homo_sapiens.jaspar2026.motif_link_table.tsv.gz``. Two keys
+#: name one table, so both are in the name and a new release or a new species is a file
+#: drop.
 RELEASE_PREFIX = "jaspar"
 
 #: The end of every link table's name, and what enumerating the directory matches on.
-LINK_SUFFIX = ".motif_link_table.tsv"
+LINK_SUFFIX = ".motif_link_table.tsv.gz"
 
-#: The alias table beside them: the **Motif name** parts no census spells that way.
+#: The alias table beside them: the **Motif name** parts no census spells that way. Three
+#: rows, and **plain**, as every small metadata table in this package's data is — the
+#: gzip is for the bulk tables, and a three-row file curated by hand is worth more as a
+#: readable diff than as 200 saved bytes.
 ALIAS_FILE = "motif_name_alias.tsv"
 
 #: A link table's columns, in table order. The release and the species lead every row so
@@ -732,10 +736,15 @@ def check_table(rows: Sequence[Sequence[str]], *, origin: str) -> None:
 
 
 def render(rows: Sequence[Sequence[str]]) -> bytes:
-    r"""Return the shipped table as TSV bytes — no quoting, ``\n`` throughout."""
+    r"""Return the shipped table as unpacked TSV bytes — no quoting, ``\n`` throughout."""
     lines = ["\t".join(LINK_COLUMNS)]
     lines.extend("\t".join(row) for row in rows)
     return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def write_table(unpacked: bytes, path: Path) -> None:
+    """Write ``unpacked`` to ``path`` as gzip with no timestamp, so two runs agree byte for byte."""
+    path.write_bytes(gzip.compress(unpacked, compresslevel=9, mtime=0))
 
 
 def report_residuals(
@@ -745,8 +754,13 @@ def report_residuals(
 
     The denominator is the profiles the dump files under this species' taxid, which is
     the only set where a profile failing to name one of this census's genes is worth
-    looking at: a profile measured on another vertebrate naming a gene this census never
+    printing: a profile measured on another vertebrate naming a gene this census never
     assessed is ordinary rather than a residual.
+
+    **An unresolved profile is not a pending alias.** It is as often a profile naming a
+    gene the census never assessed at all, which no alias can reach and which is a
+    correct answer — mouse ``MA0611.3 Dux`` is one, and ``ATTRIBUTION.md`` beside the
+    data records why. This list is a report, not a queue.
     """
     tagged = [profile for profile in profiles if taxid in profile.tax_ids]
     unresolved = [
@@ -756,6 +770,8 @@ def report_residuals(
     print(f"    resolved to at least one assessed-positive gene: {len(tagged) - len(unresolved)}")
     for profile in unresolved:
         print(f"    unresolved: {profile.motif_id} {profile.motif_name}")
+    if unresolved:
+        print("      (a profile naming a gene the census never assessed is a correct answer)")
     named = {part for profile in profiles for part in profile.name_parts}
     unused = sorted(
         alias.motif_name_part for alias in aliases if alias.motif_name_part not in named
@@ -790,7 +806,8 @@ def build(species: str, release: str, dump: Path, data_dir: Path) -> None:
     check_table(rows, origin=file_name)
     unpacked = render(rows)
     data_dir.mkdir(parents=True, exist_ok=True)
-    (data_dir / file_name).write_bytes(unpacked)
+    write_table(unpacked, data_dir / file_name)
+    packed = (data_dir / file_name).stat().st_size
     genes = {link.gene_id_stem for link, _ in ranked}
     cross = sum(1 for link, _ in ranked if link.is_cross_species)
     monomer = sum(1 for link, _ in ranked if link.profile.role == MONOMER)
@@ -798,7 +815,8 @@ def build(species: str, release: str, dump: Path, data_dir: Path) -> None:
     print(f"  {monomer} monomer, {len(rows) - monomer} complex; {cross} cross-species")
     print(f"  {len(profiles)} CORE {DEFAULT_TAX_GROUP} profiles in the {release} release")
     report_residuals(profiles, lookup, taxid, aliases)
-    print(f"  {len(unpacked)} bytes")
+    print(f"  unpacked {len(unpacked)} bytes")
+    print(f"  packed   {packed} bytes ({len(unpacked) / packed:.1f}x)")
 
 
 def link_file_name(species: str, release: str) -> str:
