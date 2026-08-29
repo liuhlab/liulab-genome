@@ -10,6 +10,24 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **A motif, built from counts and able to answer for itself.** `genome.tf.motif.Motif` is a frozen
+  4 × L count matrix plus the id and name it is addressed by and the six annotations JASPAR
+  publishes — tax group, class, family, UniProt accessions, PubMed ids, data type — and it needs no
+  file, no download and no network to be built or asked anything. **The counts are the single
+  source of truth**: probabilities are a column normalisation, and log-odds take a background and a
+  pseudocount as *arguments and never fields*, so one motif scored against two backgrounds stays
+  one motif and two motifs sharing an id can never differ. Counts are float rather than int,
+  because the source's own records carry fractional values. It reports its information content per
+  position in bits, its consensus as a typed `DNA` rather than a `str`, and its sequence logo
+  through `plot()`, which takes an optional axes and returns the axes so a grid of motifs is one
+  figure — with the y-axis in bits, the same quantity trimming thresholds on. **Trimming acts only
+  on the ends**, so a degenerate spacer in the middle of a dimer can never split it in two; it
+  honours an optional maximum length, never goes below the minimum scannable length of 7 — a 6-mer
+  has 4096 possible words, so its best match has p = 2.44e-4 and cannot reach the default 1e-4
+  threshold — and returns a motif with the same id, the same name and an offset such that a
+  position in the trimmed frame plus the offset is the position in the full one. Trimming a trimmed
+  motif composes. The matrix is copied and marked read-only at construction, so a frozen motif is
+  frozen all the way down.
 - **The motif libraries, in every environment.** MOODS, logomaker, matplotlib and xarray join the
   core conda dependency table and `memelite` the PyPI one, ahead of the motif subpackage that will
   import them. None gets its own feature or environment: what earns a feature is a binary the
