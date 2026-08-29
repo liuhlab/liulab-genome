@@ -16,8 +16,8 @@ None of it is built. Every entry below is *(decided, not built — ADR-0019, ADR
 the context map describes: use the word, do not call the API it describes.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker** and the
-rest — are defined once in the repo-root `CONTEXT-MAP.md`. **Gene id stem** is defined once in the
-[TF](./tf.md) glossary, along with **TF gene table**, **Cofactor table** and **Cross-species link**;
+rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem** among them. **TF gene
+table**, **Cofactor table** and **Cross-species link** are defined in the [TF](./tf.md) glossary;
 **Annotation** belongs to [Annotation](./annotation.md), **Release** to [Motif](./motif.md), and
 **Xref set** and **Xref source** to [Xref](./xref.md).
 

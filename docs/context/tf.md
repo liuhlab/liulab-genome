@@ -22,11 +22,11 @@ and the motif half's were, so that every issue, test name, error message and doc
 used one set — which is why no entry below carries a *(decided, not built)* marker of the kind the
 context map describes.
 
-Words every context shares — **Assembly**, **Genome**, **Data dir** and the rest — are defined once
-in the repo-root `CONTEXT-MAP.md`. **Annotation**, **Registered name**, **Annotation database** and
-**Curated gene list** belong to the [Annotation](./annotation.md) context; **Motif**, **Motif id**,
-**Motif name**, **Release**, **Tax group** and **Information content** to the [Motif](./motif.md)
-half of this one.
+Words every context shares — **Assembly**, **Genome**, **Data dir**, **Gene id stem** and the
+rest — are defined once in the repo-root `CONTEXT-MAP.md`. **Annotation**, **Registered name**,
+**Annotation database** and **Curated gene list** belong to the [Annotation](./annotation.md)
+context; **Motif**, **Motif id**, **Motif name**, **Release**, **Tax group** and **Information
+content** to the [Motif](./motif.md) half of this one.
 
 ## Language
 
@@ -87,18 +87,6 @@ holding a mouse assembly is not expressible (ADR-0003); an assembly whose specie
 raises and names the species that do.
 _Avoid_: TF set, TF panel, TF universe; and the bare phrase "the gene list", which the Annotation
 context bans for naming no annotation — the qualifier is exactly what makes this compound legal
-
-**Gene id stem**:
-A gene id with its version suffix dropped: `ENSG00000123456` for `ENSG00000123456.7`. A stem may
-name more than one gene id inside one **Annotation** — nine do in `gencode_v50lift37`, eight of them
-pseudoautosomal-Y — so resolution answers with every id a stem names and never picks one. A stem
-carrying no version resolves to itself, which is why an annotation whose ids are not Ensembl-shaped
-is unaffected. The mechanism belongs to the annotation registry rather than to this context's code,
-and reading gene ids is the first thing that opens the **Annotation database** this package has
-always built; TF genes are merely its first caller.
-_Avoid_: base id — that already names a **Motif id** with its version dropped, `MA0139` for
-`MA0139.2`, and one term must not name two things inside one package; unversioned id, stripped id,
-gene id (the versioned thing this is a stem *of*), ENSG (one publisher's spelling)
 
 ### Cofactors
 
@@ -182,6 +170,5 @@ CORE **Tax group** `vertebrates` files an orthologous pair's matrix under whiche
 assayed, so a profile's species is an artefact of the experiment rather than a claim about the
 factor. Marked on every row because the flag is the only thing a caller who needs species-matched
 profiles can filter on — 732 of mouse's 896 links on the 2026 **Release** are cross-species.
-_Avoid_: ortholog link, orthologous motif — this package holds no ortholog table and asserts no
-orthology, only that JASPAR filed one vertebrate's assay under one vertebrate's name; foreign,
-non-native, imputed, borrowed
+_Avoid_: ortholog link, orthologous motif — a link asserts no orthology, only that JASPAR filed one
+vertebrate's assay under one vertebrate's name; foreign, non-native, imputed, borrowed

@@ -122,7 +122,7 @@ whichever context asked.
 
 ## Shared kernel
 
-Ten words every context uses. Anything defined here is not redefined in a context file.
+Eleven words every context uses. Anything defined here is not redefined in a context file.
 
 **Assembly**:
 The identity of one reference — a free-form **local** key that names its directory under the **Data
@@ -170,6 +170,18 @@ slicing and reverse-complement, and is discarded only by asking, since `TwoBit(m
 default. Scanning is the one exception and discards it unasked — ADR-0012.
 _Avoid_: case, lowercase, formatting; bare "masking" — hard-masking writes `N` and is a different
 thing
+
+**Gene id stem**:
+A gene id with its version suffix dropped: `ENSG00000123456` for `ENSG00000123456.7`. A stem may
+name more than one gene id inside one **Annotation** — nine do in `gencode_v50lift37`, eight of them
+pseudoautosomal-Y — so resolution answers with every id a stem names and never picks one. A stem
+carrying no version resolves to itself, which is why an annotation whose ids are not Ensembl-shaped
+is unaffected. The mechanism belongs to the annotation registry rather than to any one context's
+code, and reading gene ids is the first thing that opens the **Annotation database** this package
+has always built; TF genes are merely its first caller.
+_Avoid_: base id — that already names a **Motif id** with its version dropped, `MA0139` for
+`MA0139.2`, and one term must not name two things inside one package; unversioned id, stripped id,
+gene id (the versioned thing this is a stem *of*), ENSG (one publisher's spelling)
 
 **Data dir**:
 The root of all lab reference data, read from `$LIULAB_DATA` (`src/genome/io/registration.py`). Most
