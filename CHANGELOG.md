@@ -97,6 +97,33 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   build tooling. The link generator reads JASPAR's SQLite dump for per-profile species, which is
   why **the motif subpackage needed no change at all**: no new field on **Motif**, no change to the
   loader, parser or scan path.
+- **Which genes a publisher lists as transcription cofactors, answered by a table that ships in the
+  wheel.** `genome.tf.cofactor` is the third part of the TF context and a peer of the gene and motif
+  halves: the gene half answers whether a gene is a **TF gene** and of what **DBD family**, this one
+  answers whether it is a **Transcription cofactor** and of what class. It is keyed the same way, by
+  **Gene id stem**. Two **Cofactor table**s ship, both **AnimalTFDB 4.0** (PMID 36268869) — mouse
+  with 970 genes across 84 of the publisher's own families, *C. elegans* with 317 across 57, and the
+  same six categories in each — as gzipped TSVs under `data/tf_cofactor/`, found by enumerating that
+  directory so that adding a species is dropping in a file. **Nothing here decides what a cofactor
+  is**: membership and classification both travel with the publisher that reached them, and the
+  answer names the publisher, version and PubMed id to cite. Four uniform columns lead every table —
+  the stem, the symbol, the cofactor flag and a closed-vocabulary `source` validated on read — and
+  everything after them is one publisher's own column under a namespaced name, never compared with
+  another's (ADR-0014). `is_cofactor` reads `yes` on every row today and is kept anyway: dropping it
+  would make presence in the file the verdict, and a future source could then not record a rejection
+  without a format change. **Worm ships although no publisher has censused worm transcription
+  factors**, so a worm assembly answers here while the TF gene half has nothing to say — the
+  publishers' shape and not a defect, stated beside the data and pinned in the tests. Provenance is
+  **two** plain tables rather than one, keyed by species and by species-and-source, because one row
+  cannot describe a table built from several publishers and joining them positionally inside a cell
+  is the shape that breaks quietly. `parse_cofactor_table` is public and takes the table as text, so
+  every way a shipped file can be malformed is reachable without writing a broken one into the
+  package, and every refusal names the file and the command that regenerates it.
+  `scripts/build_tf_cofactor.py` is the third committed generator: it takes file paths and downloads
+  nothing, joins AnimalTFDB's own two files through five hand-written family spellings **whose
+  arithmetic it re-runs on every build**, and fails loudly both when a family survives that map with
+  no category and when the publisher's own counts stop reconciling — so a release that renames a
+  family is a broken build rather than a quietly blanked column.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;
