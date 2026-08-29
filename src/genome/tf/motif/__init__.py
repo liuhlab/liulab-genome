@@ -1,5 +1,11 @@
 """TF binding motifs — the matrices themselves, and finding where they occur."""
 
+from genome.tf.motif.background import (
+    BACKGROUND_FLOOR,
+    BACKGROUND_MODES,
+    UNIFORM_BACKGROUND,
+    BackgroundArg,
+)
 from genome.tf.motif.compare import (
     COMPARISON_VARIABLES,
     FRAME_COLUMNS,
@@ -33,8 +39,11 @@ from genome.tf.motif.scan import (
     HIT_PROVENANCE,
     FastaFormatError,
 )
+from genome.tf.motif.thresholds import threshold_cache_dir
 
 __all__ = [
+    "BACKGROUND_FLOOR",
+    "BACKGROUND_MODES",
     "BASES",
     "COMPARISON_VARIABLES",
     "DEFAULT_RELEASE",
@@ -48,8 +57,10 @@ __all__ = [
     "JASPAR_RELEASES",
     "JASPAR_TAX_GROUPS",
     "MIN_MOTIF_LENGTH",
+    "UNIFORM_BACKGROUND",
     "AmbiguousBaseIdError",
     "AmbiguousMotifNameError",
+    "BackgroundArg",
     "FastaFormatError",
     "JasparDatabase",
     "JasparReleaseError",
@@ -60,4 +71,5 @@ __all__ = [
     "RaggedComparisonError",
     "TransfacError",
     "parse_transfac",
+    "threshold_cache_dir",
 ]

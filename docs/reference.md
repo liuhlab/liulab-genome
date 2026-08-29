@@ -53,6 +53,14 @@
 
 ::: genome.tf.motif.jaspar
 
+## `genome.tf.motif.background`
+
+::: genome.tf.motif.background
+
+## `genome.tf.motif.thresholds`
+
+::: genome.tf.motif.thresholds
+
 ## `genome.tf.motif.scan`
 
 ::: genome.tf.motif.scan

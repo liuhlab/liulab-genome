@@ -64,6 +64,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays c
     import pandas as pd
     from matplotlib.axes import Axes
 
+    from genome.tf.motif.background import BackgroundArg
     from genome.tf.motif.compare import MotifComparison
 
 #: The rows of a **Count matrix**, in order. The same order MOODS and logomaker use, so
@@ -352,7 +353,8 @@ class Motif:
         ----------
         background : sequence of float, optional
             Four frequencies over :data:`BASES`, each above zero and summing to 1.
-            Uniform when omitted.
+            Uniform when omitted — a motif holds no input to derive one from, which is
+            what a scan does instead.
         pseudocount : float, default 0.01
             Added to each column, split by the background, so an unobserved base scores
             very low rather than ``-inf``. Must be above zero.
@@ -1056,7 +1058,7 @@ class MotifSet:
         name: str = DEFAULT_SEQUENCE_NAME,
         *,
         threshold: float = DEFAULT_THRESHOLD,
-        background: Sequence[float] | npt.NDArray[np.float64] | None = None,
+        background: BackgroundArg = None,
     ) -> pd.DataFrame:
         """Scan one sequence with every motif here and return the **Hit table**.
 
@@ -1084,9 +1086,13 @@ class MotifSet:
         threshold : float, default 1e-4
             The **Threshold**: one per-position p-value, converted per motif against
             ``background`` into the score that motif must clear. In ``(0, 1)``.
-        background : sequence of float, optional
+        background : sequence of float or {"auto", "uniform", "derive"}, optional
             The **Background**: four frequencies over :data:`BASES`, above zero and
-            summing to 1. Uniform when omitted.
+            summing to 1, or one of the three modes. **Automatic when omitted** — derived
+            from ``sequence`` when it holds at least
+            :data:`~genome.tf.motif.background.BACKGROUND_FLOOR` unambiguous bases,
+            uniform below that. ``"uniform"`` pins it; ``"derive"`` derives whatever the
+            input holds, floor or no floor. Whichever it is, it is recorded on the result.
 
         Returns
         -------
@@ -1100,8 +1106,8 @@ class MotifSet:
         Raises
         ------
         ValueError
-            If ``threshold`` is not in ``(0, 1)``, or ``background`` is not four positive
-            frequencies summing to 1.
+            If ``threshold`` is not in ``(0, 1)``, or ``background`` is neither one of the
+            three modes nor four positive frequencies summing to 1.
 
         Notes
         -----
@@ -1135,7 +1141,7 @@ class MotifSet:
         sequences: Mapping[str, str],
         *,
         threshold: float = DEFAULT_THRESHOLD,
-        background: Sequence[float] | npt.NDArray[np.float64] | None = None,
+        background: BackgroundArg = None,
     ) -> pd.DataFrame:
         """Scan named sequences — a peak set in one call — and return the **Hit table**.
 
@@ -1150,8 +1156,9 @@ class MotifSet:
             rather than all of them.
         threshold : float, default 1e-4
             The **Threshold**, as a per-position p-value.
-        background : sequence of float, optional
-            The **Background**. Uniform when omitted.
+        background : sequence of float or {"auto", "uniform", "derive"}, optional
+            The **Background**. Automatic when omitted — see :meth:`scan`. Deciding reads
+            a bounded prefix of ``sequences``, which is then scanned like the rest.
 
         Returns
         -------
@@ -1161,8 +1168,8 @@ class MotifSet:
         Raises
         ------
         ValueError
-            If ``threshold`` is not in ``(0, 1)``, or the background is not four positive
-            frequencies summing to 1.
+            If ``threshold`` is not in ``(0, 1)``, or the background is neither a mode nor
+            four positive frequencies summing to 1.
 
         Examples
         --------
@@ -1188,7 +1195,7 @@ class MotifSet:
         path: str | Path,
         *,
         threshold: float = DEFAULT_THRESHOLD,
-        background: Sequence[float] | npt.NDArray[np.float64] | None = None,
+        background: BackgroundArg = None,
     ) -> pd.DataFrame:
         r"""Scan every record of a FASTA and return the **Hit table**.
 
@@ -1205,8 +1212,10 @@ class MotifSet:
             The FASTA to scan, ``.fa`` or ``.fa.gz``.
         threshold : float, default 1e-4
             The **Threshold**, as a per-position p-value.
-        background : sequence of float, optional
-            The **Background**. Uniform when omitted.
+        background : sequence of float or {"auto", "uniform", "derive"}, optional
+            The **Background**. Automatic when omitted — see :meth:`scan`. Deciding reads
+            records off the front of the file, which are then scanned like the rest, so
+            the file is still read exactly once.
 
         Returns
         -------
@@ -1219,7 +1228,8 @@ class MotifSet:
             If ``path`` does not exist.
         ValueError
             If the file is not FASTA, a record carries no name, ``threshold`` is not in
-            ``(0, 1)``, or the background is not four positive frequencies summing to 1.
+            ``(0, 1)``, or the background is neither a mode nor four positive frequencies
+            summing to 1.
 
         Examples
         --------

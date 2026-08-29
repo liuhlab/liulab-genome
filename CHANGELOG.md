@@ -10,6 +10,28 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **A scan derives its background from what it was handed, and stops converting the same
+  thresholds twice.** The background is now **automatic**: derived from the input when the input
+  holds at least 10 000 unambiguous bases, uniform below that, since a composition estimated from
+  fewer would distort the very cutoffs it sets — at that floor the standard error on each base
+  frequency is about 0.004, which moves a per-position log-odds term by under 0.02 nats. This
+  matters more than any other scan parameter: switching from uniform to a real chromosome's
+  composition changed the hit count by 2.5% but turned over **26%** of the hit set. `background=`
+  still takes four frequencies and now also takes `"uniform"` to pin it, `"derive"` to derive
+  whatever the input holds, and `"auto"`, which is what omitting it means; **whichever it was, the
+  background actually used is recorded on the result**, so handing the recorded value back
+  reproduces the scan exactly. Deriving reads a **bounded prefix** of the input and hands those
+  records back in front of the rest, so a FASTA is still read once and a generator source is still
+  drained once — the estimate is a head sample rather than the whole input, which is exactly the
+  accuracy the floor was chosen for. Every background, however it arrived, is **rounded onto a
+  0.001 grid** and that one value builds the matrices, sets the cutoffs, keys the cache and is what
+  gets recorded. Converting the threshold into one cutoff per motif is the engine's one slow step —
+  a few seconds for a full vertebrate release — and a pure function of `(matrices, background, p)`,
+  so it is **cached on disk** under `<LIULAB_DATA>/motif/thresholds/`, shared by every project on
+  the machine exactly as the JASPAR files are; the rounding is what lets two peak sets from one
+  genome share an entry. A cache is a speed-up and never a dependency: a corrupt, truncated or
+  older entry is a miss, and a data root that cannot be written to makes a scan slow rather than
+  broken.
 - **Scan DNA with a motif set and get one hit table back, whatever you scanned.**
   `MotifSet.scan(sequence, name="sequence")`, `MotifSet.scan_sequences({name: bases})` and
   `MotifSet.scan_fasta(path)` answer with the same table — the same columns, in the same order,

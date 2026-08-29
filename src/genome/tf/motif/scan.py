@@ -24,6 +24,15 @@ there is no argument that would make it change one — ADR-0012. The engine's ow
 happens to fold case as well; the promise is this module's rather than the engine's, which
 is why the call is made here.
 
+**The Background is settled before the matrices are built, because it builds them.** That
+is the whole reason :func:`scan_stream` hands its sequence source to
+:func:`~genome.tf.motif.background.resolve_background` first and scans whatever comes back:
+an automatic background has to see the input, and the input is an iterator that may be
+drained only once. What comes back is the same records in the same order. The cutoffs those
+matrices are called at are the engine's one slow step and a pure function of
+``(matrices, background, p)``, so :func:`~genome.tf.motif.thresholds.cutoffs_for` answers
+from disk on a repeat.
+
 Batches, not one array: :func:`scan_stream` consumes an iterable of named sequences and
 drains one frame per sequence, so the peak memory is set by the largest record rather than
 by the file. That shape is deliberate — a Parquet sink replaces the collector and a
@@ -47,7 +56,7 @@ from __future__ import annotations
 
 import gzip
 import math
-from collections.abc import Hashable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -55,14 +64,14 @@ from typing import IO, TYPE_CHECKING, Any
 
 import MOODS.scan
 import MOODS.tools
-import numpy.typing as npt
+import numpy as np
 import pandas as pd
 
-from genome.tf.motif.motif import DEFAULT_THRESHOLD, MIN_MOTIF_LENGTH, Motif, _check_background
+from genome.tf.motif.background import BackgroundArg, resolve_background
+from genome.tf.motif.motif import DEFAULT_THRESHOLD, MIN_MOTIF_LENGTH, Motif
+from genome.tf.motif.thresholds import cutoffs_for
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the import runs the other way
-    import numpy as np
-
     from genome.tf.motif.motif import MotifSet
 
 #: The **Hit table**'s columns and their dtypes, in order. **This is the contract**, not an
@@ -154,7 +163,7 @@ def scan_stream(
     sequences: Iterable[tuple[str, str]],
     *,
     threshold: float = DEFAULT_THRESHOLD,
-    background: Sequence[float] | npt.NDArray[np.float64] | None = None,
+    background: BackgroundArg = None,
 ) -> pd.DataFrame:
     """Scan named sequences with a **Motif set** and collect one **Hit table**.
 
@@ -174,10 +183,13 @@ def scan_stream(
     threshold : float, default 1e-4
         The **Threshold**: one per-position p-value, converted per motif against
         ``background`` into the score that motif must clear. Must be in ``(0, 1)``.
-    background : sequence of float, optional
+    background : sequence of float or {"auto", "uniform", "derive"}, optional
         The **Background**: four frequencies over
-        :data:`~genome.tf.motif.motif.BASES`, above zero and summing to 1. Uniform when
-        omitted.
+        :data:`~genome.tf.motif.motif.BASES`, above zero and summing to 1, or one of the
+        three modes. **Automatic when omitted** — derived from ``sequences`` when they
+        hold at least :data:`~genome.tf.motif.background.BACKGROUND_FLOOR` unambiguous
+        bases, uniform below that. Deciding reads a bounded prefix of ``sequences``, which
+        is then scanned like the rest: the source is still drained exactly once.
 
     Returns
     -------
@@ -189,8 +201,8 @@ def scan_stream(
     Raises
     ------
     ValueError
-        If ``threshold`` is not in ``(0, 1)``, or ``background`` is not four positive
-        frequencies summing to 1.
+        If ``threshold`` is not in ``(0, 1)``, or ``background`` is neither a mode nor four
+        positive frequencies summing to 1.
 
     Examples
     --------
@@ -203,9 +215,13 @@ def scan_stream(
     >>> hits = scan_stream(motifs, [("chrTest", "TTTTTGATTACAGTTTTT")])
     >>> list(hits.itertuples(index=False, name=None))[0][:6]
     ('MA9999.1', 'Gattacag', 'chrTest', 5, 13, '+')
+    >>> hits.attrs["background"]                  # under the floor, so uniform — and said so
+    (0.25, 0.25, 0.25, 0.25)
     """
-    prepared = _prepare(motifs, threshold=threshold, background=background)
-    return _collect(_batches(prepared, sequences), prepared)
+    _check_threshold(threshold)
+    frequencies, remaining = resolve_background(background, sequences)
+    prepared = _prepare(motifs, threshold=threshold, background=frequencies)
+    return _collect(_batches(prepared, remaining), prepared)
 
 
 def read_fasta(path: str | Path) -> Iterator[tuple[str, str]]:
@@ -287,11 +303,21 @@ def _record_name(header: str, number: int, path: Path) -> str:
     return fields[0]
 
 
+def _check_threshold(threshold: float) -> None:
+    """Refuse a threshold that is not a p-value, before any sequence has been touched."""
+    if not 0.0 < threshold < 1.0:
+        raise ValueError(
+            f"threshold must be a per-position p-value in (0, 1), got {threshold}. It is a "
+            f"p-value and not a score — 1e-4 is the default, and a smaller number is "
+            f"stricter."
+        )
+
+
 def _prepare(
     motifs: MotifSet,
     *,
     threshold: float,
-    background: Sequence[float] | npt.NDArray[np.float64] | None,
+    background: tuple[float, ...],
 ) -> _Prepared:
     """Convert a **Motif set** into matrices, cutoffs and the provenance of the scan.
 
@@ -299,16 +325,11 @@ def _prepare(
     than handed to the engine at a looser cutoff than was asked for; the engine would clamp
     a p-value it cannot reach to that matrix's best attainable score and over-call in
     silence.
+
+    The **Background** arrives already settled and already quantised — this is downstream
+    of the one decision, not a second copy of it.
     """
-    if not 0.0 < threshold < 1.0:
-        raise ValueError(
-            f"threshold must be a per-position p-value in (0, 1), got {threshold}. It is a "
-            f"p-value and not a score — 1e-4 is the default, and a smaller number is "
-            f"stricter."
-        )
-    # The one validator for a background lives on the motif module, beside the log-odds
-    # arithmetic it guards; calling it here is what keeps its message from being copied.
-    frequencies = _check_background(background)
+    frequencies = np.asarray(background, dtype=np.float64)
     scanned = tuple(motif for motif in motifs if len(motif) >= MIN_MOTIF_LENGTH)
     skipped = tuple(motif.motif_id for motif in motifs if len(motif) < MIN_MOTIF_LENGTH)
     # The engine works in nats; log_odds() is in bits, and this is the only place the two
@@ -318,13 +339,14 @@ def _prepare(
     ]
     reverse = [[list(row) for row in MOODS.tools.reverse_complement(matrix)] for matrix in forward]
     matrices = forward + reverse
-    weights = list(frequencies)
     return _Prepared(
         motifs=scanned,
         skipped=skipped,
         matrices=matrices,
-        cutoffs=[MOODS.tools.threshold_from_p(matrix, weights, threshold) for matrix in matrices],
-        background=tuple(float(value) for value in frequencies),
+        # Off the disk when this triple has been asked for before: the conversion is the
+        # engine's one slow step and a pure function of it.
+        cutoffs=cutoffs_for(matrices, background, threshold),
+        background=background,
         threshold=float(threshold),
         # Read off the set rather than isinstance-tested: the release type imports this
         # module's neighbours, and filter() hands back a plain set that has neither.

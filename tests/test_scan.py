@@ -22,6 +22,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+import MOODS.tools
 import numpy as np
 import pandas as pd
 import pytest
@@ -30,12 +31,14 @@ from hypothesis import strategies as st
 
 from genome.seq import DNA
 from genome.tf.motif import (
+    BACKGROUND_FLOOR,
     DEFAULT_SEQUENCE_NAME,
     DEFAULT_THRESHOLD,
     HIT_COLUMNS,
     HIT_DTYPES,
     HIT_PROVENANCE,
     MIN_MOTIF_LENGTH,
+    UNIFORM_BACKGROUND,
     FastaFormatError,
     JasparDatabase,
     Motif,
@@ -141,6 +144,21 @@ def release(fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> JasparDat
     )
     fake_fetch.serve(MOTIF_FIXTURE)
     return JasparDatabase("2024", "all")
+
+
+def wide(bases: str, copies: int = 20) -> dict[str, str]:
+    """``copies`` named sequences of the same bases — an input over the derivation floor.
+
+    Every record identical, so the composition of any prefix is the composition of all of
+    them and the expected background does not depend on how many were read while deciding.
+    """
+    return {f"peak{index}": bases for index in range(copies)}
+
+
+def composition(bases: str) -> list[float]:
+    """The four base frequencies of one sequence, ambiguous bases ignored, in ACGT order."""
+    counts = [bases.upper().count(base) for base in "ACGT"]
+    return [count / sum(counts) for count in counts]
 
 
 def rows(frame: pd.DataFrame) -> list[tuple[Any, ...]]:
@@ -561,6 +579,42 @@ class TestThreshold:
         with pytest.raises(ValueError, match="per-position p-value"):
             motifs.scan("ACGT" * 20, threshold=threshold)
 
+    def test_a_repeat_scan_does_not_convert_its_thresholds_again(
+        self, motifs: MotifSet, planted: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The engine's one slow step — seconds for a full vertebrate release — and a pure
+        # function of (matrices, background, p). The engine still runs; it is counted.
+        calls: list[float] = []
+        real = MOODS.tools.threshold_from_p
+
+        def counted(matrix: object, background: object, p: float, *args: object) -> float:
+            calls.append(p)
+            return real(matrix, background, p, *args)
+
+        monkeypatch.setattr(MOODS.tools, "threshold_from_p", counted)
+        first = motifs.scan_fasta(planted)
+        converted = len(calls)
+        assert converted > 0
+        second = motifs.scan_fasta(planted)
+        assert len(calls) == converted
+        assert rows(second) == rows(first)
+
+    def test_a_different_threshold_is_converted_afresh(
+        self, motifs: MotifSet, planted: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[float] = []
+        real = MOODS.tools.threshold_from_p
+
+        def counted(matrix: object, background: object, p: float, *args: object) -> float:
+            calls.append(p)
+            return real(matrix, background, p, *args)
+
+        monkeypatch.setattr(MOODS.tools, "threshold_from_p", counted)
+        motifs.scan_fasta(planted, threshold=1e-4)
+        converted = len(calls)
+        motifs.scan_fasta(planted, threshold=1e-6)
+        assert len(calls) == 2 * converted
+
 
 # ---------------------------------------------------------------------------
 # The background, and the provenance the table carries
@@ -571,12 +625,84 @@ class TestBackgroundAndProvenance:
     def test_every_provenance_key_is_present(self, hits: pd.DataFrame) -> None:
         assert set(hits.attrs) == set(HIT_PROVENANCE)
 
-    def test_the_background_defaults_to_uniform_and_is_recorded(self, hits: pd.DataFrame) -> None:
-        assert hits.attrs["background"] == (0.25, 0.25, 0.25, 0.25)
+    def test_an_input_under_the_floor_falls_back_to_uniform_and_says_so(
+        self, hits: pd.DataFrame, planted_records: dict[str, str]
+    ) -> None:
+        # 1200 bases: a composition estimated from that few would distort its own cutoffs.
+        assert sum(len(bases) for bases in planted_records.values()) < BACKGROUND_FLOOR
+        assert hits.attrs["background"] == UNIFORM_BACKGROUND
+
+    def test_an_input_over_the_floor_has_its_background_derived(
+        self, motifs: MotifSet, planted_records: dict[str, str]
+    ) -> None:
+        bases = planted_records["plantedI"]
+        peaks = wide(bases)
+        assert sum(len(sequence) for sequence in peaks.values()) > BACKGROUND_FLOOR
+        found = motifs.scan_sequences(peaks)
+        assert found.attrs["background"] != UNIFORM_BACKGROUND
+        for recorded, wanted in zip(found.attrs["background"], composition(bases), strict=True):
+            assert recorded == pytest.approx(wanted, abs=0.002)
+
+    def test_the_recorded_background_is_the_one_that_was_used(
+        self, motifs: MotifSet, planted_records: dict[str, str]
+    ) -> None:
+        # The whole point of recording it: handing the recorded value back must reproduce
+        # the scan exactly, or two runs could not be reconciled from what they carry.
+        peaks = wide(planted_records["plantedI"])
+        derived = motifs.scan_sequences(peaks)
+        replayed = motifs.scan_sequences(peaks, background=list(derived.attrs["background"]))
+        pd.testing.assert_frame_equal(replayed, derived)
+        assert replayed.attrs["background"] == derived.attrs["background"]
+
+    def test_deriving_moves_the_hits_off_what_uniform_would_have_said(
+        self, motifs: MotifSet, planted_records: dict[str, str]
+    ) -> None:
+        # Why this is automatic rather than an option nobody remembers to pass.
+        peaks = wide(planted_records["plantedI"])
+        assert sites(motifs.scan_sequences(peaks)) != sites(
+            motifs.scan_sequences(peaks, background="uniform")
+        )
+
+    def test_uniform_can_be_asked_for_over_the_floor(
+        self, motifs: MotifSet, planted_records: dict[str, str]
+    ) -> None:
+        found = motifs.scan_sequences(wide(planted_records["plantedI"]), background="uniform")
+        assert found.attrs["background"] == UNIFORM_BACKGROUND
+
+    def test_deriving_can_be_asked_for_under_the_floor(
+        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
+    ) -> None:
+        found = motifs.scan_fasta(planted, background="derive")
+        assert found.attrs["background"] != UNIFORM_BACKGROUND
+        whole = "".join(planted_records.values())
+        for recorded, wanted in zip(found.attrs["background"], composition(whole), strict=True):
+            assert recorded == pytest.approx(wanted, abs=0.002)
 
     def test_a_background_given_is_the_one_recorded(self, motifs: MotifSet, planted: Path) -> None:
         found = motifs.scan_fasta(planted, background=[0.3, 0.2, 0.2, 0.3])
         assert found.attrs["background"] == (0.3, 0.2, 0.2, 0.3)
+
+    def test_an_explicit_background_wins_over_the_input(
+        self, motifs: MotifSet, planted_records: dict[str, str]
+    ) -> None:
+        found = motifs.scan_sequences(
+            wide(planted_records["plantedI"]), background=[0.3, 0.2, 0.2, 0.3]
+        )
+        assert found.attrs["background"] == (0.3, 0.2, 0.2, 0.3)
+
+    def test_a_background_mode_that_does_not_exist_names_the_ones_that_do(
+        self, motifs: MotifSet
+    ) -> None:
+        with pytest.raises(ValueError, match="auto, uniform, derive"):
+            motifs.scan("ACGT" * 20, background="gc")  # type: ignore[arg-type]
+
+    def test_deciding_the_background_does_not_eat_the_first_records(
+        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
+    ) -> None:
+        # A FASTA is read once. Records pulled off it while the background was being
+        # decided must still be scanned, or a scan would silently skip its first records.
+        found = motifs.scan_fasta(planted, background="derive")
+        assert set(found["sequence_name"]) == set(planted_records)
 
     def test_the_background_decides_the_answer(self, motifs: MotifSet, planted: Path) -> None:
         # Recorded rather than assumed because it moves the hits: an AT-rich null and a
