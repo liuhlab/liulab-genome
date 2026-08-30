@@ -312,24 +312,29 @@ class TestXrefTable:
     def test_the_three_species_ship_with_alliance_as_the_default(self) -> None:
         assert xref_species() == ("Homo sapiens", "Mus musculus", "Caenorhabditis elegans")
         for species in xref_species():
-            assert xref_sources(species) == (ALLIANCE,)
+            assert ALLIANCE in xref_sources(species)
             assert xref_releases(species, ALLIANCE) == (RELEASE,)
             assert lookup_xref(species).source == ALLIANCE
             assert lookup_xref(species).default is True
 
-    def test_every_row_pins_a_publisher_a_version_a_url_and_a_checksum(self) -> None:
-        for row in xref_table():
+    def test_every_alliance_row_pins_a_publisher_a_version_a_url_and_a_checksum(self) -> None:
+        rows = [row for row in xref_table() if row.source == ALLIANCE]
+        assert len(rows) == len(xref_species())
+        for row in rows:
             assert row.publisher == "Alliance of Genome Resources"
             assert row.version == RELEASE
             assert row.url.startswith("https://download.alliancegenome.org/")
+            assert row.pubmed_id == 38552170
+
+    def test_every_row_of_every_source_pins_an_unpacked_md5(self) -> None:
+        for row in xref_table():
             algorithm, _, digest = row.source_checksum.partition(":")
             assert algorithm == "md5"
             assert len(digest) == 32
             assert set(digest) <= set("0123456789abcdef")
-            assert row.pubmed_id == 38552170
 
     def test_the_taxids_are_the_ones_the_publishers_file_uses(self) -> None:
-        assert {row.species: row.ncbi_taxid for row in xref_table()} == {
+        assert {row.species: row.ncbi_taxid for row in xref_table() if row.source == ALLIANCE} == {
             "Homo sapiens": 9606,
             "Mus musculus": 10090,
             "Caenorhabditis elegans": 6239,

@@ -105,9 +105,17 @@
 
 ::: genome.xref.metadata
 
+## `genome.xref.evidence`
+
+::: genome.xref.evidence
+
 ## `genome.xref.alliance`
 
 ::: genome.xref.alliance
+
+## `genome.xref.ensembl`
+
+::: genome.xref.ensembl
 
 ## `genome.xref.xref`
 

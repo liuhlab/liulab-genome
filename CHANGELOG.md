@@ -10,6 +10,35 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **Ensembl is a second Xref source, selectable and pinned to a release of its own — and it is not
+  the equal of the first.** `XrefSet("Homo sapiens", "ensembl", "116")` answers off Ensembl's
+  per-species TSV dumps for human and mouse, pinned to release **116** — the release the lab's
+  registered `gencode_v50` corresponds to — independently of Alliance's `9.0.0`, which stays the
+  **Default xref source**. Adding it was what the design promised: a reader module, one entry in the
+  reader table and two rows in the shipped metadata table. **Two publishers are two answers and
+  nothing merges them** (ADR-0017): Entrez GeneID `79166` names **two** stems in Alliance 9.0.0 and
+  **seventy-two** in Ensembl 116, each answer carrying the source and release that produced it, and
+  the narrower one is never widened nor the wider one voted down. **The fan-out is stated where the
+  source is chosen** rather than in a note — in the constructor's `source` parameter, in the
+  reader's own module and in the shipped attribution — because it is the reason to choose
+  deliberately: the two publishers agree on only **57.6%** of human gene-level (GeneID, ENSG) pairs,
+  NCBI's mapping being a sequence match at a published overlap threshold and near-one-to-one where
+  Ensembl's reaches 72 stems for one GeneID and **208 GeneIDs for one stem**. **The intuitive
+  quality filter raises rather than answering nothing**: every human `EntrezGene` row release 116
+  publishes carries `info_type=DEPENDENT` and **not one** carries `DIRECT` — 552,633 rows, zero
+  direct, and mouse the same at 358,853 — so `evidence="DIRECT"` empties the set rather than
+  narrowing it, and is met with an error naming what the release actually carries. The filter is a
+  real capability and not only a guard: it selects which of the publisher's rows are read, a
+  filtered set is prepared beside the unfiltered one rather than over it, and a source whose file
+  grades nothing refuses a filter instead of ignoring it. Two conventions that cannot be assumed
+  from one another are now recorded side by side: Alliance publishes an md5 of the **unpacked** TSV,
+  Ensembl a BSD `sum` of the **served** `.gz` — 16 bits, and no integrity check for a 6 MB file — so
+  the rows pin a digest of the unpacked bytes and the attribution records Ensembl's own value and
+  what it covers. No worm row, and not by oversight: Ensembl files *C. elegans* under Ensembl
+  Genomes' numbering, so release-116's worm directory holds a file stamped **63**, and worm is
+  answered by the Alliance where the hop is the identity.
+- **An `XrefSet` carries the curated row it actually resolved to**, as `provenance`, so what is
+  cited is what answered rather than what a second lookup would resolve the defaults to today.
 - **Which genes are transcription factors, answered by a published census that ships in the
   wheel.** `genome.tf.gene` is the gene half of the TF context, keyed by gene where the motif half
   is keyed by motif. Name an assembly and `Genome.tf_gene_list()` answers with the genes one census

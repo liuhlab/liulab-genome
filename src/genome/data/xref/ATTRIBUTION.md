@@ -91,9 +91,105 @@ sha256 as the integrity check; two checksums because what is stored is a derived
 the publisher's bytes. The gzip is written with no modification time, so one release sliced on two
 machines produces byte-identical files.
 
+## Ensembl — `ensembl`, release 116
+
+Dyer, S. C., *et al.* **Ensembl 2025.** *Nucleic Acids Research* 53(D1), 2025. PMID 39656687.
+doi:10.1093/nar/gkae1071 — the per-species `entrez` TSV dump of release **116**, from
+<https://ftp.ensembl.org/pub/release-116/tsv/homo_sapiens/Homo_sapiens.GRCh38.116.entrez.tsv.gz> and
+<https://ftp.ensembl.org/pub/release-116/tsv/mus_musculus/Mus_musculus.GRCm39.116.entrez.tsv.gz>.
+
+One file per species, and a **second** source rather than a better one. Release 116 is what the
+lab's registered `gencode_v50` annotation corresponds to, which is why it is the release pinned.
+
+**How the release was pinned.** `Homo_sapiens.GRCh38.<release>.entrez.tsv.gz` answers 200 for every
+release probed from **88** through **116**, so old releases stay live and the source is eligible
+(ADR-0018). One thing a URL written from memory gets wrong: **`ftp.ensembl.org/pub/current_tsv/` is
+a 404**. There is no `current_` shortcut for these dumps and the release number is mandatory — which
+is convenient, since it means every URL in the table above already names the release it pins.
+
+### Ensembl is not the equal of the first source
+
+Measured on human release 116 against NCBI's own `gene2ensembl`, both sides reduced to distinct
+(Entrez GeneID, ENSG stem) pairs:
+
+| | Pairs |
+|---|---|
+| NCBI asserts | 38,577 |
+| Ensembl asserts | 36,824 |
+| both assert | 27,554 |
+| **agreement (intersection over union)** | **57.6%** |
+
+**The cause is method, not release skew.** NCBI's mapping is a sequence match at a published overlap
+threshold and comes out all but one-to-one — no GeneID names more than two stems. Ensembl's fans out
+by two orders of magnitude at the tail:
+
+| | NCBI | Ensembl |
+|---|---|---|
+| distinct GeneIDs | 38,546 | 28,433 |
+| GeneIDs naming exactly one stem | 38,515 (99.9%) | 25,890 (91.1%) |
+| **most stems named by one GeneID** | 2 | **72** (GeneID `79166`) |
+| **most GeneIDs naming one stem** | 4 | **208** (`ENSG00000278233`) |
+
+So an answer from here is wider than the Alliance's for the same id — `79166` names two stems in
+Alliance 9.0.0 and seventy-two here — and the width is Ensembl's assertion rather than a fault.
+Nothing narrows it and nothing reconciles the two: two publishers are two answers (ADR-0017).
+
+### Every row is `DEPENDENT` and none is `DIRECT`
+
+Ensembl grades each cross-reference in an `info_type` column, so the obvious quality filter is
+`DIRECT`. Counted over the whole release-116 file:
+
+| `db_name` | Rows | `DIRECT` | `DEPENDENT` |
+|---|---|---|---|
+| `EntrezGene` (human) | **552,633** | **0** | 552,633 |
+| `EntrezGene` (mouse) | **358,853** | **0** | 358,853 |
+| `EntrezGene_trans_name` (human) | 644,668 | — | `MISC` |
+
+**Filtering to `DIRECT` yields an empty set rather than a smaller one**, which would answer every
+query with nothing and look exactly like a gene list that matched none of it. Asking for it raises
+and names what the release actually carries, rather than building a set that can only say nothing.
+
+### The published checksum covers the *served* bytes — the opposite of the Alliance's
+
+Each directory ships a `CHECKSUMS` file in BSD `sum` format, computed over the `.tsv.gz` **exactly
+as downloaded**: `28782 5952` for release 116's human dump, verified against the file. The Alliance
+publishes the other convention, an md5 of the TSV *inside* its gzip. Neither can be assumed of the
+other, and a BSD `sum` is a 16-bit checksum — no integrity check at all for a 6 MB file. So the rows
+above pin an **md5 of the unpacked bytes** computed here on the pinned release, which is the one
+convention every row of this table uses (ADR-0006), and Ensembl's own `sum` values are recorded here
+as the publisher's cross-check rather than in the table.
+
+### What the reader keeps, and what it drops
+
+Only the `EntrezGene` rows are cross-references. The dump also carries `EntrezGene_trans_name` rows
+whose `xref` column holds a **transcript name** — `KU-MEL-3-201`, not a GeneID — because, as the
+file's own `README_entrez.tsv` warns, it "contains all Ensembl external database names which started
+with entrez so duplication of hits is possible". Reading them would key the Entrez namespace by
+transcript labels. They are a different assertion and are dropped.
+
+The file is transcript- and protein-grained, so 552,633 human rows collapse to 36,824 gene-level
+pairs; deduplication is on the pair and happens as the file is read.
+
+| Species | Assembly | Gene-level pairs | Namespaces carried |
+|---|---|---|---|
+| *Homo sapiens* | GRCh38 | 36,824 | Ensembl, Entrez |
+| *Mus musculus* | GRCm39 | 28,681 | Ensembl, Entrez |
+
+**No worm row, and not by oversight.** Ensembl files *C. elegans* under Ensembl Genomes' own
+numbering: release-116's worm directory holds `Caenorhabditis_elegans.WBcel235.63.entrez.tsv.gz`, so
+"116" would name a file that does not exist. Worm is answered by the Alliance, where the hop is the
+identity function, and no worm row is invented here to make the table look symmetrical.
+
 ## Adding a source
 
 A row here plus a reader in `genome/xref/`, and nothing else. The row must pin a release that stays
 retrievable at a stable URL: a publisher that overwrites its file in place, or that keeps no archive
 of the release the row names, cannot be pinned and does not belong here, however good its data
 (ADR-0018).
+
+Two things a second source made explicit that the first alone did not. **A publisher's own checksum
+may cover the served bytes or the unpacked ones**, and the two conventions sit side by side in this
+directory — check which before pinning, because a row pinned to the wrong scope rejects every
+download. And **an evidence filter is a capability of the source rather than of every set**: a file
+that grades nothing refuses a filter rather than ignoring it, since a filter silently dropped is a
+quality claim the caller believes and nobody made.
