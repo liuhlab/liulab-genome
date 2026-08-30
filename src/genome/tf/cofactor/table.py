@@ -113,7 +113,10 @@ __all__ = [
     "ANIMALTFDB",
     "BOTH",
     "CITED_SOURCES",
+    "COFACTOR_FORMAT",
+    "COFACTOR_METADATA_FORMAT",
     "COFACTOR_METADATA_RESOURCE",
+    "COFACTOR_SOURCE_METADATA_FORMAT",
     "COFACTOR_SOURCE_METADATA_RESOURCE",
     "COFACTOR_SUBDIR",
     "COFACTOR_SUFFIX",
@@ -309,7 +312,7 @@ class CofactorSource:
         >>> CofactorSource.from_row(row, origin="cofactor_source_metadata.tsv").version
         'v1'
         """
-        record = cls(**_COFACTOR_SOURCE_METADATA.record(row, _SOURCE_TYPES, origin=origin))
+        record = cls(**COFACTOR_SOURCE_METADATA_FORMAT.record(row, _SOURCE_TYPES, origin=origin))
         if record.source not in CITED_SOURCES:
             raise CofactorTableError(
                 f"{origin} names the source {record.source!r} for {record.species!r}, and the "
@@ -440,7 +443,8 @@ class CofactorProvenance:
                 f"Re-run {_REBUILD} for that species, which writes both provenance rows."
             )
         return cls(
-            **_COFACTOR_METADATA.record(row, _PROVENANCE_TYPES, origin=origin), sources=sources
+            **COFACTOR_METADATA_FORMAT.record(row, _PROVENANCE_TYPES, origin=origin),
+            sources=sources,
         )
 
     def attribution(self) -> str:
@@ -581,20 +585,23 @@ _PROVENANCE_TYPES: dict[str, Any] = {
 }
 _SOURCE_TYPES: dict[str, Any] = get_type_hints(CofactorSource)
 
-#: The species-keyed provenance table as a **Shipped table**.
-_COFACTOR_METADATA = ShippedTable(
+#: The species-keyed provenance table as a **Shipped table**. One row per species, which is
+#: also the row the generator replaces when it rebuilds one species and leaves the rest alone
+#: (:mod:`genome.shipped_writer`).
+COFACTOR_METADATA_FORMAT = ShippedTable(
     resource=COFACTOR_METADATA_RESOURCE,
     columns=_METADATA_COLUMNS,
     noun="cofactor provenance table",
     repair=_REPAIR_PROVENANCE,
     error=CofactorTableError,
+    key=("species",),
     because=_REQUIRED,
     identify=("species",),
 )
 
 #: The source-keyed provenance table, deliberately ragged — one row per species per
 #: publisher, so the key is the pair and a species-and-source named twice is refused.
-_COFACTOR_SOURCE_METADATA = ShippedTable(
+COFACTOR_SOURCE_METADATA_FORMAT = ShippedTable(
     resource=COFACTOR_SOURCE_METADATA_RESOURCE,
     columns=_SOURCE_METADATA_COLUMNS,
     noun="cofactor provenance table",
@@ -608,7 +615,9 @@ _COFACTOR_SOURCE_METADATA = ShippedTable(
 #: One **Cofactor table** as a **Shipped table**, one per species. The uniform four are the
 #: header's leading columns and one publisher's own follow them, namespaced; the **Gene id
 #: stem** is the key, so a table naming one twice is refused.
-_COFACTOR = ShippedTable(
+#: ``scripts/build_tf_cofactor.py`` writes a table through this same declaration, so the file
+#: it produces is held to what this module will hold it to before it reaches disk.
+COFACTOR_FORMAT = ShippedTable(
     resource=f"{COFACTOR_SUBDIR}/{{slug}}{COFACTOR_SUFFIX}",
     columns=UNIFORM_COLUMNS,
     noun="cofactor table",
@@ -655,11 +664,11 @@ def cofactor_metadata() -> tuple[CofactorProvenance, ...]:
     AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Caenorhabditis_elegans_Cof
     """
     return _read_metadata(
-        _COFACTOR_METADATA.text(),
+        COFACTOR_METADATA_FORMAT.text(),
         sources=_read_source_metadata(
-            _COFACTOR_SOURCE_METADATA.text(), origin=_COFACTOR_SOURCE_METADATA.origin()
+            COFACTOR_SOURCE_METADATA_FORMAT.text(), origin=COFACTOR_SOURCE_METADATA_FORMAT.origin()
         ),
-        origin=_COFACTOR_METADATA.origin(),
+        origin=COFACTOR_METADATA_FORMAT.origin(),
     )
 
 
@@ -739,7 +748,7 @@ def cofactor_table(species: str) -> CofactorTable | None:
     slug = species_slug(species)
     if slug not in cofactor_species():
         return None
-    origin = _COFACTOR.origin(slug=slug)
+    origin = COFACTOR_FORMAT.origin(slug=slug)
     provenance = next(
         (record for record in cofactor_metadata() if species_slug(record.species) == slug), None
     )
@@ -753,7 +762,9 @@ def cofactor_table(species: str) -> CofactorTable | None:
     # These are tens of kilobytes of shipped rows, so the seam is between the bytes and
     # the format: unpacking happens at the resource boundary and the parse below is a pure
     # function of text.
-    return parse_cofactor_table(_COFACTOR.text(slug=slug), provenance=provenance, origin=origin)
+    return parse_cofactor_table(
+        COFACTOR_FORMAT.text(slug=slug), provenance=provenance, origin=origin
+    )
 
 
 def parse_cofactor_table(
@@ -802,7 +813,7 @@ def parse_cofactor_table(
     (('ENSTEST0001',), ('ENSTEST0001',))
     """
     where = provenance.file if origin is None else origin
-    read = _COFACTOR.parse(text, origin=where)
+    read = COFACTOR_FORMAT.parse(text, origin=where)
     for number, row in enumerate(read.rows, start=2):
         _check_source(row[_SOURCE], number, origin=where)
     return CofactorTable(
@@ -828,7 +839,7 @@ def _read_metadata(
     text: str, *, sources: tuple[CofactorSource, ...], origin: str
 ) -> tuple[CofactorProvenance, ...]:
     """Read the species-keyed provenance table, joining each species' source rows onto it."""
-    rows = _COFACTOR_METADATA.parse(text, origin=origin).mappings()
+    rows = COFACTOR_METADATA_FORMAT.parse(text, origin=origin).mappings()
     named = {row["species"] for row in rows}
     orphan = sorted({source.species for source in sources} - named)
     if orphan:
@@ -855,5 +866,5 @@ def _read_source_metadata(text: str, *, origin: str) -> tuple[CofactorSource, ..
     """
     return tuple(
         CofactorSource.from_row(row, origin=origin)
-        for row in _COFACTOR_SOURCE_METADATA.parse(text, origin=origin).mappings()
+        for row in COFACTOR_SOURCE_METADATA_FORMAT.parse(text, origin=origin).mappings()
     )

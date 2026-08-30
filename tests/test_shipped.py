@@ -35,12 +35,12 @@ _TABLES: dict[str, ShippedTable] = {
     "annotation_metadata": metadata_module._ANNOTATION_TABLE,
     "xref_metadata": xref_module._XREF_TABLE,
     "homology_metadata": homology_module._HOMOLOGY_METADATA,
-    "census_metadata": census_module._CENSUS_METADATA,
-    "census": census_module._CENSUS,
-    "cofactor_metadata": cofactor_module._COFACTOR_METADATA,
-    "cofactor_source_metadata": cofactor_module._COFACTOR_SOURCE_METADATA,
-    "cofactor": cofactor_module._COFACTOR,
-    "link": link_module._LINK,
+    "census_metadata": census_module.CENSUS_METADATA_FORMAT,
+    "census": census_module.CENSUS_FORMAT,
+    "cofactor_metadata": cofactor_module.COFACTOR_METADATA_FORMAT,
+    "cofactor_source_metadata": cofactor_module.COFACTOR_SOURCE_METADATA_FORMAT,
+    "cofactor": cofactor_module.COFACTOR_FORMAT,
+    "link": link_module.LINK_FORMAT,
 }
 
 #: The modules that own one, and the one module that reads shipped data and owns none.
@@ -282,13 +282,13 @@ def test_the_repair_each_table_names_is_pinned_word_for_word() -> None:
     # These read well because each names its own noun and its own repair, and the point of
     # composing them here is that they go on reading exactly as well. Pinned verbatim, since a
     # message that has become generic is the regression this refactor could have introduced.
-    census = _raises(census_module._CENSUS, "")
+    census = _raises(census_module.CENSUS_FORMAT, "")
     assert "Re-run scripts/build_tf_census.py" in census
 
-    cofactor = _raises(cofactor_module._COFACTOR, "gene_id_stem\tsymbol\tis_cofactor\n")
+    cofactor = _raises(cofactor_module.COFACTOR_FORMAT, "gene_id_stem\tsymbol\tis_cofactor\n")
     assert "re-run scripts/build_tf_cofactor.py for that species" in cofactor
 
-    link = _raises(link_module._LINK, "nonsense\n")
+    link = _raises(link_module.LINK_FORMAT, "nonsense\n")
     assert "re-run scripts/build_tf_links.py for that species and release" in link
 
     # Homology's is a reason rather than a command — the table is maintained by hand — and it

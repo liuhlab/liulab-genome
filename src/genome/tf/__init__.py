@@ -31,6 +31,7 @@ Examples
 from genome.tf.link import (
     COMPLEX,
     LINK_COLUMNS,
+    LINK_FORMAT,
     LINK_SUBDIR,
     LINK_SUFFIX,
     LINK_TAX_GROUP,
@@ -54,6 +55,7 @@ from genome.tf.link import (
 __all__ = [
     "COMPLEX",
     "LINK_COLUMNS",
+    "LINK_FORMAT",
     "LINK_SUBDIR",
     "LINK_SUFFIX",
     "LINK_TAX_GROUP",

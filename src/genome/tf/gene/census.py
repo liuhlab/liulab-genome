@@ -93,6 +93,8 @@ from genome.shipped import (
 )
 
 __all__ = [
+    "CENSUS_FORMAT",
+    "CENSUS_METADATA_FORMAT",
     "CENSUS_METADATA_RESOURCE",
     "CENSUS_SUBDIR",
     "CENSUS_SUFFIX",
@@ -263,7 +265,7 @@ class CensusProvenance:
         >>> CensusProvenance.from_row(row, origin="census_metadata.tsv").ncbi_taxid
         9606
         """
-        return cls(**_CENSUS_METADATA.record(row, _PROVENANCE_TYPES, origin=origin))
+        return cls(**CENSUS_METADATA_FORMAT.record(row, _PROVENANCE_TYPES, origin=origin))
 
     def attribution(self) -> str:
         """Return the one line to print beside anything this census answered.
@@ -401,13 +403,15 @@ _PROVENANCE_TYPES: dict[str, Any] = get_type_hints(CensusProvenance)
 
 #: The provenance table as a **Shipped table**: where it lives, what its header is, what it
 #: is called and what repairs it. Every check the file is held to lives in
-#: :mod:`genome.shipped`.
-_CENSUS_METADATA = ShippedTable(
+#: :mod:`genome.shipped`. One row per species, which is also the row the generator replaces
+#: when it rebuilds one census and leaves the others alone (:mod:`genome.shipped_writer`).
+CENSUS_METADATA_FORMAT = ShippedTable(
     resource=CENSUS_METADATA_RESOURCE,
     columns=_METADATA_COLUMNS,
     noun="census provenance table",
     repair=_REBUILD,
     error=TFGeneTableError,
+    key=("species",),
     because=(
         "Every provenance column is required: a census nobody can cite is one this package "
         "may not redistribute"
@@ -418,7 +422,9 @@ _CENSUS_METADATA = ShippedTable(
 #: One census as a **Shipped table**, one per species. The uniform four are the header's
 #: leading columns and the publisher's own follow them; the **Gene id stem** is the key, so
 #: a census naming one twice is refused as the two verdicts it would let a caller read.
-_CENSUS = ShippedTable(
+#: ``scripts/build_tf_census.py`` writes a census through this same declaration, so the file
+#: it produces is held to what this module will hold it to before it reaches disk.
+CENSUS_FORMAT = ShippedTable(
     resource=f"{CENSUS_SUBDIR}/{{slug}}{CENSUS_SUFFIX}",
     columns=UNIFORM_COLUMNS,
     noun="census",
@@ -459,7 +465,7 @@ def census_metadata() -> tuple[CensusProvenance, ...]:
     >>> {record.species for record in census_metadata()} >= {"Homo sapiens"}
     True
     """
-    return _read_metadata(_CENSUS_METADATA.text(), origin=_CENSUS_METADATA.origin())
+    return _read_metadata(CENSUS_METADATA_FORMAT.text(), origin=CENSUS_METADATA_FORMAT.origin())
 
 
 @cache
@@ -539,7 +545,7 @@ def tf_gene_table(species: str) -> TFGeneTable | None:
     slug = species_slug(species)
     if slug not in census_species():
         return None
-    origin = _CENSUS.origin(slug=slug)
+    origin = CENSUS_FORMAT.origin(slug=slug)
     provenance = next(
         (record for record in census_metadata() if species_slug(record.species) == slug), None
     )
@@ -553,14 +559,14 @@ def tf_gene_table(species: str) -> TFGeneTable | None:
     # These are hundreds of kilobytes of shipped rows, so the seam is between the bytes and
     # the format: unpacking happens at the resource boundary and the parse below is a pure
     # function of text.
-    return _read_census(_CENSUS.text(slug=slug), provenance=provenance, origin=origin)
+    return _read_census(CENSUS_FORMAT.text(slug=slug), provenance=provenance, origin=origin)
 
 
 def _read_metadata(text: str, *, origin: str) -> tuple[CensusProvenance, ...]:
     """Read the provenance table from ``text``, holding it to what the shared reader checks."""
     return tuple(
         CensusProvenance.from_row(row, origin=origin)
-        for row in _CENSUS_METADATA.parse(text, origin=origin).mappings()
+        for row in CENSUS_METADATA_FORMAT.parse(text, origin=origin).mappings()
     )
 
 
@@ -572,7 +578,7 @@ def _read_census(text: str, *, provenance: CensusProvenance, origin: str) -> TFG
     text came from and is named in every message, since regenerating that file is the
     only repair.
     """
-    read = _CENSUS.parse(text, origin=origin)
+    read = CENSUS_FORMAT.parse(text, origin=origin)
     return TFGeneTable(
         species=provenance.species, provenance=provenance, columns=read.columns, rows=read.rows
     )

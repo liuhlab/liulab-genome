@@ -55,10 +55,10 @@ named in the error. The profile count is checked against the count the package's
 loader pins for that release, so a dump that is not the release it claims to be is an
 error rather than a short table.
 
-*It writes byte-stable output.* Rows are sorted by **Gene id stem** and then by rank,
-cells are written with no quoting, the total information content is rendered to a
-fixed number of decimals, the line terminator is ``\n``, and gzip is given ``mtime=0``
-— so re-running on an unchanged input produces no diff.
+*It writes rows in a total order.* They are sorted by **Gene id stem** and then by
+rank, and the total information content is rendered to a fixed number of decimals, so
+what this hands over is already the same on every machine. Everything after that, the
+rendering and the compression, is :mod:`genome.shipped_writer`'s.
 
 Usage
 -----
@@ -72,69 +72,44 @@ Add ``--data-dir`` to write somewhere other than ``src/genome/data/tf_link``.
 from __future__ import annotations
 
 import argparse
-import gzip
 import sqlite3
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 
 import numpy as np
 
-from genome.tf.gene import TRUE_CELL, UNIFORM_COLUMNS, TFGeneTable, census_species, tf_gene_table
+# The format is the package's and this script writes through it: the columns, the file
+# name, the two **Role**s, the flag spellings and the separator are declared once, beside
+# the reader, and the writer holds what is about to be written to exactly them.
+from genome.shipped_writer import shipped_name, write_table
+from genome.tf import COMPLEX, LINK_COLUMNS, LINK_FORMAT, LINK_SUBDIR, MONOMER, VALUE_SEPARATOR
+from genome.tf.gene import (
+    FALSE_CELL,
+    TRUE_CELL,
+    UNIFORM_COLUMNS,
+    TFGeneTable,
+    census_species,
+    tf_gene_table,
+)
 from genome.tf.motif.jaspar import DEFAULT_TAX_GROUP, JASPAR_RELEASES, MOTIF_COUNTS
 from genome.tf.motif.motif import BASES, Motif
 
-#: Where the shipped link tables live, relative to the repository root.
-DATA_SUBDIR = Path("src") / "genome" / "data" / "tf_link"
-
-#: What one link table is called: the species slug, the release under this prefix, then
-#: :data:`LINK_SUFFIX` — ``homo_sapiens.jaspar2026.motif_link_table.tsv.gz``. Two keys
-#: name one table, so both are in the name and a new release or a new species is a file
-#: drop.
-RELEASE_PREFIX = "jaspar"
-
-#: The end of every link table's name, and what enumerating the directory matches on.
-LINK_SUFFIX = ".motif_link_table.tsv.gz"
+#: Where the shipped link tables live, relative to the repository root — the package's
+#: own resource directory, under the source tree it is packaged from.
+DATA_SUBDIR = Path("src") / "genome" / LINK_SUBDIR
 
 #: The alias table beside them: the **Motif name** parts no census spells that way. Three
 #: rows, and **plain**, as every small metadata table in this package's data is — the
 #: gzip is for the bulk tables, and a three-row file curated by hand is worth more as a
-#: readable diff than as 200 saved bytes.
+#: readable diff than as 200 saved bytes. It is read here and by nothing in the wheel:
+#: it is an input to the join and never an answer the package gives.
 ALIAS_FILE = "motif_name_alias.tsv"
-
-#: A link table's columns, in table order. The release and the species lead every row so
-#: that two tables concatenate into one frame that still says what each row came from.
-LINK_COLUMNS = (
-    "release",
-    "species",
-    "gene_id_stem",
-    "symbol",
-    "motif_id",
-    "motif_name",
-    "role",
-    "partners",
-    "motif_tax_ids",
-    "is_cross_species",
-    "total_information_content",
-    "rank",
-)
 
 #: The alias table's columns, in table order. ``gene_id_stem`` is the key: a symbol is
 #: what moved, so keying on one is keying on the thing that changed.
 ALIAS_COLUMNS = ("species", "motif_name_part", "gene_id_stem", "census_symbol", "note")
-
-#: The two **Role**s, and the only two. ``monomer`` where the profile names one gene,
-#: ``complex`` otherwise, so a heterodimer matrix is never read as a monomer's.
-MONOMER, COMPLEX = "monomer", "complex"
-
-#: How a flag column is spelled, which is how a census spells its own.
-TRUE_FLAG, FALSE_FLAG = "yes", "no"
-
-#: What separates one value from the next inside a cell — the partners of a complex and
-#: a profile's tax ids. A semicolon and never a comma or a tab: the file is read by
-#: splitting on tabs and carries no quoting.
-VALUE_SEPARATOR = ";"
 
 #: How the **Motif name** spells the join between the genes a complex names.
 NAME_SEPARATOR = "::"
@@ -168,9 +143,23 @@ class MotifLinkSourceError(ValueError):
     """A link table cannot be built from what it was handed.
 
     Either the release's dump is not the file this script was written against, the
-    census is not the shape a census is, or the alias table says something no census
-    confirms. Every message names what was wrong and what to fix.
+    census is not the shape a census is, the alias table says something no census
+    confirms, or what the join would write is not a file a **Motif link** reader would
+    accept back. Every message names what was wrong and what to fix.
     """
+
+
+#: What repairs a refused build: never *re-run this*, which is what the reader's own
+#: refusals say, because re-running is what has just failed.
+_REPAIR = (
+    "fix the join in scripts/build_tf_links.py, or reconcile the census and the release's "
+    "dump before building from them"
+)
+
+#: A **Motif link** table as this script writes one: the package's own declaration of the
+#: format, refusing in this script's words. Everything about what a link table *is* comes
+#: from :mod:`genome.tf.link`; only the error class and the repair are the build's.
+WRITTEN_LINKS = replace(LINK_FORMAT, error=MotifLinkSourceError, repair=_REPAIR)
 
 
 @dataclass(frozen=True)
@@ -684,7 +673,7 @@ def build_table(
             link.profile.role,
             VALUE_SEPARATOR.join(link.partners),
             VALUE_SEPARATOR.join(link.profile.tax_ids),
-            TRUE_FLAG if link.is_cross_species else FALSE_FLAG,
+            TRUE_CELL if link.is_cross_species else FALSE_CELL,
             f"{link.profile.total_information_content:.{IC_DECIMALS}f}",
             str(rank),
         )
@@ -695,13 +684,17 @@ def build_table(
 def check_table(rows: Sequence[Sequence[str]], *, origin: str) -> None:
     """Hold the built table to what a shipped link table promises, or refuse to write it.
 
+    What is checked here is what a link *means*, since the shape a **Shipped table**
+    has — the header, the width of a row, what a cell may carry, the columns no row may
+    leave blank — is checked as the file is written, against the package's own
+    declaration of the format.
+
     Raises
     ------
     MotifLinkSourceError
-        If the table is empty, a row is the wrong width, a cell carries a tab or a
-        newline, a **Role** is neither of the two declared, a complex names no partner
-        or a monomer names one — the file is read by splitting on tabs, and a role that
-        disagrees with its partners is the confusion **Role** exists to end.
+        If the table is empty, a **Role** is neither of the two declared, or a complex
+        names no partner or a monomer names one — a role that disagrees with its
+        partners is the confusion **Role** exists to end.
     """
     if not rows:
         raise MotifLinkSourceError(
@@ -712,16 +705,6 @@ def check_table(rows: Sequence[Sequence[str]], *, origin: str) -> None:
     role_at = LINK_COLUMNS.index("role")
     partners_at = LINK_COLUMNS.index("partners")
     for number, row in enumerate(rows, start=2):
-        if len(row) != len(LINK_COLUMNS):
-            raise MotifLinkSourceError(
-                f"{origin} line {number} would hold {len(row)} cells where the header declares "
-                f"{len(LINK_COLUMNS)}."
-            )
-        if any("\t" in cell or "\n" in cell or "\r" in cell for cell in row):
-            raise MotifLinkSourceError(
-                f"{origin} line {number} would carry a tab or a newline inside a cell. A link "
-                f"table is a plain TSV with no quoting, so such a cell has to be cleaned first."
-            )
         if row[role_at] not in (MONOMER, COMPLEX):
             raise MotifLinkSourceError(
                 f"{origin} line {number} would spell its role {row[role_at]!r}, and a link is "
@@ -733,18 +716,6 @@ def check_table(rows: Sequence[Sequence[str]], *, origin: str) -> None:
                 f"{row[partners_at]!r}. A complex names at least one partner and a monomer names "
                 f"none — that is what keeps a heterodimer matrix from being read as a monomer's."
             )
-
-
-def render(rows: Sequence[Sequence[str]]) -> bytes:
-    r"""Return the shipped table as unpacked TSV bytes — no quoting, ``\n`` throughout."""
-    lines = ["\t".join(LINK_COLUMNS)]
-    lines.extend("\t".join(row) for row in rows)
-    return ("\n".join(lines) + "\n").encode("utf-8")
-
-
-def write_table(unpacked: bytes, path: Path) -> None:
-    """Write ``unpacked`` to ``path`` as gzip with no timestamp, so two runs agree byte for byte."""
-    path.write_bytes(gzip.compress(unpacked, compresslevel=9, mtime=0))
 
 
 def report_residuals(
@@ -801,13 +772,12 @@ def build(species: str, release: str, dump: Path, data_dir: Path) -> None:
     taxid = str(census.provenance.ncbi_taxid)
     profiles = read_profiles(dump, release)
     ranked = rank_links(build_links(profiles, lookup, symbols, taxid))
-    file_name = link_file_name(species, release)
+    file_name = shipped_name(LINK_FORMAT, slug=species, release=release)
     rows = build_table(ranked, release=release, species=census.species)
     check_table(rows, origin=file_name)
-    unpacked = render(rows)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    write_table(unpacked, data_dir / file_name)
-    packed = (data_dir / file_name).stat().st_size
+    written = write_table(
+        WRITTEN_LINKS, data_dir, LINK_COLUMNS, rows, slug=species, release=release
+    )
     genes = {link.gene_id_stem for link, _ in ranked}
     cross = sum(1 for link, _ in ranked if link.is_cross_species)
     monomer = sum(1 for link, _ in ranked if link.profile.role == MONOMER)
@@ -815,13 +785,8 @@ def build(species: str, release: str, dump: Path, data_dir: Path) -> None:
     print(f"  {monomer} monomer, {len(rows) - monomer} complex; {cross} cross-species")
     print(f"  {len(profiles)} CORE {DEFAULT_TAX_GROUP} profiles in the {release} release")
     report_residuals(profiles, lookup, taxid, aliases)
-    print(f"  unpacked {len(unpacked)} bytes")
-    print(f"  packed   {packed} bytes ({len(unpacked) / packed:.1f}x)")
-
-
-def link_file_name(species: str, release: str) -> str:
-    """Return what one link table is called: the species slug, the release, then the suffix."""
-    return f"{species}.{RELEASE_PREFIX}{release}{LINK_SUFFIX}"
+    print(f"  unpacked {len(written.unpacked)} bytes")
+    print(f"  packed   {written.packed} bytes ({len(written.unpacked) / written.packed:.1f}x)")
 
 
 def main(argv: Sequence[str] | None = None) -> None:

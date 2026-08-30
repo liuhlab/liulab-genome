@@ -34,6 +34,8 @@ from genome.tf.gene.annotation import (
     tf_gene_list,
 )
 from genome.tf.gene.census import (
+    CENSUS_FORMAT,
+    CENSUS_METADATA_FORMAT,
     CENSUS_METADATA_RESOURCE,
     CENSUS_SUBDIR,
     CENSUS_SUFFIX,
@@ -50,6 +52,8 @@ from genome.tf.gene.census import (
 from genome.tf.species import NoTFCensusError
 
 __all__ = [
+    "CENSUS_FORMAT",
+    "CENSUS_METADATA_FORMAT",
     "CENSUS_METADATA_RESOURCE",
     "CENSUS_SUBDIR",
     "CENSUS_SUFFIX",

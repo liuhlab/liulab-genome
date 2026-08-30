@@ -62,6 +62,14 @@ from typing import Any, get_args
 #: looser — see :func:`parse_cell`, where a blank flag cell is the real answer *no*.
 TRUE_CELL, FALSE_CELL = "yes", "no"
 
+#: How one cell spells more than one value — a **Motif link**'s partners and tax ids, a
+#: **Cofactor table**'s functions and complexes, a census's Interpro ids. One separator across
+#: every table this package ships, so a caller never has to remember which column uses which,
+#: and a semicolon rather than a comma or a tab: the files carry no quoting and are read by
+#: splitting on the tab. A published value that already contains it is refused by whatever
+#: writes the cell, since writing it unchanged would make one value read back as two.
+VALUE_SEPARATOR = ";"
+
 #: Cell spellings a curated table's boolean column accepts, lower-cased. Anything else in one is
 #: a typo in a hand-maintained table and says so rather than reading as ``False``.
 _TRUE_CELLS = frozenset({"yes", "true", "1"})
@@ -485,7 +493,7 @@ class ShippedTable:
                 raise self.error(
                     f"{origin} carries the columns {list(columns)} where every {self.noun} "
                     f"carries {list(self.columns)}. The header is the format and not a hint: "
-                    f"fix it, keeping the columns in that order{self._clause}"
+                    f"fix it, keeping the columns in that order{self.repair_clause}"
                 )
             return
         wide = len(self.columns)
@@ -494,12 +502,12 @@ class ShippedTable:
                 f"{origin} leads with the columns {list(columns[:wide])} where every "
                 f"{self.noun} leads with {list(self.columns)}. Those {wide} are the only "
                 f"columns one {self.noun} shares with another, so a file without them cannot be "
-                f"read as one{self._clause}"
+                f"read as one{self.repair_clause}"
             )
         if len(set(columns)) != len(columns):
             raise self.error(
                 f"{origin} names a column twice: {list(columns)}. Each column is named once, so "
-                f"two of one name would let a reader take either{self._clause}"
+                f"two of one name would let a reader take either{self.repair_clause}"
             )
 
     def _read_row(
@@ -512,7 +520,7 @@ class ShippedTable:
                 f"{origin} line {number} holds {len(cells)} cells where the header declares "
                 f"{len(columns)}. {self._an.capitalize()} {self.noun} is a plain TSV with no "
                 f"quoting, so a cell carrying a tab is a defect in what wrote it rather than "
-                f"something to parse around{self._clause}"
+                f"something to parse around{self.repair_clause}"
             )
         row = dict(zip(columns, cells, strict=True))
         for column in self.flags:
@@ -521,13 +529,13 @@ class ShippedTable:
                     f"{origin} line {number} spells its {column!r} cell {row[column]!r}, and "
                     f"{self._an} {self.noun} spells a flag {TRUE_CELL!r} or {FALSE_CELL!r}. One "
                     f"spelling of *yes* across every table this package ships, so a third is a "
-                    f"defect in what wrote the file and not a new kind of answer{self._clause}"
+                    f"defect in what wrote the file and not a new kind of answer{self.repair_clause}"
                 )
         for column in self.required:
             if not row[column]:
                 raise self.error(
                     f"{origin} line {number} leaves the {column!r} column blank."
-                    f"{self._reason}{self._clause}"
+                    f"{self._reason}{self.repair_clause}"
                 )
         return tuple(cell if cell else None for cell in cells)
 
@@ -547,7 +555,7 @@ class ShippedTable:
                 raise self.error(
                     f"{origin} names the {words} {spelled!r} more than once. "
                     f"{self._an.capitalize()} {self.noun} carries one row per {words}, so two "
-                    f"rows for one would let a caller read either{self._clause}"
+                    f"rows for one would let a caller read either{self.repair_clause}"
                 )
             seen.add(identity)
 
@@ -564,8 +572,28 @@ class ShippedTable:
         return "an" if self.noun[:1].lower() in "aeiou" else "a"
 
     @property
-    def _clause(self) -> str:
-        """The repair as a trailing clause, closing the sentence either way."""
+    def repair_clause(self) -> str:
+        """Return the repair as the trailing clause a refusal about this table closes with.
+
+        The half of a message a table declares and a shared refusal composes, so that
+        whatever writes a table can close its own refusals in the same words the reader
+        closes its own with. A table with no generator has no command to name and closes
+        the sentence with a full stop instead.
+
+        Returns
+        -------
+        str
+            ``" — re-run scripts/build_tf_census.py."``, or ``"."``.
+
+        Examples
+        --------
+        >>> ShippedTable(resource="", columns=("id",), noun="tiny table").repair_clause
+        '.'
+        >>> ShippedTable(
+        ...     resource="", columns=("id",), noun="tiny table", repair="re-run the build"
+        ... ).repair_clause
+        ' — re-run the build.'
+        """
         return f" — {self.repair}." if self.repair else "."
 
     def _then(self, tail: str) -> str:
@@ -697,7 +725,7 @@ def _parse_text(
     except (TypeError, ValueError) as error:
         raise _raised(table)(
             f"{_says(name, text, origin)}, which {declared.__name__} cannot read. Fix that cell "
-            f"to a value {declared.__name__} accepts{'.' if table is None else table._clause}"
+            f"to a value {declared.__name__} accepts{'.' if table is None else table.repair_clause}"
         ) from error
 
 
@@ -717,7 +745,7 @@ def _blank(
     where = f"{origin} leaves" if origin else "the table leaves"
     return table.error(
         f"{where} the {name!r} column blank{table._names(row)}.{table._reason} Fill that cell "
-        f"in{table._clause}"
+        f"in{table.repair_clause}"
     )
 
 

@@ -86,10 +86,10 @@ id the archive does not name, one the archive gives no Ensembl id, a stem HGNC n
 under two symbols, and a published value that already contains
 :data:`VALUE_SEPARATOR` are each a refusal naming the rows, never a blanked cell.
 
-*It writes byte-stable output.* Rows keep the publishers' own order — AnimalTFDB's
-list, then the genes only EpiFactors names, in its order — cells are written with no
-quoting, the line terminator is ``\n``, and gzip is given ``mtime=0``, so re-running
-on unchanged inputs produces no diff.
+*It writes rows in the publishers' own order* — AnimalTFDB's list, then the genes
+only EpiFactors names, in its order — which is already deterministic and is all
+byte-stability needs of a recipe. Everything after that, the rendering and the
+compression and the provenance merges, is :mod:`genome.shipped_writer`'s.
 
 Usage
 -----
@@ -108,64 +108,39 @@ Add ``--data-dir`` to write somewhere other than ``src/genome/data/tf_cofactor``
 from __future__ import annotations
 
 import argparse
-import gzip
-import hashlib
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pandas as pd
 
-# The one function this script shares with the package rather than copying. Everything
-# else below is the writer's own declaration of what it writes.
-from genome.tf.gene.census import species_slug
+# The format is the package's and this script writes through it: the columns, the file
+# names, the source vocabulary, the flag and the separator are declared once, beside the
+# reader, and the writer holds what is about to be written to exactly them. What is left
+# below is this script's own — the publishers' files, and how they are read.
+from genome.shipped import VALUE_SEPARATOR
+from genome.shipped_writer import WrittenTable, merge_rows, shipped_name, write_table
+from genome.tf.cofactor import (
+    ANIMALTFDB,
+    BOTH,
+    COFACTOR_FORMAT,
+    COFACTOR_METADATA_FORMAT,
+    COFACTOR_SOURCE_METADATA_FORMAT,
+    COFACTOR_SUBDIR,
+    EPIFACTORS,
+    HGNC,
+    TRUE_CELL,
+    species_slug,
+)
 
-#: Where the shipped tables live, relative to the repository root.
-DATA_SUBDIR = Path("src") / "genome" / "data" / "tf_cofactor"
-
-#: What one table file is called: the species slug, then this. Kept in step with
-#: ``genome.tf.cofactor.table.COFACTOR_SUFFIX``, which is what enumerates them.
-COFACTOR_SUFFIX = ".cofactor_table.tsv.gz"
-
-#: The provenance table keyed by species, and its columns in table order.
-METADATA_FILE = "cofactor_metadata.tsv"
-METADATA_COLUMNS = ("species", "ncbi_taxid", "file", "sha256")
-
-#: The provenance table keyed by species *and* source, and its columns in table order.
-#: Two tables and not one, because one row cannot describe a file built from three
-#: publishers and joining them positionally inside a cell breaks quietly. This one is
-#: deliberately ragged: one row per species here, three for a species built from three.
-SOURCE_METADATA_FILE = "cofactor_source_metadata.tsv"
-SOURCE_METADATA_COLUMNS = ("species", "source", "publisher", "version", "pubmed_id", "source_url")
-
-#: The four columns every shipped table carries under the same name, in the same place.
-UNIFORM_COLUMNS = ("gene_id_stem", "symbol", "is_cofactor", "source")
+#: Where the shipped tables live, relative to the repository root — the package's own
+#: resource directory, under the source tree it is packaged from.
+DATA_SUBDIR = Path("src") / "genome" / COFACTOR_SUBDIR
 
 #: AnimalTFDB's own two columns, under a namespaced spelling, after the uniform four.
 #: A second publisher's group is more columns here and one more source row — never a
 #: change to the format.
 ANIMALTFDB_COLUMNS = ("animaltfdb_family", "animaltfdb_category")
-
-#: How a shipped table spells its cofactor flag.
-TRUE_CELL, FALSE_CELL = "yes", "no"
-
-#: The values of the uniform ``source`` column, from the closed vocabulary
-#: ``genome.tf.cofactor`` validates on read. ``both`` says two publishers listed the
-#: gene — agreement on membership only, and never on how either of them classified it.
-ANIMALTFDB, EPIFACTORS, BOTH = "animaltfdb", "epifactors", "both"
-
-#: A source that supplies identifiers and lists no gene. It never spells a row's
-#: ``source`` and appears only in the provenance table, which is a wider vocabulary for
-#: exactly this reason: human's 442 EpiFactors-only stems exist only because HGNC said
-#: so, and a source that earns a stem earns a citation.
-HGNC = "hgnc"
-
-#: How a cell spells more than one value. The separator every multi-valued cell in this
-#: package already uses — ``interpro_ids`` in a **TF gene table**, a **Motif link**'s
-#: partners, ``genome.tf.link.VALUE_SEPARATOR`` — so that a caller never has to remember
-#: which column uses which. :func:`published_values` refuses a publisher's value that
-#: already contains it rather than writing a cell that splits into the wrong values.
-VALUE_SEPARATOR = ";"
 
 #: The header the per-species cofactor list publishes, in order.
 GENE_LIST_COLUMNS = ("Species", "Symbol", "Ensembl", "Family", "Entrez_ID")
@@ -273,9 +248,33 @@ FAMILY_SPELLINGS: Mapping[str, str] = {
 class CofactorSourceError(ValueError):
     """The cofactor table asked for cannot be built.
 
-    Either the publisher's files are not the files the recipe was written against, or
-    the two of them no longer reconcile with each other.
+    Either the publisher's files are not the files the recipe was written against, the
+    two of them no longer reconcile with each other, or what they would write is not a
+    file a **Cofactor table** reader would accept back.
     """
+
+
+#: What repairs a refused build: never *re-run this*, which is what the reader's own
+#: refusals say, because re-running is what has just failed.
+_REPAIR = (
+    "fix the column lists in scripts/build_tf_cofactor.py, or reconcile the publishers' "
+    "files before building from them"
+)
+
+#: What repairs a provenance table that is already there and is not the shape it should be.
+_REPAIR_PROVENANCE = "fix that file's header, or move it aside and let this script write it afresh"
+
+#: A **Cofactor table** as this script writes one, and the two provenance tables beside
+#: it: the package's own declarations of all three formats, refusing in this script's
+#: words. Everything about what a table *is* comes from :mod:`genome.tf.cofactor.table`;
+#: only the error class and the repair are the build's.
+WRITTEN_COFACTOR = replace(COFACTOR_FORMAT, error=CofactorSourceError, repair=_REPAIR)
+WRITTEN_METADATA = replace(
+    COFACTOR_METADATA_FORMAT, error=CofactorSourceError, repair=_REPAIR_PROVENANCE
+)
+WRITTEN_SOURCE_METADATA = replace(
+    COFACTOR_SOURCE_METADATA_FORMAT, error=CofactorSourceError, repair=_REPAIR_PROVENANCE
+)
 
 
 @dataclass(frozen=True)
@@ -361,8 +360,8 @@ class Recipe:
 
     @property
     def file_name(self) -> str:
-        """Return the table's file name."""
-        return f"{self.slug}{COFACTOR_SUFFIX}"
+        """Return the table's file name, as the package's own declaration spells it."""
+        return shipped_name(COFACTOR_FORMAT, slug=self.slug)
 
     @property
     def sources(self) -> tuple[Source, ...]:
@@ -688,9 +687,13 @@ def build_table(
     Membership and classification are both AnimalTFDB's here, and the symbol is its own
     spelling: HGNC names human genes and no others, so mouse and worm are relayed
     unaltered rather than corrected against a nomenclature that does not cover them.
+
+    What a **Cofactor table** must be — the uniform columns first, one row per **Gene id
+    stem**, a flag spelled the one way — is checked as it is written, against the
+    package's own declaration of the format.
     """
     animaltfdb = animaltfdb_rows(genes, summary, recipe, origin=origin)
-    table = pd.DataFrame(
+    return pd.DataFrame(
         {
             "gene_id_stem": animaltfdb["gene_id_stem"],
             "symbol": animaltfdb["symbol"],
@@ -704,8 +707,6 @@ def build_table(
             "animaltfdb_category": animaltfdb["animaltfdb_category"],
         }
     )
-    check_table(table, origin=recipe.file_name)
-    return table
 
 
 def hgnc_stems(hgnc: pd.DataFrame, *, origin: str) -> dict[str, str]:
@@ -918,102 +919,7 @@ def build_union_table(
             },
         }
     )
-    check_table(table, origin=recipe.file_name)
     return table
-
-
-def check_table(table: pd.DataFrame, *, origin: str) -> None:
-    """Hold the built table to what a shipped **Cofactor table** promises, or refuse to write it.
-
-    Raises
-    ------
-    CofactorSourceError
-        If the uniform four are not first, a **Gene id stem** is blank or repeated, the
-        cofactor flag is spelled a way no table spells one, or a cell carries a tab or a
-        newline — the shipped file is read by splitting on those, and quoting it would
-        make a plain TSV that is not plainly readable.
-    """
-    columns = tuple(table.columns)
-    if columns[: len(UNIFORM_COLUMNS)] != UNIFORM_COLUMNS:
-        raise CofactorSourceError(
-            f"{origin} would lead with {columns[: len(UNIFORM_COLUMNS)]} where every cofactor "
-            f"table leads with {UNIFORM_COLUMNS}. Fix the column list in this script."
-        )
-    stems = table["gene_id_stem"]
-    if (stems == "").any():
-        raise CofactorSourceError(
-            f"{origin} would carry a blank gene id stem. A cofactor table is keyed by stem, so "
-            f"the publisher's file has to be reconciled first."
-        )
-    if stems.duplicated().any():
-        repeated = sorted(stems[stems.duplicated()].unique())
-        raise CofactorSourceError(
-            f"{origin} would name these gene id stems more than once: {repeated}. One row per "
-            f"gene, so the publisher's file has to be reconciled first."
-        )
-    flags = set(table["is_cofactor"].unique())
-    if not flags <= {TRUE_CELL, FALSE_CELL}:
-        raise CofactorSourceError(
-            f"{origin} would spell its cofactor flag {sorted(flags)} where a table spells it "
-            f"{TRUE_CELL!r} or {FALSE_CELL!r}. Fix the flag in this script."
-        )
-    for name in columns:
-        if table[name].str.contains("[\t\r\n]", regex=True).any():
-            raise CofactorSourceError(
-                f"{origin} would carry a tab or a newline inside the {name!r} column. A cofactor "
-                f"table is read by splitting on those, so such a cell has to be cleaned first."
-            )
-
-
-def render(table: pd.DataFrame) -> bytes:
-    r"""Return the shipped table as unpacked TSV bytes — no quoting, ``\n`` throughout."""
-    lines = ["\t".join(table.columns)]
-    lines.extend("\t".join(row) for row in table.itertuples(index=False, name=None))
-    return ("\n".join(lines) + "\n").encode("utf-8")
-
-
-def write_table(unpacked: bytes, path: Path) -> None:
-    """Write ``unpacked`` to ``path`` as gzip with no timestamp, so two runs agree byte for byte."""
-    path.write_bytes(gzip.compress(unpacked, compresslevel=9, mtime=0))
-
-
-def write_metadata(
-    path: Path, columns: tuple[str, ...], rows: list[dict[str, str]], *, keys: tuple[str, ...]
-) -> None:
-    """Rewrite one provenance table with ``rows`` in place of every row they key over.
-
-    ``keys`` is what makes a row the same row — the species for one table, the species
-    and the source for the ragged one. The whole file is rewritten sorted by those keys,
-    so a rebuild is a diff of the rows that changed and nothing else.
-    """
-    replaced = {tuple(row[key] for key in keys) for row in rows}
-    kept = [
-        dict(existing)
-        for existing in read_metadata(path, columns)
-        if tuple(existing[key] for key in keys) not in replaced
-    ]
-    kept.extend(rows)
-    kept.sort(key=lambda row: tuple(row[key] for key in keys))
-    lines = ["\t".join(columns)]
-    lines.extend("\t".join(row[name] for name in columns) for row in kept)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def read_metadata(path: Path, columns: tuple[str, ...]) -> list[dict[str, str]]:
-    """Return one provenance table's rows as text, empty when no table is there yet.
-
-    Raises
-    ------
-    CofactorSourceError
-        If the table on disk carries different columns from the ones being written,
-        since merging into it would then produce a file neither shape can read.
-    """
-    if not path.is_file():
-        return []
-    lines = path.read_text(encoding="utf-8").splitlines()
-    header = tuple(lines[0].split("\t"))
-    check_header(header, columns, origin=str(path))
-    return [dict(zip(header, line.split("\t"), strict=True)) for line in lines[1:] if line]
 
 
 def assemble(
@@ -1058,9 +964,7 @@ def assemble(
     )
 
 
-def report(
-    table: pd.DataFrame, recipe: Recipe, *, unpacked: bytes, digest: str, packed: int
-) -> None:
+def report(table: pd.DataFrame, recipe: Recipe, *, written: WrittenTable) -> None:
     """Print what was written, in the numbers a reviewer checks a rebuild against.
 
     A blank cell counts towards nothing: it is a publisher who never named the gene,
@@ -1083,8 +987,8 @@ def report(
             }
             print(f"  {name}: {len(values)} distinct values over {(table[name] != '').sum()} genes")
     print(f"  sources: {', '.join(source.source for source in recipe.sources)}")
-    print(f"  unpacked {len(unpacked)} bytes, sha256 {digest}")
-    print(f"  packed   {packed} bytes ({len(unpacked) / packed:.1f}x)")
+    print(f"  unpacked {len(written.unpacked)} bytes, sha256 {written.sha256}")
+    print(f"  packed   {written.packed} bytes ({len(written.unpacked) / written.packed:.1f}x)")
 
 
 def build(
@@ -1105,26 +1009,28 @@ def build(
         epifactors_path=epifactors_path,
         hgnc_path=hgnc_path,
     )
-    unpacked = render(table)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    write_table(unpacked, data_dir / recipe.file_name)
-    digest = hashlib.sha256(unpacked).hexdigest()
-    write_metadata(
-        data_dir / METADATA_FILE,
-        METADATA_COLUMNS,
+    written = write_table(
+        WRITTEN_COFACTOR,
+        data_dir,
+        tuple(table.columns),
+        table.itertuples(index=False, name=None),
+        slug=recipe.slug,
+    )
+    merge_rows(
+        WRITTEN_METADATA,
+        data_dir,
         [
             {
                 "species": recipe.species,
                 "ncbi_taxid": str(recipe.ncbi_taxid),
                 "file": recipe.file_name,
-                "sha256": digest,
+                "sha256": written.sha256,
             }
         ],
-        keys=("species",),
     )
-    write_metadata(
-        data_dir / SOURCE_METADATA_FILE,
-        SOURCE_METADATA_COLUMNS,
+    merge_rows(
+        WRITTEN_SOURCE_METADATA,
+        data_dir,
         [
             {
                 "species": recipe.species,
@@ -1136,15 +1042,8 @@ def build(
             }
             for source in recipe.sources
         ],
-        keys=("species", "source"),
     )
-    report(
-        table,
-        recipe,
-        unpacked=unpacked,
-        digest=digest,
-        packed=(data_dir / recipe.file_name).stat().st_size,
-    )
+    report(table, recipe, written=written)
 
 
 def main(argv: Sequence[str] | None = None) -> None:

@@ -30,9 +30,9 @@ nothing downstream would say so. Every published name is listed here, so a
 re-spelling is one missing name and one unexpected name, and both are named in the
 error.
 
-*It writes byte-stable output.* Rows keep the publisher's own order, cells are
-written with no quoting, the line terminator is ``\n``, and gzip is given
-``mtime=0``, so re-running on an unchanged input produces no diff.
+*It writes rows in the publisher's own order*, which is already deterministic and
+is all byte-stability needs of a recipe. Everything after that — the rendering, the
+compression and the provenance merge — is :mod:`genome.shipped_writer`'s.
 
 Usage
 -----
@@ -45,42 +45,27 @@ Add ``--data-dir`` to write somewhere other than ``src/genome/data/tf_gene``.
 from __future__ import annotations
 
 import argparse
-import gzip
-import hashlib
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pandas as pd
 
-#: Where the shipped censuses live, relative to the repository root.
-DATA_SUBDIR = Path("src") / "genome" / "data" / "tf_gene"
-
-#: What one census file is called: the species slug, then this. Kept in step with
-#: ``genome.tf.gene.census.CENSUS_SUFFIX``, which is what enumerates them.
-CENSUS_SUFFIX = ".tf_gene_table.tsv.gz"
-
-#: The provenance table beside the censuses.
-METADATA_FILE = "census_metadata.tsv"
-
-#: Its columns, in table order.
-METADATA_COLUMNS = (
-    "species",
-    "ncbi_taxid",
-    "file",
-    "publisher",
-    "version",
-    "pubmed_id",
-    "family_column",
-    "source_url",
-    "sha256",
+# The format is the package's and this script writes through it: the columns, the file
+# name and every rule a census is held to are declared once, beside the reader, and the
+# writer holds what is about to be written to exactly them.
+from genome.shipped_writer import merge_rows, shipped_name, write_table
+from genome.tf.gene import (
+    CENSUS_FORMAT,
+    CENSUS_METADATA_FORMAT,
+    CENSUS_SUBDIR,
+    TRUE_CELL,
+    species_slug,
 )
 
-#: The four columns every census carries under the same name, in the same place.
-UNIFORM_COLUMNS = ("gene_id_stem", "symbol", "is_tf", "dbd_family")
-
-#: How the uniform TF flag is spelled in a shipped census.
-TRUE_CELL, FALSE_CELL = "yes", "no"
+#: Where the shipped censuses live, relative to the repository root — the package's own
+#: resource directory, under the source tree it is packaged from.
+DATA_SUBDIR = Path("src") / "genome" / CENSUS_SUBDIR
 
 #: The publishers' own spelling of *nothing recorded here*, which ships as a blank
 #: cell instead — blank is how every other table in this package spells unknown.
@@ -92,9 +77,29 @@ _ABSENT_CELLS = frozenset({"None"})
 class CensusSourceError(ValueError):
     """The census asked for cannot be built.
 
-    Either the publisher's file is not the file the recipe was written against, or the
-    recipe is not the shape a recipe has.
+    Either the publisher's file is not the file the recipe was written against, the
+    recipe is not the shape a recipe has, or what the recipe would write is not a file
+    a census reader would accept back.
     """
+
+
+#: What repairs a refused build: never *re-run this*, which is what the reader's own
+#: refusals say, because re-running is what has just failed.
+_REPAIR = (
+    "fix the recipe in scripts/build_tf_census.py, or reconcile the publisher's file "
+    "before building from it"
+)
+
+#: A census as this script writes one, and the provenance table beside it: the package's
+#: own declarations of both formats, refusing in this script's words. Everything about
+#: what a census *is* comes from :mod:`genome.tf.gene.census`; only the error class and
+#: the repair are the build's.
+WRITTEN_CENSUS = replace(CENSUS_FORMAT, error=CensusSourceError, repair=_REPAIR)
+WRITTEN_METADATA = replace(
+    CENSUS_METADATA_FORMAT,
+    error=CensusSourceError,
+    repair="fix that file's header, or move it aside and let this script write it afresh",
+)
 
 
 @dataclass(frozen=True)
@@ -127,7 +132,8 @@ class Recipe:
         stripped. The header is held to exactly this.
     shipped : tuple of tuple of (str or None) and str
         ``(published name, shipped name)`` for the columns that ship, in shipped
-        order. The first four must be :data:`UNIFORM_COLUMNS`. A published name of
+        order. The first four must be the uniform columns every census leads with,
+        which ``WRITTEN_CENSUS.columns`` declares. A published name of
         ``None`` means this script supplies the column because the publisher has no
         such column, which is legal for the TF flag and nothing else: a publisher
         that lists none but the genes it accepts publishes no rejected set, so every
@@ -173,14 +179,8 @@ class Recipe:
 
     @property
     def file_name(self) -> str:
-        """Return the census's file name."""
-        return f"{self.slug}{CENSUS_SUFFIX}"
-
-
-def species_slug(species: str) -> str:
-    """Return the file-name spelling of ``species``: lower case, underscores for runs of anything else."""
-    kept = [character if character.isalnum() else " " for character in species.strip().lower()]
-    return "_".join("".join(kept).split())
+        """Return the census's file name, as the package's own declaration spells it."""
+        return shipped_name(CENSUS_FORMAT, slug=self.slug)
 
 
 LAMBERT_2018 = Recipe(
@@ -341,7 +341,9 @@ def build_table(frame: pd.DataFrame, recipe: Recipe) -> pd.DataFrame:
     exactly the runs that compress.
 
     A column the recipe sources from ``None`` is supplied as ``yes`` on every row,
-    which the recipe holds to the TF flag alone.
+    which the recipe holds to the TF flag alone. What a census must be — the uniform
+    columns first, one row per **Gene id stem**, a flag spelled the one way — is
+    checked as it is written, against the package's own declaration of the format.
     """
     shipped = pd.DataFrame(
         {
@@ -354,7 +356,6 @@ def build_table(frame: pd.DataFrame, recipe: Recipe) -> pd.DataFrame:
         }
     )
     shipped["is_tf"] = shipped["is_tf"].str.lower()
-    check_table(shipped, origin=recipe.file_name)
     return shipped
 
 
@@ -364,107 +365,39 @@ def clean_cell(value: str) -> str:
     return "" if stripped in _ABSENT_CELLS else stripped
 
 
-def check_table(table: pd.DataFrame, *, origin: str) -> None:
-    """Hold the built table to what a shipped census promises, or refuse to write it.
-
-    Raises
-    ------
-    CensusSourceError
-        If the uniform four are not first, a **Gene id stem** is blank or repeated,
-        the TF flag is spelled a way no census spells one, or a cell carries a tab or
-        a newline — the shipped file is read by splitting on those, and quoting it
-        would make a plain TSV that is not plainly readable.
-    """
-    columns = tuple(table.columns)
-    if columns[: len(UNIFORM_COLUMNS)] != UNIFORM_COLUMNS:
-        raise CensusSourceError(
-            f"{origin} would lead with {columns[: len(UNIFORM_COLUMNS)]} where every census "
-            f"leads with {UNIFORM_COLUMNS}. Fix the recipe's 'shipped' list."
-        )
-    stems = table["gene_id_stem"]
-    if (stems == "").any():
-        raise CensusSourceError(f"{origin} would carry a blank gene id stem — fix the recipe.")
-    if stems.duplicated().any():
-        repeated = sorted(stems[stems.duplicated()].unique())
-        raise CensusSourceError(
-            f"{origin} would name these gene id stems more than once: {repeated}. A census "
-            f"answers one verdict per gene, so the publisher's file has to be reconciled first."
-        )
-    flags = set(table["is_tf"].unique())
-    if not flags <= {TRUE_CELL, FALSE_CELL}:
-        raise CensusSourceError(
-            f"{origin} would spell its TF flag {sorted(flags)} where a census spells it "
-            f"{TRUE_CELL!r} or {FALSE_CELL!r}. Map the publisher's spelling in the recipe."
-        )
-    for name in columns:
-        if table[name].str.contains("[\t\r\n]", regex=True).any():
-            raise CensusSourceError(
-                f"{origin} would carry a tab or a newline inside the {name!r} column. A census "
-                f"is read by splitting on those, so such a cell has to be cleaned first."
-            )
-
-
-def render(table: pd.DataFrame) -> bytes:
-    r"""Return the shipped table as unpacked TSV bytes — no quoting, ``\n`` throughout."""
-    lines = ["\t".join(table.columns)]
-    lines.extend("\t".join(row) for row in table.itertuples(index=False, name=None))
-    return ("\n".join(lines) + "\n").encode("utf-8")
-
-
-def write_census(unpacked: bytes, path: Path) -> None:
-    """Write ``unpacked`` to ``path`` as gzip with no timestamp, so two runs agree byte for byte."""
-    path.write_bytes(gzip.compress(unpacked, compresslevel=9, mtime=0))
-
-
-def write_metadata(path: Path, row: dict[str, str]) -> None:
-    """Rewrite the provenance table with ``row`` in place of any row for the same species."""
-    rows = [
-        dict(existing) for existing in read_metadata(path) if existing["species"] != row["species"]
-    ]
-    rows.append(row)
-    rows.sort(key=lambda existing: existing["species"])
-    lines = ["\t".join(METADATA_COLUMNS)]
-    lines.extend("\t".join(entry[name] for name in METADATA_COLUMNS) for entry in rows)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def read_metadata(path: Path) -> list[dict[str, str]]:
-    """Return the provenance table's rows as text, empty when no table is there yet."""
-    if not path.is_file():
-        return []
-    lines = path.read_text(encoding="utf-8").splitlines()
-    header = lines[0].split("\t")
-    return [dict(zip(header, line.split("\t"), strict=True)) for line in lines[1:] if line]
-
-
 def build(census: str, source: Path, data_dir: Path) -> None:
     """Build one census and its provenance row, and report what was written."""
     recipe = RECIPES[census]
     table = build_table(read_source(source, recipe), recipe)
-    unpacked = render(table)
-    data_dir.mkdir(parents=True, exist_ok=True)
-    write_census(unpacked, data_dir / recipe.file_name)
-    digest = hashlib.sha256(unpacked).hexdigest()
-    write_metadata(
-        data_dir / METADATA_FILE,
-        {
-            "species": recipe.species,
-            "ncbi_taxid": str(recipe.ncbi_taxid),
-            "file": recipe.file_name,
-            "publisher": recipe.publisher,
-            "version": recipe.version,
-            "pubmed_id": str(recipe.pubmed_id),
-            "family_column": recipe.family_column,
-            "source_url": recipe.source_url,
-            "sha256": digest,
-        },
+    written = write_table(
+        WRITTEN_CENSUS,
+        data_dir,
+        tuple(table.columns),
+        table.itertuples(index=False, name=None),
+        slug=recipe.slug,
     )
-    packed = (data_dir / recipe.file_name).stat().st_size
+    merge_rows(
+        WRITTEN_METADATA,
+        data_dir,
+        [
+            {
+                "species": recipe.species,
+                "ncbi_taxid": str(recipe.ncbi_taxid),
+                "file": recipe.file_name,
+                "publisher": recipe.publisher,
+                "version": recipe.version,
+                "pubmed_id": str(recipe.pubmed_id),
+                "family_column": recipe.family_column,
+                "source_url": recipe.source_url,
+                "sha256": written.sha256,
+            }
+        ],
+    )
     positive = int((table["is_tf"] == TRUE_CELL).sum())
     print(f"{recipe.file_name}: {len(table)} rows, {positive} assessed positive")
     print(f"  columns: {', '.join(table.columns)}")
-    print(f"  unpacked {len(unpacked)} bytes, sha256 {digest}")
-    print(f"  packed   {packed} bytes ({len(unpacked) / packed:.1f}x)")
+    print(f"  unpacked {len(written.unpacked)} bytes, sha256 {written.sha256}")
+    print(f"  packed   {written.packed} bytes ({len(written.unpacked) / written.packed:.1f}x)")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
