@@ -156,6 +156,10 @@ _EMSY_STEM = "ENSG00000158636"
 #: unresolved and the answer must say why rather than letting it read as an absent gene.
 _MOUSE_RETIRED_SYMBOL = "Arntl"
 
+#: One spelling MGI still approves, and the gene it names. Mouse's symbols come from a third
+#: source again, so the source a question fills in is asked for here as well as for human.
+_MOUSE_APPROVED_SYMBOL, _TRP53_STEM = "Trp53", "ENSMUSG00000059552"
+
 #: The three species ``genome homologs`` is exercised against, spelled as the shipped
 #: provenance table spells them. All three pairings among them must answer, which is an
 #: acceptance criterion of its own rather than a sample.
@@ -1977,6 +1981,19 @@ class TestXrefCommand:
         assert _json.loads(defaulted.stdout) == _json.loads(named.stdout)
         assert lookup_xref(_XREF_SPECIES).default is True
 
+    def test_the_defaulted_answer_is_the_one_the_api_renders(self, xref_release: FakeFetch) -> None:
+        # Which default an unnamed source is filled in with is the API's decision, named by
+        # handing it the namespace the flags carried — so the command and the Python call
+        # cannot resolve differently. The symbol namespace is the case that matters and
+        # `TestMatchSymbolsCommand` asserts it; this is the same claim for every other one.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet.for_namespace(_XREF_SPECIES, ENTREZ).to_stems(["7157"], ENTREZ).as_json()
+        )
+
     def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
         self, xref_release: FakeFetch
     ) -> None:
@@ -2293,18 +2310,59 @@ class TestMatchSymbolsCommand:
         assert f"on {APPROVED}, {PREVIOUS}, {ALIAS} spellings" in result.stderr
         assert "limits" not in result.stderr
 
-    def test_a_source_that_carries_no_symbols_exits_one_naming_the_ones_that_do(
+    def test_a_symbol_needs_no_source_named(self, symbol_sources: FakeFetch) -> None:
+        # The papercut this command was landed with: human's default xref source is the
+        # Alliance, which carries no human symbol, so this exited 1 on the first try. The
+        # question now picks the default (ADR-0021) and the retired spelling resolves.
+        result = runner.invoke(app, ["match-symbols", _XREF_SPECIES, _RETIRED_SYMBOL])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_RETIRED_SYMBOL}\t{_RETIRED_SYMBOL}\t{_BMAL1_STEM}\t{PREVIOUS}"
+        ]
+        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in result.stderr
+
+    def test_mouse_needs_no_source_named_either(self, symbol_sources: FakeFetch) -> None:
+        # Mouse's symbols come from a third source again, so the flag holds for it or it is
+        # a human special case wearing a general name.
+        result = runner.invoke(app, ["match-symbols", _MOUSE, _MOUSE_APPROVED_SYMBOL])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_MOUSE_APPROVED_SYMBOL}\t{_MOUSE_APPROVED_SYMBOL}\t{_TRP53_STEM}\t{APPROVED}"
+        ]
+        assert ALLIANCE_BGI in result.stderr
+
+    def test_the_json_with_no_source_is_what_the_api_renders_the_same_way(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The strongest form of "the CLI is a thin client" for the new path: the command and
+        # the Python call fill the default in one place, so they cannot resolve differently.
+        asked = [_RETIRED_SYMBOL, "nosuchgene"]
+
+        result = runner.invoke(app, ["match-symbols", _XREF_SPECIES, *asked, "--json"])
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet.for_symbols(_XREF_SPECIES).match_symbols(asked).as_json()
+        )
+
+    def test_a_source_carrying_no_symbols_named_on_purpose_exits_one_naming_what_to_pass(
         self, xref_release: FakeFetch
     ) -> None:
         # The Alliance's cross-reference file carries no human symbol at all, measured on
         # the whole 25 MB file — so asking it is a different failure from a gene that is
-        # absent, and the message names the sources that would answer.
-        result = runner.invoke(app, ["match-symbols", _XREF_SPECIES, _APPROVED_SYMBOL])
+        # absent. Naming it is deliberate and is never overridden, so this still exits 1,
+        # and the message names this species' symbol source rather than every one there is.
+        result = runner.invoke(
+            app, ["match-symbols", _XREF_SPECIES, "--source", ALLIANCE, _APPROVED_SYMBOL]
+        )
 
         assert result.exit_code == 1
         assert result.stdout == ""
         assert HGNC_ARCHIVE in _output(result)
-        assert ALLIANCE_BGI in _output(result)
+        assert ALLIANCE_BGI not in _output(result)
 
     def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
         self, symbol_sources: FakeFetch
@@ -2369,6 +2427,39 @@ class TestMatchSymbolsCommand:
 
         assert result.exit_code == 0
         assert result.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
+
+    def test_the_labelling_direction_needs_no_source_named_either(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The same papercut in the other direction: labelling a stem is a symbol question
+        # too, so the source the question fills in is the same one, and the rule reads as a
+        # rule rather than as one command's special case.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", SYMBOL, _BMAL1_STEM])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
+        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in result.stderr
+
+    def test_the_labelling_direction_is_the_call_the_api_makes_for_it(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The command holds no logic the API does not: it hands the namespace it was given
+        # to the constructor that fills the question's default in, and renders. It once
+        # chose the opener itself, which made this exact Python call raise where the shell
+        # answered — two code paths for one question, which is what this asserts is gone.
+        # The mouse stem is asked of the human set on purpose: it resolves to nothing, so
+        # the two renderings have to agree about what was missed as well as what was found.
+        asked = [_BMAL1_STEM, _TRP53_STEM]
+
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--from-stems", SYMBOL, *asked, "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet.for_namespace(_XREF_SPECIES, SYMBOL).from_stems(asked, SYMBOL).as_json()
+        )
 
     def test_the_progress_display_is_suppressed_under_json(self, symbol_sources: FakeFetch) -> None:
         _match_symbols(_APPROVED_SYMBOL, "--json")

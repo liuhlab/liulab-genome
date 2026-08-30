@@ -62,14 +62,19 @@ source among several and the word does not say which; and **Source** unqualified
 [Assembly](./assembly.md) context already owns for where an assembly's bytes came from
 
 **Default xref source**:
-Per species, the **Xref source** a caller who names none is answered by, so that everyone in the lab
-reaches for the same one without discussing it — exactly the job **Default annotation** already
-does. It is a default and not a recommendation: naming a source is how the scientific choice gets
-made deliberately, and this exists so that declining to make it is still reproducible rather than
-arbitrary.
+Per species **and per question**, the **Xref source** a caller who names none is answered by, so
+that everyone in the lab reaches for the same one without discussing it — exactly the job **Default
+annotation** already does. It is a default and not a recommendation: naming a source is how the
+scientific choice gets made deliberately, and this exists so that declining to make it is still
+reproducible rather than arbitrary. There are two questions and so two flags in the curated table
+(ADR-0021), because the publisher carrying a species' identifiers is usually not the one carrying
+its **Symbol match**es: human's identifiers default to the Alliance, which publishes no human symbol
+at all, and its symbols to HGNC. The question is named where the source is filled in and nowhere
+else — a set already built for one source is never answered from another's bytes, and one that
+carries no symbol raises naming the one that does.
 _Avoid_: preferred source, canonical source, best source, authoritative source — no such judgement
 is made here; primary and fallback, which imply a second source is tried when the first misses, and
-none is
+none is; and a second term for the symbol half — it is one idea with two flags, not two ideas
 
 ### What an identifier is
 
