@@ -83,8 +83,9 @@ _GENE_LIST_ERRORS = (*_ASSEMBLY_ERRORS, LookupError)
 
 #: What a failed motif scan raises. The same three, and each already says what to do: a
 #: release this package does not prepare, a threshold that is not a p-value and a file that
-#: is not FASTA are ``ValueError``s; a FASTA that is not there and a release that cannot be
-#: fetched are ``OSError``s; a process pool that died under the scan is a ``RuntimeError``.
+#: is not FASTA are ``ValueError``s; a FASTA that is not there is an ``OSError``; and a
+#: release that cannot be fetched, a directory holding one left unfinished and a process
+#: pool that died under the scan are ``RuntimeError``s.
 #: Its own name rather than :data:`_ASSEMBLY_ERRORS` reused, because a motif belongs to no
 #: assembly and the two lists are alike by coincidence rather than by construction.
 _MOTIF_SCAN_ERRORS = (ValueError, OSError, RuntimeError)
@@ -1420,8 +1421,9 @@ def motif_scan(
 
     Exits with code 1 when the FASTA is not there or is not FASTA, when the release or tax
     group is not one this package prepares, when the threshold is not a p-value in `(0, 1)`,
-    when the worker count is below 1, and when the release is not cached here and cannot be
-    fetched — which is what a compute node with no internet looks like.
+    when the worker count is below 1, when the release is not prepared here and cannot be
+    fetched — which is what a compute node with no internet looks like — and when a directory
+    holds a release left unfinished.
     """
     # Built before the try and read nowhere yet: `read_fasta` is a generator, so the file
     # is opened when the scan draws its first record and not here.

@@ -35,6 +35,7 @@ import pytest
 import genome.xref.ensembl as ensembl_mod
 from genome.io import fetch as fetch_mod
 from genome.io.completion import read_record
+from genome.io.prepared import PreparedChecksumError
 from genome.xref import (
     ALLIANCE,
     ENSEMBL,
@@ -593,7 +594,7 @@ class TestPreparation:
         # No re-pinning: the shipped row pins Ensembl's whole 6 MB human dump, and 151 rows
         # of it is not that file. A truncated download is not a smaller release.
         fake_fetch.serve(ENSEMBL_HUMAN)
-        with pytest.raises(XrefTableError, match="hashes to"):
+        with pytest.raises(PreparedChecksumError, match="hashes to"):
             XrefSet("Homo sapiens", ENSEMBL_TSV, RELEASE)
 
     def test_a_set_that_cannot_be_fetched_names_the_next_action_filter_and_all(

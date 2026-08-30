@@ -53,7 +53,7 @@ Examples
 ['ENSG00000141510']
 """
 
-from genome.io.registration import xref_data_dir
+from genome.io.prepared import xref_data_dir
 from genome.io.results import ResolvedStems, ResolvedSymbols, ResolvedXrefIds, SymbolMatch
 from genome.xref.alliance import ALLIANCE, AllianceFileError
 from genome.xref.bgi import ALLIANCE_BGI, BgiFileError

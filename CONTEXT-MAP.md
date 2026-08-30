@@ -100,11 +100,10 @@ columns stays inside the context that owns it.
   **Xref set** is how an Entrez, HGNC or UniProt column reaches them — the gap that let two UniProt
   entry names ship in the human census unnoticed. One way only: nothing shipped here is keyed by a
   foreign **Namespace**, and the xref half reads no census.
-- **Xref ↔ Motif**: shape shared, and nothing else. Both a **Motif set** and an **Xref set** belong
-  to no **Assembly**, live outside the assembly tree under the **Data dir**, are pinned to a
-  **Release** and are prepared by construction — the same object, learned once. Neither imports the
-  other, and a **Motif name** is never fed to a **Symbol match**: it labels a matrix and names no
-  gene.
+- **Xref ↔ Motif**: shape shared, and nothing else. A **Motif set** and an **Xref set** are both
+  **Prepared set**s, so the shape is one thing learned once and one module prepares both. Neither
+  imports the other, and a **Motif name** is never fed to a **Symbol match**: it labels a matrix and
+  names no gene.
 - **Orthology → Annotation**: the same one existing call the Xref edge uses, `resolve_gene_ids`,
   against the same registry, unchanged. A **Homology type** crosses it untouched and a **Dropped
   partner** count says what the crossing removed, so a link that only looks one-to-one in your
@@ -124,7 +123,7 @@ columns stays inside the context that owns it.
 
 ## Shared kernel
 
-Eleven words every context uses. Anything defined here is not redefined in a context file.
+Twelve words every context uses. Anything defined here is not redefined in a context file.
 
 **Assembly**:
 The identity of one reference — a free-form **local** key that names its directory under the **Data
@@ -204,6 +203,19 @@ FASTA consumed. Confirming one compares presence and size and reads no contents,
 answer to *is this finished* and the only answer to *how was this made*.
 _Avoid_: flag, success flag, sentinel, stamp, lock file; and never an output file's mere existence,
 which is what this word exists to distrust
+
+**Prepared set**:
+Files pinned to a **Release**, belonging to no **Assembly**, filed beside the assembly tree
+under the **Data dir**, and prepared by constructing the object that answers from them.
+Three contexts own one each — a **Motif set**, an **Xref set**, a **Homology set** — and
+preparing one is a single pipeline (`src/genome/io/prepared.py`): a source declares a URL, a
+checksum and how to slice or parse what arrives, and the module owns the working area, the
+fetch, the digest, the **Completion marker** and the one sentence that sends a caller to a
+login node. Fetching is the only step in this package that needs the network, so a set is
+prepared once where there is internet and every job afterwards reads it.
+_Avoid_: cache, download, dataset, resource; "the JASPAR download" or "the xref files",
+which name one instance and hide that the three are one thing; and **Data dir**, which is
+the root they are filed under rather than any one of them
 
 **External tool**:
 A binary the package shells out to instead of reimplementing — resolved on `PATH`, version-detected

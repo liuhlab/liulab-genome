@@ -10,6 +10,37 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **One module prepares every release-pinned set, where three had each written the pipeline out.**
+  A **Prepared set** — a **Motif set**, an **Xref set**, a **Homology set** — is files pinned to a
+  **Release**, belonging to no assembly, filed beside the assembly tree under the **Data dir**.
+  `genome.io.prepared` now owns the whole of preparing one: the set's directory, the working area,
+  the fetch, the digest, the staged rename, the **Completion marker** and the one sentence that
+  sends a caller to a login node. A source declares a URL, a checksum and how to slice or parse
+  what arrives, and nothing else — a test prepares a fictitious fourth set end to end on exactly
+  that. The three roots under the **Data dir** are declared together there (`homology/` included,
+  which used to be spelled in `homology/compara.py`), and each context keeps its own reader, its
+  own answer types and its own not-downloaded error quoting its own exact prepare command.
+- **Where a checksum is enforced now follows what it covers, and decompress-while-hashing has one
+  implementation.** A pin over the **unpacked** bytes (ADR-0006) is checked as the file is streamed
+  and unpacked; a pin over the archive as served — Ensembl Compara's own md5 of its `.gz` — is
+  pooch's `known_hash`, as before. The same streaming step digests the stored slice and every
+  re-read of it, so the whole-slice-into-memory read in `xref/xref.py` is gone and the four
+  spellings of *unpack while hashing* are one. The working area is now kept exactly when something
+  can vouch for what is in it: with an archive pin pooch re-checks a leftover download, so an
+  interrupted 110 MB fetch still costs no second download; with no such pin a leftover is
+  unverifiable and is swept before fetching rather than adopted.
+- **A JASPAR release now writes a Completion marker, and is prepared one set per directory.**
+  It used to write none, substituting an atomic rename and a motif count on the grounds that the
+  files are under a megabyte. That covered *is this finished* and missed the other half of what a
+  record is for — the only answer to *how was this made*: the URL, the package version, when, and
+  what the bytes hashed to. JASPAR publishes no checksum to pin, so what is recorded is the digest
+  of what was stored and every re-read is held to it; the motif count and the base-id check stay,
+  because they say the file is the *right release, whole*, which no digest of ours can. A release
+  is therefore prepared in `motif/jaspar/<release>/<tax group>/` rather than flat under
+  `motif/jaspar/`; **a file prepared by an earlier version is left where it lies and prepared again
+  under the new layout**, one download of under a megabyte. A fetch that fails now raises
+  `MotifSetNotDownloadedError` naming the call to make on a login node, where it used to surface
+  pooch's own transport error.
 - **The TF context moved out of the Annotation module, and the registry kept one seam.**
   `AnnotationRegistry.resolve_gene_ids` is now the only identifier surface `genome.io.gtf` exposes:
   it answers *which gene ids does this **Gene id stem** name here* and knows nothing about what it

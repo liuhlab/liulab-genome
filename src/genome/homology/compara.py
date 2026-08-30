@@ -7,6 +7,11 @@ read back as a :class:`HomologySet`. A second construction re-reads what is ther
 fetches nothing — the shape :class:`~genome.tf.motif.jaspar.JasparDatabase` established.
 The types it hands back are :mod:`genome.io.results`'s, which read no file.
 
+**Preparing it is not this module's**, and none of the steps that fetch are here: a
+**Homology set** is a **Prepared set**, so what is declared here is the URL, the checksum
+and the reader that slices the pair out, and :mod:`genome.io.prepared` owns the working
+area, the fetch, the digest and the **Completion marker**.
+
 The slice is stored as a plain gzipped TSV carrying the publisher's own header and the
 publisher's own rows, unedited, so a collaborator can read it in R or in a shell without
 this package. Every value in a **Homology link** is a cell of that file and none of them
@@ -60,23 +65,24 @@ from __future__ import annotations
 import gzip
 import hashlib
 import re
-import shlex
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 from genome.homology import metadata as metadata_mod
 from genome.homology.metadata import HomologyMetadata
-from genome.io import fetch
-from genome.io.completion import (
-    CompletionRecord,
-    build_record,
-    check_registration,
-    clear_work_dir,
-    work_dir,
-    write_record,
+from genome.io.completion import CompletionRecord
+from genome.io.prepared import (
+    ARCHIVE,
+    Checksum,
+    PreparedSetNotDownloadedError,
+    PreparedSource,
+    SourceReader,
+    homology_data_dir,
+    prepare,
+    unpacked_lines,
 )
-from genome.io.registration import liulab_data_dir
 from genome.io.results import HomologyAnswer, HomologyLink
 
 # The file-naming convention every shipped-data directory here uses, read from the module
@@ -93,11 +99,6 @@ ENSEMBL_BASE_URL = "https://ftp.ensembl.org/pub"
 #: collection. The ncRNA dumps and the whole-clade collection dumps are deliberately not
 #: read — they are different objects with different membership, not more rows of this one.
 COMPARA_DUMP = "protein_default"
-
-#: Subdirectory of the **Data dir** holding homology data, a *sibling* of the assembly
-#: tree beside ``motif/``: a **Homology set** belongs to no **Assembly**, so there is no
-#: assembly directory it could go under.
-HOMOLOGY_SUBDIR = "homology"
 
 #: Subdirectory of the homology tree holding Ensembl Compara's sets. One publisher, one
 #: directory: a second homology source would get its own beside this.
@@ -212,16 +213,15 @@ class ComparaPartitionError(RuntimeError):
     """
 
 
-class HomologySetNotDownloadedError(RuntimeError):
+class HomologySetNotDownloadedError(PreparedSetNotDownloadedError):
     """The set is not prepared here, and the publisher's dump could not be fetched.
 
-    A :class:`RuntimeError` rather than a :class:`LookupError`: nothing the caller asked
-    for is missing, this machine could not reach the publisher. Fetching is the one step
-    in this package that needs the network and the lab's CPU cluster compute nodes have
-    none, so the message names the call to make on a login node instead of reporting a
-    transport error and stopping there.
-    :class:`genome.xref.xref.XrefSetNotDownloadedError` says the same thing for an **Xref
-    set**; they are two classes because they are two contexts.
+    The Orthology context's own spelling of what every **Prepared set** raises here, so the
+    message names *this* pair and quotes :func:`homology_prepare_command`.
+    :class:`genome.xref.xref.XrefSetNotDownloadedError` is the Xref context's; they are two
+    classes because they are two contexts, and what they share — that fetching is the one
+    step that needs the network, and that the lab's compute nodes have none — is said once
+    on the class they both derive from.
 
     Examples
     --------
@@ -269,30 +269,6 @@ class VersionedGeneIdError(ValueError):
     ...     print("ENSG00000141510" in str(error))
     True
     """
-
-
-def homology_data_dir() -> Path:
-    """Return the directory holding homology data, which belongs to no assembly.
-
-    ``<liulab_data>/homology/``, a **sibling** of the assembly tree beside ``motif/``: a
-    **Homology set** is anchored to a species pair and a **Release**, so it names no
-    **Assembly** and there is no per-assembly directory it could be filed under. Shared by
-    every project on the machine. Nothing is created by asking.
-
-    Returns
-    -------
-    pathlib.Path
-        ``<liulab_data>/homology``.
-
-    Examples
-    --------
-    >>> import os
-    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
-    >>> homology_data_dir()
-    PosixPath('/scratch/liulab/homology')
-    >>> del os.environ["LIULAB_DATA"]
-    """
-    return liulab_data_dir() / HOMOLOGY_SUBDIR
 
 
 def compara_url(species: str, release: str) -> str:
@@ -722,8 +698,9 @@ class HomologySet:
             if cache_dir is not None
             else set_dir(homology_data_dir(), row)
         )
-        self.path, record = _prepare(row, directory=directory, progressbar=progressbar)
-        links, nulls = _read_slice(self.path, row=row, species=self.species, record=record)
+        prepared = prepare(_source(row, directory=directory), progressbar=progressbar)
+        self.path = prepared.path
+        links, nulls = _read_slice(self.path, row=row, species=self.species, record=prepared.record)
         self._links = links
         self.null_quality_scores = nulls
 
@@ -807,136 +784,98 @@ class HomologySet:
         )
 
 
-def _prepare(
-    row: HomologyMetadata, *, directory: Path, progressbar: bool
-) -> tuple[Path, CompletionRecord]:
-    """Return the stored slice and its record, preparing the set once if it is not there.
+def _source(row: HomologyMetadata, *, directory: Path) -> PreparedSource:
+    """Return what this **Homology set** declares: a URL, a checksum and how to slice it.
 
-    Four steps, in the order every build in this package takes them: fetch into the working
-    area, slice, place under the final name, write the record. The record is written last,
-    after the file it claims exists, so an interrupted run reads as unfinished rather than
-    present — and the working area survives an interruption, so repairing one costs no
-    second download of a 110 MB dump.
-
-    The partition guard fires *before* anything is placed: a slice holding no rows is never
-    written, so a set that would answer empty does not exist on disk to be re-read.
+    Everything else — the working area, the fetch, the staged rename and the **Completion
+    marker** — is :mod:`genome.io.prepared`'s. The checksum covers the **archive** rather
+    than the unpacked bytes, which is the one thing this set declares differently from an
+    **Xref set**: Compara's own ``MD5SUM`` is over the ``.gz`` it serves, so it is pooch's
+    ``known_hash`` and is checked as the bytes arrive. That check is load-bearing and not a
+    formality — a resumed download of one of these gzips has been seen to pass ``gzip -t``
+    with the wrong md5.
     """
-    path = directory / slice_filename(row)
-    # Both halves of the repair, because deleting the directory on its own leaves the
-    # caller with nothing and no way back — and the second half is the call that needs a
-    # login node, which is worth reading before the first half has run.
-    repair = (
-        f"rm -rf {shlex.quote(str(directory))} && "
-        f"{homology_prepare_command(row.species, row.other_species, row.release)}"
-    )
-    record = check_registration(directory, repair=repair)
-    if record is not None:
-        return path, record
-
-    try:
-        source = fetch.fetch_url(
-            row.source_url,
-            work_dir(directory),
-            known_hash=f"md5:{row.md5}",
-            fname=source_filename(row),
-            progressbar=progressbar,
-        )
-    except OSError as error:
-        # `OSError` alone, and not the `ValueError` a checksum mismatch raises: a pin that
-        # does not match names bytes that arrived, which is a different fact needing a
-        # different next action, and re-running the fetch would not repair it.
-        raise HomologySetNotDownloadedError(
-            f"the Compara release {row.release} homology set for {row.species!r} and "
-            f"{row.other_species!r} is not prepared here and {row.source_url} could not be "
-            f"fetched: {error}. Nothing else in this package needs the network, so this is "
-            f"the one step that does. Prepare it on a machine with internet — a login node, "
-            f"since the lab's compute nodes have none — with "
-            f"`{homology_prepare_command(row.species, row.other_species, row.release)}`, after "
-            f"which it is read from the Data dir and shared by every project on the machine."
-        ) from error
-    staged = work_dir(directory) / f"{path.name}.part"
-    rows, digest, nulls = _slice(source, staged, row=row)
-    if rows == 0:
-        staged.unlink(missing_ok=True)
-        raise ComparaPartitionError(
-            f"{row.source_url} holds no {row.species}/{row.other_species} rows at all, so "
-            f"Compara release {row.release} has filed this pair in the other file of the two: "
-            f"{compara_url(row.other, row.release)}. Compara says so itself — each per-species "
-            f"dump carries 'an arbitrary subset of orthologies involving the given genome', and "
-            f"its README tells you to take the files of both genomes — so zero means the pair "
-            f"moved rather than that these species share no homologs, and a pair is never "
-            f"partially present. Update this pair's row in "
-            f"data/homology/homology_metadata.tsv to name {row.other!r} as its "
-            f"holding_species, with that file's own URL and md5 read from the release's own "
-            f"listing rather than built from this one's."
-        )
-    directory.mkdir(parents=True, exist_ok=True)
-    staged.replace(path)
-    written = build_record(
-        directory,
+    return PreparedSource(
+        url=row.source_url,
+        directory=directory,
+        stored_name=slice_filename(row),
         kind=RECORD_KIND,
         name=pair_name(*row.pair),
-        files=[path],
-        source_url=row.source_url,
-        sha256=digest,
+        prepare_command=homology_prepare_command(row.species, row.other_species, row.release),
+        description=(
+            f"the Compara release {row.release} homology set for {row.species!r} and "
+            f"{row.other_species!r}"
+        ),
+        read=_slicer(row),
+        not_downloaded=HomologySetNotDownloadedError,
+        checksum=Checksum(algorithm="md5", digest=row.md5, covers=ARCHIVE),
+        download_name=source_filename(row),
         details={
             "publisher": row.publisher,
             "release": row.release,
             "species": list(row.pair),
             "holding_species": row.holding_species,
             "source_md5": row.md5,
-            "links": rows,
-            "null_quality_scores": list(nulls),
         },
     )
-    write_record(directory, written)
-    clear_work_dir(directory)
-    return path, written
 
 
-def _slice(
-    source: Path, target: Path, *, row: HomologyMetadata
-) -> tuple[int, str, tuple[str, ...]]:
-    """Write the pair's rows out of ``source`` into ``target``, and say what they were.
+def _slicer(row: HomologyMetadata) -> SourceReader:
+    """Return the reader that cuts one pair's rows out of the publisher's dump.
 
     Streams a line at a time: the published dumps run to millions of rows and are never
     held in memory. Rows are copied byte for byte — the **Homology type** and both quality
     scores reach disk exactly as the publisher wrote them.
 
-    Returns the row count, the sha256 of the **unpacked** slice (ADR-0006) and which
-    quality columns held nothing anywhere in it.
+    The partition guard fires here, before anything is placed: a slice holding no rows is
+    never written, so a set that would answer empty does not exist on disk to be re-read.
     """
     wanted = {species_slug(name) for name in row.pair}
-    digest = hashlib.sha256()
-    written = 0
-    scored: set[str] = set()
-    with gzip.open(source, "rt", encoding="utf-8") as reading:
-        header = reading.readline().rstrip("\n")
-        found = tuple(header.split("\t"))
+
+    def read(lines: Iterator[str], staged: Path, *, origin: str) -> Mapping[str, Any]:
+        written = 0
+        scored: set[str] = set()
+        header = next(lines, "")
+        found = tuple(header.rstrip("\n").split("\t"))
         if found != COMPARA_COLUMNS:
             raise ComparaFileError(
-                f"{source} leads with the columns {list(found)} where a Compara homology dump "
+                f"{origin} leads with the columns {list(found)} where a Compara homology dump "
                 f"leads with {list(COMPARA_COLUMNS)}. This is not the file {row.source_url} "
                 f"publishes — delete it and construct the set again."
             )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with gzip.open(target, "wt", encoding="utf-8") as writing:
-            first = header + "\n"
-            writing.write(first)
-            digest.update(first.encode("utf-8"))
-            for line in reading:
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(staged, "wt", encoding="utf-8") as writing:
+            writing.write(header if header.endswith("\n") else header + "\n")
+            for line in lines:
                 cells = line.rstrip("\n").split("\t")
                 if len(cells) != len(COMPARA_COLUMNS):
                     continue
                 here, there = cells[_SPECIES], cells[_HOMOLOG_SPECIES]
                 if here == there or {here, there} != wanted:
                     continue
-                kept = line if line.endswith("\n") else line + "\n"
-                writing.write(kept)
-                digest.update(kept.encode("utf-8"))
+                writing.write(line if line.endswith("\n") else line + "\n")
                 written += 1
                 scored.update(_scored_columns(cells))
-    return written, digest.hexdigest(), tuple(n for n in QUALITY_SCORE_COLUMNS if n not in scored)
+        if written == 0:
+            staged.unlink(missing_ok=True)
+            raise ComparaPartitionError(
+                f"{row.source_url} holds no {row.species}/{row.other_species} rows at all, so "
+                f"Compara release {row.release} has filed this pair in the other file of the "
+                f"two: {compara_url(row.other, row.release)}. Compara says so itself — each "
+                f"per-species dump carries 'an arbitrary subset of orthologies involving the "
+                f"given genome', and its README tells you to take the files of both genomes — "
+                f"so zero means the pair moved rather than that these species share no "
+                f"homologs, and a pair is never partially present. Update this pair's row in "
+                f"data/homology/homology_metadata.tsv to name {row.other!r} as its "
+                f"holding_species, with that file's own URL and md5 read from the release's "
+                f"own listing rather than built from this one's."
+            )
+        return {
+            "links": written,
+            "null_quality_scores": [n for n in QUALITY_SCORE_COLUMNS if n not in scored],
+        }
+
+    return read
 
 
 def _scored_columns(cells: list[str]) -> set[str]:
@@ -954,50 +893,50 @@ def _read_slice(
     Nothing about the row changes: the **Homology type** is a property of the pair of genes
     and not of which of them was asked about.
 
-    The unpacked bytes are hashed as they are read and held to the digest the **Completion
-    marker** recorded, so a slice edited or truncated after it was prepared raises instead
-    of answering short. A pair's slice is tens of thousands of rows rather than a genomic
-    file, so it is indexed in memory; the multi-million-row dump it was cut from never is.
+    The unpacked bytes are hashed as they are read — by the same decompress-while-hashing
+    step that took the digest when the slice was written — and held to what the
+    **Completion marker** recorded, so a slice edited or truncated after it was prepared
+    raises instead of answering short. A pair's slice is tens of thousands of rows rather
+    than a genomic file, so it is indexed in memory; the multi-million-row dump it was cut
+    from never is.
     """
     flip = species_slug(species) != species_slug(row.holding_species)
     digest = hashlib.sha256()
     index: dict[str, list[HomologyLink]] = {}
     scored: set[str] = set()
-    with gzip.open(path, "rt", encoding="utf-8") as reading:
-        header = reading.readline()
-        digest.update(header.encode("utf-8"))
-        if tuple(header.rstrip("\n").split("\t")) != COMPARA_COLUMNS:
-            raise ComparaFileError(
-                f"{path} does not lead with Compara's own columns, so it is not a slice this "
-                f"package wrote. Delete {path.parent} and construct the set again."
+    reading = unpacked_lines(path, digest)
+    header = next(reading, "")
+    if tuple(header.rstrip("\n").split("\t")) != COMPARA_COLUMNS:
+        raise ComparaFileError(
+            f"{path} does not lead with Compara's own columns, so it is not a slice this "
+            f"package wrote. Delete {path.parent} and construct the set again."
+        )
+    for line in reading:
+        cells = line.rstrip("\n").split("\t")
+        if len(cells) != len(COMPARA_COLUMNS):
+            continue
+        stem = cells[_HOMOLOG if flip else _GENE]
+        index.setdefault(stem, []).append(
+            HomologyLink(
+                gene_id_stem=stem,
+                homolog_gene_id_stem=cells[_GENE if flip else _HOMOLOG],
+                homology_type=cells[_TYPE],
+                is_high_confidence=_flag(cells[_HIGH_CONFIDENCE]),
+                goc_score=_score(
+                    cells[_QUALITY_AT["goc_score"]],
+                    column="goc_score",
+                    path=path,
+                    read=int,
+                ),
+                wga_coverage=_score(
+                    cells[_QUALITY_AT["wga_coverage"]],
+                    column="wga_coverage",
+                    path=path,
+                    read=float,
+                ),
             )
-        for line in reading:
-            digest.update(line.encode("utf-8"))
-            cells = line.rstrip("\n").split("\t")
-            if len(cells) != len(COMPARA_COLUMNS):
-                continue
-            stem = cells[_HOMOLOG if flip else _GENE]
-            index.setdefault(stem, []).append(
-                HomologyLink(
-                    gene_id_stem=stem,
-                    homolog_gene_id_stem=cells[_GENE if flip else _HOMOLOG],
-                    homology_type=cells[_TYPE],
-                    is_high_confidence=_flag(cells[_HIGH_CONFIDENCE]),
-                    goc_score=_score(
-                        cells[_QUALITY_AT["goc_score"]],
-                        column="goc_score",
-                        path=path,
-                        read=int,
-                    ),
-                    wga_coverage=_score(
-                        cells[_QUALITY_AT["wga_coverage"]],
-                        column="wga_coverage",
-                        path=path,
-                        read=float,
-                    ),
-                )
-            )
-            scored.update(_scored_columns(cells))
+        )
+        scored.update(_scored_columns(cells))
     if record.sha256 is not None and digest.hexdigest() != record.sha256:
         raise ComparaFileError(
             f"{path} does not hash to what its completion record claims, so it changed after "

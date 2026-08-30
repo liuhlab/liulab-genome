@@ -432,8 +432,9 @@ from a shell.
     Constructing a `JasparDatabase` downloads the release the first time. **The lab's CPU
     cluster compute nodes have no internet**, so that first construction fails on one: do
     it once from a login node — `genome motif-scan`, or `JasparDatabase(...)` in Python —
-    and every job afterwards reads the cached file out of `<LIULAB_DATA>/motif/jaspar/`,
-    which every project on the machine shares.
+    and every job afterwards reads the prepared release out of
+    `<LIULAB_DATA>/motif/jaspar/<release>/<tax group>/`, which every project on the machine
+    shares.
 
 ## Chimera assemblies
 

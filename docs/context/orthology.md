@@ -18,11 +18,11 @@ a pair is fetched once, verified against the publisher's own md5, sliced to the 
 locally — and `resolve_homologs` puts an answer into one registered **Annotation**'s own gene ids
 through the call the Xref half already uses.
 
-Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker** and the
-rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem** among them. **TF gene
-table**, **Cofactor table** and **Cross-species link** are defined in the [TF](./tf.md) glossary;
-**Annotation** belongs to [Annotation](./annotation.md), **Release** to [Motif](./motif.md), and
-**Xref set** and **Xref source** to [Xref](./xref.md).
+Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker**,
+**Prepared set** and the rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem**
+among them. **TF gene table**, **Cofactor table** and **Cross-species link** are defined in the
+[TF](./tf.md) glossary; **Annotation** belongs to [Annotation](./annotation.md), **Release** to
+[Motif](./motif.md), and **Xref set** and **Xref source** to [Xref](./xref.md).
 
 ## Language
 

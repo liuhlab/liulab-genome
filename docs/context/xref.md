@@ -19,26 +19,26 @@ further sources carry symbols, which those two do not: HGNC's quarterly archive 
 approved, previous and alias spellings each typed, and the Alliance's per-species gene submissions
 for mouse and worm, with the current approved spelling alone.
 
-Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker** and the
-rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem**, the hub every entry
-below hangs off, among them. **Annotation**, **Registered name** and **Annotation database** belong
-to [Annotation](./annotation.md); **Release**, **Motif set** and **Motif name** to
-[Motif](./motif.md), and a release here is the same word it is there — one dated, versioned
-publication of the source a downloaded set is pinned to.
+Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker**,
+**Prepared set** and the rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id
+stem**, the hub every entry below hangs off, among them. **Annotation**, **Registered name** and
+**Annotation database** belong to [Annotation](./annotation.md); **Release**, **Motif set** and
+**Motif name** to [Motif](./motif.md), and a release here is the same word it is there — one dated,
+versioned publication of the source a downloaded set is pinned to.
 
 ## Language
 
 ### What a set is, and whose it is
 
 **Xref set**:
-One species, one **Xref source**, one pinned **Release**, opened the way a **Motif set** is —
-constructing it fetches it once into the **Data dir**, re-reads it on every construction after, and
-answers with no **Genome** open. It answers two questions and only two: which **Gene id stem**s a
-foreign id names, and which foreign ids a stem names. Gene level only, because a gene, a transcript
-and a protein have different keys and different sources and are three objects rather than one table
-with a level column — the illegal state that is already sitting in the shipped human census. A query
-runs against exactly one set (ADR-0017), which is what makes merging two publishers inexpressible
-rather than merely discouraged.
+One species, one **Xref source**, one pinned **Release**: a **Prepared set**, so it is prepared by
+constructing it and re-read on every construction after, exactly as a **Motif set** is and by the
+same module, and it answers with no **Genome** open. It answers two questions and only two: which
+**Gene id stem**s a foreign id names, and which foreign ids a stem names. Gene level only, because a
+gene, a transcript and a protein have different keys and different sources and are three objects
+rather than one table with a level column — the illegal state that is already sitting in the
+shipped human census. A query runs against exactly one set (ADR-0017), which is what makes merging
+two publishers inexpressible rather than merely discouraged.
 _Avoid_: crosswalk, id map, mapping table, id translation table — each names a flat file that has
 forgotten who asserted it and when; xref database, xref table; and the bare plural "the xrefs",
 which says neither whose nor from when

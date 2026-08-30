@@ -201,6 +201,10 @@
 
 ::: genome.io.registration
 
+## `genome.io.prepared`
+
+::: genome.io.prepared
+
 ## `genome.io.chimera`
 
 ::: genome.io.chimera

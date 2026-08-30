@@ -44,6 +44,7 @@ from genome.io.completion import (
     read_record,
 )
 from genome.io.gtf import _gene_id_stem as annotation_gene_id_stem
+from genome.io.prepared import PreparedChecksumError
 from genome.io.results import ResolvedStems, ResolvedXrefIds
 from genome.xref import (
     ALLIANCE,
@@ -515,8 +516,12 @@ class TestXrefSetPreparation:
         # and 14 genes of it is not that file. A truncated download is not a smaller
         # release, and slicing one would answer with silently fewer genes.
         fake_fetch.serve(FIXTURE)
-        with pytest.raises(XrefTableError, match="hashes to"):
+        with pytest.raises(PreparedChecksumError, match="hashes to") as pinned:
             XrefSet("Homo sapiens")
+        # The pin covers the publisher's unpacked bytes, and the repair is both halves of
+        # preparing the set again — the shared pipeline's message, not one of this module's.
+        assert "unpacked bytes" in str(pinned.value)
+        assert xref_prepare_command("Homo sapiens", ALLIANCE, RELEASE) in str(pinned.value)
 
         serve_source(["MGI:98834\tENSEMBL:ENSMUSG00000059552\tu\tgeneric\tNCBITaxon:10090"])
         with pytest.raises(XrefTableError, match="NCBITaxon:9606"):

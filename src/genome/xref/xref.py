@@ -7,6 +7,11 @@ and fetches nothing. The set belongs to no **Assembly** and opens no **Genome** 
 identifier is a name and not a place — so it is filed beside the assembly tree rather than
 inside it, the way a **Motif set** already is.
 
+**Preparing it is not this module's**, and none of the steps that fetch are here: an
+**Xref set** is a **Prepared set**, so what is declared here is the URL, the checksum and
+the reader, and :mod:`genome.io.prepared` owns the working area, the fetch, the digest and
+the **Completion marker**.
+
 **Two directions and only two**, to the hub and from it (ADR-0017).
 :meth:`XrefSet.to_stems` turns foreign ids into **Gene id stem**s,
 :meth:`XrefSet.from_stems` turns stems back into foreign ids, and there is no verb that
@@ -56,24 +61,21 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import shlex
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol
-from urllib.parse import urlparse
+from typing import Any, Protocol
 
-from genome.io import fetch
-from genome.io.completion import (
-    CompletionRecord,
-    RegistrationMismatchError,
-    build_record,
-    check_registration,
-    clear_work_dir,
-    work_dir,
-    write_record,
+from genome.io.completion import RegistrationMismatchError
+from genome.io.prepared import (
+    Checksum,
+    PreparedSetNotDownloadedError,
+    PreparedSource,
+    SourceReader,
+    prepare,
+    unpacked_lines,
+    xref_data_dir,
 )
-from genome.io.registration import xref_data_dir
 from genome.io.results import ResolvedStems, ResolvedSymbols, ResolvedXrefIds, SymbolMatch
 from genome.metadata import species_slug
 from genome.xref.alliance import ALLIANCE, read_alliance
@@ -91,9 +93,6 @@ from genome.xref.symbols import (
     fold_symbol,
     normalise_symbol,
 )
-
-if TYPE_CHECKING:  # pragma: no cover - typeshed's name for a live hash object
-    from hashlib import _Hash as Hash
 
 #: What a **Completion marker** written here calls the thing it recorded, beside the
 #: ``genome``, ``annotation`` and ``index`` kinds the assembly tree writes.
@@ -125,8 +124,8 @@ class XrefReader(Protocol):
     What a source *is*, beside its row in the curated table: a pure function from the
     publisher's lines to this package's triples, which is what makes adding a source data
     plus a reader rather than a refactor. It opens nothing and downloads nothing —
-    :func:`_prepare` has already fetched, unpacked and verified the bytes by the time one
-    of these is called.
+    :func:`genome.io.prepared.prepare` has already fetched and unpacked the bytes, and is
+    hashing them past this, by the time one of these is called.
     """
 
     def __call__(
@@ -187,12 +186,12 @@ class NamespaceNotCarriedError(LookupError):
     """
 
 
-class XrefSetNotDownloadedError(RuntimeError):
+class XrefSetNotDownloadedError(PreparedSetNotDownloadedError):
     """The set is not on disk and could not be fetched, so nothing can answer.
 
-    A :class:`RuntimeError`, because nothing about the call was wrong: the bytes are simply
-    not here and this machine could not go and get them. The lab's compute nodes have no
-    internet, so the message names the call to make on a login node instead.
+    The Xref context's own spelling of what every **Prepared set** raises here, so the
+    message names *this* set and quotes :func:`xref_prepare_command`; what the base class
+    says about a compute node with no internet is said once, there.
 
     Examples
     --------
@@ -364,9 +363,19 @@ def parse_slice(text: str, *, origin: str) -> tuple[tuple[str, str, str], ...]:
     ...             origin="example.tsv")
     (('entrez', '7157', 'ENSG00000141510'),)
     """
-    lines = text.splitlines()
-    if not lines or tuple(lines[0].split("\t")) != SLICE_COLUMNS:
-        found = lines[0] if lines else "<empty file>"
+    return _parse_lines(iter(text.splitlines()), origin=origin)
+
+
+def _parse_lines(lines: Iterator[str], origin: str) -> tuple[tuple[str, str, str], ...]:
+    """Read a stored slice line by line, so the file is never held whole.
+
+    The reading half of :func:`parse_slice`, taking lines rather than text because that is
+    what a stored slice is streamed as — line endings are stripped here, so a caller may
+    hand over either spelling.
+    """
+    header = next(lines, None)
+    if header is None or tuple(header.rstrip("\n").split("\t")) != SLICE_COLUMNS:
+        found = "<empty file>" if header is None else header.rstrip("\n")
         raise XrefTableError(
             f"{origin} opens with {found!r} where a stored xref slice opens with "
             f"{'/'.join(SLICE_COLUMNS)}. It is not one of this package's slices, or it was "
@@ -374,7 +383,8 @@ def parse_slice(text: str, *, origin: str) -> tuple[tuple[str, str, str], ...]:
             f"the set again."
         )
     triples: list[tuple[str, str, str]] = []
-    for number, line in enumerate(lines[1:], start=2):
+    for number, raw in enumerate(lines, start=2):
+        line = raw.rstrip("\n")
         if not line:
             continue
         fields = line.split("\t")
@@ -539,22 +549,16 @@ class XrefSet:
             if cache_dir is not None
             else xref_set_dir(row.species, row.source, row.release, evidence=self.evidence)
         )
-        self.path = directory / xref_slice_name(row.species)
-        record = _prepare(
-            row,
-            directory=directory,
-            path=self.path,
-            evidence=self.evidence,
-            progressbar=progressbar,
-        )
+        declared = _source(row, directory=directory, evidence=self.evidence)
+        prepared = prepare(declared, progressbar=progressbar)
+        self.path = prepared.path
         triples, digest = _read_slice(self.path)
-        if record.sha256 != digest:
+        if prepared.record.sha256 != digest:
             raise RegistrationMismatchError(
-                f"{self.path} hashes to {digest} where its record claims {record.sha256}, so "
-                f"the slice on disk is not the one that was prepared. Something rewrote it "
-                f"after the record was written; nothing here can be trusted as complete. "
-                f"Re-prepare it with `rm -rf {shlex.quote(str(directory))} && "
-                f"{xref_prepare_command(*_names(row), evidence=self.evidence)}`."
+                f"{self.path} hashes to {digest} where its record claims "
+                f"{prepared.record.sha256}, so the slice on disk is not the one that was "
+                f"prepared. Something rewrote it after the record was written; nothing here "
+                f"can be trusted as complete. Re-prepare it with `{declared.repair}`."
             )
         self._to_stems, self._from_stems = _index(triples)
         self.namespaces: tuple[str, ...] = tuple(
@@ -986,66 +990,24 @@ def _symbol_source_hint(species: str) -> str:
     )
 
 
-def _prepare(
-    row: XrefMetadata,
-    *,
-    directory: Path,
-    path: Path,
-    evidence: tuple[str, ...],
-    progressbar: bool,
-) -> CompletionRecord:
-    """Return the finished set's record, fetching and slicing it once if it is not there.
+def _source(row: XrefMetadata, *, directory: Path, evidence: tuple[str, ...]) -> PreparedSource:
+    """Return what this **Xref set** declares: a URL, a checksum and how to slice it.
 
-    The publisher's file lands in the directory's working area, is verified against the
-    checksum the curated row pins, is sliced to this species and written under a name of
-    its own, and is renamed into place only once the whole slice exists. The **Completion
-    marker** is written last, after the file it claims, and the working area is emptied
-    once it is — so the set is finished or it is not, and a run killed anywhere in between
-    leaves a directory that reads as unfinished rather than as present.
-
-    An evidence filter is applied by the reader, as the publisher's rows go past, and a
-    filter that keeps nothing raises there — before anything is written, so a set that
-    could only answer nothing is never left on disk to be re-read as present.
+    Everything else — the working area, the fetch, the digest, the staged rename and the
+    **Completion marker** — is :mod:`genome.io.prepared`'s, which is why nothing in this
+    module fetches. What is declared here is what makes one xref set differ from another.
     """
-    existing = check_registration(
-        directory,
-        repair=(
-            f"rm -rf {shlex.quote(str(directory))} && "
-            f"{xref_prepare_command(*_names(row), evidence=evidence)}"
-        ),
-    )
-    if existing is not None:
-        return existing
-    reader = _reader(row)
-    clear_work_dir(directory)
-    work = work_dir(directory)
-    fetched = _fetch(row, work=work, evidence=evidence, progressbar=progressbar)
-    digest = hashlib.new(_algorithm(row))
-    triples = reader(
-        _unpacked_lines(fetched, digest),
-        ncbi_taxid=row.ncbi_taxid,
-        origin=str(fetched),
-        evidence=evidence,
-    )
-    _check_source_checksum(row, digest.hexdigest(), path=fetched)
-    if not triples:
-        raise XrefTableError(
-            f"{fetched} carries no row for {row.species!r} (NCBITaxon:{row.ncbi_taxid}), so "
-            f"the slice would be empty and every query would answer nothing. The file at "
-            f"{row.url} is not the one this row pins, or the publisher dropped the species. "
-            f"Fix the row in the curated xref metadata table."
-        )
-    staged = work / path.name
-    sha256 = _write_slice(staged, triples)
-    directory.mkdir(parents=True, exist_ok=True)
-    staged.replace(path)
-    record = build_record(
-        directory,
+    return PreparedSource(
+        url=row.url,
+        directory=directory,
+        stored_name=xref_slice_name(row.species),
         kind=XREF_KIND,
         name=f"{row.source}/{row.release}/{species_slug(row.species)}{_suffix(evidence)}",
-        files=[path],
-        source_url=row.url,
-        sha256=sha256,
+        prepare_command=xref_prepare_command(*_names(row), evidence=evidence),
+        description=f"the {row.source} {row.release} xref set for {row.species!r}",
+        read=_slicer(row, evidence=evidence),
+        not_downloaded=XrefSetNotDownloadedError,
+        checksum=_checksum(row),
         details={
             "species": row.species,
             "ncbi_taxid": row.ncbi_taxid,
@@ -1054,22 +1016,40 @@ def _prepare(
             "publisher": row.publisher,
             "version": row.version,
             # The publisher's own checksum of its own file, kept as *provenance*: what is
-            # stored here is a derived slice, so `sha256` above — this slice's own digest —
-            # is what the set is held to, and this says which bytes it was cut from.
+            # stored here is a derived slice, so the record's own `sha256` — this slice's
+            # digest — is what the set is held to, and this says which bytes it was cut from.
             "source_checksum": row.source_checksum,
             "evidence": list(evidence),
-            "namespaces": sorted({namespace for namespace, _id, _stem in triples}),
-            "symbol_kinds": [
-                kind
-                for kind in SYMBOL_KINDS
-                if KIND_NAMESPACES[kind] in {namespace for namespace, _id, _stem in triples}
-            ],
-            "rows": len(triples),
         },
     )
-    write_record(directory, record)
-    clear_work_dir(directory)
-    return record
+
+
+def _slicer(row: XrefMetadata, *, evidence: tuple[str, ...]) -> SourceReader:
+    """Return the reader that turns this publisher's lines into the stored slice.
+
+    An evidence filter is applied by the source's own reader, as the publisher's rows go
+    past, and a filter that keeps nothing raises there — before anything is placed, so a
+    set that could only answer nothing is never left on disk to be re-read as present.
+    """
+
+    def read(lines: Iterator[str], staged: Path, *, origin: str) -> Mapping[str, Any]:
+        triples = _reader(row)(lines, ncbi_taxid=row.ncbi_taxid, origin=origin, evidence=evidence)
+        if not triples:
+            raise XrefTableError(
+                f"{origin} carries no row for {row.species!r} (NCBITaxon:{row.ncbi_taxid}), so "
+                f"the slice would be empty and every query would answer nothing. The file at "
+                f"{row.url} is not the one this row pins, or the publisher dropped the species. "
+                f"Fix the row in the curated xref metadata table."
+            )
+        _write_slice(staged, triples)
+        carried = {namespace for namespace, _id, _stem in triples}
+        return {
+            "namespaces": sorted(carried),
+            "symbol_kinds": [kind for kind in SYMBOL_KINDS if KIND_NAMESPACES[kind] in carried],
+            "rows": len(triples),
+        }
+
+    return read
 
 
 def _reader(row: XrefMetadata) -> XrefReader:
@@ -1084,31 +1064,14 @@ def _reader(row: XrefMetadata) -> XrefReader:
     return reader
 
 
-def _fetch(row: XrefMetadata, *, work: Path, evidence: tuple[str, ...], progressbar: bool) -> Path:
-    """Download the publisher's file into the working area, or say what to do instead.
+def _checksum(row: XrefMetadata) -> Checksum:
+    """Return the digest the curated row pins, over the publisher's **unpacked** bytes.
 
-    Nothing is verified here, and ``known_hash`` is deliberately not passed. **The checksum
-    a row pins is over the publisher's unpacked bytes** (ADR-0006) while what lands is the
-    compressed file, so pooch would compare the pin against the wrong bytes and reject
-    every download. It is checked instead as the file is read — see :func:`_unpacked_lines`
-    and :func:`_check_source_checksum` — which costs one pass rather than two.
+    Unpacked and not the archive (ADR-0006), which is what Alliance publishes and what the
+    shared pipeline therefore checks as the file is streamed rather than handing to pooch —
+    a pin compared against the compressed bytes would reject every download.
     """
-    name = Path(urlparse(row.url).path).name or f"{row.source}-{row.release}"
-    try:
-        return fetch.fetch_url(row.url, work, fname=name, progressbar=progressbar)
-    except (OSError, ValueError) as error:
-        raise XrefSetNotDownloadedError(
-            f"the {row.source} {row.release} xref set for {row.species!r} is not prepared "
-            f"here and {row.url} could not be fetched: {error}. Nothing else in this "
-            f"package needs the network, so this is the one step that does. Prepare it on a "
-            f"machine with internet — a login node, since the lab's compute nodes have "
-            f"none — with `{xref_prepare_command(*_names(row), evidence=evidence)}`."
-        ) from error
-
-
-def _algorithm(row: XrefMetadata) -> str:
-    """Return the hash algorithm the row's pinned checksum names, e.g. ``md5``."""
-    algorithm, separator, _digest = row.source_checksum.partition(":")
+    algorithm, separator, digest = row.source_checksum.partition(":")
     if not separator:
         raise XrefTableError(
             f"the curated xref row for {row.species!r} pins the checksum "
@@ -1116,51 +1079,16 @@ def _algorithm(row: XrefMetadata) -> str:
             f"'<algorithm>:<hexdigest>' so that the algorithm travels with it. Fix that "
             f"cell in the xref metadata table."
         )
-    return algorithm
+    return Checksum(algorithm=algorithm, digest=digest)
 
 
-def _unpacked_lines(path: Path, digest: Hash) -> Iterator[str]:
-    """Yield the file's unpacked lines, hashing the bytes exactly as the publisher did.
-
-    Streamed a line at a time and never held whole: the publisher's file unpacks to over
-    half a gigabyte. Gzip is undone here rather than in a reader, so a source that ships
-    plain text needs no branch of its own.
-    """
-    if path.suffix == ".gz":
-        with gzip.open(path, "rb") as packed:
-            yield from _hashed(packed, digest)
-    else:
-        with path.open("rb") as plain:
-            yield from _hashed(plain, digest)
-
-
-def _hashed(lines: Iterable[bytes], digest: Hash) -> Iterator[str]:
-    """Decode each line, feeding the bytes to ``digest`` exactly as they were read."""
-    for raw in lines:
-        digest.update(raw)
-        yield raw.decode("utf-8")
-
-
-def _check_source_checksum(row: XrefMetadata, found: str, *, path: Path) -> None:
-    """Hold the publisher's file to the digest the curated row pins for it."""
-    _algorithm_name, _, expected = row.source_checksum.partition(":")
-    if found != expected:
-        raise XrefTableError(
-            f"{path} hashes to {found} where the curated xref row for {row.species!r} pins "
-            f"{expected}. A truncated download is not a smaller release, and slicing it "
-            f"would answer a query with silently fewer genes — delete {path} and construct "
-            f"the set again to fetch it afresh. If {row.url} has genuinely been "
-            f"re-published under the same name, that source cannot be pinned and does not "
-            f"belong in the table (ADR-0018)."
-        )
-
-
-def _write_slice(path: Path, triples: tuple[tuple[str, str, str], ...]) -> str:
-    """Write the slice as a plain gzipped TSV and return its **unpacked** sha256.
+def _write_slice(path: Path, triples: tuple[tuple[str, str, str], ...]) -> None:
+    """Write the slice as a plain gzipped TSV.
 
     The gzip is stamped with no modification time, so one release sliced on two machines
-    produces byte-identical files. The digest is of what is *inside* the gzip (ADR-0006),
-    so a slice recompressed elsewhere still matches its record.
+    produces byte-identical files. What the slice hashes to is taken from the file itself
+    by the shared pipeline, over what is *inside* the gzip (ADR-0006), so a slice
+    recompressed elsewhere still matches its record.
     """
     payload = "".join(
         ["\t".join(SLICE_COLUMNS) + "\n", *(f"{a}\t{b}\t{c}\n" for a, b, c in triples)]
@@ -1168,20 +1096,16 @@ def _write_slice(path: Path, triples: tuple[tuple[str, str, str], ...]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as out:
         out.write(payload)
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _read_slice(path: Path) -> tuple[tuple[tuple[str, str, str], ...], str]:
     """Return the stored slice's triples and the sha256 of its **unpacked** bytes.
 
-    One pass: the digest that holds the file to its record costs nothing extra, since the
-    bytes are being read anyway.
+    One streaming pass, and the file is never held: the digest that holds the slice to its
+    record costs nothing extra, since the bytes are being read anyway.
     """
-    with gzip.open(path, "rb") as handle:
-        payload = handle.read()
-    return parse_slice(payload.decode("utf-8"), origin=str(path)), hashlib.sha256(
-        payload
-    ).hexdigest()
+    digest = hashlib.sha256()
+    return _parse_lines(unpacked_lines(path, digest), origin=str(path)), digest.hexdigest()
 
 
 def _index(
