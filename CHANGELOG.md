@@ -339,6 +339,27 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   action**: a species no set exists for names the three that do, a set that is not here and cannot
   be fetched names the call to make on a login node, a **Namespace** the source does not carry names
   the ones it does, and a directory an interrupted download left unfinished names the repair.
+- **`genome homologs` — a species pair, a set of stems, and the publisher's own label on every
+  row.** The shell surface over a **Homology set**, and as thin as its sibling: it parses
+  arguments, makes one API call and renders, so `import genome` and the shell hit one code path.
+  Any pairing among human, mouse and worm answers, either way round. **The links go to stdout,
+  tab-separated, so the output pipes** — the seven columns are the keys `as_json()` writes, in its
+  order, so the text rendering and `--json` cannot drift and every cell printed is a value the API
+  put in the answer. **Every stem passed leaves with at least one row**: one with three homologs
+  prints three, and one this release names no homolog for gets a row with the other columns empty
+   — which is not `NULL`, Compara's own word for a cell it recorded nothing in on a link that does
+  exist. The heading, the attribution and two qualifications go to stderr: the **Dropped
+  partner**s, counted *and* named so a link that merely looks one-to-one stays distinguishable
+  from one the publisher called one-to-one, and whichever quality columns the set holds no value
+  in anywhere — `goc_score` and `wga_coverage` are null on every link of *either* worm pairing, so
+  a shell user is told before `awk` empties their filter rather than after. `--paralogs` returns
+  every link the publisher wrote and a **Paralogy link** is marked by its own `homology_type`
+  rather than excluded (ADR-0013); release 116 publishes none cross-species, so on it the flag
+  changes nothing and the heading says which question was asked either way. **Every failure exits
+  non-zero naming the next action**, the wrong-file case most of all: a pair fetched from the
+  Compara dump that no longer holds it raises naming the other file rather than answering empty.
+  A set that cannot be fetched now names the call to make on a login node, as an **Xref set**
+  already did.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;

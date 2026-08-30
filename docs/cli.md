@@ -340,6 +340,91 @@ fetched (the message names the call to make on a login node), when the namespace
 the set carries (the message names the ones it does), and when a directory holds a set an
 interrupted download left unfinished.
 
+## `genome homologs <species> <other-species> <stems>...`
+
+Print the genes of another species a gene id stem's gene is homologous to, on Ensembl
+Compara's own gene trees — the way a hit carries across species without leaving the package
+and without the BioMart web API, whose intermittent failures make a pipeline built on it
+fail irreproducibly. Everything here is a bulk file fetched once and read locally. No
+assembly is named and no genome is opened: a homology set is anchored to a species pair and
+a release, not to a build. Any pairing among human, mouse and worm answers, either way
+round, off one prepared file per pair.
+
+```console
+$ genome homologs "Homo sapiens" "Caenorhabditis elegans" \
+      ENSG00000152670 ENSG00000177479 ENSG00000000000 > homologs.tsv
+Homo sapiens -> Caenorhabditis elegans orthologs (Ensembl Compara 116)
+  source   Ensembl Compara release 116 (PMID 26896847) — https://ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/homo_sapiens/Compara.116.protein_default.homologies.tsv.gz
+  columns  gene_id_stem, homolog_gene_id_stem, homology_type, is_ortholog, is_high_confidence, goc_score, wga_coverage
+  2 resolved, 4 links, 1 this release names no homolog for, 0 dropped partners
+  quality  goc_score and wga_coverage null on every link of this set, so a filter on either empties rather than narrowing
+
+$ cat homologs.tsv
+ENSG00000152670	WBGene00001598	ortholog_one2many	True	False	NULL	NULL
+ENSG00000152670	WBGene00001599	ortholog_one2many	True	False	NULL	NULL
+ENSG00000152670	WBGene00001600	ortholog_one2many	True	False	NULL	NULL
+ENSG00000177479	WBGene00020462	ortholog_one2one	True	True	NULL	NULL
+ENSG00000000000
+```
+
+The links go to stdout, tab-separated, so the output pipes — `cut -f2` is the answer and
+`cut -f1` says what asked for it — and the heading, the attribution, the counts and the two
+qualifications go to stderr. **Every stem you passed gets at least one row.** One with three
+homologs prints three rather than whichever came first, and one this release names no
+homolog for gets a row with every other column empty: what your list holds and this release
+does not is visible rather than dropped. An empty cell there is not `NULL`, which is
+Compara's own word for a cell it recorded nothing in on a link that does exist.
+
+**Every cell is the publisher's.** `homology_type` is Compara's tree-derived label printed
+verbatim, and it is never recomputed from what came back — an answer can show one partner
+and still read `ortholog_one2many`, which is why the label is carried instead of counted
+(ADR-0020). The high-confidence flag and both quality scores come through the same way. This
+package publishes no score, ranking or "best ortholog" of its own.
+
+Two qualifications ride on every answer. **Dropped partners** — homologous genes a filter
+removed — are counted *and* named, so a link that merely looks one-to-one in your view stays
+distinguishable from one the publisher called one-to-one. And whichever quality columns the
+set holds no value in *anywhere* are named up front: Compara records neither `goc_score` nor
+`wga_coverage` on any link of **either** worm pairing, so `awk -F'\t' '$6 > 50'` would empty
+itself rather than narrow, and you are told before you write it.
+
+`--paralogs` returns every link the publisher wrote rather than only the ones its label calls
+a speciation event. A paralogy link is **marked** by that label in the `homology_type` column
+and never excluded, so *not an ortholog* stays distinguishable from *absent* — the stance
+ADR-0013 already takes. Measured: release 116 publishes no cross-species paralogy for these
+three species at all, so on it the flag changes nothing and the heading says which question
+was asked either way.
+
+`--release` names the Compara release, and `--json` carries the same answer the API renders,
+keyed by the stems asked about, with the ones that named nothing under `unresolved`.
+
+```console
+$ genome homologs "Mus musculus" "Homo sapiens" ENSMUSG00000074698 --json
+{"species": "Mus musculus", "other_species": "Homo sapiens", "release": "116",
+ "resolved": {"ENSMUSG00000074698": [
+   {"gene_id_stem": "ENSMUSG00000074698", "homolog_gene_id_stem": "ENSG00000101266",
+    "homology_type": "ortholog_one2many", "is_ortholog": true, "is_high_confidence": true,
+    "goc_score": 100, "wga_coverage": 100.0}, …]},
+ "unresolved": [], "dropped_partners": [], "null_quality_scores": [],
+ "homolog_gene_id_stems": ["ENSG00000101266", "ENSG00000254598"]}
+```
+
+Putting an answer into a registered annotation's own gene ids is
+`genome.homology.resolve_homologs` from Python, and it is deliberately not a flag here: it
+names an assembly, and this command names none. `genome.homology.HomologySet` in the
+[API reference](reference.md) is the same one verb, on one code path with this.
+
+Naming a pair prepares its set, which the first time is a download — so run it once on a
+login node before submitting a job that needs it, as the lab's compute nodes have no
+internet. Exits `1` when no set is pinned for a species (the message names the ones that
+are), when the release is not pinned, when both species are the same one, when a stem carries
+a version (the message names the stem to pass), when the set is not here and cannot be
+fetched (the message names the call to make on a login node), when a directory holds a set an
+interrupted download left unfinished, and when the file recorded as holding this pair holds
+none of its rows — Compara's per-species dumps are a de-duplicated partition at the pair
+level and the assignment moves between releases, so that is an error naming the other file
+rather than an empty answer that would read as *these species share no homologs*.
+
 ## `genome verify <assembly>`
 
 Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is
