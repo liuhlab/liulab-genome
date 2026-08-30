@@ -381,7 +381,9 @@ def test_rebuilding_a_finished_chimera_rewrites_nothing_and_a_broken_one_is_repa
     # command that repairs it.
     pair = build_chimera("tinyCe", "tinySc")
     record_path(pair.fasta_path.parent).unlink()
-    with pytest.raises(UnfinishedRegistrationError, match="genome register tinyCe_tinySc --force"):
+    with pytest.raises(
+        UnfinishedRegistrationError, match="genome assembly register tinyCe_tinySc --force"
+    ):
         build_chimera("tinyCe", "tinySc")
     assert build_chimera("tinyCe", "tinySc", force=True).chromosomes == pair.chromosomes
 
@@ -410,7 +412,9 @@ def test_a_chrom_sizes_that_disagrees_with_the_components_is_never_recorded_and_
     components = [chimera_component(name) for name in ("tinyCe", "tinySc")]
     with pytest.MonkeyPatch.context() as scoped:
         scoped.setattr(chimera_mod, "prepare_fasta", prepare_and_mangle)
-        with pytest.raises(RegistrationError, match="genome register tinyCe_tinySc --force"):
+        with pytest.raises(
+            RegistrationError, match="genome assembly register tinyCe_tinySc --force"
+        ):
             Genome.chimera(*components)
     assert read_record(assembly_data_dir("tinyCe_tinySc")) is None
 

@@ -54,7 +54,7 @@ rehashed — made both when a finished chimera is handed back and when one is ve
 absent digest on either side reads as *unknown* rather than as wrong.
 
 **The merge is part of the build.** Between those two steps the **Merged annotation** is
-registered, so there is no second surface to remember and ``genome register <chimera>
+registered, so there is no second surface to remember and ``genome assembly register <chimera>
 --force`` repairs the annotation and the FASTA together. Each component contributes its
 own **Default annotation** and nothing is passed in: a component that has none contributes
 nothing, and no contributors at all means no annotation rather than an empty one — while a
@@ -215,7 +215,7 @@ def build_chimera(
     missing = [name for name in components if not is_prepared(name)]
     if missing:
         listed = ", ".join(missing)
-        commands = ", ".join(f"`genome register {name}`" for name in missing)
+        commands = ", ".join(f"`genome assembly register {name}`" for name in missing)
         raise FileNotFoundError(
             f"{assembly_dir.assembly} is a chimera of {', '.join(components)}, and a chimera "
             f"copies the bytes of components that are already prepared: {listed} is not "
@@ -338,7 +338,7 @@ class ChimeraBuilder(AssemblyRegistration):
         rewriting anything — the annotation included, since a finished chimera already has
         the one its build wrote — but only once its components are shown to still be the
         ones it was built from (:func:`components_status`). A directory that cannot be
-        trusted **raises** instead of being rebuilt, naming ``genome register <name>
+        trusted **raises** instead of being rebuilt, naming ``genome assembly register <name>
         --force`` (ADR-0007). That command is what ``overwrite=True`` is, and it repairs
         both halves in one pass.
 

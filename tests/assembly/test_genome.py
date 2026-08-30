@@ -349,7 +349,7 @@ def test_opening_a_genome_over_a_damaged_registration_raises_until_forced(
 
     message = str(excinfo.value)
     assert "hg38.2bit" in message
-    assert "genome register hg38 --force" in message
+    assert "genome assembly register hg38 --force" in message
 
     register_assembly("hg38", cache_dir=tmp_path, force=True, progressbar=False, metadata=_UNPINNED)
 
@@ -388,7 +388,7 @@ class TestOfferedAgainstRegistered:
         ):
             _ = g.default_gtf_path
 
-        assert "genome register-annotation sacCer3 ensgene_v101" in str(excinfo.value)
+        assert "genome annotation register sacCer3 ensgene_v101" in str(excinfo.value)
 
     def test_an_explicit_default_beats_the_flag_and_need_not_start_registered(
         self, yeast_dir: Path, data_dir: Path
@@ -448,12 +448,12 @@ class TestOfferedAgainstRegistered:
             assert [broken.name for broken in g.annotations.broken] == ["ensgene_v101"]
             assert g.fetch_sequence("chrI:0-4") == DNA("CCAC")
 
-            # Not `genome register-annotation sacCer3 ensgene_v101`, which would itself
+            # Not `genome annotation register sacCer3 ensgene_v101`, which would itself
             # raise and demand --force: the command named here is the one that works.
             with pytest.raises(AnnotationNotRegisteredError) as excinfo:
                 _ = g.default_gtf_path
 
-        assert "genome register-annotation sacCer3 ensgene_v101 --force" in str(excinfo.value)
+        assert "genome annotation register sacCer3 ensgene_v101 --force" in str(excinfo.value)
 
     def test_repairing_a_broken_annotation_stops_reporting_it(
         self, yeast_dir: Path, data_dir: Path
@@ -486,7 +486,7 @@ class TestOfferedAgainstRegistered:
         ):
             g.annotations.register_path(source, "mine")
 
-        assert f"genome register-gtf tiny {source} mine --force" in str(excinfo.value)
+        assert f"genome annotation register-gtf tiny {source} mine --force" in str(excinfo.value)
 
         with Genome("sacCer3", cache_dir=prepared_dir) as g, pytest.raises(KeyError) as unknown:
             g.annotations.path("no_such_annotation")

@@ -126,7 +126,7 @@ def test_a_name_is_read_as_a_component_set_only_when_both_halves_are_assemblies(
 
 
 def test_a_mis_ordered_chimera_name_is_refused_and_told_its_spelling(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="genome register ce11_ecHT115"):
+    with pytest.raises(FileNotFoundError, match="genome assembly register ce11_ecHT115"):
         resolve_source(
             AssemblyDir.locate("ecHT115_ce11", tmp_path), metadata=None, golden_path_url=_GOLDEN
         )

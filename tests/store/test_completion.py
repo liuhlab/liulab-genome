@@ -236,7 +236,7 @@ def test_every_offender_is_reported_not_just_the_first(tmp_path: Path) -> None:
 
 # --- finished, fresh, or broken ----------------------------------------------
 
-_REPAIR = "genome register tiny --force"
+_REPAIR = "genome assembly register tiny --force"
 
 
 def test_a_finished_build_answers_with_its_record(tmp_path: Path) -> None:
@@ -321,4 +321,6 @@ def test_an_ignored_subtree_hides_its_own_leftovers_but_not_a_real_interrupted_r
     # them.
     (tmp_path / "hg38.fa").write_text(">chr1\nACGT\n")
     with pytest.raises(UnfinishedRegistrationError, match=r"hg38\.fa"):
-        check_registration(tmp_path, repair="genome register hg38 --force", ignore={"gtf", "index"})
+        check_registration(
+            tmp_path, repair="genome assembly register hg38 --force", ignore={"gtf", "index"}
+        )

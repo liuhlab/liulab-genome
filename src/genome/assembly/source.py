@@ -70,7 +70,7 @@ class SeededSource:
     """The caller handed the bytes over — a local path or a URL of their own.
 
     Never resolved, only declared: this is what ``Genome(path_or_url=...)`` and ``genome
-    register <name> --source`` say, so nothing is inferred and UCSC is never consulted.
+    assembly register <name> --source`` say, so nothing is inferred and UCSC is never consulted.
     The bytes are recorded rather than compared, and the assembly name degrades to a label
     for the directory they land in (ADR-0003).
 
@@ -193,7 +193,7 @@ def resolve_source(
 
     What a name means, decided once. Both ways in — :class:`~genome.assembly.genome.Genome` and
     :func:`~genome.assembly.download.register_assembly` — reach this through one registration
-    step, which is what makes ``genome register <name>`` one command for every kind of
+    step, which is what makes ``genome assembly register <name>`` one command for every kind of
     **Source** and keeps the command line a thin client, since neither the resolution nor
     its refusals are written there. Four checks, in this order:
 
@@ -272,6 +272,6 @@ def resolve_source(
             f"it is not how a chimera of {', '.join(candidates)} is spelled: a chimera's name "
             f"is its components sorted, so that one set of components means one "
             f"directory whatever order they are typed in (ADR-0008). Build it with "
-            f"`genome register {canonical}`."
+            f"`genome assembly register {canonical}`."
         )
     return ComponentSource(candidates)

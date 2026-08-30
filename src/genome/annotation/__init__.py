@@ -21,8 +21,8 @@ about them. Its implementation is spread over four modules and it calls across t
   addressed by assembly name.
 - :mod:`~genome.annotation.registry` holds the class itself, the three scans and the
   **Default annotation** rule it settles at construction, and the by-assembly-name
-  questions ``genome annotations``, ``genome gene-list`` and ``genome gene-categories``
-  ask.
+  questions ``genome annotation list``, ``genome annotation gene-list`` and ``genome
+  annotation gene-categories`` ask.
 - :mod:`~genome.annotation.stems` resolves a **Gene id stem** against an annotation's
   own gene ids — the seam the Xref, Orthology and TF contexts all cross, and the only one.
 - :mod:`~genome.annotation.database` is the `gffutils` adapter: the build, and the read

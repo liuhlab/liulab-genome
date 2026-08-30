@@ -307,7 +307,7 @@ def test_from_row_reads_blank_and_missing_optional_cells_as_none() -> None:
     assert (by_hand.source_url, by_hand.sha256) == (None, None)
     assert (by_hand.intron_length_cap, by_hand.intron_length_cap_rationale) == (None, None)
 
-    # What `genome table-row` emits for an assembly the table does not list yet: the
+    # What `genome assembly table-row` emits for an assembly the table does not list yet: the
     # name, the source and the digest, and blanks for everything only a person supplies.
     # Pasted into the table, it used to give species the string "nan" and raise on taxid.
     line = format_table_row(
@@ -429,7 +429,7 @@ def test_a_record_is_rebuilt_from_its_own_fields(record: AssemblyMetadata) -> No
 @given(name=_CELLS)
 def test_an_unknown_record_survives_rendering_and_parsing_unchanged(name: str) -> None:
     # An unknown record is a row like any other, and this is the one that says so: it
-    # renders to the line `genome table-row` emits for an assembly nobody has curated —
+    # renders to the line `genome assembly table-row` emits for an assembly nobody has curated —
     # the name, and every other cell blank — and pasting that line back yields it again.
     record = AssemblyMetadata.unknown(name)
     assert AssemblyMetadata.from_row(_pasted(format_table_row(asdict(record)))) == record

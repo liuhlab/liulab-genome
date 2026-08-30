@@ -922,7 +922,7 @@ def test_nothing_this_package_publishes_is_derived_through_homology() -> None:
     ``cli.py`` is the one exemption, and it is sound because *consume* here means
     *derive a claim of this package's own*. The CLI publishes no table: it parses
     arguments, makes the one call the caller asked for and renders the answer, so
-    ``genome homologs`` is the served half of ADR-0019 reaching a shell rather than
+    ``genome homology links`` is the served half of ADR-0019 reaching a shell rather than
     Python. Nothing it prints outlives the process, and no list that ships in the wheel
     passes through it. Every other module keeps the ban whole — a reader of this list
     should be able to say, of any name added to it, which table it could not build.

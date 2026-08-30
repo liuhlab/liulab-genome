@@ -406,7 +406,7 @@ class TestTheDefaultWhenTheQuestionIsSymbols:
         self, sources: FakeFetch
     ) -> None:
         # Read off the shipped rows, so a fourth species added without the flag fails here
-        # rather than at the first `match-symbols` somebody runs.
+        # rather than at the first `xref symbols` somebody runs.
         flagged = {
             species: [
                 row.source

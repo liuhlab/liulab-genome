@@ -351,7 +351,7 @@ class ChimeraDetails:
         ------
         genome.store.completion.RegistrationError
             If ``details`` claim to be a chimera's and cannot be read as one. The message
-            says which part did not read and quotes ``genome register <assembly>
+            says which part did not read and quotes ``genome assembly register <assembly>
             --force``, which is the repair.
 
         Examples
@@ -469,7 +469,7 @@ def components_status(assembly_dir: AssemblyDir) -> str | None:
     genome.store.completion.RegistrationMismatchError
         If a component's FASTA, or the annotation it contributed to the **Merged
         annotation**, is not the one this chimera was built from. The message names both
-        digests and ``genome register <assembly> --force``, which rebuilds both halves.
+        digests and ``genome assembly register <assembly> --force``, which rebuilds both halves.
     genome.store.completion.RegistrationError
         If the record claims to be a chimera's and cannot be read as one — see
         :meth:`ChimeraDetails.from_details`.

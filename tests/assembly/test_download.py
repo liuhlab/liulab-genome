@@ -474,7 +474,7 @@ def test_registration_raises_when_broken_and_succeeds_from_absent_empty_or_inter
         dl.fetch_genome()
     message = str(excinfo.value)
     assert "tiny.fa" in message  # what is there
-    assert "genome register tiny --force" in message  # and what to do about it
+    assert "genome assembly register tiny --force" in message  # and what to do about it
     assert fake_fetch.calls == []  # nothing was fetched over the top of it
 
     # The opposite defect: a record exists, but disk disagrees with what it claims.
@@ -488,7 +488,7 @@ def test_registration_raises_when_broken_and_succeeds_from_absent_empty_or_inter
         dl2.fetch_genome()
     message2 = str(excinfo2.value)
     assert f"tiny.2bit: recorded {recorded} bytes, found 0" in message2
-    assert "genome register tiny --force" in message2
+    assert "genome assembly register tiny --force" in message2
     assert len(fake_fetch.calls) == 1  # not silently registered again either
 
     fresh = tmp_path / "never-registered"
@@ -571,7 +571,7 @@ def test_a_forced_re_registration_fetches_again_unless_the_fasta_is_provably_goo
 def test_a_seeded_assembly_names_its_own_source_in_the_repair_and_records_it_when_it_succeeds(
     tmp_path: Path, data_dir: Path, no_native_prepare: None
 ) -> None:
-    # `genome register tiny --force` would fetch from the golden path, which is not
+    # `genome assembly register tiny --force` would fetch from the golden path, which is not
     # where this assembly came from, so the repair names the source it was seeded from.
     source = data_dir / "tiny.fa.gz"
     broken = tmp_path / "broken"
@@ -581,7 +581,7 @@ def test_a_seeded_assembly_names_its_own_source_in_the_repair_and_records_it_whe
 
     with pytest.raises(UnfinishedRegistrationError) as excinfo:
         dl.fetch_genome_from(source)
-    assert f"genome register tiny --force --source {source}" in str(excinfo.value)
+    assert f"genome assembly register tiny --force --source {source}" in str(excinfo.value)
 
     # And on a clean directory, that same seeding succeeds and records where it came from.
     cache = tmp_path / "cache"
@@ -632,7 +632,7 @@ def test_register_assembly_reports_serializes_repairs_and_seeds_from_a_source(
     # The command the error message names has to be the command that fixes it.
     (tmp_path / "broken" / "tiny.fa").parent.mkdir(parents=True)
     (tmp_path / "broken" / "tiny.fa").write_text("half a genome\n")
-    with pytest.raises(UnfinishedRegistrationError, match="genome register tiny --force"):
+    with pytest.raises(UnfinishedRegistrationError, match="genome assembly register tiny --force"):
         register_assembly("tiny", cache_dir=tmp_path / "broken", progressbar=False)
     repaired = register_assembly(
         "tiny", cache_dir=tmp_path / "broken", force=True, progressbar=False
@@ -723,10 +723,10 @@ def test_verify_assembly_expected_digest_comes_from_table_record_or_nothing_and_
     # none at all, each raises naming what to run.
     (tmp_path / "broken" / "tiny.fa").parent.mkdir(parents=True)
     (tmp_path / "broken" / "tiny.fa").write_text("half a genome\n")
-    with pytest.raises(UnfinishedRegistrationError, match="genome register tiny --force"):
+    with pytest.raises(UnfinishedRegistrationError, match="genome assembly register tiny --force"):
         verify_assembly("tiny", cache_dir=tmp_path / "broken")
 
-    with pytest.raises(FileNotFoundError, match="genome register tiny"):
+    with pytest.raises(FileNotFoundError, match="genome assembly register tiny"):
         verify_assembly("tiny", cache_dir=tmp_path / "elsewhere")
 
 

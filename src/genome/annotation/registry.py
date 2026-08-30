@@ -223,10 +223,10 @@ class BrokenAnnotation:
     ...     name="mine",
     ...     directory=Path("/data/genome/hg38/gtf/mine"),
     ...     problem="... holds files but no .completion.json ...",
-    ...     repair="genome register-gtf hg38 /tmp/mine.gtf mine --force",
+    ...     repair="genome annotation register-gtf hg38 /tmp/mine.gtf mine --force",
     ... )
     >>> broken.repair
-    'genome register-gtf hg38 /tmp/mine.gtf mine --force'
+    'genome annotation register-gtf hg38 /tmp/mine.gtf mine --force'
     """
 
     name: str
@@ -348,7 +348,7 @@ class AnnotationStatusRow:
 class AnnotationStatus:
     """What one assembly's table offers, set against what is registered on this machine.
 
-    :meth:`AnnotationRegistry.status`'s answer, and what ``genome annotations`` prints. Two
+    :meth:`AnnotationRegistry.status`'s answer, and what ``genome annotation list`` prints. Two
     questions joined for one reader, with a third riding along because this is where anyone
     would look for it: a directory that cannot be trusted is ``broken`` rather than
     registered, and reporting one is the point — nothing here raises.
@@ -413,7 +413,7 @@ class AnnotationStatus:
         Returns
         -------
         str
-            One line, beginning ``default: `` — the whole of what ``genome annotations``
+            One line, beginning ``default: `` — the whole of what ``genome annotation list``
             prints last.
         """
         default = self.default_annotation
@@ -510,8 +510,8 @@ class GeneListSource:
 class GeneList:
     """The genes one annotation puts in one **Gene category**, attributed to their sources.
 
-    :meth:`AnnotationRegistry.gene_list`'s answer — what ``genome gene-list`` prints and
-    what its ``--json`` serializes. There is no empty one: an annotation that declares no
+    :meth:`AnnotationRegistry.gene_list`'s answer — what ``genome annotation gene-list``
+    prints and what its ``--json`` serializes. There is no empty one: an annotation that declares no
     categories, and one that declares categories but not this one, each raise a
     :class:`LookupError` of their own rather than answering with nothing, so holding one of
     these means the category was really declared and really has genes in it.
@@ -964,7 +964,7 @@ class AnnotationRegistry:
         An annotation that already has a valid record is returned silently: nothing is
         fetched, nothing is rebuilt and nothing is warned about. A directory that cannot be
         trusted — files with no record, or a record that disagrees with disk — **raises**,
-        naming ``genome register-annotation <assembly> <name> --force`` (ADR-0007). That is
+        naming ``genome annotation register <assembly> <name> --force`` (ADR-0007). That is
         what ``force=True`` is: it skips the question, keeps a GTF whose digest can be shown
         to be the pinned one, and fetches the source again when it cannot.
 
@@ -1078,7 +1078,7 @@ class AnnotationRegistry:
         rather than passed, so an unlisted GTF is held to the same check a listed one gets.
 
         Registering something already registered returns it silently, and a directory that
-        cannot be trusted raises naming ``genome register-gtf <assembly> <gtf> <name>
+        cannot be trusted raises naming ``genome annotation register-gtf <assembly> <gtf> <name>
         --force``, exactly as :meth:`register` does for a listed one.
 
         Parameters
@@ -1138,7 +1138,7 @@ class AnnotationRegistry:
 
         Two questions with two answers, joined for one reader: the table's rows say what
         the lab supports, the disk says what is on this machine, and every row carries
-        which of the two it is. The command behind it is ``genome annotations``.
+        which of the two it is. The command behind it is ``genome annotation list``.
 
         A third answer rides along, because this is where a reader would look for it: a
         directory that cannot be trusted is ``broken`` rather than ``registered``. Nothing
@@ -1491,7 +1491,7 @@ def annotation_status(assembly: str, *, cache_dir: str | Path | None = None) -> 
     """Report what ``assembly``'s table offers against what is registered on this machine.
 
     :meth:`AnnotationRegistry.status` for an assembly named rather than opened, which is
-    what ``genome annotations`` runs. Nothing is prepared, fetched, built or created to
+    what ``genome annotation list`` runs. Nothing is prepared, fetched, built or created to
     answer it — an assembly with no directory at all is the case it most needs to serve.
 
     Parameters
@@ -1525,7 +1525,7 @@ def gene_list(
     """Return the genes ``assembly``'s annotation puts in ``category``.
 
     :meth:`AnnotationRegistry.gene_list` for an assembly named rather than opened, which
-    is what ``genome gene-list`` runs. A registry is built for the length of the call, so
+    is what ``genome annotation gene-list`` runs. A registry is built for the length of the call, so
     there is no second code path. Nothing is prepared, fetched or built to answer it.
 
     Parameters
@@ -1570,8 +1570,8 @@ def gene_lists(
     """Return every **Gene category** ``assembly``'s annotation declares.
 
     :meth:`AnnotationRegistry.gene_lists` addressed by assembly name — what ``genome
-    gene-categories`` runs, built the same way :func:`gene_list` is. Never an empty tuple:
-    an annotation that declares nothing raises instead.
+    annotation gene-categories`` runs, built the same way :func:`gene_list` is. Never an
+    empty tuple: an annotation that declares nothing raises instead.
 
     Parameters
     ----------

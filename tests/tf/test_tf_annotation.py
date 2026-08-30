@@ -276,7 +276,7 @@ class TestTFGeneList:
         with pytest.raises(AnnotationNotRegisteredError) as excinfo:
             resolve_tf_genes(registry, _CURATED)
 
-        assert f"genome register-annotation {_CENSUSED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
+        assert f"genome annotation register {_CENSUSED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
 
         default_registry = self._registry(tmp_path / "default", _TF_PAR_X, name=_CURATED)
         assert default_registry.default == _CURATED
@@ -481,7 +481,7 @@ class TestTFCofactorList:
         with pytest.raises(AnnotationNotRegisteredError) as excinfo:
             resolve_tf_cofactors(registry, "gencode_vM39")
 
-        assert f"genome register-annotation {_TABLED_ASSEMBLY} gencode_vM39" in str(excinfo.value)
+        assert f"genome annotation register {_TABLED_ASSEMBLY} gencode_vM39" in str(excinfo.value)
 
         stem = _cofactors().cofactor_stems[0]
         default_registry = self._registry(
