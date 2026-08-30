@@ -34,6 +34,11 @@ theme:
 
 plugins:
   - search
+  # Renders each Typer sub-app's own --help into the CLI pages, so a synopsis
+  # cannot drift from src/genome/*/cli.py. `pretty` picks the native renderer
+  # (options as a table) over shelling out to the `typer` command.
+  - mkdocs-typer2:
+      pretty: true
   - mkdocstrings:
       handlers:
         python:

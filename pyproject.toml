@@ -102,6 +102,13 @@ mkdocs-material = "*"
 mkdocstrings-python = "*"
 ruff = "*"   # mkdocstrings formats rendered signatures with it
 
+[tool.pixi.feature.docs.pypi-dependencies]
+# Renders the Typer app's own --help into the CLI pages, so a synopsis cannot go
+# stale against src/genome/cli.py. Published to no conda channel; `mkdocs-typer`
+# (the unrelated 0.0.3 package) pins typer==0.* from before Typer 0.12 and does
+# not work here.
+mkdocs-typer2 = ">=0.4,<0.5"
+
 # Optional because they are only needed when Genome.build_<aligner>_index() is called,
 # and the aligner checks for itself then. Being optional is what earns them their own lane.
 [tool.pixi.feature.star.dependencies]
