@@ -25,8 +25,8 @@ The files land in the shared [data directory](../index.md#the-data-directory), w
 
 The first use downloads. The lab's CPU compute nodes have no internet, so run `genome xref ids` once on a login node before submitting a job that needs it.
 
-A set prints which species, source and release it holds, and how many genes it covers. The
-namespaces are read off the slice rather than declared:
+A set prints which species, source and release it holds, and how many genes it covers.
+`namespaces` is read off the slice, so it lists what this set can actually answer in:
 
 ```python
 human
@@ -68,9 +68,9 @@ lookup_xref("Mus musculus", for_symbols=True).source    # 'alliance_bgi'
 
 Name a source, as `XrefSet("Homo sapiens", "ensembl")`, and it is honoured rather than
 swapped for a default. Two publishers can disagree about which Ensembl gene an Entrez id
-names, so the choice is yours, and every answer records the source and release that
-produced it. Naming a species, source or release nothing is prepared for raises
-`NoXrefSetError`.
+names, so pick one deliberately when it matters; every answer records the source and
+release that produced it. Naming a species, source or release nothing is prepared for
+raises `NoXrefSetError`.
 
 There is more here than the common path uses: an `evidence=` filter for publishers that
 grade their rows, the `normalise_id` and `normalise_symbol` helpers, and a reader module per
@@ -103,7 +103,7 @@ human.to_stems(["HGNC:11998", "HGNC:13666"], "hgnc").resolved
 
 `gene_id_stems` flattens those values into one list. It drops which id named which gene, so
 read `resolved` whenever that matters. There is no direct hop from one namespace to
-another: Entrez to UniProt is two calls with the stem in the middle, and the join is yours.
+another: Entrez to UniProt is two calls with the stem in the middle, and you join them.
 
 ### What did not resolve
 
@@ -115,10 +115,10 @@ answer.resolved      # {'7157': ('ENSG00000141510',)}
 answer.unresolved    # ('999999999',)
 ```
 
-**An answer shorter than the list you asked about is what a hand-written join loses
-silently.** `unresolved` is in ask order, and a stem that carries no id in the namespace you
-asked for lands there too. Nothing here separates an id a publisher retired from one it
-never carried.
+**Read `unresolved` on every answer**, because a hand-written join drops these rows without
+saying so. It is in ask order, and a stem that carries no id in the namespace you asked for
+lands there too. Nothing here separates an id a publisher retired from one it never
+carried.
 
 ## Versioned ids and stems
 
@@ -148,9 +148,8 @@ changes nothing.
 
 ## Matching symbols
 
-A symbol is not answered like an id, and the two directions are not mirror images. Starting
-from a stem, a gene has one current approved symbol, which is what a figure axis wants, and
-`from_stems` gives it:
+The two directions are different questions. Starting from a stem, a gene has one current
+approved symbol, which is what a figure axis wants, and `from_stems` gives it:
 
 ```python
 symbols = XrefSet.for_symbols("Homo sapiens")
@@ -172,9 +171,8 @@ answer.unresolved    # ('Brca1',)
 
 `ARNTL` is a spelling HGNC retired and it still reaches `BMAL1`. `ADCY3` is HGNC's approved
 symbol for one gene and a symbol it took away from another, so it answers with both.
-**Matching is exact by default**, since the species is fixed by the set: `Brca1` is a mouse
-spelling asked of the human authority and matches nothing. Pass `case_insensitive=True` to
-fold both sides.
+**Matching is exact by default**, so `Brca1`, a mouse spelling asked of the human
+authority, matches nothing. Pass `case_insensitive=True` to fold both sides.
 
 `XrefSet.for_symbols` fills in the source that carries symbols; the plain constructor fills
 in the identifier one, which for human carries no symbol at all, so
@@ -184,10 +182,10 @@ in the identifier one, which for human carries no symbol at all, so
 
 ### What a source could not match
 
-Only HGNC publishes previous and alias spellings typed. Mouse's and worm's authority
-publishes one approved symbol per gene beside an undifferentiated synonyms list, so those
-sets match approved spellings and nothing else. The pair that works for human does not work
-for mouse:
+Only HGNC labels its previous and alias spellings as such. The mouse and worm authorities
+each publish one approved symbol per gene beside an undifferentiated synonyms list, so
+those sets match approved spellings and nothing else. The pair that works for human does
+not work for mouse:
 
 ```python
 mouse = XrefSet.for_symbols("Mus musculus")
@@ -198,10 +196,10 @@ answer.unresolved    # ('Arntl',)
 answer.kinds         # ('approved',)
 ```
 
-**A symbol this release does not have and a spelling this source could not have matched
-both land in `unresolved`**, so the answer carries the difference itself. `kinds` says which
-kinds the set can match, and `limits` says why the rest are missing. It is a long string,
-trimmed here after its first clause:
+**A symbol this release does not have and a spelling this source could never have matched
+both land in `unresolved`**, and the entry alone does not say which happened. `kinds` says
+which kinds the set can match, and `limits` says why the rest are missing. `limits` is a
+long string, trimmed here after its first clause:
 
 ```python
 print(answer.limits)
@@ -215,8 +213,8 @@ For a human symbol set, `kinds` is `('approved', 'previous', 'alias')` and `limi
 
 ## Citing what answered
 
-A set carries the curated row it resolved to, so what you cite is what actually answered
-rather than what you looked up afterwards:
+A set carries the curated row it resolved to, so what you cite is what answered rather than
+what you looked up afterwards:
 
 ```python
 print(symbols.provenance.attribution())
@@ -226,7 +224,7 @@ print(symbols.provenance.attribution())
 
 Publisher, their own version string, the paper to cite where there is one, and the file the
 bytes came from. `provenance` is the whole record, including the species, the NCBI taxid
-and the publisher's checksum. Both commands below print the same URL on every answer.
+and the publisher's checksum. Each command below prints its own source URL on every answer.
 
 ## From the command line
 

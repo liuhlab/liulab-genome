@@ -1,10 +1,9 @@
 # Transcription factors
 
 A **transcription factor** is a protein that binds a particular DNA sequence and changes how
-nearby genes are transcribed. Nothing in this package decides which genes those are. A
-published census decides it, one census per species, and naming an assembly gets that
-census back in the annotation's own gene ids, so the answer joins to a counts matrix with
-nothing left to normalise.
+nearby genes are transcribed. A published census says which genes those are, one census
+per species. Name an assembly and you get that census back in the annotation's own gene
+ids, so the answer joins straight onto a counts matrix.
 
 ```python
 from genome import Genome
@@ -21,9 +20,9 @@ package. Loading a JASPAR release and scanning sequence for where its matrices o
 `tf_gene_list()` answers against one registered annotation, the assembly's default unless
 you name another with `annotation=`. Three things come back. `genes` holds one entry per
 gene the census judged a transcription factor and this annotation carries. `gene_ids`
-flattens those into the ids the annotation actually spells, versioned as GENCODE spells
-them. `unresolved` holds the census's gene id stems that this annotation has no gene for,
-so what the crossing cost is countable rather than silent.
+flattens those into the ids the annotation itself spells, version suffix included where it
+carries one. `unresolved` holds the census gene id stems this annotation has no gene for,
+so what the crossing drops is countable rather than silent.
 
 A census is keyed by **gene id stem**, a gene id with its version suffix dropped:
 `ENSG00000137203` and not `ENSG00000137203.12`. One stem can name two gene ids in one
@@ -31,16 +30,15 @@ annotation, a pseudoautosomal gene and its `_PAR_Y` copy among them, and both co
 rather than one being picked.
 
 **The species is not a parameter.** It is read from the assembly's own metadata row, so
-asking for human transcription factors while holding a mouse assembly is not something the
-call lets you express. Registering the annotation the ids come back in is on
-[Annotations](../genome/annotations.md).
+you cannot ask a mouse assembly for human transcription factors. Registering the
+annotation the ids come back in is on [Annotations](../genome/annotations.md).
 
 ## What the census recorded about each gene
 
 Four fields are the same in every census: the gene id stem, the symbol, the TF flag, and the
 **DBD family**, which is the DNA-binding domain the publisher classifies the factor under.
-Everything else the publisher recorded stays under the publisher's own column name in
-`judgements`, and how much that is differs by publisher:
+Everything else a publisher recorded stays under that publisher's own column name in
+`judgements`, and how much there is varies a lot:
 
 ```python
 from genome.tf.gene import tf_gene_table
@@ -53,9 +51,9 @@ tf_gene_table("Mus musculus").columns[4:]    # ()
 ```
 
 Those are the keys of `judgements` on every gene in the answer, so tightening or loosening
-is a filter over what you already hold rather than a second call. Lambert's `tf_assessment`
-runs `Known motif`, `Likely to be sequence specific TF` and `Inferred motif` over the genes
-it accepted:
+the criteria is a filter over what you already hold rather than a second call. Lambert's
+`tf_assessment` takes the values `Known motif`, `Likely to be sequence specific TF` and
+`Inferred motif` across the genes it accepted:
 
 ```python
 known = [gene for gene in tfs.genes if gene.judgements["tf_assessment"] == "Known motif"]
@@ -67,7 +65,7 @@ spellings rather than one family counted twice.
 
 ## Assessed, rejected and never assessed
 
-Three states, and two of them are easy to run together. Lambert assessed 2,765 human genes
+Three states, and two of them are easy to confuse. Lambert assessed 2,765 human genes
 and judged 1,639 of them transcription factors. The other 1,126 are a verdict: assessed and
 turned down. A gene in neither number was never looked at.
 
@@ -76,9 +74,9 @@ census = tf_gene_table("Homo sapiens")
 len(census), len(census.assessed_positive)    # (2765, 1639)
 ```
 
-`tf_gene_list()` answers with the assessed-positive genes, since the common case is not
-2,765 rows to filter down to 1,639. `include_rejected=True` widens it to every gene the
-census assessed, each carrying the census's verdict in `is_tf`:
+`tf_gene_list()` answers with the assessed-positive genes, which is what most callers
+want. `include_rejected=True` widens it to every gene the census assessed, each carrying
+the census's verdict in `is_tf`:
 
 ```python
 everything = Genome("hg38").tf_gene_list(include_rejected=True)
@@ -116,15 +114,15 @@ entry.classifications["animaltfdb_category"]    # 'Chromatin Remodeling Factors'
 ```
 
 `source` is `animaltfdb`, `epifactors`, or `both` where two publishers listed the same gene.
-**`both` says the two agree the gene is a cofactor and says nothing about how either
+**`both` means the two agree the gene is a cofactor and says nothing about how either
 classified it**, so group within one publisher's columns and never across two. Human is the
-only species here built from more than one publisher; mouse and worm relay one each. There
-is no `include_rejected` on this half, because no publisher shipping today releases a
+only species here built from more than one publisher; mouse and worm come from one each.
+There is no `include_rejected` on this half, because no publisher shipping today releases a
 rejected set.
 
 ## When no table answers for a species
 
-The two halves do not cover the same species. Nobody has published a worm TF census, and a
+The two halves do not cover the same species. Nobody has published a worm TF census, but a
 publisher has listed worm cofactors, so `ce11` raises from one call and answers from the
 other:
 
@@ -148,17 +146,15 @@ tfs, len(cofactors.cofactors)    # (None, 317)
 
 Nothing on a `Genome` says in advance which way either call will go, so the `try` is how you
 ask. **Neither error means the species has no transcription factors or no cofactors.** It
-means nobody has published for it, which is a fact about the literature. Both messages name
-the species that are covered. A chimera, and an assembly the curated metadata table does not
-list, raise `UnknownSpeciesError` instead, because nothing says what species they are and so
-no file could be chosen.
+means nobody has published for it. Both messages name the species that are covered. A
+chimera, and an assembly the curated metadata table does not list, raise
+`UnknownSpeciesError` instead, because nothing on them says what species they are.
 
 ## Citing the publisher
 
-Every verdict on this page is a publisher's, and citing them is the condition on
-redistributing their tables here. `provenance.attribution()` renders the line to print
-beside anything they answered. It is on the answers `tf_gene_list()` and
-`tf_cofactor_list()` return and on the shipped tables alike:
+Every verdict on this page is a publisher's. `provenance.attribution()` renders the line to
+print beside anything they answered, and it is on the answers `tf_gene_list()` and
+`tf_cofactor_list()` return as well as on the shipped tables:
 
 ```python
 print(tf_gene_table("Homo sapiens").provenance.attribution())
@@ -177,9 +173,9 @@ from genome.tf.cofactor import cofactor_table
 
 ## Which motifs answer for a factor
 
-`motif_links` maps one transcription factor to the JASPAR profiles attributed to it. It is a
-curated table shipped inside the package, built and checked once, rather than a rule applied
-to names at call time. No assembly is involved and nothing is downloaded:
+`motif_links` maps one transcription factor to the JASPAR profiles attributed to it. It
+reads a curated table shipped inside the package. No assembly is involved and nothing is
+downloaded:
 
 ```python
 from genome.tf import motif_links
@@ -206,17 +202,17 @@ link.role, link.partners          # ('complex', ('FOSL2',))
 
 Links come back monomers first, then species-matched profiles before ones measured on
 another vertebrate, then higher information content. **That order says what the matrix is
-attributable to and not which matrix is better**, and every field it sorts on is on the link
-for you to re-sort by. `cross_species=False` drops the profiles measured on another
-vertebrate, which is how a question that needs species-matched matrices asks for them:
+attributable to, not which matrix is better**, and every field it sorts on is on the link,
+so you can re-sort. `cross_species=False` drops the profiles measured on another vertebrate,
+which is how a question that needs species-matched matrices asks for them:
 
 ```python
 motif_links("Jun", "Mus musculus", cross_species=False).motif_ids    # ('MA0489.3',)
 ```
 
-An empty answer is a real answer. A gene the census turned down receives no links by design,
-and a gene it accepted may still have no profile in this release; `is_tf` is what tells the
-two apart. The rest of the link's fields are in the [API reference](../reference.md).
+An empty answer has two causes. A gene the census turned down receives no links at all, and
+a gene it accepted may still have no profile in this release. `is_tf` tells the two apart.
+The rest of the link's fields are in the [API reference](../reference.md).
 
 ```python
 smad2 = motif_links("SMAD2", "Homo sapiens")
@@ -245,7 +241,8 @@ for symbol in ("JUN", "WDR5", "GAPDH"):
 # GAPDH was never assessed
 ```
 
-The subclassing is about the censuses and not about biology: a cofactor is not a kind of
-transcription factor, and no census assessed one. `motif_links` asks the census first, so a
-gene that is both, TBP among them, is answered by the census rather than raised over. The
-cofactor error is reached only where no census assessed the gene at all.
+The subclassing follows the censuses, not the biology: a cofactor is not a kind of
+transcription factor, but no census assessed one, so it lands in the never-assessed set.
+`motif_links` asks the census first, so a gene that is both, TBP among them, is answered by
+the census rather than raised over. The cofactor error is reached only where no census
+assessed the gene at all.
