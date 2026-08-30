@@ -332,14 +332,14 @@ There is no third direction: Entrez to HGNC is two calls and the join is yours, 
 the hop visible in your pipeline rather than invisible in ours. `genome.xref.XrefSet` in the
 [API reference](reference.md) is the same two verbs from Python, on one code path with this.
 
-**`--from-stems symbol` labels; `--to-stems symbol` refuses and says why.** Against a source
-that carries symbols — `hgnc` for human, `alliance_bgi` for mouse and worm — `--from-stems
-symbol` gives the authority's single current approved spelling for each stem, which is what
-a figure axis wants. The other way round is not its mirror: a symbol also matches spellings
-the authority has retired, and answering here on approved ones alone would drop exactly the
-gene lists this exists for, so it exits `1` naming `XrefSet.match_symbols` in Python. Match
-symbols from a shell by writing that one call, or by asking `--from-stems symbol` of the
-stems you already hold.
+**`--from-stems symbol` labels; the other way round is a command of its own.** Against a
+source that carries symbols — `hgnc` for human, `alliance_bgi` for mouse and worm —
+`--from-stems symbol` gives the authority's single current approved spelling for each stem,
+which is what a figure axis wants. Toward stems is not its mirror: a symbol also matches
+spellings the authority has retired, answers with every gene any of them names, and carries
+which kind matched — so it is [`genome match-symbols`](#genome-match-symbols-species-symbols)
+that answers it, and `--to-stems symbol` exits `2` naming that command. The `--to-stems` help
+lists the namespaces it does convert and no longer offers the one it refuses.
 
 Naming a species prepares its set, which the first time is a download — so run it once on a
 login node before submitting a job that needs it, as the lab's compute nodes have no
@@ -348,6 +348,92 @@ when the source is not one this package prepares, when the set is not here and c
 fetched (the message names the call to make on a login node), when the namespace is not one
 the set carries (the message names the ones it does), and when a directory holds a set an
 interrupted download left unfinished.
+
+## `genome match-symbols <species> <symbols>...`
+
+Print the genes each gene symbol names, and which kind of spelling matched — the way a gene
+list copied out of a paper becomes usable without first finding its ids, and without the join
+that silently drops every row spelling its gene the way the authority used to. No assembly is
+named and no genome is opened: a symbol is a name and not a place.
+
+```console
+$ genome match-symbols "Homo sapiens" --source hgnc ARNTL ADCY3 Brca1 > genes.tsv
+gene symbols -> gene id stems for Homo sapiens (hgnc 2026-07-07)
+  source   https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt
+  columns  asked, symbol, gene_id_stem, kind
+  matching exact, on approved, previous, alias spellings
+  2 resolved, 3 matches, 1 this release matched nothing for
+
+$ cat genes.tsv
+ARNTL	ARNTL	ENSG00000133794	previous
+ADCY3	ADCY3	ENSG00000138031	approved
+ADCY3	ADCY3	ENSG00000155897	previous
+Brca1
+```
+
+**A symbol is matched, never converted**, which is why this is a command rather than a third
+direction of `genome xref`. Approved, previous *and* alias spellings are matched, every gene
+id stem any of them names comes back, and each match says which kind of spelling it was.
+`ARNTL` is a spelling HGNC retired and reaches `BMAL1` anyway: of EpiFactors v2.0's 801 human
+rows, **31 spell their gene that way**, and an approved-only match drops exactly those.
+`ADCY3` is HGNC's approved symbol for one gene and a symbol it retired from another, so it
+answers with both — ambiguity is what you are handed rather than something resolved on your
+behalf.
+
+The matches go to stdout, tab-separated, so the output pipes — `cut -f3` is the answer,
+`cut -f1` says what asked for it and `cut -f4` says which kind of spelling matched — and the
+heading, the URL, the counts and what this source could not have matched go to stderr. The
+last three columns are the keys `SymbolMatch.as_json()` writes, in its order, so the text and
+`--json` cannot drift apart. **Every symbol you passed gets at least one row**, the ones that
+matched nothing getting one with the other columns empty. Column 2 is the authority's own
+spelling and column 1 is yours, which differ whenever the answer is worth reading twice.
+
+**Matching is exact by default**, because the species is fixed by the set: `Brca1` asked of a
+human set is a mouse spelling asked of the wrong authority, and matching nothing beats half
+working. `--case-insensitive` folds both sides and still answers with **every** gene matched
+rather than picking one.
+
+```console
+$ genome match-symbols "Homo sapiens" --source hgnc brca1 --case-insensitive --json
+{"species": "Homo sapiens", "source": "hgnc", "release": "2026-07-07",
+ "case_insensitive": true, "kinds": ["approved", "previous", "alias"], "limits": null,
+ "resolved": {"brca1": [{"symbol": "BRCA1", "gene_id_stem": "ENSG00000012048",
+                         "kind": "approved"}]},
+ "unresolved": [], "gene_id_stems": ["ENSG00000012048"]}
+```
+
+**What this source could not have matched is printed too.** Only `hgnc` publishes previous
+and alias spellings typed; `alliance_bgi` matches current approved symbols alone, because
+each of its records files retired names and sequence names in one undifferentiated synonyms
+list and typing them would put a kind on a claim no publisher made (ADR-0018). So a mouse
+answer says which kinds it could match and, on a `limits` line, why the rest are missing —
+without which *this gene is not in the release* and *this source does not publish the
+spelling you used* would both be silence.
+
+```console
+$ genome match-symbols "Mus musculus" --source alliance_bgi Arntl
+gene symbols -> gene id stems for Mus musculus (alliance_bgi 9.0.0)
+  source   https://download.alliancegenome.org/9.0.0/BGI/MGI/1.0.2.5_BGI_MGI_0.json.gz
+  columns  asked, symbol, gene_id_stem, kind
+  matching exact, on approved spellings
+  0 resolved, 0 matches, 1 this release matched nothing for
+  limits   this source publishes one current approved symbol per gene beside an undifferentiated synonyms list, …
+Arntl
+```
+
+`--source` names the xref source, as it does on `genome xref`. The species' default source is
+not always one that carries symbols — human's is `alliance`, whose cross-reference file
+carries no human symbol at all — and one that carries none exits `1` naming the ones that do
+rather than matching nothing. `genome.xref.XrefSet.match_symbols` in the
+[API reference](reference.md) is the same one verb, on one code path with this.
+
+Naming a species prepares its set, which the first time is a download — so run it once on a
+login node before submitting a job that needs it, as the lab's compute nodes have no
+internet. Exits `1` when no set exists for the species (the message names the ones that do),
+when the source is not one this package prepares, when the source carries no symbols (the
+message names the ones that do), when the set is not here and cannot be fetched (the message
+names the call to make on a login node), and when a directory holds a set an interrupted
+download left unfinished.
 
 ## `genome homologs <species> <other-species> <stems>...`
 

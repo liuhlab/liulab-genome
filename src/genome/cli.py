@@ -41,6 +41,7 @@ from genome.io.results import GeneListSource as _GeneListSource
 from genome.io.results import HomologyAnswer as _HomologyAnswer
 from genome.io.results import RegisteredAnnotation as _RegisteredAnnotation
 from genome.io.results import ResolvedStems as _ResolvedStems
+from genome.io.results import ResolvedSymbols as _ResolvedSymbols
 from genome.io.results import ResolvedXrefIds as _ResolvedXrefIds
 from genome.io.results import VerifiedAssembly as _VerifiedAssembly
 from genome.metadata import format_table_row as _format_table_row
@@ -59,6 +60,7 @@ from genome.tf.motif.scan import read_fasta as _read_fasta
 from genome.tf.motif.scan import scan_stream as _scan_stream
 from genome.tf.motif.workers import resolve_workers as _resolve_workers
 from genome.xref import NAMESPACES as _NAMESPACES
+from genome.xref import SYMBOL as _SYMBOL
 from genome.xref import XrefSet as _XrefSet
 
 #: What a failed assembly command raises, in one place. Every one of them is already
@@ -106,6 +108,41 @@ _XREF_DIRECTION_HELP = (
     "and answers in that namespace. An identifier does not say which system it belongs to, "
     "so nothing here infers the direction from the strings you passed."
 )
+
+#: The **Namespace**s ``--to-stems`` offers: every one this package knows except the symbol
+#: one, which is not a conversion this command makes at all. Derived rather than written out
+#: again, so a namespace added to the package reaches the help without being spelled twice —
+#: and so the help cannot go on advertising a conversion the command refuses.
+_TO_STEMS_NAMESPACES: tuple[str, ...] = tuple(name for name in _NAMESPACES if name != _SYMBOL)
+
+#: What to do when the symbol namespace is asked *toward* the hub. The reason is the API's
+#: own — answering here would match this release's approved spellings and nothing else — but
+#: the next action is this surface's to give: the exception names ``match_symbols(symbols)``,
+#: which is a Python call and no next step for someone in a shell, so the command that
+#: answers it is named instead. Checked before the set is prepared, so the refusal costs no
+#: download; the same reason ``_XREF_DIRECTION_HELP`` is checked where the flags are read.
+_XREF_SYMBOL_HELP = (
+    "error: a gene symbol is not read toward gene id stems with --to-stems. It would match "
+    "this release's approved spellings and nothing else, so a table spelling a gene the way "
+    "the authority used to would come back unresolved rather than matched — which is what "
+    "happens to 31 of EpiFactors' 801 rows. Run `genome match-symbols SPECIES SYMBOL...` "
+    "instead, which matches approved, previous and alias spellings and says on each match "
+    "which kind it was. `--from-stems symbol` is the labelling direction and is answered "
+    "here."
+)
+
+#: The columns one **Symbol match** is printed as, which are the keys
+#: :meth:`~genome.io.results.SymbolMatch.as_json` writes and in its order — so the text
+#: rendering and ``--json`` cannot drift apart, and every cell printed is a value the API put
+#: in the answer rather than one assembled here. ``kind`` is what makes a spelling the
+#: authority retired distinguishable from its current one, which is the whole point of
+#: matching a symbol rather than converting it, so it is a column and never a footnote.
+_SYMBOL_MATCH_COLUMNS: tuple[str, ...] = ("symbol", "gene_id_stem", "kind")
+
+#: Those three behind the spelling that was asked about, which is the mapping key and so
+#: belongs to no match. It earns a column of its own rather than being assumed equal to the
+#: match's: folded, ``brca1`` is what was asked and ``BRCA1`` is what the authority spells.
+_SYMBOL_COLUMNS: tuple[str, ...] = ("asked", *_SYMBOL_MATCH_COLUMNS)
 
 #: What a failed homology lookup raises, and every one of them already names its next
 #: action: a species and a species pair nothing is pinned for are ``LookupError``s; a release
@@ -874,16 +911,19 @@ def xref(
         "--to-stems",
         metavar="NAMESPACE",
         help=f"Read the ids as this namespace and answer in gene id stems: "
-        f"{', '.join(_NAMESPACES)}, whichever of them this set carries. Exactly one of "
-        f"this and --from-stems is named.",
+        f"{', '.join(_TO_STEMS_NAMESPACES)}, whichever of them this set carries. A gene "
+        f"symbol is not among them — it matches spellings the authority has retired and "
+        f"each match carries which kind it was, so `genome match-symbols` answers it. "
+        f"Exactly one of this and --from-stems is named.",
     ),
     from_stems: str | None = typer.Option(
         None,
         "--from-stems",
         metavar="NAMESPACE",
-        help="Read the ids as gene id stems and answer in this namespace. A versioned "
-        "gene id is accepted and reduced to its stem, so an annotation's own ids go "
-        "straight in.",
+        help="Read the ids as gene id stems and answer in this namespace, `symbol` "
+        "included — which gives the authority's one current approved spelling, the one a "
+        "figure axis wants. A versioned gene id is accepted and reduced to its stem, so an "
+        "annotation's own ids go straight in.",
     ),
     source: str | None = typer.Option(
         None,
@@ -909,6 +949,13 @@ def xref(
     around. There is no third direction: Entrez to HGNC is two calls and the join is yours,
     which keeps the hop visible in your pipeline rather than invisible in ours.
 
+    **A gene symbol is the one namespace these two directions do not mirror.**
+    `--from-stems symbol` is answered here and gives the authority's single current approved
+    spelling. The other way round is `genome match-symbols`, because a symbol also matches
+    spellings the authority has retired and each match carries which kind it was — so
+    `--to-stems symbol` exits 2 naming that command rather than matching approved spellings
+    alone, which is what drops 31 of EpiFactors' 801 rows.
+
     **The pairs go to stdout, tab-separated, so the output pipes** — `cut -f2` is the
     answer, `cut -f1` says what asked for it — and the heading, the publisher's URL and the
     counts go to stderr. An id naming two genes prints two rows rather than whichever came
@@ -927,10 +974,11 @@ def xref(
     node — by running this there, or from Python — before a job that needs it is submitted;
     after that it is read from the **Data dir** and shared by every project on the machine.
 
-    Exits with code 2 when no direction is named or both are, and with code 1 when no set
-    exists for the species — the message names the ones that do — when the source is not one
-    this package prepares, when the set is not here and cannot be fetched, when the
-    namespace is not one the set carries, and when a directory holds a set left unfinished.
+    Exits with code 2 when no direction is named or both are, and when the symbol namespace
+    is asked toward the hub; and with code 1 when no set exists for the species — the message
+    names the ones that do — when the source is not one this package prepares, when the set
+    is not here and cannot be fetched, when the namespace is not one the set carries, and
+    when a directory holds a set left unfinished.
     """
     # Which way the hop goes and which namespace it is in arrive on one flag, so neither can
     # be given without the other. Naming both, or neither, is the one thing left to check.
@@ -940,6 +988,13 @@ def xref(
         to_hub, namespace = False, from_stems
     else:
         typer.echo(_XREF_DIRECTION_HELP, err=True)
+        raise typer.Exit(code=2)
+
+    # The one direction-and-namespace pair this command does not answer, refused where the
+    # flags are read rather than where the set is prepared: it is another command's question
+    # however the set turns out, so nothing is downloaded to find that out.
+    if to_hub and namespace.strip().lower() == _SYMBOL:
+        typer.echo(_XREF_SYMBOL_HELP, err=True)
         raise typer.Exit(code=2)
 
     try:
@@ -987,6 +1042,128 @@ def _report_xref(
         typer.echo(f"{asked}\t{found}")
     for asked in answer.unresolved:
         typer.echo(f"{asked}\t")
+
+
+@app.command("match-symbols")
+def match_symbols(
+    species: str = typer.Argument(
+        ...,
+        help="Species an xref set exists for, e.g. 'Homo sapiens' — the slug "
+        "'homo_sapiens' names the same one. The species fixes the authority, so a symbol "
+        "is matched against that authority's spellings and no other's.",
+    ),
+    symbols: list[str] = typer.Argument(
+        ...,
+        help="The gene symbols to match, answered in the order you passed them. "
+        "Surrounding whitespace goes; case does not, unless --case-insensitive is named.",
+    ),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Answer from this xref source rather than the species' default one. Symbols "
+        "are carried by `hgnc` for human and `alliance_bgi` for mouse and worm; a source "
+        "that carries none says so and names those, rather than matching nothing.",
+    ),
+    case_insensitive: bool = typer.Option(
+        False,
+        "--case-insensitive",
+        help="Fold case on both sides — your spelling and the authority's — and still "
+        "answer with every gene matched. Off by default: the species is fixed by the set, "
+        "so 'Brca1' asked of a human set is a mouse spelling asked of the wrong authority.",
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Print the genes each gene symbol names, and which kind of spelling matched.
+
+    The way a gene list copied out of a paper becomes usable without first finding its ids —
+    and without the join that silently drops every row spelling its gene the way the
+    authority used to. No assembly is named and no genome is opened: a symbol is a name and
+    not a place.
+
+    **A symbol is matched, never converted.** Approved, previous *and* alias spellings are
+    matched, every **Gene id stem** any of them names comes back, and each match says which
+    kind of spelling it was — so ambiguity is what you are handed rather than something
+    resolved on your behalf. `ADCY3` is HGNC's approved symbol for one gene and a symbol it
+    retired from another, and both are printed. This is why it is a command of its own and
+    not a third direction of `genome xref`: matching approved spellings alone would drop
+    exactly the rows this exists for — 31 of EpiFactors' 801 human rows spell their gene the
+    way HGNC spelled it years ago. The opposite hop, a stem to the authority's one current
+    approved spelling, is `genome xref --from-stems symbol`.
+
+    **The matches go to stdout, tab-separated, so the output pipes** — `cut -f3` is the
+    answer, `cut -f1` says what asked for it and `cut -f4` says which kind of spelling
+    matched — and the heading, the publisher's URL, the counts and what this source could
+    not have matched go to stderr. A symbol naming two genes prints two rows rather than
+    whichever came first, and **a symbol this release matched nothing for gets a row too,
+    with every other column empty**. Column 2 is the authority's own spelling, which is not
+    always the one asked about: folded, `brca1` asked comes back as `BRCA1` matched.
+
+    **Matching is exact by default**, because the species is fixed by the set:
+    `--case-insensitive` folds both sides and still answers with every gene matched rather
+    than picking one.
+
+    **What this source could not have matched is printed too.** Only HGNC publishes previous
+    and alias spellings typed; mouse and worm match current approved symbols alone, their
+    authorities' typed spellings belonging to publishers that cannot be pinned or cannot be
+    fetched (ADR-0018). So the answer says which kinds it could match and why the others are
+    missing — without which *this gene is not in the release* and *this source does not
+    publish the spelling you used* would both be silence.
+
+    Naming a species prepares its set, which the first time is a download. **The lab's CPU
+    cluster compute nodes have no internet**, so a set must be constructed once from a login
+    node — by running this there, or from Python — before a job that needs it is submitted.
+
+    Exits with code 1 when no set exists for the species — the message names the ones that
+    do — when the source is not one this package prepares, when the source carries no
+    symbols at all — the message names the ones that do — when the set is not here and cannot
+    be fetched, and when a directory holds a set left unfinished.
+    """
+    try:
+        xrefs = _XrefSet(species, source, progressbar=not json)
+        answer = xrefs.match_symbols(symbols, case_insensitive=case_insensitive)
+    except _XREF_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(answer.as_json()))
+        return
+    _report_symbols(answer, source_url=xrefs.source_url)
+
+
+def _report_symbols(answer: _ResolvedSymbols, *, source_url: str) -> None:
+    """Print one set's symbol matches, with what asserted them and what limits them beside.
+
+    The matches to stdout and everything else to stderr, for the reason `xref` splits them:
+    tab-separated columns are what a shell pipeline wants, and which authority asserted them
+    is what a reader wants. **Every symbol asked about gets at least one row**, the ones that
+    matched nothing getting one with every other column empty, so nothing leaves this command
+    shorter than it arrived.
+
+    The limits line prints only when there is one: the line above it already names the kinds
+    that *were* matched on, so a set that carries all three has nothing left to explain.
+    """
+    matching = "case-insensitive" if answer.case_insensitive else "exact"
+    rows = [(asked, match) for asked, matches in answer.resolved.items() for match in matches]
+    typer.echo(
+        f"gene symbols -> gene id stems for {answer.species} ({answer.source} {answer.release})",
+        err=True,
+    )
+    typer.echo(f"  source   {source_url}", err=True)
+    typer.echo(f"  columns  {', '.join(_SYMBOL_COLUMNS)}", err=True)
+    typer.echo(f"  matching {matching}, on {', '.join(answer.kinds)} spellings", err=True)
+    typer.echo(
+        f"  {len(answer.resolved)} resolved, {len(rows)} matches, "
+        f"{len(answer.unresolved)} this release matched nothing for",
+        err=True,
+    )
+    if answer.limits is not None:
+        typer.echo(f"  limits   {answer.limits}", err=True)
+    for asked, match in rows:
+        written = match.as_json()
+        typer.echo("\t".join([asked, *(str(written[column]) for column in _SYMBOL_MATCH_COLUMNS)]))
+    for asked in answer.unresolved:
+        typer.echo(asked + "\t" * len(_SYMBOL_MATCH_COLUMNS))
 
 
 # --- homology commands -------------------------------------------------------
