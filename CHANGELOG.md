@@ -54,6 +54,41 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   through homology, held structurally — nothing outside `genome.homology` may import it, which a test
   asserts by reading every module's source.
 
+- **A gene symbol reaches the package's answers, and a retired spelling no longer drops silently.**
+  `XrefSet.match_symbols(symbols)` matches **approved, previous and alias** spellings, answers with
+  every **Gene id stem** any of them names, and says on each hit which kind it matched — ambiguity is
+  the return type and not an edge case, so `ADCY3`, HGNC's approved symbol for one gene and a symbol
+  it retired from another, answers with both. **The measured failure it prevents:** of EpiFactors
+  v2.0's 801 human rows all 801 carry an HGNC id and all 801 resolve, but **31 still spell the gene
+  by a symbol HGNC has retired** — `ARNTL` for `BMAL1`, `C11orf30` for `EMSY` — and an approved-only
+  join mis-keys or drops exactly those. Matching is **exact by default**, so `Brca1` asked of a human
+  set matches nothing rather than half-working; `case_insensitive=True` is opt-in and still returns
+  **every** gene matched rather than picking one.
+- **The two directions are deliberately not mirror images.** Away from the hub,
+  `from_stems(stems, "symbol")` gives the authority's **single current approved symbol** — this is
+  labelling a figure axis, and it is one-to-one by the authority's own construction. Toward it,
+  `to_stems(ids, "symbol")` **raises** naming `match_symbols` rather than answering on approved
+  spellings alone, which is the failure above. The kind of each spelling is stored in the set's own
+  plain gzipped TSV — `symbol`, `previous_symbol`, `alias_symbol` in the namespace column — so a
+  collaborator reads it in a shell with `awk`.
+- **Two further Xref sources, and both pin.** `hgnc` is human's, from HGNC's **quarterly archive file
+  of 2026-07-07**, and is the only one that publishes previous and alias spellings *typed*. Its
+  reader **parses by header name and never by position**, because the schema has drifted from **52**
+  columns in 2020 to **54** now, and a named test reverses the whole header to prove the answer does
+  not move. Its pin **names a file read out of the bucket listing** rather than one built from a
+  date: the archive's dates are irregular — `2024-07-02`, `2025-01-06`, and both `2026-07-03` and
+  `2026-07-07` in one quarter. HGNC's remembered EBI FTP path is a live 404; the live one is a Google
+  Cloud Storage bucket with a **doubled path segment**, `…/hgnc/archive/archive/quarterly/tsv/…`.
+- **Mouse and worm get current symbols, and are told why they get no others.** `alliance_bgi` is the
+  Alliance's per-species gene submission — MGI's for mouse, WormBase's own **WS298** for worm — read
+  a record at a time out of 72 MB and 74 MB of JSON. It publishes the current approved symbol alone,
+  because each record's `synonyms` list is **undifferentiated**: WormBase files the genuine former
+  name `daf-17` beside the sequence names `R13H8.1` and `CELE_R13H8.1`, and typing them would put a
+  kind on a claim no publisher made. So every answer carries `kinds` and `limits` saying which kinds
+  that source could match and why the rest are missing — *this gene is absent* and *this source
+  cannot match that spelling* must not both be silence. It is the Alliance's copy because neither
+  authority can be reached directly: MGI keeps no dated archive (ADR-0018), and
+  `downloads.wormbase.org` answers **403 to an automated client**, measured from two networks.
 - **Ensembl is a second Xref source, selectable and pinned to a release of its own — and it is not
   the equal of the first.** `XrefSet("Homo sapiens", "ensembl", "116")` answers off Ensembl's
   per-species TSV dumps for human and mouse, pinned to release **116** — the release the lab's

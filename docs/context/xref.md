@@ -12,11 +12,12 @@ source** that asserted it, so two publishers who disagree are two answers rather
 contradiction to resolve: NCBI and Ensembl agree on 57.6% of human gene-level (GeneID, ENSG) pairs,
 which makes the choice of publisher nearly half the answer.
 
-**Xref set**, **Xref source**, **Default xref source** and **Namespace** are built: `genome.xref`
-answers for human, mouse and worm off the Alliance of Genome Resources, and for human and mouse off
-Ensembl's per-species TSV dumps as well — a second source, selectable and pinned to its own numbered
-**Release**, never merged with the first. **Symbol match** is still *(decided, not built —
-ADR-0018)* in the sense the context map describes — use the word, do not call the API it describes.
+Every term below is built. `genome.xref` answers for human, mouse and worm off the Alliance of
+Genome Resources, and for human and mouse off Ensembl's per-species TSV dumps as well — a second
+source, selectable and pinned to its own numbered **Release**, never merged with the first. Two
+further sources carry symbols, which those two do not: HGNC's quarterly archive for human, with
+approved, previous and alias spellings each typed, and the Alliance's per-species gene submissions
+for mouse and worm, with the current approved spelling alone.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker** and the
 rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem**, the hub every entry
@@ -48,7 +49,10 @@ shipped metadata table beside a reader rather than a branch in code, so adding o
 publisher is eligible only if it keeps dated releases at stable URLs (ADR-0018): the Alliance of
 Genome Resources, Ensembl's per-species dumps, HGNC's quarterly archive and WormBase qualify, while
 NCBI Gene, UniProt idmapping and MGI are rebuilt daily and overwritten in place, so a checksum
-shipped in the wheel would be wrong within a day. Two sources are not two grades of one thing and
+shipped in the wheel would be wrong within a day. Pinnable is not the same as reachable: WormBase's
+own download host answers 403 to an automated client, so its assertions are carried through the copy
+the Alliance serves of WormBase's own submission — the same bytes, at a URL a script can fetch.
+Two sources are not two grades of one thing and
 neither is a fallback for the other: they number their releases differently, carry different
 **Namespace**s, and some grade each assertion where others grade none — a filter on that grading is
 therefore a capability of the source, and one no row of a release satisfies raises rather than
@@ -88,9 +92,13 @@ the way out, and a symbol naming several genes answers with all of them, because
 the return type and not an edge case: a table spelling a gene the way it was spelled five years ago
 is otherwise dropped without a word, which is what would have happened to 31 of 801 EpiFactors rows.
 Matching is exact by default and case-insensitive only when asked for, and the insensitive path
-still answers with every gene matched rather than picking one. Mouse matches approved spellings
-only, its authority publishing no dated archive (ADR-0018). The reverse direction is not symmetric:
-from a stem the answer is the authority's single current approved symbol, which is labelling.
+still answers with every gene matched rather than picking one. Which kinds a set can match is the
+**Xref source**'s and never the species' — mouse and worm match approved spellings only, their
+authorities' typed spellings belonging to publishers that cannot be pinned or cannot be fetched
+(ADR-0018) — and why the others are missing rides back on the answer, since *this gene is absent*
+and *this source cannot match that spelling* would otherwise both be silence. The reverse direction
+is not symmetric: from a stem the answer is the authority's single current approved symbol, which is
+labelling.
 _Avoid_: gene name; HGNC symbol, which is one authority's spelling of a general idea; synonym — the
 authorities' own word is *alias*, and one idea gets one word; fuzzy match, which nothing here does;
 and **Motif name**, which labels a matrix and names no gene at all

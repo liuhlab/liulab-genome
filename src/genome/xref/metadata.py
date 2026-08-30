@@ -44,7 +44,7 @@ True
 >>> row.source_checksum.startswith("md5:")
 True
 >>> sorted({record.source for record in xref_table()})
-['alliance', 'ensembl']
+['alliance', 'alliance_bgi', 'ensembl', 'hgnc']
 """
 
 from __future__ import annotations
@@ -236,7 +236,7 @@ def xref_table() -> tuple[XrefMetadata, ...]:
     Examples
     --------
     >>> sorted({record.release for record in xref_table()})
-    ['116', '9.0.0']
+    ['116', '2026-07-07', '9.0.0']
     """
     resource = files("genome").joinpath(XREF_METADATA_RESOURCE)
     with resource.open("r", encoding="utf-8") as handle:
@@ -286,9 +286,9 @@ def xref_sources(species: str, *, table: Sequence[XrefMetadata] | None = None) -
     Examples
     --------
     >>> xref_sources("Mus musculus")
-    ('alliance', 'ensembl')
+    ('alliance', 'ensembl', 'alliance_bgi')
     >>> xref_sources("Caenorhabditis elegans")
-    ('alliance',)
+    ('alliance', 'alliance_bgi')
     >>> xref_sources("Danio rerio")
     ()
     """

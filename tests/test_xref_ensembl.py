@@ -245,15 +245,18 @@ class TestFixtureBytes:
 
 class TestEnsemblIsSelectable:
     def test_it_is_a_second_source_for_human_and_mouse(self) -> None:
-        assert xref_sources("Homo sapiens") == (ALLIANCE, ENSEMBL_TSV)
-        assert xref_sources("Mus musculus") == (ALLIANCE, ENSEMBL_TSV)
+        # Which sources a species has grows as rows are added, so what is asserted is that
+        # this one is among them and that the first one still leads — not the whole list.
+        for species in ("Homo sapiens", "Mus musculus"):
+            assert xref_sources(species)[0] == ALLIANCE
+            assert ENSEMBL_TSV in xref_sources(species)
 
-    def test_worm_has_only_the_first_source(self) -> None:
+    def test_worm_has_no_ensembl_source(self) -> None:
         # Ensembl files worm under Ensembl Genomes' own numbering — release-116's worm
         # directory holds `Caenorhabditis_elegans.WBcel235.63.entrez.tsv.gz` — so "116"
         # would name a file that does not exist. Worm is answered by Alliance, where the
         # hop is the identity, and no worm row is invented here.
-        assert xref_sources("Caenorhabditis elegans") == (ALLIANCE,)
+        assert ENSEMBL_TSV not in xref_sources("Caenorhabditis elegans")
         with pytest.raises(NoXrefSetError, match=ALLIANCE):
             lookup_xref("Caenorhabditis elegans", ENSEMBL_TSV)
 

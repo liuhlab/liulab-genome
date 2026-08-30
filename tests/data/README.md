@@ -18,6 +18,9 @@ words, which is the one place a base here was chosen rather than found. Nothing 
 | `tiny_jaspar_transfac.txt` | Ten whole records of the JASPAR 2024 `all` union file, in its own order — see below |
 | `planted_motifs.fa` | Two 600-base windows of `tiny.fa` with three motif consensus words written into them at known positions and strands — see below |
 | `xref/alliance_genecrossreference_tiny.tsv.gz` | Fourteen whole genes of the Alliance of Genome Resources release 9.0.0 cross-reference file, copied verbatim — see below |
+| `xref/hgnc_complete_set_tiny.txt` | Ten whole rows of HGNC's quarterly archive file of 2026-07-07, under its own 54-column header, copied verbatim — see below |
+| `xref/bgi_mgi_tiny.json.gz` | Seven whole gene records of MGI's Alliance gene submission, each object's own bytes — see below |
+| `xref/bgi_wb_tiny.json.gz` | Five whole gene records of WormBase's WS298 Alliance gene submission, likewise — see below |
 | `homology/compara116.*.homologies.tsv.gz` | Whole rows of three Ensembl Compara 116 per-species homology dumps, in each file's own order — see below |
 
 Sources:
@@ -266,3 +269,47 @@ The same eight rows also carry, incidentally and for real, two traps the reader 
 None of this is prose to be trusted: `TestFixtureBytes` in `tests/test_xref_ensembl.py` asserts the
 header, the evidence types, the transcript-name rows and both fan-outs against the committed bytes,
 and the module's constants pin what each slice comes to.
+
+## `xref/hgnc_complete_set_tiny.txt` — the typed spellings
+
+Ten whole rows of HGNC's quarterly archive file dated **2026-07-07**, under the file's own header,
+copied verbatim and sorted by `hgnc_id`. Plain text and not gzipped, because the published file is:
+the URL a curated row pins ends `.txt`, and the fake fetch serves the fixture under that name.
+
+The header is **54 columns**, which is the current schema; the same file was **52** in 2020, which
+is why the reader finds its seven columns by name. Every row is real, and each is there for a
+reason:
+
+| Row | What it is in the fixture for |
+|---|---|
+| `BMAL1` | `prev_symbol` **`ARNTL`** — one of the 31 EpiFactors rows the cofactor work measured as spelling its gene the way HGNC used to. Also five aliases in one quoted, pipe-separated cell |
+| `EMSY` | `prev_symbol` **`C11orf30`**, the second named one of those 31, and an **empty** alias cell beside it |
+| `ACIN1` | `prev_symbol` `ACINUS`, the third — and a two-value alias cell |
+| `ADCY3` and `ADCY8` | **One spelling, two genes, two kinds**: `ADCY3` is HGNC's approved symbol for the first and a symbol it retired from the second, so a match on it answers with both and says which was which |
+| `TP53` | The alias **`p53`**, written in lower case by HGNC itself, so that exact and case-insensitive matching differ on a real spelling rather than an invented one |
+| `BRCA1` | Whose mouse spelling is `Brca1` — the exact-by-default case, asked of a human set |
+| `KDM1A` | Two previous and three alias spellings, the widest row here |
+| `MECP2` | Three previous spellings and no alias, the mirror of `EMSY` |
+| `AAVS1` | **An empty `ensembl_gene_id`** — no hub, so the row contributes nothing at all, as 2,682 of the archive's 45,019 rows do |
+
+## `xref/bgi_mgi_tiny.json.gz` and `xref/bgi_wb_tiny.json.gz` — current symbols
+
+Seven mouse and five worm gene records from the Alliance's per-species gene submissions —
+`9.0.0/BGI/MGI/1.0.2.5_BGI_MGI_0.json.gz` and `8.3.0/BGI/WB/1.0.2.5_BGI_WB_4.json.gz`, the latter
+re-served under release 9.0.0. Each record is the publisher's **own bytes**, indentation included,
+lifted whole out of the `data` array and re-wrapped with that file's own `metaData` header — so the
+two publishers' two different pretty-printers, two-space for MGI and three-space for WormBase, are
+both in the suite.
+
+| File | Genes | What it is in the fixture for |
+|---|---|---|
+| MGI | `Trp53`, `Brca1`, `Bmal1`, `Kdm1a`, `Mecp2`, `Scgb1a1`, `Adcy3` | Mouse spellings of genes the human fixture carries, so that a mouse-cased symbol asked of a human set is a real mouse symbol rather than a typo |
+| WB | `aap-1`, `daf-16`, `msp-10`, `lin-12`, `unc-22` | The worm hop, where a WormBase gene id **is** the **Gene id stem**. `daf-16`'s record carries `daf-17`, `R13H8.1` and `CELE_R13H8.1` in **one undifferentiated `synonyms` list** — a genuine former name beside two sequence names, with nothing saying which is which, which is why this source publishes approved spellings only |
+
+The worm file's own header states `"release" : "WS298"` — WormBase's final release, and the one the
+lab has registered. `downloads.wormbase.org` answers **403** to an automated client, so this copy,
+served by the Alliance at a pinned path with a published md5, is how those bytes are reachable.
+
+None of this is prose to be trusted: `TestFixtureBytes` in `tests/test_xref_symbols.py` asserts the
+column count, the quoted multi-valued cell, the hub-less row and the WS298 header against the
+committed bytes, and the module's constants pin what each slice comes to.
