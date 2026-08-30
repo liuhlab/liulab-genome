@@ -47,8 +47,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
-from importlib.resources import files
-from typing import Any
+from typing import Any, get_type_hints
+
+from genome.shipped import ShippedTable, ShippedTableError
 
 #: Directory inside the package holding the homology provenance table. No data file
 #: ships beside it: a **Homology set** is downloaded, and this says from where.
@@ -71,11 +72,15 @@ METADATA_COLUMNS: tuple[str, ...] = (
     "md5",
 )
 
-#: Provenance columns holding a number rather than text.
-_NUMERIC_METADATA_COLUMNS = frozenset({"pubmed_id"})
+#: Why no cell of this table may be left blank — the reason it names when one is, and the
+#: one piece of prose the shared reader cannot compose out of a noun and a repair.
+_REQUIRED = (
+    "Every provenance column is required: a set nobody can cite is one this package may not "
+    "point anyone at, and one with no checksum is one a truncated fetch would answer from"
+)
 
 
-class HomologyMetadataError(ValueError):
+class HomologyMetadataError(ShippedTableError):
     r"""A row of the shipped provenance table cannot be read as a record.
 
     A defect in this package rather than anything a caller did, so the message names the
@@ -201,7 +206,7 @@ class HomologyMetadata:
         >>> HomologyMetadata.from_row(row, origin="test").pubmed_id
         26896847
         """
-        return cls(**{name: _parse_cell(name, row, origin=origin) for name in METADATA_COLUMNS})
+        return cls(**_HOMOLOGY_METADATA.record(row, _FIELD_TYPES, origin=origin))
 
     def attribution(self) -> str:
         """Return the one line to print beside anything this set answered.
@@ -223,6 +228,24 @@ class HomologyMetadata:
             f"{self.publisher} release {self.release} (PMID {self.pubmed_id}) "
             f"\N{EM DASH} {self.source_url}"
         )
+
+
+#: Each field's declared type, which parses that field's column of the table.
+_FIELD_TYPES: dict[str, Any] = get_type_hints(HomologyMetadata)
+
+#: The provenance table as a **Shipped table**: where it lives, what its header is, what it
+#: is called and what repairs it. Every check the file is held to lives in
+#: :mod:`genome.shipped`; the pair is what names a row in a message, since a row is one
+#: species pair's provenance and nothing else identifies it.
+_HOMOLOGY_METADATA = ShippedTable(
+    resource=HOMOLOGY_METADATA_RESOURCE,
+    columns=METADATA_COLUMNS,
+    noun="homology provenance table",
+    repair=f"edit {HOMOLOGY_METADATA_RESOURCE}, which is maintained by hand",
+    error=HomologyMetadataError,
+    because=_REQUIRED,
+    identify=("species", "other_species"),
+)
 
 
 @cache
@@ -250,8 +273,7 @@ def homology_table() -> tuple[HomologyMetadata, ...]:
     >>> len(homology_table())
     3
     """
-    resource = files("genome").joinpath(HOMOLOGY_METADATA_RESOURCE)
-    return read_metadata(resource.read_text(encoding="utf-8"), origin=str(resource))
+    return read_metadata(_HOMOLOGY_METADATA.text(), origin=_HOMOLOGY_METADATA.origin())
 
 
 @cache
@@ -351,13 +373,13 @@ def read_metadata(text: str, *, origin: str) -> tuple[HomologyMetadata, ...]:
     Returns
     -------
     tuple of HomologyMetadata
-        One record per non-empty row, in table order.
+        One record per row, in table order.
 
     Raises
     ------
     HomologyMetadataError
-        If the header is not :data:`METADATA_COLUMNS`, a row holds the wrong number of
-        cells, or a cell cannot be read.
+        If the file is empty, the header is not :data:`METADATA_COLUMNS`, a row holds
+        the wrong number of cells, or a cell cannot be read.
 
     Examples
     --------
@@ -365,46 +387,7 @@ def read_metadata(text: str, *, origin: str) -> tuple[HomologyMetadata, ...]:
     >>> read_metadata(header + "\n", origin="test")
     ()
     """
-    lines = text.split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
-    header = tuple(lines[0].split("\t")) if lines else ()
-    if header != METADATA_COLUMNS:
-        raise HomologyMetadataError(
-            f"{origin} carries the columns {list(header)} where the provenance table's are "
-            f"{list(METADATA_COLUMNS)}. Fix the header, keeping the columns in that order."
-        )
-    records: list[HomologyMetadata] = []
-    for number, line in enumerate(lines[1:], start=2):
-        if not line:
-            continue
-        cells = line.split("\t")
-        if len(cells) != len(header):
-            raise HomologyMetadataError(
-                f"{origin} line {number} holds {len(cells)} cells where the header declares "
-                f"{len(header)}. The table is a plain TSV with no quoting — fix that line."
-            )
-        records.append(
-            HomologyMetadata.from_row(dict(zip(header, cells, strict=True)), origin=origin)
-        )
-    return tuple(records)
-
-
-def _parse_cell(name: str, row: Mapping[str, str], *, origin: str) -> Any:
-    """Return one provenance cell, parsed by its column and never blank."""
-    text = row.get(name, "").strip()
-    if not text:
-        raise HomologyMetadataError(
-            f"{origin} leaves the {name!r} column blank for the pair "
-            f"{row.get('species')!r}/{row.get('other_species')!r}. Every provenance column is "
-            f"required: a set nobody can cite is one this package may not point anyone at, and "
-            f"one with no checksum is one a truncated fetch would answer from. Fill that cell in."
-        )
-    if name not in _NUMERIC_METADATA_COLUMNS:
-        return text
-    try:
-        return int(text)
-    except ValueError as error:
-        raise HomologyMetadataError(
-            f"{origin} holds {text!r} in the {name!r} column, which is not a number. Fix that cell."
-        ) from error
+    return tuple(
+        HomologyMetadata.from_row(row, origin=origin)
+        for row in _HOMOLOGY_METADATA.parse(text, origin=origin).mappings()
+    )

@@ -59,12 +59,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cache
-from importlib.resources import files
 from typing import Any, get_type_hints
 
-import pandas as pd
-
-from genome.metadata import parse_cell, species_slug
+from genome.shipped import MetadataRowError, ShippedTable, parse_cell, species_slug
 
 #: Directory inside the package holding the curated **Xref source** table and the
 #: attribution beside it. No **Xref set** ships here — only the row that fetches one.
@@ -235,6 +232,19 @@ _XREF_FIELD_TYPES: dict[str, Any] = get_type_hints(XrefMetadata)
 #: The field names, in table-column order — the columns every row carries.
 XREF_FIELDS: tuple[str, ...] = tuple(_XREF_FIELD_TYPES)
 
+#: The curated table as a **Shipped table**: where it lives, what its header is, what it is
+#: called and what repairs it. Every check the file is held to lives in
+#: :mod:`genome.shipped`, and a row is hand-written here rather than generated, so the
+#: repair is an edit and the message says which file to make it in.
+_XREF_TABLE = ShippedTable(
+    resource=XREF_METADATA_RESOURCE,
+    columns=XREF_FIELDS,
+    noun="xref source table",
+    repair=f"edit {XREF_METADATA_RESOURCE}, which is maintained by hand",
+    error=MetadataRowError,
+    identify=("species", "source", "release"),
+)
+
 
 @cache
 def xref_table() -> tuple[XrefMetadata, ...]:
@@ -248,15 +258,18 @@ def xref_table() -> tuple[XrefMetadata, ...]:
     tuple of XrefMetadata
         One record per row of ``data/xref/xref_metadata.tsv``.
 
+    Raises
+    ------
+    genome.metadata.MetadataRowError
+        If the shipped file is empty, its header is not :data:`XREF_FIELDS`, a row holds the
+        wrong number of cells, or a cell cannot be read as its column's type.
+
     Examples
     --------
     >>> sorted({record.release for record in xref_table()})
     ['116', '2026-07-07', '9.0.0']
     """
-    resource = files("genome").joinpath(XREF_METADATA_RESOURCE)
-    with resource.open("r", encoding="utf-8") as handle:
-        frame = pd.read_csv(handle, sep="\t", dtype=str)
-    return tuple(XrefMetadata.from_row(dict(row)) for _, row in frame.iterrows())
+    return tuple(XrefMetadata.from_row(row) for row in _XREF_TABLE.read().mappings())
 
 
 def xref_species(*, table: Sequence[XrefMetadata] | None = None) -> tuple[str, ...]:

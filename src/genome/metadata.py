@@ -29,17 +29,17 @@ pinned checksum — and an assembly or an annotation with no row is perfectly le
 Each dataclass declares its field list once: its table is read through those fields
 column by column, parsed by each field's own declared type, and a whole record is what
 :class:`~genome.genome.Genome` and the registration functions take to override the table.
-That last step is :func:`parse_cell`, which is public because it is the reader every
-curated table in this package shares — the two here, and the **Xref source** table
-:mod:`genome.xref.metadata` declares the same way.
+Both tables are **Shipped table**s and are read by the one loader every such table goes
+through, :mod:`genome.shipped`: this module declares where each table lives, what its
+columns are and what repairs it, and the header validation, the cell parsing and the shape
+of the error a broken file raises all happen there.
 
-:func:`species_slug` sits here for a different reason. The species column of these tables
-is what every shipped-data directory in the package names its files after — the censuses,
-the **Cofactor table**s, the **Xref set**s and Ensembl Compara's own genome names — so
-reconciling the table's spelling with a file name belongs to none of those in particular
-and to the context that owns the table it is read from. Every other context reads this
-module, so a helper here is reachable from all of them without any of them importing
-another.
+:func:`parse_cell` and :func:`species_slug` used to live here and now live with that
+reader — the first because four other tables parse their cells the same way, the second
+because naming a file after a species is what every shipped-data directory in the package
+does and none of them owns. Both are re-exported here, so ``from genome.metadata import
+species_slug`` still resolves, exactly as :mod:`genome.tf.gene` re-exports it from the
+last time it moved for this reason.
 
 A row is a record's other spelling, and both directions are public:
 :func:`format_table_row` writes one, :meth:`AssemblyMetadata.from_row` and
@@ -52,14 +52,29 @@ allow-list (ADR-0003). The shipped TSVs are read in :func:`assembly_table` and
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cache
-from importlib.resources import files
-from typing import Any, get_args, get_type_hints
+from typing import Any, get_type_hints
 
-import pandas as pd
+from genome.shipped import MetadataRowError, ShippedTable, parse_cell, species_slug
+
+__all__ = [
+    "ANNOTATION_FIELDS",
+    "METADATA_FIELDS",
+    "AnnotationMetadata",
+    "AssemblyMetadata",
+    "MetadataRowError",
+    "annotation_table",
+    "assembly_metadata",
+    "assembly_table",
+    "format_table_row",
+    "list_annotation_metadata",
+    "lookup_annotation",
+    "lookup_assembly",
+    "parse_cell",
+    "species_slug",
+]
 
 #: Location of the curated assembly metadata table within the package.
 _METADATA_RESOURCE = "data/assembly_metadata.tsv"
@@ -67,28 +82,16 @@ _METADATA_RESOURCE = "data/assembly_metadata.tsv"
 #: Location of the curated annotation metadata table within the package.
 _ANNOTATION_RESOURCE = "data/annotation_metadata.tsv"
 
-#: Cell spellings a boolean column accepts, lower-cased. Anything else in one is a
-#: typo in a hand-maintained table and says so rather than reading as ``False``.
-_TRUE_CELLS = frozenset({"yes", "true", "1"})
-_FALSE_CELLS = frozenset({"no", "false", "0"})
+#: What repairs either of these two: they are hand-maintained rather than generated, so
+#: the repair is an edit and the message says which file to make it in.
+_ASSEMBLY_REPAIR = f"edit {_METADATA_RESOURCE}, which is maintained by hand"
+_ANNOTATION_REPAIR = f"edit {_ANNOTATION_RESOURCE}, which is maintained by hand"
 
-
-class MetadataRowError(ValueError):
-    """A row cannot be read as a record, and the message names the column that refused.
-
-    Raised by :meth:`AssemblyMetadata.from_row` and :meth:`AnnotationMetadata.from_row`,
-    for a cell no column's type can read and for a blank cell in a column that has no
-    unknown. A :class:`ValueError`, because a hand-maintained row that says something
-    the columns do not is a bad value rather than a broken program.
-
-    Examples
-    --------
-    >>> try:
-    ...     AssemblyMetadata.from_row({"assembly_name": "tiny", "ncbi_taxid": "many"})
-    ... except MetadataRowError as error:
-    ...     print("ncbi_taxid" in str(error))
-    True
-    """
+#: Why a column with no unknown may not be left blank — the reason either table names when
+#: one is. Shared with the **Xref source** table, which declares its columns the same way.
+_UNKNOWN = (
+    "A blank cell reads back as unknown, and a column whose type declares none has no way to say so"
+)
 
 
 @dataclass(frozen=True)
@@ -248,6 +251,19 @@ _FIELD_TYPES: dict[str, Any] = get_type_hints(AssemblyMetadata)
 #: The metadata field names, in table-column order — the columns every row carries.
 METADATA_FIELDS: tuple[str, ...] = tuple(_FIELD_TYPES)
 
+#: The assembly table as a **Shipped table**: where it lives, what its header is, what it
+#: is called and what repairs it. Every check the header and the file are held to lives in
+#: :mod:`genome.shipped`; a blank cell is the record's own business, since which columns
+#: have an unknown is declared by the field types and not here.
+_ASSEMBLY_TABLE = ShippedTable(
+    resource=_METADATA_RESOURCE,
+    columns=METADATA_FIELDS,
+    noun="assembly metadata table",
+    repair=_ASSEMBLY_REPAIR,
+    error=MetadataRowError,
+    identify=("assembly_name",),
+)
+
 
 @dataclass(frozen=True)
 class AnnotationMetadata:
@@ -350,6 +366,16 @@ _ANNOTATION_FIELD_TYPES: dict[str, Any] = get_type_hints(AnnotationMetadata)
 #: The annotation field names, in table-column order.
 ANNOTATION_FIELDS: tuple[str, ...] = tuple(_ANNOTATION_FIELD_TYPES)
 
+#: The annotation table as a **Shipped table**, declared exactly as the assembly one is.
+_ANNOTATION_TABLE = ShippedTable(
+    resource=_ANNOTATION_RESOURCE,
+    columns=ANNOTATION_FIELDS,
+    noun="annotation metadata table",
+    repair=_ANNOTATION_REPAIR,
+    error=MetadataRowError,
+    identify=("assembly", "name"),
+)
+
 
 def format_table_row(row: Mapping[str, object]) -> str:
     r"""Render one metadata row as a tab-separated line, in table-column order.
@@ -378,38 +404,6 @@ def format_table_row(row: Mapping[str, object]) -> str:
     return "\t".join("" if row.get(name) is None else str(row[name]) for name in METADATA_FIELDS)
 
 
-def species_slug(species: str) -> str:
-    """Return the file-name spelling of ``species``.
-
-    Lower case, with each run of anything that is not a letter or a digit collapsed to one
-    underscore. It is the one place a curated table's spelling of a species and a file name
-    are reconciled, so neither has to be written the other's way — and it lives beside the
-    tables the species is read from rather than inside any one of the shipped-data
-    directories that name their files with it.
-
-    Parameters
-    ----------
-    species : str
-        A species name, in any spelling.
-
-    Returns
-    -------
-    str
-        Its slug.
-
-    Examples
-    --------
-    >>> species_slug("Homo sapiens")
-    'homo_sapiens'
-    >>> species_slug("Escherichia coli HT115")
-    'escherichia_coli_ht115'
-    >>> species_slug("homo_sapiens")
-    'homo_sapiens'
-    """
-    kept = "".join(character if character.isalnum() else " " for character in species.lower())
-    return "_".join(kept.split())
-
-
 @cache
 def assembly_table() -> tuple[AssemblyMetadata, ...]:
     """Return every assembly the shipped table lists, in table order.
@@ -423,12 +417,18 @@ def assembly_table() -> tuple[AssemblyMetadata, ...]:
     tuple of AssemblyMetadata
         One record per row of ``data/assembly_metadata.tsv``.
 
+    Raises
+    ------
+    MetadataRowError
+        If the shipped file is empty, its header is not :data:`METADATA_FIELDS`, a row
+        holds the wrong number of cells, or a cell cannot be read as its column's type.
+
     Examples
     --------
     >>> "hg38" in {record.assembly_name for record in assembly_table()}
     True
     """
-    return tuple(AssemblyMetadata.from_row(row) for row in _rows(_METADATA_RESOURCE))
+    return tuple(AssemblyMetadata.from_row(row) for row in _ASSEMBLY_TABLE.read().mappings())
 
 
 @cache
@@ -444,116 +444,17 @@ def annotation_table() -> tuple[AnnotationMetadata, ...]:
     tuple of AnnotationMetadata
         One record per row of ``data/annotation_metadata.tsv``.
 
+    Raises
+    ------
+    MetadataRowError
+        As :func:`assembly_table` raises it, for that table's own columns.
+
     Examples
     --------
     >>> "ensgene_v101" in {record.name for record in annotation_table()}
     True
     """
-    return tuple(AnnotationMetadata.from_row(row) for row in _rows(_ANNOTATION_RESOURCE))
-
-
-def _rows(resource_name: str) -> list[dict[str, Any]]:
-    """Read one shipped TSV as rows of text — every column, every cell, unparsed."""
-    resource = files("genome").joinpath(resource_name)
-    with resource.open("r", encoding="utf-8") as handle:
-        frame = pd.read_csv(handle, sep="\t", dtype=str)
-    return [dict(row) for _, row in frame.iterrows()]
-
-
-def _cell_text(name: str, row: Mapping[str, object]) -> str:
-    """Return the ``name`` cell of ``row`` as stripped text, empty when it is blank.
-
-    Blank is a missing column, ``None``, the NaN pandas reads a blank cell as, or
-    whitespace. Anything else is that cell's own text, so a row that spells a value in
-    its column's own type — an ``int`` taxid, a ``bool`` flag — reads back the same as
-    the table's text for it.
-    """
-    cell = row.get(name)
-    if cell is None or (isinstance(cell, float) and math.isnan(cell)):
-        return ""
-    return str(cell).strip()
-
-
-def _parse_flag(name: str, row: Mapping[str, object]) -> bool:
-    """Parse a boolean column — blank is ``False``, and a spelling nobody uses raises."""
-    text = _cell_text(name, row).lower()
-    if not text or text in _FALSE_CELLS:
-        return False
-    if text in _TRUE_CELLS:
-        return True
-    accepted = ", ".join(sorted(_TRUE_CELLS | _FALSE_CELLS))
-    raise MetadataRowError(
-        f"the {name!r} column holds {text!r}, which is not a flag. Fix that cell to one "
-        f"of: {accepted} — or leave it blank, which reads as false."
-    )
-
-
-def parse_cell(name: str, row: Mapping[str, object], types: Mapping[str, Any]) -> Any:
-    """Parse the ``name`` column of ``row`` with that field's own declared type.
-
-    How every curated table in this package turns a cell into a field, so a table that
-    declares its columns as a frozen dataclass gets its reader for free — the assembly and
-    annotation tables here, and the **Xref source** table in :mod:`genome.xref.metadata`.
-
-    A field declared optional (``T | None``) is parsed by ``T`` when its cell carries
-    text, and is ``None`` when the cell is blank or its column is absent — a union is
-    not callable, so the type inside it does the parsing. A field declared ``bool`` is a
-    flag column, where an empty cell is a real answer (see :func:`_parse_flag`) rather
-    than an unknown. Any other field is parsed by its declared type and has no unknown,
-    so a blank cell there is a malformed row rather than the text ``'nan'``.
-
-    Parameters
-    ----------
-    name : str
-        The column to read, which is also the field it fills.
-    row : mapping of str to object
-        Column name to cell, as the shipped TSV spells one. An absent column is blank.
-    types : mapping of str to object
-        Each field's declared type, normally :func:`typing.get_type_hints` of the record.
-
-    Returns
-    -------
-    object
-        The cell parsed by its column's own type, or ``None`` for a blank cell in a column
-        that has an unknown.
-
-    Raises
-    ------
-    MetadataRowError
-        If the cell cannot be read as its column's type, or the column has no unknown and
-        the cell is blank. The message names the column.
-
-    Examples
-    --------
-    >>> parse_cell("ncbi_taxid", {"ncbi_taxid": "9606"}, {"ncbi_taxid": int})
-    9606
-    >>> parse_cell("species", {}, {"species": str | None}) is None
-    True
-    """
-    declared = types[name]
-    if declared is bool:
-        return _parse_flag(name, row)
-    inside = [arg for arg in get_args(declared) if arg is not type(None)]
-    text = _cell_text(name, row)
-    if inside:
-        return _parse_text(name, text, inside[0]) if text else None
-    if not text:
-        raise MetadataRowError(
-            f"the {name!r} column is blank, and it is one no row may leave blank. Fill "
-            f"that cell in: a blank cell reads back as unknown, and {name!r} has none."
-        )
-    return _parse_text(name, text, declared)
-
-
-def _parse_text(name: str, text: str, declared: Any) -> Any:
-    """Parse one cell's text with its column's type, or say which cell refused."""
-    try:
-        return declared(text)
-    except (TypeError, ValueError) as error:
-        raise MetadataRowError(
-            f"the {name!r} column holds {text!r}, which {declared.__name__} cannot read. "
-            f"Fix that cell to a value {declared.__name__} accepts."
-        ) from error
+    return tuple(AnnotationMetadata.from_row(row) for row in _ANNOTATION_TABLE.read().mappings())
 
 
 def lookup_assembly(

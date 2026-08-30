@@ -89,21 +89,50 @@ True
 
 from __future__ import annotations
 
-import gzip
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
-from typing import Any
+from typing import Any, get_type_hints
 
 import pandas as pd
 
-# ``species_slug`` is the file-naming convention every shipped-data directory here uses
-# and belongs to none of them in particular, so it lives beside the curated tables a
-# species is spelled in. The flag spellings stay with the census for a different reason:
-# one spelling of *yes* across every table this package ships.
-from genome.metadata import species_slug
-from genome.tf.gene.census import FALSE_CELL, TRUE_CELL
+# ``species_slug`` is the file-naming convention every shipped-data directory here uses and
+# belongs to none of them in particular, and the flag spellings are one spelling of *yes*
+# across every table this package ships. Both live with the reader that holds every
+# **Shipped table** to them, and both are re-exported here, as the census re-exports them.
+from genome.shipped import (
+    FALSE_CELL,
+    TRUE_CELL,
+    ShippedTable,
+    ShippedTableError,
+    species_slug,
+)
+
+__all__ = [
+    "ANIMALTFDB",
+    "BOTH",
+    "CITED_SOURCES",
+    "COFACTOR_METADATA_RESOURCE",
+    "COFACTOR_SOURCE_METADATA_RESOURCE",
+    "COFACTOR_SUBDIR",
+    "COFACTOR_SUFFIX",
+    "EPIFACTORS",
+    "FALSE_CELL",
+    "HGNC",
+    "SOURCES",
+    "TRUE_CELL",
+    "UNIFORM_COLUMNS",
+    "CofactorProvenance",
+    "CofactorSource",
+    "CofactorTable",
+    "CofactorTableError",
+    "cofactor_metadata",
+    "cofactor_species",
+    "cofactor_table",
+    "parse_cofactor_table",
+    "species_slug",
+]
 
 #: Directory inside the package holding one **Cofactor table** per species, plus the
 #: two provenance tables beside them.
@@ -166,14 +195,20 @@ _SOURCE_METADATA_COLUMNS: tuple[str, ...] = (
     "source_url",
 )
 
-#: Provenance columns holding a number rather than text.
-_NUMERIC_METADATA_COLUMNS = frozenset({"ncbi_taxid", "pubmed_id"})
-
-#: What to do about any of it, named in every message this module raises.
+#: The generator, and the two repairs every message here is composed with: a table is
+#: written for one species at a time, and the provenance rows for both tables at once.
 _REBUILD = "scripts/build_tf_cofactor.py"
+_REPAIR = f"re-run {_REBUILD} for that species"
+_REPAIR_PROVENANCE = f"re-run {_REBUILD}, which writes both provenance tables"
+
+#: Why no cell of either provenance table may be left blank.
+_REQUIRED = (
+    "Every provenance column is required: a table nobody can cite is one this package may "
+    "not redistribute"
+)
 
 
-class CofactorTableError(ValueError):
+class CofactorTableError(ShippedTableError):
     r"""A shipped **Cofactor table** cannot be read, so it is not allowed to answer.
 
     A **packaging defect** and not a caller error: these files ship inside the package
@@ -274,9 +309,7 @@ class CofactorSource:
         >>> CofactorSource.from_row(row, origin="cofactor_source_metadata.tsv").version
         'v1'
         """
-        record = cls(
-            **{name: _parse_cell(name, row, origin=origin) for name in _SOURCE_METADATA_COLUMNS}
-        )
+        record = cls(**_COFACTOR_SOURCE_METADATA.record(row, _SOURCE_TYPES, origin=origin))
         if record.source not in CITED_SOURCES:
             raise CofactorTableError(
                 f"{origin} names the source {record.source!r} for {record.species!r}, and the "
@@ -406,8 +439,9 @@ class CofactorProvenance:
                 f"for it — and citing the publisher is the condition on redistributing one here. "
                 f"Re-run {_REBUILD} for that species, which writes both provenance rows."
             )
-        fields = {name: _parse_cell(name, row, origin=origin) for name in _METADATA_COLUMNS}
-        return cls(**fields, sources=sources)
+        return cls(
+            **_COFACTOR_METADATA.record(row, _PROVENANCE_TYPES, origin=origin), sources=sources
+        )
 
     def attribution(self) -> str:
         """Return the one line to print beside anything this species' table answered.
@@ -537,6 +571,62 @@ class CofactorTable:
         return frame
 
 
+#: Each provenance field's declared type, which parses that field's column of its table.
+#: ``sources`` is left out of the first: it is joined on from the other table rather than
+#: read off a cell, so it is not a column.
+_PROVENANCE_TYPES: dict[str, Any] = {
+    name: declared
+    for name, declared in get_type_hints(CofactorProvenance).items()
+    if name in _METADATA_COLUMNS
+}
+_SOURCE_TYPES: dict[str, Any] = get_type_hints(CofactorSource)
+
+#: The species-keyed provenance table as a **Shipped table**.
+_COFACTOR_METADATA = ShippedTable(
+    resource=COFACTOR_METADATA_RESOURCE,
+    columns=_METADATA_COLUMNS,
+    noun="cofactor provenance table",
+    repair=_REPAIR_PROVENANCE,
+    error=CofactorTableError,
+    because=_REQUIRED,
+    identify=("species",),
+)
+
+#: The source-keyed provenance table, deliberately ragged — one row per species per
+#: publisher, so the key is the pair and a species-and-source named twice is refused.
+_COFACTOR_SOURCE_METADATA = ShippedTable(
+    resource=COFACTOR_SOURCE_METADATA_RESOURCE,
+    columns=_SOURCE_METADATA_COLUMNS,
+    noun="cofactor provenance table",
+    repair=_REPAIR_PROVENANCE,
+    error=CofactorTableError,
+    key=("species", "source"),
+    because=_REQUIRED,
+    identify=("species", "source"),
+)
+
+#: One **Cofactor table** as a **Shipped table**, one per species. The uniform four are the
+#: header's leading columns and one publisher's own follow them, namespaced; the **Gene id
+#: stem** is the key, so a table naming one twice is refused.
+_COFACTOR = ShippedTable(
+    resource=f"{COFACTOR_SUBDIR}/{{slug}}{COFACTOR_SUFFIX}",
+    columns=UNIFORM_COLUMNS,
+    noun="cofactor table",
+    repair=_REPAIR,
+    error=CofactorTableError,
+    unit="gene",
+    absence="this species has no cofactors",
+    leading=True,
+    key=("gene_id_stem",),
+    required=("gene_id_stem",),
+    flags=("is_cofactor",),
+    because=(
+        "A cofactor table is keyed by gene id stem, so a row without one cannot be looked up "
+        "or resolved against an annotation"
+    ),
+)
+
+
 @cache
 def cofactor_metadata() -> tuple[CofactorProvenance, ...]:
     """Return the provenance of every **Cofactor table** the shipped tables record.
@@ -564,12 +654,12 @@ def cofactor_metadata() -> tuple[CofactorProvenance, ...]:
     >>> print(cofactor_metadata()[0].attribution())
     AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Caenorhabditis_elegans_Cof
     """
-    sources = files("genome").joinpath(COFACTOR_SOURCE_METADATA_RESOURCE)
-    species = files("genome").joinpath(COFACTOR_METADATA_RESOURCE)
     return _read_metadata(
-        species.read_text(encoding="utf-8"),
-        sources=_read_source_metadata(sources.read_text(encoding="utf-8"), origin=str(sources)),
-        origin=str(species),
+        _COFACTOR_METADATA.text(),
+        sources=_read_source_metadata(
+            _COFACTOR_SOURCE_METADATA.text(), origin=_COFACTOR_SOURCE_METADATA.origin()
+        ),
+        origin=_COFACTOR_METADATA.origin(),
     )
 
 
@@ -649,8 +739,7 @@ def cofactor_table(species: str) -> CofactorTable | None:
     slug = species_slug(species)
     if slug not in cofactor_species():
         return None
-    resource = files("genome").joinpath(COFACTOR_SUBDIR, f"{slug}{COFACTOR_SUFFIX}")
-    origin = str(resource)
+    origin = _COFACTOR.origin(slug=slug)
     provenance = next(
         (record for record in cofactor_metadata() if species_slug(record.species) == slug), None
     )
@@ -662,12 +751,9 @@ def cofactor_table(species: str) -> CofactorTable | None:
             f"and its provenance rows together."
         )
     # These are tens of kilobytes of shipped rows, so the seam is between the bytes and
-    # the format: unpacking happens here and the parse below is a pure function of text.
-    return parse_cofactor_table(
-        gzip.decompress(resource.read_bytes()).decode("utf-8"),
-        provenance=provenance,
-        origin=origin,
-    )
+    # the format: unpacking happens at the resource boundary and the parse below is a pure
+    # function of text.
+    return parse_cofactor_table(_COFACTOR.text(slug=slug), provenance=provenance, origin=origin)
 
 
 def parse_cofactor_table(
@@ -716,38 +802,33 @@ def parse_cofactor_table(
     (('ENSTEST0001',), ('ENSTEST0001',))
     """
     where = provenance.file if origin is None else origin
-    lines = text.split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
-    if not lines:
-        raise CofactorTableError(
-            f"{where} is empty. A cofactor table carries a header and at least one gene; absence "
-            f"is spelled by shipping no file at all, and an empty one is the second spelling of "
-            f"it that would read as *this species has no cofactors*. Re-run {_REBUILD} for that "
-            f"species, or remove the file."
-        )
-    columns = tuple(lines[0].split("\t"))
-    _check_columns(columns, origin=where)
-    rows = tuple(
-        _read_row(line, columns, number, origin=where)
-        for number, line in enumerate(lines[1:], start=2)
-    )
-    if not rows:
-        raise CofactorTableError(
-            f"{where} declares columns and no genes. A table listing nothing says no more than "
-            f"an absent file does — re-run {_REBUILD} for that species, or remove the file."
-        )
-    _check_stems(rows, origin=where)
+    read = _COFACTOR.parse(text, origin=where)
+    for number, row in enumerate(read.rows, start=2):
+        _check_source(row[_SOURCE], number, origin=where)
     return CofactorTable(
-        species=provenance.species, provenance=provenance, columns=columns, rows=rows
+        species=provenance.species,
+        provenance=provenance,
+        columns=read.columns,
+        rows=read.rows,
     )
+
+
+def _check_source(cell: str | None, number: int, *, origin: str) -> None:
+    """Hold one row's publisher to the closed vocabulary the uniform ``source`` column is."""
+    if cell not in SOURCES:
+        raise CofactorTableError(
+            f"{origin} line {number} names the source {cell!r}, and the vocabulary is "
+            f"{list(SOURCES)}. It is closed on purpose: it says which publisher listed the gene, "
+            f"and a value outside it names nobody the provenance table can be asked about. "
+            f"Re-run {_REBUILD} for that species."
+        )
 
 
 def _read_metadata(
     text: str, *, sources: tuple[CofactorSource, ...], origin: str
 ) -> tuple[CofactorProvenance, ...]:
     """Read the species-keyed provenance table, joining each species' source rows onto it."""
-    rows = _read_metadata_rows(text, _METADATA_COLUMNS, origin=origin)
+    rows = _COFACTOR_METADATA.parse(text, origin=origin).mappings()
     named = {row["species"] for row in rows}
     orphan = sorted({source.species for source in sources} - named)
     if orphan:
@@ -767,130 +848,12 @@ def _read_metadata(
 
 
 def _read_source_metadata(text: str, *, origin: str) -> tuple[CofactorSource, ...]:
-    """Read the source-keyed provenance table, refusing a species-and-source named twice."""
-    rows = _read_metadata_rows(text, _SOURCE_METADATA_COLUMNS, origin=origin)
-    records = tuple(CofactorSource.from_row(row, origin=origin) for row in rows)
-    keys = [(record.species, record.source) for record in records]
-    if len(set(keys)) != len(keys):
-        repeated = sorted({key for key in keys if keys.count(key) > 1})
-        raise CofactorTableError(
-            f"{origin} names these species and sources more than once: {repeated}. One row says "
-            f"what to cite for one publisher's part of one species' table, so two would let a "
-            f"caller cite either. Re-run {_REBUILD} for that species."
-        )
-    return records
+    """Read the source-keyed provenance table into records, in its own row order.
 
-
-def _read_metadata_rows(
-    text: str, columns: tuple[str, ...], *, origin: str
-) -> list[dict[str, str]]:
-    """Read one provenance table's rows as text, validating its header as it goes."""
-    lines = text.splitlines()
-    if not lines:
-        raise CofactorTableError(
-            f"{origin} is empty, and a cofactor table with no provenance is one nobody can cite. "
-            f"Re-run {_REBUILD}, which writes it."
-        )
-    header = tuple(lines[0].split("\t"))
-    if header != columns:
-        raise CofactorTableError(
-            f"{origin} carries the columns {list(header)} where that provenance table's are "
-            f"{list(columns)}. Re-run {_REBUILD}, which writes both tables with the columns "
-            f"this reader expects."
-        )
-    rows = []
-    for number, line in enumerate(lines[1:], start=2):
-        if not line:
-            continue
-        cells = line.split("\t")
-        if len(cells) != len(header):
-            raise CofactorTableError(
-                f"{origin} line {number} holds {len(cells)} cells where the header declares "
-                f"{len(header)}. Re-run {_REBUILD}."
-            )
-        rows.append(dict(zip(header, cells, strict=True)))
-    return rows
-
-
-def _parse_cell(name: str, row: Mapping[str, str], *, origin: str) -> Any:
-    """Return one provenance cell, parsed by its column and never blank."""
-    text = row.get(name, "").strip()
-    if not text:
-        raise CofactorTableError(
-            f"{origin} leaves the {name!r} column blank for {row.get('species')!r}. Every "
-            f"provenance column is required: a table nobody can cite is one this package may "
-            f"not redistribute. Fill that cell in, or re-run {_REBUILD}."
-        )
-    if name not in _NUMERIC_METADATA_COLUMNS:
-        return text
-    try:
-        return int(text)
-    except ValueError as error:
-        raise CofactorTableError(
-            f"{origin} holds {text!r} in the {name!r} column, which is not a number. Fix that cell."
-        ) from error
-
-
-def _check_columns(columns: tuple[str, ...], *, origin: str) -> None:
-    """Hold a table's header to the uniform four in front and distinct names after."""
-    if columns[: len(UNIFORM_COLUMNS)] != UNIFORM_COLUMNS:
-        raise CofactorTableError(
-            f"{origin} leads with the columns {list(columns[: len(UNIFORM_COLUMNS)])} where "
-            f"every cofactor table leads with {list(UNIFORM_COLUMNS)}. Those four are the only "
-            f"columns one table shares with another, so a file without them cannot be read as "
-            f"one. Re-run {_REBUILD} for that species."
-        )
-    if len(set(columns)) != len(columns):
-        raise CofactorTableError(
-            f"{origin} names a column twice: {list(columns)}. Each publisher's columns are "
-            f"namespaced so that two of them never collide — re-run {_REBUILD}."
-        )
-
-
-def _read_row(
-    line: str, columns: tuple[str, ...], number: int, *, origin: str
-) -> tuple[str | None, ...]:
-    """Read one gene's row, blank cells becoming ``None`` and the uniform flags being checked."""
-    cells = line.split("\t")
-    if len(cells) != len(columns):
-        raise CofactorTableError(
-            f"{origin} line {number} holds {len(cells)} cells where its header declares "
-            f"{len(columns)}. A cofactor table is a plain TSV with no quoting, so a cell "
-            f"carrying a tab is a defect in the generator rather than something to parse "
-            f"around. Re-run {_REBUILD} for that species."
-        )
-    if cells[_IS_COFACTOR] not in (TRUE_CELL, FALSE_CELL):
-        raise CofactorTableError(
-            f"{origin} line {number} spells its cofactor flag {cells[_IS_COFACTOR]!r}, and a "
-            f"table spells it {TRUE_CELL!r} or {FALSE_CELL!r}. The flag is one of the four "
-            f"uniform columns, so its spelling is this package's and not the publisher's — "
-            f"re-run {_REBUILD} for that species."
-        )
-    if cells[_SOURCE] not in SOURCES:
-        raise CofactorTableError(
-            f"{origin} line {number} names the source {cells[_SOURCE]!r}, and the vocabulary is "
-            f"{list(SOURCES)}. It is closed on purpose: it says which publisher listed the gene, "
-            f"and a value outside it names nobody the provenance table can be asked about. "
-            f"Re-run {_REBUILD} for that species."
-        )
-    return tuple(cell if cell else None for cell in cells)
-
-
-def _check_stems(rows: tuple[tuple[str | None, ...], ...], *, origin: str) -> None:
-    """Hold every **Gene id stem** to being present and naming its gene once."""
-    seen: set[str] = set()
-    for number, row in enumerate(rows, start=2):
-        stem = row[0]
-        if stem is None:
-            raise CofactorTableError(
-                f"{origin} line {number} carries no gene id stem. A cofactor table is keyed by "
-                f"stem, so a row without one cannot be looked up or resolved against an "
-                f"annotation. Re-run {_REBUILD} for that species."
-            )
-        if stem in seen:
-            raise CofactorTableError(
-                f"{origin} names the gene id stem {stem!r} more than once. One row per gene, so "
-                f"two rows for one stem would let a caller read either — reconcile the "
-                f"publishers' files and re-run {_REBUILD}."
-            )
-        seen.add(stem)
+    A species-and-source named twice is refused by the shared reader, which the table
+    declares that pair as its key for.
+    """
+    return tuple(
+        CofactorSource.from_row(row, origin=origin)
+        for row in _COFACTOR_SOURCE_METADATA.parse(text, origin=origin).mappings()
+    )

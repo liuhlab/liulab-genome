@@ -72,20 +72,41 @@ True
 
 from __future__ import annotations
 
-import gzip
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
-from typing import Any
+from typing import Any, get_type_hints
 
 import pandas as pd
 
-# Re-exported rather than defined here. Naming a file after a species is a convention
-# every shipped-data directory in this package shares and none of them owns, so it lives
-# beside the curated tables the species is read from — `genome.metadata`, which every
-# context may read. Kept importable from here because this is where it used to be.
-from genome.metadata import species_slug
+# Re-exported rather than defined here. Naming a file after a species and spelling a flag
+# `yes` are conventions every **Shipped table** in this package shares and none of them
+# owns, so they live with the reader that holds every such table to them. Kept importable
+# from here because this is where they used to be.
+from genome.shipped import (
+    FALSE_CELL,
+    TRUE_CELL,
+    ShippedTable,
+    ShippedTableError,
+    species_slug,
+)
+
+__all__ = [
+    "CENSUS_METADATA_RESOURCE",
+    "CENSUS_SUBDIR",
+    "CENSUS_SUFFIX",
+    "FALSE_CELL",
+    "TRUE_CELL",
+    "UNIFORM_COLUMNS",
+    "CensusProvenance",
+    "TFGeneTable",
+    "TFGeneTableError",
+    "census_metadata",
+    "census_species",
+    "species_slug",
+    "tf_gene_table",
+]
 
 #: Directory inside the package holding one **TF gene table** per species, plus the
 #: provenance table beside them.
@@ -108,10 +129,6 @@ CENSUS_METADATA_RESOURCE = f"{CENSUS_SUBDIR}/census_metadata.tsv"
 #: not crosswalked (ADR-0014).
 UNIFORM_COLUMNS: tuple[str, ...] = ("gene_id_stem", "symbol", "is_tf", "dbd_family")
 
-#: How a census spells its TF flag. One pair of spellings across every census, since
-#: the flag is one of the uniform four.
-TRUE_CELL, FALSE_CELL = "yes", "no"
-
 #: Where the TF flag sits in every census, which the uniform four fix.
 _IS_TF = UNIFORM_COLUMNS.index("is_tf")
 
@@ -128,11 +145,11 @@ _METADATA_COLUMNS: tuple[str, ...] = (
     "sha256",
 )
 
-#: Provenance columns holding a number rather than text.
-_NUMERIC_METADATA_COLUMNS = frozenset({"ncbi_taxid", "pubmed_id"})
+#: What to do about any of it, named in every message this module raises.
+_REBUILD = "re-run scripts/build_tf_census.py"
 
 
-class TFGeneTableError(ValueError):
+class TFGeneTableError(ShippedTableError):
     r"""A shipped **TF gene table** cannot be read, so it is not allowed to answer.
 
     A **packaging defect** and not a caller error: these files ship inside the
@@ -246,7 +263,7 @@ class CensusProvenance:
         >>> CensusProvenance.from_row(row, origin="census_metadata.tsv").ncbi_taxid
         9606
         """
-        return cls(**{name: _parse_cell(name, row, origin=origin) for name in _METADATA_COLUMNS})
+        return cls(**_CENSUS_METADATA.record(row, _PROVENANCE_TYPES, origin=origin))
 
     def attribution(self) -> str:
         """Return the one line to print beside anything this census answered.
@@ -379,6 +396,47 @@ class TFGeneTable:
         return frame
 
 
+#: Each provenance field's declared type, which parses that field's column of the table.
+_PROVENANCE_TYPES: dict[str, Any] = get_type_hints(CensusProvenance)
+
+#: The provenance table as a **Shipped table**: where it lives, what its header is, what it
+#: is called and what repairs it. Every check the file is held to lives in
+#: :mod:`genome.shipped`.
+_CENSUS_METADATA = ShippedTable(
+    resource=CENSUS_METADATA_RESOURCE,
+    columns=_METADATA_COLUMNS,
+    noun="census provenance table",
+    repair=_REBUILD,
+    error=TFGeneTableError,
+    because=(
+        "Every provenance column is required: a census nobody can cite is one this package "
+        "may not redistribute"
+    ),
+    identify=("file", "species"),
+)
+
+#: One census as a **Shipped table**, one per species. The uniform four are the header's
+#: leading columns and the publisher's own follow them; the **Gene id stem** is the key, so
+#: a census naming one twice is refused as the two verdicts it would let a caller read.
+_CENSUS = ShippedTable(
+    resource=f"{CENSUS_SUBDIR}/{{slug}}{CENSUS_SUFFIX}",
+    columns=UNIFORM_COLUMNS,
+    noun="census",
+    repair=_REBUILD,
+    error=TFGeneTableError,
+    unit="gene",
+    absence="this species has no transcription factors",
+    leading=True,
+    key=("gene_id_stem",),
+    required=("gene_id_stem",),
+    flags=("is_tf",),
+    because=(
+        "A census is keyed by gene id stem, so a row without one cannot be looked up or "
+        "resolved against an annotation"
+    ),
+)
+
+
 @cache
 def census_metadata() -> tuple[CensusProvenance, ...]:
     """Return the provenance of every census the shipped table records, in table order.
@@ -401,8 +459,7 @@ def census_metadata() -> tuple[CensusProvenance, ...]:
     >>> {record.species for record in census_metadata()} >= {"Homo sapiens"}
     True
     """
-    resource = files("genome").joinpath(CENSUS_METADATA_RESOURCE)
-    return _read_metadata(resource.read_text(encoding="utf-8"), origin=str(resource))
+    return _read_metadata(_CENSUS_METADATA.text(), origin=_CENSUS_METADATA.origin())
 
 
 @cache
@@ -482,8 +539,7 @@ def tf_gene_table(species: str) -> TFGeneTable | None:
     slug = species_slug(species)
     if slug not in census_species():
         return None
-    resource = files("genome").joinpath(CENSUS_SUBDIR, f"{slug}{CENSUS_SUFFIX}")
-    origin = str(resource)
+    origin = _CENSUS.origin(slug=slug)
     provenance = next(
         (record for record in census_metadata() if species_slug(record.species) == slug), None
     )
@@ -494,61 +550,18 @@ def tf_gene_table(species: str) -> TFGeneTable | None:
             f"on redistributing a census here. Re-run scripts/build_tf_census.py for "
             f"{slug!r}, which writes the census and its provenance row together."
         )
-    return _read_census(
-        gzip.decompress(resource.read_bytes()).decode("utf-8"),
-        provenance=provenance,
-        origin=origin,
-    )
+    # These are hundreds of kilobytes of shipped rows, so the seam is between the bytes and
+    # the format: unpacking happens at the resource boundary and the parse below is a pure
+    # function of text.
+    return _read_census(_CENSUS.text(slug=slug), provenance=provenance, origin=origin)
 
 
 def _read_metadata(text: str, *, origin: str) -> tuple[CensusProvenance, ...]:
-    """Read the provenance table from ``text``, validating its header as it goes."""
-    lines = text.splitlines()
-    if not lines:
-        raise TFGeneTableError(
-            f"{origin} is empty, and a census with no provenance is one nobody can cite. "
-            f"Re-run scripts/build_tf_census.py, which writes it."
-        )
-    header = tuple(lines[0].split("\t"))
-    if header != _METADATA_COLUMNS:
-        raise TFGeneTableError(
-            f"{origin} carries the columns {list(header)} where the provenance table's are "
-            f"{list(_METADATA_COLUMNS)}. Re-run scripts/build_tf_census.py, which writes "
-            f"the table with the columns this reader expects."
-        )
-    records = []
-    for number, line in enumerate(lines[1:], start=2):
-        if not line:
-            continue
-        cells = line.split("\t")
-        if len(cells) != len(header):
-            raise TFGeneTableError(
-                f"{origin} line {number} holds {len(cells)} cells where the header declares "
-                f"{len(header)}. Re-run scripts/build_tf_census.py."
-            )
-        records.append(
-            CensusProvenance.from_row(dict(zip(header, cells, strict=True)), origin=origin)
-        )
-    return tuple(records)
-
-
-def _parse_cell(name: str, row: Mapping[str, str], *, origin: str) -> Any:
-    """Return one provenance cell, parsed by its column and never blank."""
-    text = row.get(name, "").strip()
-    if not text:
-        raise TFGeneTableError(
-            f"{origin} leaves the {name!r} column blank for {row.get('file') or row.get('species')!r}. "
-            f"Every provenance column is required: a census nobody can cite is one this package "
-            f"may not redistribute. Fill that cell in, or re-run scripts/build_tf_census.py."
-        )
-    if name not in _NUMERIC_METADATA_COLUMNS:
-        return text
-    try:
-        return int(text)
-    except ValueError as error:
-        raise TFGeneTableError(
-            f"{origin} holds {text!r} in the {name!r} column, which is not a number. Fix that cell."
-        ) from error
+    """Read the provenance table from ``text``, holding it to what the shared reader checks."""
+    return tuple(
+        CensusProvenance.from_row(row, origin=origin)
+        for row in _CENSUS_METADATA.parse(text, origin=origin).mappings()
+    )
 
 
 def _read_census(text: str, *, provenance: CensusProvenance, origin: str) -> TFGeneTable:
@@ -559,81 +572,7 @@ def _read_census(text: str, *, provenance: CensusProvenance, origin: str) -> TFG
     text came from and is named in every message, since regenerating that file is the
     only repair.
     """
-    lines = text.split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
-    if not lines:
-        raise TFGeneTableError(
-            f"{origin} is empty. A census carries a header and at least one gene; absence is "
-            f"spelled by shipping no file at all, and an empty one is the second spelling of "
-            f"it that would read as *this species has no transcription factors*."
-        )
-    columns = tuple(lines[0].split("\t"))
-    _check_columns(columns, origin=origin)
-    rows = tuple(
-        _read_row(line, columns, number, origin=origin)
-        for number, line in enumerate(lines[1:], start=2)
-    )
-    if not rows:
-        raise TFGeneTableError(
-            f"{origin} declares columns and no genes. A census that assessed nothing says no "
-            f"more than an absent file does — regenerate it, or remove it."
-        )
-    _check_stems(rows, origin=origin)
+    read = _CENSUS.parse(text, origin=origin)
     return TFGeneTable(
-        species=provenance.species, provenance=provenance, columns=columns, rows=rows
+        species=provenance.species, provenance=provenance, columns=read.columns, rows=read.rows
     )
-
-
-def _check_columns(columns: tuple[str, ...], *, origin: str) -> None:
-    """Hold a census's header to the uniform four in front and distinct names after."""
-    if columns[: len(UNIFORM_COLUMNS)] != UNIFORM_COLUMNS:
-        raise TFGeneTableError(
-            f"{origin} leads with the columns {list(columns[: len(UNIFORM_COLUMNS)])} where "
-            f"every census leads with {list(UNIFORM_COLUMNS)}. Those four are the only columns "
-            f"one census shares with another, so a file without them cannot be read as one."
-        )
-    if len(set(columns)) != len(columns):
-        raise TFGeneTableError(
-            f"{origin} names a column twice: {list(columns)}. Regenerate it with "
-            f"scripts/build_tf_census.py."
-        )
-
-
-def _read_row(
-    line: str, columns: tuple[str, ...], number: int, *, origin: str
-) -> tuple[str | None, ...]:
-    """Read one gene's row, blank cells becoming ``None`` and the flag being checked."""
-    cells = line.split("\t")
-    if len(cells) != len(columns):
-        raise TFGeneTableError(
-            f"{origin} line {number} holds {len(cells)} cells where its header declares "
-            f"{len(columns)}. A census is a plain TSV with no quoting, so a cell carrying a "
-            f"tab is a defect in the generator rather than something to parse around."
-        )
-    if cells[_IS_TF] not in (TRUE_CELL, FALSE_CELL):
-        raise TFGeneTableError(
-            f"{origin} line {number} spells its TF flag {cells[_IS_TF]!r}, and a census spells "
-            f"it {TRUE_CELL!r} or {FALSE_CELL!r}. The flag is one of the four uniform columns, "
-            f"so its spelling is this package's and not the publisher's — regenerate the file."
-        )
-    return tuple(cell if cell else None for cell in cells)
-
-
-def _check_stems(rows: tuple[tuple[str | None, ...], ...], *, origin: str) -> None:
-    """Hold every **Gene id stem** to being present and naming its gene once."""
-    seen: set[str] = set()
-    for number, row in enumerate(rows, start=2):
-        stem = row[0]
-        if stem is None:
-            raise TFGeneTableError(
-                f"{origin} line {number} carries no gene id stem. A census is keyed by stem, "
-                f"so a row without one cannot be looked up or resolved against an annotation."
-            )
-        if stem in seen:
-            raise TFGeneTableError(
-                f"{origin} names the gene id stem {stem!r} more than once. A census reaches one "
-                f"verdict per gene, so two rows for one stem would let a caller read either — "
-                f"reconcile the publisher's file and regenerate."
-            )
-        seen.add(stem)
