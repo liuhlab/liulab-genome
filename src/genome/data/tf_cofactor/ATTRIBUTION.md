@@ -69,7 +69,7 @@ gene** and a **Transcription cofactor** — 57 of them from the AnimalTFDB side,
 EpiFactors side, 28 from both — so **a caller who unions `tf_gene_list` with `tf_cofactor_list`
 double-counts those 151 genes.** `TBP`, `KMT2A` and `DNMT1` are among them. Being a cofactor never
 suppresses the motifs a census already reached; the two are independent verdicts about different
-questions, and `tests/test_tf_cofactor.py` pins the number so it cannot drift unnoticed.
+questions, and `tests/tf/test_tf_cofactor.py` pins the number so it cannot drift unnoticed.
 
 ## Mus musculus — `mus_musculus.cofactor_table.tsv.gz`
 
@@ -98,7 +98,7 @@ keyed by WormBase `WBGene…` gene ids.
 assembly. AnimalTFDB assessed *C. elegans* cofactors; no publisher has released a *C. elegans*
 transcription-factor census, and this package publishes no census of its own. The asymmetry is the
 publishers' shape rather than a gap in the reader — absence is theirs and not ours — and it is
-recorded here so that nobody files it as a defect. `tests/test_tf_cofactor.py` pins it.
+recorded here so that nobody files it as a defect. `tests/tf/test_tf_cofactor.py` pins it.
 
 ## What the columns are, and whose vocabulary each one is
 
@@ -163,5 +163,5 @@ a publisher re-spells a column, when a family survives the spelling map with no 
 an identifier does not resolve, and writes byte-stable output, so a re-release is a re-run and a
 reviewable diff. **No test proves a shipped table still matches its publishers, and none can**:
 regenerating one needs downloads and CI has no network, the limitation ADR-0011 already accepts. The
-counts above are pinned in `tests/test_tf_cofactor.py`, turning silent drift into a loud failure —
+counts above are pinned in `tests/tf/test_tf_cofactor.py`, turning silent drift into a loud failure —
 the most that is available.
