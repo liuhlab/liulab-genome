@@ -32,8 +32,6 @@ from genome.io.gtf import gene_list as _gene_list
 from genome.io.gtf import gene_lists as _gene_lists
 from genome.io.gtf import register_annotation as _register_annotation
 from genome.io.gtf import register_gtf as _register_gtf
-from genome.io.gtf import tf_cofactor_list as _tf_cofactor_list
-from genome.io.gtf import tf_gene_list as _tf_gene_list
 from genome.io.results import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
 from genome.io.results import GeneList as _GeneList
@@ -46,6 +44,8 @@ from genome.io.results import ResolvedXrefIds as _ResolvedXrefIds
 from genome.io.results import VerifiedAssembly as _VerifiedAssembly
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
+from genome.tf.cofactor import tf_cofactor_list as _tf_cofactor_list
+from genome.tf.gene import tf_gene_list as _tf_gene_list
 from genome.tf.motif.background import BackgroundMode as _BackgroundMode
 from genome.tf.motif.jaspar import DEFAULT_RELEASE as _DEFAULT_RELEASE
 from genome.tf.motif.jaspar import DEFAULT_TAX_GROUP as _DEFAULT_TAX_GROUP

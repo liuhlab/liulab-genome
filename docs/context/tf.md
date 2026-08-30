@@ -2,9 +2,11 @@
 
 Which genes a published source judges transcription factors, which ones it lists as cofactors of
 transcription instead, and which JASPAR motifs answer for a factor. This context covers `tf/gene/*`
-— the shipped censuses, the loader that reads them, and the **TF gene list** an **Annotation**
-answers with — `tf/cofactor/*`, the same shape for the genes a publisher lists as a **Transcription
-cofactor**, and `tf/link.py` beside them, which holds the **Motif link** join. Those two are the
+— the shipped censuses, the loader that reads them, and the **TF gene list** it answers with once a
+registered **Annotation**'s gene ids have been crossed to — `tf/cofactor/*`, the same shape for the
+genes a publisher lists as a **Transcription cofactor**, and beside them `tf/link.py`, which holds
+the **Motif link** join, and `tf/species.py`, which holds the three refusals both gene-keyed halves
+share when nothing published can answer for an assembly's species. Those two are the
 gene-keyed halves of this context and they ask different questions — is this a transcription factor
 and of what **DBD family**, against is this a cofactor and of what class — where the [motif
 half](./motif.md) is keyed by motif and keeps its own glossary. The join between a gene and a motif
@@ -112,8 +114,8 @@ asserts agreement on membership only and never on classification, and the Animal
 carries is a join this package performed onto that publisher's family rather than anything the
 published gene list itself says.
 _Avoid_: cofactor database, cofactor catalogue, epigenetic factor table; **TF cofactor list**, which
-is what an **Annotation** answers with rather than what ships; annotation, which names a registered
-GTF here
+is this table met with one **Annotation** rather than what ships; annotation, which names a
+registered GTF here
 
 **TF cofactor list**:
 One **Assembly**'s **Transcription cofactor**s: a **Cofactor table**'s **Gene id stem**s resolved

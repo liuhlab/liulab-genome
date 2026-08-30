@@ -38,11 +38,13 @@ from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
 from genome.io.gtf import AnnotationRegistry
 from genome.io.registration import AssemblyDir
-from genome.io.results import GeneList, TFCofactorList, TFGeneList
+from genome.io.results import GeneList
 from genome.io.twobit import TwoBit
 from genome.metadata import AssemblyMetadata, assembly_metadata
 from genome.region import Region, parse_region
 from genome.seq import DNA
+from genome.tf.cofactor import TFCofactorList, resolve_tf_cofactors
+from genome.tf.gene import TFGeneList, resolve_tf_genes
 from genome.tf.motif.mixin import MotifScanMixin
 
 
@@ -411,14 +413,14 @@ class Genome(AlignerMixin, MotifScanMixin):
 
         Returns
         -------
-        genome.io.results.TFGeneList
+        genome.tf.gene.annotation.TFGeneList
             The genes, the census's provenance, and the stems that resolved to nothing.
 
         Raises
         ------
-        genome.io.gtf.UnknownSpeciesError
+        genome.tf.species.UnknownSpeciesError
             If nothing names this assembly's species.
-        genome.io.gtf.NoTFCensusError
+        genome.tf.species.NoTFCensusError
             If no census ships for that species; the message names the ones that do.
         ValueError
             If ``annotation`` is omitted and this genome has no **Default annotation**.
@@ -436,7 +438,7 @@ class Genome(AlignerMixin, MotifScanMixin):
         >>> print(answer.provenance.attribution())                # doctest: +SKIP
         Lambert et al. 2018 v_1.01 (PMID 29425488) — https://humantfs.ccbr.utoronto.ca/...
         """
-        return self._registry.tf_gene_list(annotation, include_rejected=include_rejected)
+        return resolve_tf_genes(self._registry, annotation, include_rejected=include_rejected)
 
     def tf_cofactor_list(self, annotation: str | None = None) -> TFCofactorList:
         """Return the genes a publisher lists as transcription cofactors in this genome.
@@ -465,15 +467,15 @@ class Genome(AlignerMixin, MotifScanMixin):
 
         Returns
         -------
-        genome.io.results.TFCofactorList
+        genome.tf.cofactor.annotation.TFCofactorList
             The cofactors, the publishers' provenance, and the stems that resolved to
             nothing.
 
         Raises
         ------
-        genome.io.gtf.UnknownSpeciesError
+        genome.tf.species.UnknownSpeciesError
             If nothing names this assembly's species.
-        genome.io.gtf.NoCofactorTableError
+        genome.tf.species.NoCofactorTableError
             If no cofactor table ships for that species; the message names the ones that
             do.
         ValueError
@@ -492,7 +494,7 @@ class Genome(AlignerMixin, MotifScanMixin):
         >>> print(answer.provenance.attribution())                  # doctest: +SKIP
         AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/...
         """
-        return self._registry.tf_cofactor_list(annotation)
+        return resolve_tf_cofactors(self._registry, annotation)
 
     @property
     def default_gtf_path(self) -> Path | None:
