@@ -15,10 +15,11 @@ query reads exactly one set, so two sources that disagree are two answers rather
 contradiction to resolve.
 
 Four sources ship, and they are **not equals**. :data:`~genome.xref.alliance.ALLIANCE` is
-the **Default xref source** for all three species; :data:`~genome.xref.ensembl.ENSEMBL_TSV`
-is selectable and pins its own numbered **Release**, and its mapping fans out to 72 stems
-for one GeneID where the other's is near-one-to-one. Which one answers is a scientific
-choice — read :class:`~genome.xref.xref.XrefSet`'s ``source`` parameter before making it.
+the **Default xref source** for all three species when the question is identifiers;
+:data:`~genome.xref.ensembl.ENSEMBL_TSV` is selectable and pins its own numbered
+**Release**, and its mapping fans out to 72 stems for one GeneID where the other's is
+near-one-to-one. Which one answers is a scientific choice — read
+:class:`~genome.xref.xref.XrefSet`'s ``source`` parameter before making it.
 
 The other two carry **symbols**, which the first two do not.
 :data:`~genome.xref.hgnc.HGNC_ARCHIVE` is human's, from a pinned quarterly archive file,
@@ -28,6 +29,13 @@ approved symbol alone. So a symbol is matched with
 :meth:`~genome.xref.xref.XrefSet.match_symbols`, whose answer says on every hit which kind
 of spelling matched and, on the answer as a whole, which kinds that source could not match
 and why.
+
+**A default is therefore per species and per question** (ADR-0021), and the question is
+named where the source is filled in: :meth:`~genome.xref.xref.XrefSet.for_symbols` is the
+constructor that reaches one of those two, where the plain constructor reaches the
+identifier default. The two sit side by side on purpose — a set built for one publisher is
+never answered out of another's bytes, so ``XrefSet("Homo sapiens")`` matches no symbol at
+all and raises naming the source that does.
 
 Putting an answer into your own annotation's gene ids is the call that already existed,
 :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which is why the hub is the

@@ -967,7 +967,10 @@ def xref(
     Omitting `--source` answers from the species' default xref source, so everyone in the
     lab reaches for the same one without discussing it. It is a default and not a
     recommendation: naming a source is how the scientific choice gets made deliberately,
-    and every answer names the source and the release that produced it either way.
+    and every answer names the source and the release that produced it either way. **A
+    default is per species and per question**, so `--from-stems symbol` — the one question
+    here that is about symbols — is answered by the source that carries them, `hgnc` for
+    human and `alliance_bgi` for mouse and worm, rather than by the identifier default.
 
     Naming a species prepares its set, which the first time is a download. **The lab's CPU
     cluster compute nodes have no internet**, so a set must be constructed once from a login
@@ -997,8 +1000,12 @@ def xref(
         typer.echo(_XREF_SYMBOL_HELP, err=True)
         raise typer.Exit(code=2)
 
+    # Which default an unnamed source is filled in with is the question's to decide, and
+    # the question is on the flags: labelling a stem with a symbol is a symbol question, so
+    # it opens the set that carries them. The choosing is the API's — this names it.
+    opener = _XrefSet.for_symbols if namespace.strip().lower() == _SYMBOL else _XrefSet
     try:
-        xrefs = _XrefSet(species, source, progressbar=not json)
+        xrefs = opener(species, source, progressbar=not json)
         answer = xrefs.to_stems(ids, namespace) if to_hub else xrefs.from_stems(ids, namespace)
     except _XREF_ERRORS as err:
         typer.echo(f"error: {err}", err=True)
@@ -1060,9 +1067,10 @@ def match_symbols(
     source: str | None = typer.Option(
         None,
         "--source",
-        help="Answer from this xref source rather than the species' default one. Symbols "
-        "are carried by `hgnc` for human and `alliance_bgi` for mouse and worm; a source "
-        "that carries none says so and names those, rather than matching nothing.",
+        help="Answer from this xref source rather than the species' default one for "
+        "symbols, which is `hgnc` for human and `alliance_bgi` for mouse and worm. Naming "
+        "one is deliberate and is never overridden: a source that carries no symbol says "
+        "so and names the one that does, rather than matching nothing.",
     ),
     case_insensitive: bool = typer.Option(
         False,
@@ -1109,17 +1117,26 @@ def match_symbols(
     missing — without which *this gene is not in the release* and *this source does not
     publish the spelling you used* would both be silence.
 
+    **Omitting `--source` answers from the species' default source for symbols**, which is
+    not the same row as its default for identifiers: human's identifiers come from
+    `alliance`, whose cross-reference file publishes no human symbol at all, and its symbols
+    from `hgnc`; mouse's and worm's from `alliance_bgi`. A default is per species and per
+    question for that reason, and every answer names the source and release that produced it
+    either way. Naming a source is still how the scientific choice gets made deliberately,
+    and a named one is never swapped — so `--source alliance` here exits 1 saying that set
+    carries no symbol, rather than quietly answering from somebody else's file.
+
     Naming a species prepares its set, which the first time is a download. **The lab's CPU
     cluster compute nodes have no internet**, so a set must be constructed once from a login
     node — by running this there, or from Python — before a job that needs it is submitted.
 
     Exits with code 1 when no set exists for the species — the message names the ones that
-    do — when the source is not one this package prepares, when the source carries no
-    symbols at all — the message names the ones that do — when the set is not here and cannot
-    be fetched, and when a directory holds a set left unfinished.
+    do — when the source is not one this package prepares, when a named source carries no
+    symbols at all — the message names the one that does — when the set is not here and
+    cannot be fetched, and when a directory holds a set left unfinished.
     """
     try:
-        xrefs = _XrefSet(species, source, progressbar=not json)
+        xrefs = _XrefSet.for_symbols(species, source, progressbar=not json)
         answer = xrefs.match_symbols(symbols, case_insensitive=case_insensitive)
     except _XREF_ERRORS as err:
         typer.echo(f"error: {err}", err=True)

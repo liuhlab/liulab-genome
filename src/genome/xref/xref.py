@@ -420,6 +420,12 @@ class XrefSet:
         made deliberately, and two publishers disagreeing are two answers rather than one
         merged one.
 
+        **This constructor fills in the identifier default, and a set that carries no
+        symbol keeps refusing to match one** — it holds one publisher's bytes and answering
+        from another's is exactly what one query reading one set forbids (ADR-0017).
+        :meth:`for_symbols` is the constructor with the symbol question named, and is what
+        fills in the source that carries them.
+
         **The sources are not equals, and the choice is nearly half the answer.** Measured
         on human release 116 against NCBI's own file, Ensembl and NCBI agree on only
         **57.6%** of the gene-level (GeneID, ENSG) pairs they assert between them. The
@@ -560,6 +566,79 @@ class XrefSet:
             _SYMBOL_LIMITS.get(self.source) if self.symbol_kinds else None
         )
         self._exact, self._folded = _symbol_index(self._to_stems)
+
+    @classmethod
+    def for_symbols(
+        cls,
+        species: str,
+        source: str | None = None,
+        release: str | None = None,
+        *,
+        evidence: str | Iterable[str] | None = None,
+        cache_dir: str | Path | None = None,
+        progressbar: bool = True,
+    ) -> XrefSet:
+        """Return the set that answers **symbols** for a species when none is named.
+
+        The ordinary constructor with the question named, and nothing else: a **Default
+        xref source** is per species *and* per question (ADR-0021), because the publisher
+        carrying a species' identifiers is usually not the one carrying its symbols — human
+        ids default to the Alliance, whose cross-reference file publishes no human symbol at
+        all, and HGNC's quarterly archive is what does. Mouse and worm reach a third source
+        again, ``alliance_bgi``.
+
+        **A source named here is honoured exactly as it is anywhere else.** Naming one is
+        how the scientific choice gets made deliberately, so this fills in a default and
+        never overrides a choice: ``XrefSet.for_symbols(species, "alliance")`` is
+        ``XrefSet(species, "alliance")``, symbols and all — which for human means a set that
+        matches none and says so.
+
+        Parameters
+        ----------
+        species : str
+            The species, in either the curated table's spelling or its slug.
+        source : str, optional
+            The **Xref source**. Omitted, the species' symbol-carrying default answers.
+        release : str, optional
+            The pinned **Release**. Omitted, the newest that source has. Honoured against
+            whichever source was filled in, exactly as on the ordinary constructor.
+        evidence : str or iterable of str, optional
+            The evidence filter, as on the ordinary constructor.
+        cache_dir : str or pathlib.Path, optional
+            The directory to prepare in, as on the ordinary constructor.
+        progressbar : bool, default True
+            Show the download's progress bar.
+
+        Returns
+        -------
+        XrefSet
+            The prepared set, which is an ordinary one in every respect — every verb answers
+            on it and nothing about it remembers which question filled its source in.
+
+        Raises
+        ------
+        genome.xref.metadata.NoXrefSetError
+            If no set exists for that species or release, or if no row for the species is
+            flagged to answer symbols. The message names what does exist.
+
+        Examples
+        --------
+        >>> from genome.xref import XrefSet
+        >>> human = XrefSet.for_symbols("Homo sapiens")             # doctest: +SKIP
+        >>> human.source                                           # doctest: +SKIP
+        'hgnc'
+        >>> human.match_symbols(["ARNTL"]).gene_id_stems           # doctest: +SKIP
+        ['ENSG00000133794']
+        """
+        row = lookup_xref(species, source, release, for_symbols=True)
+        return cls(
+            species,
+            row.source,
+            row.release,
+            evidence=evidence,
+            cache_dir=cache_dir,
+            progressbar=progressbar,
+        )
 
     def __len__(self) -> int:
         """Return how many **Gene id stem**s this set carries.
@@ -749,21 +828,26 @@ class XrefSet:
         Raises
         ------
         NamespaceNotCarriedError
-            If this set carries no symbols at all. The message names the sources that do.
+            If this set carries no symbols at all — which the species' identifier default
+            does not, for human. It raises rather than reaching for another publisher's
+            bytes, and the message names the one source that answers this species' symbols
+            and the constructor that fills it in, :meth:`for_symbols`.
 
         Examples
         --------
         >>> human = XrefSet("Homo sapiens", "hgnc")                # doctest: +SKIP
         >>> human.match_symbols(["ARNTL"]).resolved["ARNTL"]       # doctest: +SKIP
         (SymbolMatch(symbol='ARNTL', gene_id_stem='ENSG00000133794', kind='previous'),)
+        >>> XrefSet.for_symbols("Homo sapiens").source             # doctest: +SKIP
+        'hgnc'
         """
         if not self.symbol_kinds:
-            carried = ", ".join(sorted(_SYMBOL_LIMITS))
             raise NamespaceNotCarriedError(
                 f"the {self.source} {self.release} set for {self.species!r} carries no "
-                f"{SYMBOL!r} namespace: it carries {', '.join(self.namespaces)}. The "
-                f"sources that publish symbols are {carried} — construct the set naming "
-                f"one of those, or ask in a namespace this one carries."
+                f"{SYMBOL!r} namespace: it carries {', '.join(self.namespaces)}. "
+                f"{_symbol_source_hint(self.species)} This set is not asked on another "
+                f"publisher's behalf — two publishers are two answers and one query reads "
+                f"exactly one set (ADR-0017)."
             )
         index = self._folded if case_insensitive else self._exact
         key = fold_symbol if case_insensitive else normalise_symbol
@@ -796,6 +880,25 @@ class XrefSet:
 def _names(row: XrefMetadata) -> tuple[str, str, str]:
     """Return the three strings that name one set, for a command to be built from."""
     return row.species, row.source, row.release
+
+
+def _symbol_source_hint(species: str) -> str:
+    """Return the sentence naming the source that answers this species' symbols.
+
+    Read off the curated table rather than listed from the readers, so the hint is *this
+    species'* one source and not every source that publishes symbols for anybody — a mouse
+    set told to try ``hgnc`` sends the caller to a publisher with no mouse row in it.
+    """
+    try:
+        row = lookup_xref(species, for_symbols=True)
+    except NoXrefSetError:
+        carried = ", ".join(sorted(_SYMBOL_LIMITS))
+        return f"The sources that publish symbols are {carried} — construct the set naming one."
+    return (
+        f"Symbols for {species!r} come from {row.source} — construct the set as "
+        f"XrefSet({species!r}, {row.source!r}), or as XrefSet.for_symbols({species!r}), "
+        f"which fills that in for you."
+    )
 
 
 def _prepare(
