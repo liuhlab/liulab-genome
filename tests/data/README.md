@@ -209,11 +209,12 @@ What each is in the set *for*:
 - **The partition, for real.** The human file holds no human↔mouse row, so preparing that pair from
   it is the published partition trap rather than a staged one, and the worm file holds no pair at
   all. Which file holds which pair is what `homology_metadata.tsv` records, measured.
-- **All three cardinalities.** Both cross-species pairs carry `ortholog_one2one`,
+- **All three speciation Homology types.** Both cross-species pairs carry `ortholog_one2one`,
   `ortholog_one2many` and `ortholog_many2many` rows, and every gene taken was taken with **all** of
-  its rows against that species — so a cardinality here is the publisher's own and not an artefact
-  of the sampling. Two human genes, `ENSG00000163331` and `ENSG00000112977`, are `many2many` to the
-  *same* two worm genes, which is what a partner named by two asked stems looks like.
+  its rows against that species — so a **Homology type** here is the publisher's own and not an
+  artefact of the sampling. Two human genes, `ENSG00000163331` and `ENSG00000112977`, are
+  `many2many` to the *same* two worm genes, which is what a partner named by two asked stems
+  looks like.
 - **Both null quality scores.** Every human↔worm and mouse↔worm row carries `NULL` in `goc_score`
   and `wga_coverage`, as 100% of the real rows of both pairings do; the mouse↔human rows carry real
   values in both, and the zebrafish rows carry them in the human file too — so a set that holds

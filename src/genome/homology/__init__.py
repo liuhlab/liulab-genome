@@ -15,9 +15,9 @@ now cross the line themselves, deliberately, with the publisher's **Homology typ
 hand.
 
 **Attribution.** Ensembl Compara, Herrero J *et al.*, *Database (Oxford)* 2016:bav096
-(PMID 26896847), from <https://ftp.ensembl.org/pub/>. Every link, every cardinality and
-every confidence field is the publisher's; this package computes none of them and ranks
-nothing. :meth:`~genome.homology.metadata.HomologyMetadata.attribution` renders the line to
+(PMID 26896847), from <https://ftp.ensembl.org/pub/>. Every link, every **Homology type**
+and every confidence field is the publisher's; this package computes none of them and
+ranks nothing. :meth:`~genome.homology.metadata.HomologyMetadata.attribution` renders the line to
 print, and ``src/genome/data/homology/ATTRIBUTION.md`` carries the same facts beside the
 provenance table.
 

@@ -687,6 +687,33 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   strings, which joins to nothing and says nothing about it. The suite's own hypothesis property
   found it, and it was a flaky-CI landmine besides: it passed until a machine's example database
   happened to find the case. Whitespace now goes on both sides of the version drop.
+- **Neither cross-species subpackage imports the TF half any more, and a test holds it there.**
+  `genome.homology` and `genome.xref` both reached into `genome.tf.gene.census` for `species_slug`,
+  which the context map forbids in both directions — *Orthology → TF gene* is "a prohibition rather
+  than a call" and "the xref half reads no census". The helper names files after a species and is no
+  TF concept, so it now lives in `genome.metadata`, the module that owns the curated tables a species
+  is spelled in and that every context may read. Every previous import path still answers, and a new
+  guard reads both subpackages' source — deferred and `TYPE_CHECKING` imports included — for anything
+  naming `genome.tf`.
+- **A `cache_dir` handed to a `HomologySet` names the directory it prepares in**, as it already did
+  for an `XrefSet` and a `JasparDatabase`. It was being treated as a homology *root* with
+  `ensembl_compara/<release>/<pair>/` re-applied beneath it, which is the one exception a caller
+  reading the other two would not expect.
+- **A malformed quality cell raises instead of reading as "the publisher recorded nothing."**
+  `goc_score` and `wga_coverage` fell back to `None` for anything `int()` or `float()` refused,
+  putting *Compara scored nothing here* and *this package could not read the score* under one value —
+  in the very columns a whole species pair is measured null in. A cell that is neither a number nor
+  Compara's own `NULL` now raises `ComparaFileError` naming the file, the column and the value.
+- **A crossing into an annotation stops dropping two things it was handed.** `resolve_homologs`
+  built its answer with no `null_quality_scores`, though the measurement rides on every other answer,
+  and it *replaced* the answer's `dropped_partners` with what the annotation had dropped — losing
+  every partner a **Homology type** filter removed before the crossing. A **Dropped partner** is one
+  the answer no longer names whichever step removed it, so both causes are now counted together.
+- **The repair for an unfinished homology set names the call that rebuilds it**, not only the `rm
+  -rf` that empties the directory — the shape the xref half already had.
+- **The Orthology glossary no longer says the code does not exist.** `docs/context/orthology.md` and
+  the context map's Orthology row both carried the *(decided, not built)* marker this branch made
+  false.
 
 ## [2026.8.0] - 2026-08-17
 
