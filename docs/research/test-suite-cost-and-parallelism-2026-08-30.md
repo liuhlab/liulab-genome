@@ -62,9 +62,21 @@ populated:
 
 350×, and the cache is 936 KB in 8 files. On CI the compile is larger and the cores slower, which
 is why it shows up there as 27.5 s rather than 7 s. Fixed by redirecting `NUMBA_CACHE_DIR` to a
-workspace path and caching it keyed on `pixi.lock` — no `restore-keys`, because a stale-keyed cache
-would be restored and then rejected by numba's own magic-tuple check, paying the download for
-nothing and recompiling anyway.
+workspace path and caching it.
+
+**The cache key must rotate, and a fixed key is a trap.** numba caches per type signature, so any
+one run compiles only the specialisations it happened to reach, and `actions/cache` refuses to
+overwrite an existing key — so a first run that saved a partial cache freezes it permanently and
+every later run pays the missing compiles forever. This was measured the hard way: two runs of the
+same commit, one restoring a 437 KB cache and paying no JIT at all, the other restoring a 474 KB
+cache and *still* recompiling four tests at 24–39 s each. The larger cache was the worse one. The
+key therefore carries `github.run_id`, with the lock-only prefix as a `restore-key`, so every run
+saves what it learned and the cache converges on the full signature set.
+
+A serial warm-up step was tried first and rejected: seeding by one `tomtom` call produced a 936 KB
+cache against 1448 KB from a parallel test run, and the suite was *slower* afterwards (8.35 s
+against 2.90 s) because the warm-up reached fewer signatures than the tests do. Seeding from the
+real run is what fills the cache; the key rotation is what lets it accumulate.
 
 ## 3. The suite, cut to a third
 
