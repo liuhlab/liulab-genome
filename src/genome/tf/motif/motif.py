@@ -57,7 +57,7 @@ import numpy as np
 import numpy.typing as npt
 
 from genome.seq import DNA
-from genome.tf.motif.workers import DEFAULT_WORKERS
+from genome.workers import DEFAULT_WORKERS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
     from pathlib import Path
@@ -1131,7 +1131,7 @@ class MotifSet:
             this package and calling a scan never starts a process unasked: under the spawn
             start method a pool re-imports the caller's script, and an unguarded one would
             re-execute itself. ``None`` resolves the count with
-            :func:`~genome.tf.motif.workers.resolve_workers` — the Slurm allocation first,
+            :func:`~genome.workers.resolve_workers` — the Slurm allocation first,
             then process affinity, then the machine — which is what the command line
             passes. **More than one produces the identical table**, row for row; the choice
             is about wall time and nothing else.

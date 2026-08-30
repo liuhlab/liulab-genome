@@ -10,6 +10,14 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **Worker resolution left the motif package.** `genome.tf.motif.workers` is now
+  `genome.workers`. It answers exactly the same one question — how many worker processes a run
+  may use: an explicit count as given, else the Slurm allocation, else this process's affinity,
+  else the machine — and it always had no domain coupling: about a hundred lines that import
+  nothing else from this package and name no motif, assembly or region. `genome.cli` already
+  reached past the motif package to get at it, which was the tell. `genome.tf.motif` goes on
+  re-exporting `DEFAULT_WORKERS`, `SLURM_CPU_VARS` and `resolve_workers`, so
+  `from genome.tf.motif import resolve_workers` keeps working unchanged and no answer changes.
 - **CI no longer recompiles memelite's JIT on every run, and the suite is a third of its size.**
   The `test` lane's largest single item was not a test: `memelite`'s scan and compare engines are
   `@numba.njit(cache=True)`, numba writes that cache inside the pixi env, and `setup-pixi` saves

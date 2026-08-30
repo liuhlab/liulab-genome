@@ -58,7 +58,7 @@ from genome.tf.motif.parquet import hit_count as _hit_count
 from genome.tf.motif.parquet import provenance_of as _provenance_of
 from genome.tf.motif.scan import read_fasta as _read_fasta
 from genome.tf.motif.scan import scan_stream as _scan_stream
-from genome.tf.motif.workers import resolve_workers as _resolve_workers
+from genome.workers import resolve_workers as _resolve_workers
 from genome.xref import NAMESPACES as _NAMESPACES
 from genome.xref import SYMBOL as _SYMBOL
 from genome.xref import XrefSet as _XrefSet

@@ -1,4 +1,4 @@
-"""Tests for genome.tf.motif.workers — how many processes a scan may use.
+"""Tests for genome.workers — how many processes a run may use.
 
 A pure function over the environment, so it is tested as one: **no process is started
 anywhere in this file**, and one test proves that by making the ways of starting one raise.
@@ -24,7 +24,7 @@ import os
 
 import pytest
 
-from genome.tf.motif.workers import DEFAULT_WORKERS, SLURM_CPU_VARS, resolve_workers
+from genome.workers import DEFAULT_WORKERS, SLURM_CPU_VARS, resolve_workers
 
 
 @pytest.fixture(autouse=True)

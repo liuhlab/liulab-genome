@@ -1,7 +1,11 @@
-"""How many processes a scan may use, and why the answer is never just the core count.
+"""How many processes a run may use, and why the answer is never just the core count.
+
+Lab-HPC infrastructure, not a domain module: it reads ``os.environ`` and asks the operating
+system what this process may run on, so it belongs to no bounded context and imports nothing
+else from this package. Scanning is its first caller, not its subject.
 
 **One, unless asked.** The library default is a single worker, so importing this package
-and calling a scan never starts a process nobody asked for — under the spawn start method a
+and calling into it never starts a process nobody asked for — under the spawn start method a
 process pool re-imports the caller's script, and an unguarded script would then re-execute
 itself. A console script is a proper entry point and can default to the whole machine; an
 imported library cannot, which is why :data:`DEFAULT_WORKERS` is 1 and the command line
@@ -40,7 +44,7 @@ SLURM_CPU_VARS: tuple[str, str] = ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE")
 
 
 def resolve_workers(workers: int | None = None) -> int:
-    """Return how many processes to scan with.
+    """Return how many processes to run with.
 
     A number is taken as given — a caller who says 2 gets 2, on a laptop or on a login
     node. ``None`` means *work it out*, and working it out is
