@@ -81,11 +81,16 @@ jobs:
       # at 24-39 s each. Rotating the key lets each run save what it learned, so the cache
       # converges on the full set of signatures the suite needs instead of freezing at
       # whichever subset went first.
+      #
+      # `run_attempt` as well as `run_id`, because a run id is SHARED by every attempt of a
+      # run: with the id alone a re-run restores its own first attempt's cache and then
+      # cannot save, so a re-run could never converge and looked from the outside exactly
+      # like the frozen-cache bug this rotation exists to fix.
       - name: numba JIT cache
         uses: actions/cache@v4
         with:
           path: .numba-cache
-          key: numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-${{ github.run_id }}
+          key: numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-
       - name: pytest -m 'not aligner'
