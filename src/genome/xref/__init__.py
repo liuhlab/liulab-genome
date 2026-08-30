@@ -54,7 +54,6 @@ Examples
 """
 
 from genome.io.registration import xref_data_dir
-from genome.io.results import ResolvedStems, ResolvedSymbols, ResolvedXrefIds, SymbolMatch
 from genome.xref.alliance import ALLIANCE, AllianceFileError
 from genome.xref.bgi import ALLIANCE_BGI, BgiFileError
 from genome.xref.ensembl import ENSEMBL_TSV, EnsemblTsvFileError
@@ -96,6 +95,10 @@ from genome.xref.symbols import (
 )
 from genome.xref.xref import (
     NamespaceNotCarriedError,
+    ResolvedStems,
+    ResolvedSymbols,
+    ResolvedXrefIds,
+    SymbolMatch,
     XrefSet,
     XrefSetNotDownloadedError,
     XrefTableError,

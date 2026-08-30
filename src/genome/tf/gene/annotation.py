@@ -38,8 +38,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from genome.io.gtf import AnnotationRegistry
-from genome.io.results import ResolvedGeneIds
+from genome.io.gtf import AnnotationRegistry, ResolvedGeneIds
 from genome.metadata import assembly_metadata, species_slug
 from genome.tf.gene.census import (
     TRUE_CELL,
@@ -208,7 +207,7 @@ class TFGeneList:
         """Every gene id, gene order then id order — a fresh list each call.
 
         **Every** id, not one per gene, for the reason
-        :attr:`~genome.io.results.ResolvedGeneIds.gene_ids` gives: flattening is where a
+        :attr:`~genome.io.gtf.ResolvedGeneIds.gene_ids` gives: flattening is where a
         reader would take the first id of a stem that names two and lose the other.
         :attr:`genes` is what says which gene an id came from, and what the census said
         about it.

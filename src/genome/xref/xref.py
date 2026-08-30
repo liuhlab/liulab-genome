@@ -58,9 +58,10 @@ import gzip
 import hashlib
 import shlex
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
 
 from genome.io import fetch
@@ -74,7 +75,6 @@ from genome.io.completion import (
     write_record,
 )
 from genome.io.registration import xref_data_dir
-from genome.io.results import ResolvedStems, ResolvedSymbols, ResolvedXrefIds, SymbolMatch
 from genome.metadata import species_slug
 from genome.xref.alliance import ALLIANCE, read_alliance
 from genome.xref.bgi import ALLIANCE_BGI, BGI_SYMBOL_LIMIT, read_bgi
@@ -392,6 +392,343 @@ def parse_slice(text: str, *, origin: str) -> tuple[tuple[str, str, str], ...]:
             )
         triples.append((fields[0], fields[1], fields[2]))
     return tuple(triples)
+
+
+@dataclass(frozen=True)
+class ResolvedStems:
+    """The **Gene id stem**s one **Xref set** says a foreign id names.
+
+    :meth:`XrefSet.to_stems`'s answer — the hop *toward* the hub, defined beside the set
+    that builds it (ADR-0022). Every field before :attr:`resolved` says what produced it,
+    because one publisher's assertions are not another's: NCBI and Ensembl agree on 57.6%
+    of human gene-level (GeneID, ENSG) pairs, so an answer that did not name its **Xref
+    source** and **Release** would be unreproducible a year later. A query reads exactly
+    one set (ADR-0017), which is why the source is one field here rather than a column on
+    every row.
+
+    **A foreign id naming two stems answers with both**, and nothing picks one — the same
+    guarantee :class:`~genome.io.gtf.ResolvedGeneIds` gives for a stem naming two gene ids.
+    **What named nothing rides back** in :attr:`unresolved` rather than shortening the
+    answer.
+
+    The keys are the caller's **own spelling** of the ids it asked about, so a versioned
+    and an unversioned spelling of one id are two keys with identical values and the
+    answer still zips against the caller's table row for row.
+
+    Attributes
+    ----------
+    species : str
+        The species this set is for, as the curated metadata table spells it.
+    source : str
+        The **Xref source** whose assertions these are.
+    release : str
+        The pinned **Release** of that source.
+    namespace : str
+        The **Namespace** the ids asked about belong to.
+    resolved : mapping of str to tuple of str
+        Every id that named at least one stem, in the order they were asked about, to the
+        stems it names, in ascending order. No value is ever an empty tuple — an id that
+        named nothing is in :attr:`unresolved` instead.
+    unresolved : tuple of str
+        The ids this release names no stem for, in the order they were asked about.
+
+    Examples
+    --------
+    >>> answer = ResolvedStems(
+    ...     species="Homo sapiens",
+    ...     source="alliance",
+    ...     release="8.4.0",
+    ...     namespace="entrez",
+    ...     resolved={"7157": ("ENSG00000141510",)},
+    ...     unresolved=("999999999",),
+    ... )
+    >>> answer.gene_id_stems
+    ['ENSG00000141510']
+    >>> answer.as_json()["source"]
+    'alliance'
+    """
+
+    species: str
+    source: str
+    release: str
+    namespace: str
+    resolved: Mapping[str, tuple[str, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_id_stems(self) -> list[str]:
+        """Every stem resolved, ask order and then stem order — a fresh list each call.
+
+        **Every** stem, not one per id. Flattening loses which id named which stem, and
+        with it the fact that an id named more than one: a reader taking the first stem of
+        each id would silently pick one of two genes a **Namespace** is ambiguous
+        between. :attr:`resolved` is what says which id a stem came from. It also loses
+        the ask order *of the ids*, since one id contributing two stems contributes two
+        entries here.
+        """
+        return [stem for stems in self.resolved.values() for stem in stems]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``species``, ``source``, ``release`` and ``namespace``, ``resolved`` as a
+            mapping of id to a list of stems, ``unresolved`` as a list, and the flattened
+            ``gene_id_stems``. The last is written out beside the mapping it is read from
+            for the reason :attr:`gene_id_stems` gives.
+        """
+        return {
+            "species": self.species,
+            "source": self.source,
+            "release": self.release,
+            "namespace": self.namespace,
+            "resolved": {asked: list(stems) for asked, stems in self.resolved.items()},
+            "unresolved": list(self.unresolved),
+            "gene_id_stems": self.gene_id_stems,
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedXrefIds:
+    """The foreign ids one **Xref set** says a **Gene id stem** names.
+
+    :meth:`XrefSet.from_stems`'s answer — the hop *away* from the hub, and
+    :class:`ResolvedStems`'s mirror in every respect: the same four provenance fields, the
+    same ask order, the same never-empty resolved value, and the same tuple of what named
+    nothing. Two verbs and only two, so a caller wanting one **Namespace** from another
+    makes both calls and owns the join (ADR-0017).
+
+    Attributes
+    ----------
+    species : str
+        The species this set is for, as the curated metadata table spells it.
+    source : str
+        The **Xref source** whose assertions these are.
+    release : str
+        The pinned **Release** of that source.
+    namespace : str
+        The **Namespace** the answering ids belong to.
+    resolved : mapping of str to tuple of str
+        Every stem that named at least one id in that namespace, in the order the stems
+        were asked about, to the ids it names, in ascending order. No value is ever an
+        empty tuple.
+    unresolved : tuple of str
+        The stems this release gives no id in that namespace, in the order they were asked
+        about. One bucket and not two: a stem this release never carried and a stem it
+        carries with no id in *this* namespace are both *this set answers nothing*, and no
+        id history is held that could tell a retired stem from an unknown one (ADR-0017).
+
+    Examples
+    --------
+    >>> answer = ResolvedXrefIds(
+    ...     species="Homo sapiens",
+    ...     source="alliance",
+    ...     release="8.4.0",
+    ...     namespace="hgnc",
+    ...     resolved={"ENSG00000141510": ("HGNC:11998",)},
+    ...     unresolved=("ENSG00000288541",),
+    ... )
+    >>> answer.xref_ids
+    ['HGNC:11998']
+    >>> answer.as_json()["namespace"]
+    'hgnc'
+    """
+
+    species: str
+    source: str
+    release: str
+    namespace: str
+    resolved: Mapping[str, tuple[str, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def xref_ids(self) -> list[str]:
+        """Every foreign id resolved, ask order and then id order — a fresh list each call.
+
+        **Every** id, not one per stem. Flattening loses which stem named which id, so a
+        reader taking the first id of each stem would hand a collaborator one of two
+        accessions a gene genuinely has without saying it had chosen; and a stem naming two
+        ids contributes two entries, so the flattened list no longer runs parallel to the
+        stems asked about. :attr:`resolved` is what says which stem an id came from.
+        """
+        return [xref_id for ids in self.resolved.values() for xref_id in ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``species``, ``source``, ``release`` and ``namespace``, ``resolved`` as a
+            mapping of stem to a list of ids, ``unresolved`` as a list, and the flattened
+            ``xref_ids``, written out for the reason :attr:`xref_ids` gives.
+        """
+        return {
+            "species": self.species,
+            "source": self.source,
+            "release": self.release,
+            "namespace": self.namespace,
+            "resolved": {stem: list(ids) for stem, ids in self.resolved.items()},
+            "unresolved": list(self.unresolved),
+            "xref_ids": self.xref_ids,
+        }
+
+
+@dataclass(frozen=True)
+class SymbolMatch:
+    """One hit of a gene symbol against an **Xref set**, and which spelling matched it.
+
+    The kind rides on the match rather than being filtered away on the way out, because a
+    table that spells a gene the way it was spelled five years ago is otherwise dropped
+    without a word — the failure that would have hit 31 of EpiFactors' 801 rows.
+
+    Attributes
+    ----------
+    symbol : str
+        The **authority's own** spelling that matched, which is not always the one asked
+        about: on the case-insensitive path ``brca1`` matches and this says ``BRCA1``.
+    gene_id_stem : str
+        The **Gene id stem** that spelling names.
+    kind : str
+        ``approved``, ``previous`` or ``alias`` — see :mod:`genome.xref.symbols`.
+
+    Examples
+    --------
+    >>> match = SymbolMatch(symbol="ARNTL", gene_id_stem="ENSG00000133794", kind="previous")
+    >>> match.as_json()
+    {'symbol': 'ARNTL', 'gene_id_stem': 'ENSG00000133794', 'kind': 'previous'}
+    """
+
+    symbol: str
+    gene_id_stem: str
+    kind: str
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this match as ``--json`` serializes it, in field order.
+
+        Returns
+        -------
+        dict
+            ``symbol``, ``gene_id_stem`` and ``kind``.
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ResolvedSymbols:
+    """The genes one **Xref set** says each gene symbol names, and how each one matched.
+
+    :meth:`XrefSet.match_symbols`'s answer — the hop *toward* the hub from the one
+    **Namespace** that is not answered like an identifier. :class:`ResolvedStems`'s shape
+    in every respect a caller relies on — ask order, no empty resolved value, what named
+    nothing riding back — with one difference: a value is a tuple of :class:`SymbolMatch`
+    rather than of stems, because **ambiguity is the return type here and not an edge
+    case**. A symbol naming several genes answers with all of them and nothing picks one,
+    and each says whether it matched an approved, a previous or an alias spelling so the
+    caller can judge the ambiguity themselves.
+
+    **What the set could not have matched is on the answer too.** :attr:`kinds` says which
+    kinds of spelling this **Xref source** publishes and :attr:`limits` says why the others
+    are missing, so *this gene is not in the release* and *this source cannot match the way
+    you spelled it* are distinguishable rather than both being silence.
+
+    Attributes
+    ----------
+    species : str
+        The species this set is for, as the curated metadata table spells it.
+    source : str
+        The **Xref source** whose assertions these are.
+    release : str
+        The pinned **Release** of that source.
+    case_insensitive : bool
+        Whether case was ignored. ``False`` is the default: the species is fixed by the
+        set, so a mouse-cased spelling asked of a human set is the wrong authority's and
+        matches nothing rather than half-working.
+    kinds : tuple of str
+        The kinds of **Symbol match** this set could make, in
+        :data:`~genome.xref.symbols.SYMBOL_KINDS` order.
+    limits : str or None
+        Why the kinds not in :attr:`kinds` are missing, or ``None`` when all three are
+        there.
+    resolved : mapping of str to tuple of SymbolMatch
+        Every symbol that matched at least one gene, in the order they were asked about,
+        to every match it made — approved first, then previous, then alias, and by stem
+        within a kind. No value is ever an empty tuple.
+    unresolved : tuple of str
+        The symbols this release matched nothing for, in the order they were asked about.
+
+    Examples
+    --------
+    >>> answer = ResolvedSymbols(
+    ...     species="Homo sapiens",
+    ...     source="hgnc",
+    ...     release="2026-07-07",
+    ...     case_insensitive=False,
+    ...     kinds=("approved", "previous", "alias"),
+    ...     limits=None,
+    ...     resolved={
+    ...         "ADCY3": (
+    ...             SymbolMatch("ADCY3", "ENSG00000138031", "approved"),
+    ...             SymbolMatch("ADCY3", "ENSG00000155897", "previous"),
+    ...         )
+    ...     },
+    ...     unresolved=("Brca1",),
+    ... )
+    >>> answer.gene_id_stems
+    ['ENSG00000138031', 'ENSG00000155897']
+    >>> answer.as_json()["resolved"]["ADCY3"][1]["kind"]
+    'previous'
+    """
+
+    species: str
+    source: str
+    release: str
+    case_insensitive: bool
+    kinds: tuple[str, ...]
+    limits: str | None
+    resolved: Mapping[str, tuple[SymbolMatch, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_id_stems(self) -> list[str]:
+        """Every stem matched, ask order and then match order — a fresh list each call.
+
+        **Every** stem, not one per symbol, and it may repeat: one gene answering a symbol
+        on both an approved and an alias spelling contributes two matches and so two
+        entries. Flattening loses the two things this answer exists to carry — which
+        symbol named which gene, and which kind of spelling each match was on — so a
+        reader who takes this list has thrown away the means of judging the ambiguity.
+        :attr:`resolved` is what keeps both.
+        """
+        return [match.gene_id_stem for matches in self.resolved.values() for match in matches]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``species``, ``source``, ``release``, ``case_insensitive``, ``kinds`` and
+            ``limits``, ``resolved`` as a mapping of symbol to a list of match objects,
+            ``unresolved`` as a list, and the flattened ``gene_id_stems`` — written out
+            beside the mapping it is read from for the reason :attr:`gene_id_stems` gives.
+        """
+        return {
+            "species": self.species,
+            "source": self.source,
+            "release": self.release,
+            "case_insensitive": self.case_insensitive,
+            "kinds": list(self.kinds),
+            "limits": self.limits,
+            "resolved": {
+                asked: [match.as_json() for match in matches]
+                for asked, matches in self.resolved.items()
+            },
+            "unresolved": list(self.unresolved),
+            "gene_id_stems": self.gene_id_stems,
+        }
 
 
 class XrefSet:
@@ -743,8 +1080,8 @@ class XrefSet:
         Alliance 9.0.0, so 6.2% of HGNC ids are ambiguous and nothing here picks a side.
 
         **Nothing is dropped.** Ids this release names no stem for come back in
-        :attr:`~genome.io.results.ResolvedStems.unresolved`, in ask order, so what a list
-        holds and this release does not is visible rather than silently shorter.
+        :attr:`~ResolvedStems.unresolved`, in ask order, so what a list holds and this
+        release does not is visible rather than silently shorter.
 
         Parameters
         ----------
@@ -759,7 +1096,7 @@ class XrefSet:
 
         Returns
         -------
-        genome.io.results.ResolvedStems
+        ResolvedStems
             The ids that named stems, mapped to every stem each names, and the ids that
             named none — with the species, source, release and namespace that answered.
 
@@ -823,7 +1160,7 @@ class XrefSet:
 
         Returns
         -------
-        genome.io.results.ResolvedXrefIds
+        ResolvedXrefIds
             The stems that named ids, mapped to every id each names, and the stems that
             named none — with the species, source, release and namespace that answered.
 
@@ -872,11 +1209,11 @@ class XrefSet:
         every gene matched** rather than picking one.
 
         **What this source could not have matched rides back on the answer**, in
-        :attr:`~genome.io.results.ResolvedSymbols.kinds` and
-        :attr:`~genome.io.results.ResolvedSymbols.limits`: mouse and worm match approved
-        spellings only, their authorities' typed previous and alias spellings belonging to
-        publishers that cannot be pinned or cannot be fetched (ADR-0018), and an answer that
-        did not say so would look exactly like a gene that is not in the release.
+        :attr:`~ResolvedSymbols.kinds` and :attr:`~ResolvedSymbols.limits`: mouse and worm
+        match approved spellings only, their authorities' typed previous and alias
+        spellings belonging to publishers that cannot be pinned or cannot be fetched
+        (ADR-0018), and an answer that did not say so would look exactly like a gene that
+        is not in the release.
 
         Parameters
         ----------
@@ -889,7 +1226,7 @@ class XrefSet:
 
         Returns
         -------
-        genome.io.results.ResolvedSymbols
+        ResolvedSymbols
             The symbols that matched, mapped to every match each made, and the symbols that
             matched nothing — with the species, source and release that answered, which
             kinds it could match and why the others are missing.
