@@ -87,6 +87,20 @@ annotations and indexes go with it, for when the shared root is full or slow.
 Yeast is the quickest thing to try this on. Its FASTA is 3.8 MB compressed, and the whole
 walkthrough below finishes in about a minute.
 
+The shipped metadata table lists eight assemblies, `sacCer3` among them:
+
+```python
+from genome.assembly import assembly_table
+
+[row.assembly_name for row in assembly_table()]
+# ['hg38', 'hg19', 'mm39', 'mm10', 'sacCer3', 'ce11', 'ecHT115', 'ce11_ecHT115']
+```
+
+A listed assembly is pinned to a source URL and a checksum. Any other UCSC name registers
+too, without a pin, which is how you prepare a non-model organism;
+[which assemblies you can name](genome/assembly.md#which-assemblies-you-can-name) has the
+detail.
+
 Preparing an assembly downloads the FASTA, checks it against a pinned checksum, and derives
 the three companion files. Do it from a shell before a pipeline starts:
 
@@ -120,8 +134,22 @@ sacCer3["chrIV:1000-1030"].reverse_complement()
 # DNA('GTGAAGTAAAAGCGTCTGTATGACTATAGA')
 ```
 
-An annotation is a GTF registered against the assembly under a short name. Registering one
-downloads the GTF and builds a gffutils database beside the genome files:
+An annotation is a GTF registered against the assembly under a short name. `genome
+annotation list` gives the annotation names for an assembly, says which are built here, and
+marks the default:
+
+```console
+$ genome annotation list sacCer3
+annotations for sacCer3 in /Users/hanqing/liulab_data/genome/sacCer3
+  ensgene_v101  registered  UCSC ensGene.v101
+default: ensgene_v101
+```
+
+On a fresh machine that row reads `offered, not registered` and the last line names the
+command to run; [annotations](genome/annotations.md#what-is-registered-offered-or-broken)
+covers the other states. `register` takes the assembly and the name, both required, so
+registering the default means typing it out. It downloads the GTF and builds a gffutils
+database beside the genome files:
 
 ```console
 $ genome annotation register sacCer3 ensgene_v101

@@ -14,6 +14,36 @@ len(sacCer3.chromosomes)   # 17
 
 Reading bases out of a prepared assembly is on [Sequences and regions](sequences.md).
 
+## Which assemblies you can name
+
+The shipped metadata table lists eight assemblies. Each row pins the URL its FASTA comes
+from and the sha256 that download is checked against.
+
+```python
+from genome.assembly import assembly_table
+
+[row.assembly_name for row in assembly_table()]
+# ['hg38', 'hg19', 'mm39', 'mm10', 'sacCer3', 'ce11', 'ecHT115', 'ce11_ecHT115']
+```
+
+`ce11_ecHT115` is a chimera, concatenated from two of the others rather than downloaded.
+`lookup_assembly` reads one row by name and returns `None` for a name the table does not
+carry:
+
+```python
+from genome.assembly import lookup_assembly
+
+lookup_assembly("sacCer3").ncbi_name    # 'R64-1-1'
+lookup_assembly("danRer11") is None     # True
+```
+
+**A name the table does not list still registers.** Any UCSC assembly name resolves to its
+golden-path FASTA, so `genome assembly register danRer11` fetches
+`https://hgdownload.soe.ucsc.edu/goldenPath/danRer11/bigZips/danRer11.fa.gz` and prepares it
+the same way. It does not get a pinned checksum, so nothing independent confirms what
+arrived; `genome assembly table-row danRer11` computes the row to add if you want one. A
+name UCSC does not have fails on the first request, before any bytes are downloaded.
+
 ## Preparing an assembly
 
 The first `Genome("sacCer3")` downloads the FASTA, checks it against the checksum the
