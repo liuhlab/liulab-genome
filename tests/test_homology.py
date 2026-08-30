@@ -47,18 +47,21 @@ from genome.homology import (
     HomologyMetadata,
     HomologyMetadataError,
     HomologySet,
+    HomologySetNotDownloadedError,
     NoHomologyPairError,
     UnknownHomologySpeciesError,
     VersionedGeneIdError,
     compara_url,
     homology_data_dir,
     homology_metadata,
+    homology_prepare_command,
     homology_releases,
     homology_species,
     homology_table,
     read_metadata,
     resolve_homologs,
 )
+from genome.io import fetch as fetch_mod
 from genome.io.completion import RECORD_NAME, UnfinishedRegistrationError, read_record
 from genome.io.gtf import AnnotationRegistry
 from genome.io.registration import AssemblyDir
@@ -464,6 +467,26 @@ class TestPreparation:
 
         with pytest.raises(ComparaFileError, match="gene_stable_id"):
             HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
+
+    def test_a_set_that_cannot_be_fetched_names_the_call_to_make_on_a_login_node(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # What a compute node looks like from here: fetching is the one step in this
+        # package that needs the network, and the lab's CPU cluster nodes have none. A
+        # transport error on its own would leave the reader to work out that the repair is
+        # to run this somewhere else first.
+        def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
+            raise ConnectionError("the compute node has no internet")
+
+        monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+
+        with pytest.raises(HomologySetNotDownloadedError) as raised:
+            HomologySet("Mus musculus", "Homo sapiens", progressbar=False)
+
+        assert "login node" in str(raised.value)
+        assert homology_prepare_command("Homo sapiens", "Mus musculus", DEFAULT_RELEASE) in str(
+            raised.value
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -966,11 +989,20 @@ def test_nothing_this_package_publishes_is_derived_through_homology() -> None:
     as ``genome.homology`` and never re-exported at the top level. Read off the source
     rather than observed, since importing a module loads its package and ``sys.modules``
     would then say more than any module asked for.
+
+    ``cli.py`` is the one exemption, and it is sound because *consume* here means
+    *derive a claim of this package's own*. The CLI publishes no table: it parses
+    arguments, makes the one call the caller asked for and renders the answer, so
+    ``genome homologs`` is the served half of ADR-0019 reaching a shell rather than
+    Python. Nothing it prints outlives the process, and no list that ships in the wheel
+    passes through it. Every other module keeps the ban whole — a reader of this list
+    should be able to say, of any name added to it, which table it could not build.
     """
     package = Path(__file__).resolve().parents[1] / "src" / "genome"
+    served = {package / "cli.py"}
     offenders: list[str] = []
     for path in sorted(package.rglob("*.py")):
-        if path.parent.name == "homology":
+        if path.parent.name == "homology" or path in served:
             continue
         for node in ast.parse(path.read_text(encoding="utf-8")).body:
             if isinstance(node, ast.Import):

@@ -20,9 +20,19 @@ from genome.cli import app
 from genome.external import REQUIRED_TOOLS
 from genome.external import doctor as doctor_api
 from genome.gene_list import curated_gene_list
+from genome.homology import (
+    DEFAULT_RELEASE as HOMOLOGY_RELEASE,
+)
+from genome.homology import (
+    QUALITY_SCORE_COLUMNS,
+    HomologySet,
+    homology_metadata,
+    homology_prepare_command,
+    homology_species,
+)
 from genome.io import download as download_mod
 from genome.io import fetch as fetch_mod
-from genome.io.completion import read_record, record_path, write_record
+from genome.io.completion import RECORD_NAME, read_record, record_path, write_record
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.io.gtf import (
     AnnotationRegistry,
@@ -56,6 +66,14 @@ from genome.xref import (
 from genome.xref import metadata as xref_metadata_mod
 
 from .conftest import CHIMERA_COMPONENTS, COMPONENT_ANNOTATION, FakeFetch
+from .test_homology import ABSENT as _NO_HOMOLOG
+from .test_homology import FIXTURES as _COMPARA_FIXTURES
+from .test_homology import ONE2MANY_HUMAN as _THREE_WORM_HOMOLOGS
+from .test_homology import ONE2MANY_WORMS as _THE_THREE_WORMS
+from .test_homology import ONE2ONE_HUMAN as _ONE_WORM_HOMOLOG
+from .test_homology import ONE2ONE_WORM as _THE_ONE_WORM
+from .test_homology import PAIRS as _HOMOLOGY_PAIRS
+from .test_homology import _stems as _homology_stems
 from .test_jaspar import FIXTURE as _MOTIF_FIXTURE
 from .test_jaspar import FIXTURE_COUNT as _MOTIF_COUNT
 from .test_jaspar import FIXTURE_MOTIFS as _MOTIF_RECORDS
@@ -101,6 +119,11 @@ _MOUSE_ASSEMBLY, _MOUSE_ANNOTATION = "mm39", "gencode_vM39"
 #: fixture carries the two things the command's shape exists for: a foreign id naming two
 #: **Gene id stem**s, and a real gene with no Ensembl cross-reference to reach at all.
 _XREF_SPECIES = "Homo sapiens"
+
+#: The three species ``genome homologs`` is exercised against, spelled as the shipped
+#: provenance table spells them. All three pairings among them must answer, which is an
+#: acceptance criterion of its own rather than a sample.
+_HUMAN, _MOUSE, _WORM = "Homo sapiens", "Mus musculus", "Caenorhabditis elegans"
 
 #: Which of the committed motifs a scan leaves out, and how many are left to scan with.
 #: Read off the fixture table rather than written down again, so a changed fixture moves the
@@ -210,6 +233,19 @@ def motif_release(fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> Fak
 def planted_fasta(data_dir: Path) -> Path:
     """The committed FASTA with motifs planted at positions ``tests/data/README.md`` lists."""
     return data_dir / _PLANTED_FASTA
+
+
+def _serve_compara(fake_fetch: FakeFetch, species: str, other: str) -> FakeFetch:
+    """Serve the subsample of whichever published dump the shipped table names for a pair.
+
+    Which of the two per-species files holds a pair is exactly what that table records, so
+    a test serves what the package asked for rather than deciding for itself — the test
+    that serves the *wrong* file does so on purpose and says why.
+    """
+    row = homology_metadata(species, other, HOMOLOGY_RELEASE)
+    assert row is not None
+    fake_fetch.serve(_COMPARA_FIXTURES[row.holding_species])
+    return fake_fetch
 
 
 @pytest.fixture
@@ -1924,6 +1960,354 @@ class TestXrefCommand:
         runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
 
         assert xref_release.last.progressbar is True
+
+
+class TestHomologsCommand:
+    """``genome homologs`` — the shell surface over a **Homology set**, on the fixtures.
+
+    Offline throughout, the way ``tests/test_homology.py`` is: the fake fetch serves the
+    committed Compara subsamples and the command prepares and reads a real set under the
+    test's own data root. What is asserted here is the command and not the set —
+    ``tests/test_homology.py`` owns the slice, the partition and the answer — so: all three
+    pairings reaching a shell, the publisher's **Homology type** surviving the render, the
+    stdout/stderr split that makes the output pipe, the **Dropped partner**s and the null
+    quality scores being said out loud, and a non-zero exit naming the next action for each
+    way it can fail.
+
+    The strongest claim here is that the command holds no logic the API does not, and it is
+    checked the two ways that can be: ``--json`` is asserted equal to what the same call
+    answers in Python, whole, and the text rows are asserted to be that JSON's own values
+    in its own key order — so nothing the shell sees was assembled here.
+    """
+
+    @pytest.mark.parametrize(("species", "other", "links"), _HOMOLOGY_PAIRS)
+    def test_it_answers_for_every_pairing_among_human_mouse_and_worm(
+        self, fake_fetch: FakeFetch, data_dir: Path, species: str, other: str, links: int
+    ) -> None:
+        _serve_compara(fake_fetch, species, other)
+        asked = _homology_stems(data_dir, species, other)
+
+        result = runner.invoke(app, ["homologs", species, other, *asked])
+
+        assert result.exit_code == 0
+        assert len(result.stdout.splitlines()) == links
+
+    def test_a_stem_prints_every_homolog_with_the_publishers_own_type_and_picks_none(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _THREE_WORM_HOMOLOGS])
+
+        assert result.exit_code == 0
+        rows = [line.split("\t") for line in result.stdout.splitlines()]
+        assert [row[1] for row in rows] == list(_THE_THREE_WORMS)
+        # Verbatim, and the label the publisher's tree assigned rather than a count of the
+        # rows in front of you: three partners here and the type still reads one2many.
+        assert {row[2] for row in rows} == {"ortholog_one2many"}
+
+    def test_orthologs_are_the_default_answer(self, fake_fetch: FakeFetch, data_dir: Path) -> None:
+        _serve_compara(fake_fetch, _MOUSE, _WORM)
+        asked = _homology_stems(data_dir, _MOUSE, _WORM)
+
+        result = runner.invoke(app, ["homologs", _MOUSE, _WORM, *asked])
+
+        assert result.exit_code == 0
+        types = {line.split("\t")[2] for line in result.stdout.splitlines()}
+        assert types
+        assert all(kind.startswith("ortholog_") for kind in types)
+        assert "orthologs" in result.stderr
+
+    def test_paralogs_come_back_only_on_request_and_the_heading_says_which_was_asked(
+        self, fake_fetch: FakeFetch, data_dir: Path
+    ) -> None:
+        # Release 116 publishes no cross-species paralogy for these pairs — counted over
+        # the whole human dump — so what is asserted is that the flag reaches the API and
+        # that the render says which question was asked, not that a paralogy row appeared.
+        # Claiming one would claim something about the publisher that is not true.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        asked = _homology_stems(data_dir, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs", "--json"])
+        heading = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs"])
+
+        assert result.exit_code == heading.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == HomologySet(_HUMAN, _WORM, progressbar=False)
+            .homologs(asked, paralogs=True)
+            .as_json()
+        )
+        assert "paralogy included" in heading.stderr
+
+    def test_a_paralogy_link_would_be_marked_by_the_type_column_it_already_carries(
+        self, fake_fetch: FakeFetch, data_dir: Path
+    ) -> None:
+        # *Not an ortholog* stays distinguishable from *absent* because the publisher's own
+        # label is a column of every row rather than a filter applied before printing: a
+        # duplication label would print in the same place `ortholog_one2one` does now.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        asked = _homology_stems(data_dir, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs"])
+
+        assert result.exit_code == 0
+        assert {line.split("\t")[2] for line in result.stdout.splitlines()} == {
+            "ortholog_one2one",
+            "ortholog_one2many",
+            "ortholog_many2many",
+        }
+
+    def test_json_is_the_answer_the_api_renders(
+        self, fake_fetch: FakeFetch, data_dir: Path
+    ) -> None:
+        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
+        asked = [*_homology_stems(data_dir, _MOUSE, _HUMAN), _NO_HOMOLOG]
+
+        result = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, *asked, "--json"])
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == HomologySet(_MOUSE, _HUMAN, progressbar=False).homologs(asked).as_json()
+        )
+
+    def test_the_links_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        row = homology_metadata(_HUMAN, _WORM, HOMOLOGY_RELEASE)
+        assert row is not None
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+
+        assert result.exit_code == 0
+        assert result.stdout.startswith(f"{_ONE_WORM_HOMOLOG}\t{_THE_ONE_WORM}\tortholog_one2one\t")
+        assert len(result.stdout.splitlines()) == 1
+        # Who asserted it, and from which release and file, is what a reader needs and what
+        # a pipeline must not be handed: it goes beside the links rather than among them.
+        assert row.attribution() in result.stderr
+        assert f"{_HUMAN} -> {_WORM}" in result.stderr
+
+    def test_the_text_columns_are_the_json_links_own_values_so_the_two_cannot_drift(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # The whole claim that the command holds no logic: every cell printed is a value
+        # the API put in the answer, in the order the API writes it, with the publisher's
+        # own `NULL` where it recorded nothing.
+        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
+        asked = "ENSMUSG00000074698"
+
+        text = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, asked])
+        rendered = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, asked, "--json"])
+
+        links = _json.loads(rendered.stdout)["resolved"][asked]
+        assert text.stdout.splitlines() == [
+            "\t".join("NULL" if value is None else str(value) for value in link.values())
+            for link in links
+        ]
+
+    def test_a_stem_this_release_names_no_homolog_for_stays_in_the_human_output(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # The one thing a hand-rolled join drops. A stem with no link gets a row of its
+        # own with every other column empty, so nothing leaves shorter than it arrived —
+        # and empty is not `NULL`, which would claim a link the publisher scored nothing on.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, _NO_HOMOLOG])
+
+        assert result.exit_code == 0
+        rows = result.stdout.splitlines()
+        assert len(rows) == 2
+        assert rows[1].split("\t")[0] == _NO_HOMOLOG
+        assert set(rows[1].split("\t")[1:]) == {""}
+        assert "1 this release names no homolog for" in result.stderr
+
+    def test_a_stem_that_named_nothing_stays_in_the_json(self, fake_fetch: FakeFetch) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(
+            app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, _NO_HOMOLOG, "--json"]
+        )
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["unresolved"] == [_NO_HOMOLOG]
+        assert _NO_HOMOLOG not in payload["resolved"]
+
+    def test_a_worm_pairing_names_the_null_quality_scores_before_a_filter_empties(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # Compara records neither score on any link of *either* worm pairing, so a shell
+        # user about to write `awk -F'\t' '$6 > 50'` is told the column is null throughout
+        # rather than discovering it when the filter comes back empty.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+        payload = _json.loads(
+            runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--json"]).stdout
+        )
+
+        assert result.exit_code == 0
+        # The line that says it, not merely the word appearing somewhere: the column list
+        # above it names every column, so a warning nobody wrote would pass a looser check.
+        (quality,) = [
+            line for line in result.stderr.splitlines() if line.strip().startswith("quality")
+        ]
+        for column in QUALITY_SCORE_COLUMNS:
+            assert column in quality
+        assert "empties" in quality
+        assert payload["null_quality_scores"] == list(QUALITY_SCORE_COLUMNS)
+
+    def test_the_scored_pairing_says_so_rather_than_staying_silent(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # A pair Compara did score says that too: silence would read the same as a warning
+        # nobody printed.
+        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
+
+        result = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, "ENSMUSG00000074698"])
+
+        assert result.exit_code == 0
+        (quality,) = [
+            line for line in result.stderr.splitlines() if line.strip().startswith("quality")
+        ]
+        assert "carry values" in quality
+        assert "empties" not in quality
+
+    def test_the_dropped_partners_are_reported_where_an_answer_was_narrowed(
+        self, fake_fetch: FakeFetch, data_dir: Path
+    ) -> None:
+        # Counted *and* named, both off the answer. None are dropped on release 116 — it
+        # publishes no cross-species paralogy for the ortholog filter to remove — and zero
+        # is printed as an answer rather than left as a silence.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        asked = _homology_stems(data_dir, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked])
+        payload = _json.loads(
+            runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--json"]).stdout
+        )
+
+        assert result.exit_code == 0
+        assert "dropped partners" in result.stderr
+        assert payload["dropped_partners"] == []
+
+    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["homologs", "Danio rerio", _HUMAN, _ONE_WORM_HOMOLOG])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        for species in homology_species():
+            assert species in _output(result)
+        # Refused before anything was fetched: nobody pinned this species, which must never
+        # read as this species having no homologs.
+        assert fake_fetch.calls == []
+
+    def test_a_pair_of_one_species_exits_one_because_a_set_relates_two(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["homologs", _HUMAN, "homo_sapiens", _ONE_WORM_HOMOLOG])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "two different species" in _output(result)
+        assert fake_fetch.calls == []
+
+    def test_a_release_that_is_not_pinned_exits_one_naming_the_ones_that_are(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        result = runner.invoke(
+            app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--release", "115"]
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert HOMOLOGY_RELEASE in _output(result)
+        assert fake_fetch.calls == []
+
+    def test_a_versioned_gene_id_exits_one_naming_the_stem_to_pass(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # Compara writes its ids bare, so the versioned spelling would match nothing and
+        # come back unresolved looking exactly like a gene it never placed in a tree.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, f"{_ONE_WORM_HOMOLOG}.18"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert _ONE_WORM_HOMOLOG in _output(result)
+
+    def test_a_pair_taken_from_the_wrong_compara_file_exits_one_naming_the_other_file(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # The published partition, not a staged one: the real release-116 human dump holds
+        # zero human/mouse rows. Serving it for that pair is what a release that had
+        # re-partitioned looks like from a shell, and it must be an error naming the other
+        # file rather than an empty answer that reads as *these species share no homologs*.
+        fake_fetch.serve(_COMPARA_FIXTURES[_HUMAN])
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "homo_sapiens/Compara.116.protein_default.homologies.tsv.gz" in _output(result)
+        assert "homology_metadata.tsv" in _output(result)
+
+    def test_a_dump_that_is_not_comparas_exits_one_naming_the_columns_it_should_have(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        fake_fetch.serve("tiny.gtf.gz")
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "gene_stable_id" in _output(result)
+
+    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
+            raise ConnectionError("the compute node has no internet")
+
+        monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert homology_prepare_command(_HUMAN, _MOUSE, HOMOLOGY_RELEASE) in _output(result)
+        assert "login node" in _output(result)
+
+    def test_a_set_left_unfinished_exits_one_naming_the_repair(self, fake_fetch: FakeFetch) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        prepared = HomologySet(_HUMAN, _WORM, progressbar=False)
+        (prepared.path.parent / RECORD_NAME).unlink()
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "rm -rf" in _output(result)
+
+    def test_the_progress_display_is_suppressed_under_json(self, fake_fetch: FakeFetch) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--json"])
+
+        assert fake_fetch.last.progressbar is False
+
+    def test_the_progress_display_is_drawn_without_it(self, fake_fetch: FakeFetch) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+
+        assert fake_fetch.last.progressbar is True
 
 
 class TestTheSurfacesThatDidNotChange:

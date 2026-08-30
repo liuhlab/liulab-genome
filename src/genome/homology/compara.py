@@ -208,6 +208,24 @@ class ComparaPartitionError(RuntimeError):
     """
 
 
+class HomologySetNotDownloadedError(RuntimeError):
+    """The set is not prepared here, and the publisher's dump could not be fetched.
+
+    A :class:`RuntimeError` rather than a :class:`LookupError`: nothing the caller asked
+    for is missing, this machine could not reach the publisher. Fetching is the one step
+    in this package that needs the network and the lab's CPU cluster compute nodes have
+    none, so the message names the call to make on a login node instead of reporting a
+    transport error and stopping there.
+    :class:`genome.xref.xref.XrefSetNotDownloadedError` says the same thing for an **Xref
+    set**; they are two classes because they are two contexts.
+
+    Examples
+    --------
+    >>> issubclass(HomologySetNotDownloadedError, RuntimeError)
+    True
+    """
+
+
 class ComparaFileError(ValueError):
     """A file read as Compara's is not one, or a prepared slice is not what was recorded.
 
@@ -304,6 +322,38 @@ def compara_url(species: str, release: str) -> str:
         f"{ENSEMBL_BASE_URL}/release-{release}/tsv/ensembl-compara/homologies/{genome}/"
         f"Compara.{release}.{COMPARA_DUMP}.homologies.tsv.gz"
     )
+
+
+def homology_prepare_command(species: str, other_species: str, release: str) -> str:
+    r"""Return the call that prepares one **Homology set**, for an error message to quote.
+
+    One spelling of it, so a renamed entry point is renamed once. Quoted by the error a
+    caller repairs by fetching the set on a machine with internet.
+
+    Parameters
+    ----------
+    species : str
+        One species of the pair, as the shipped table spells it.
+    other_species : str
+        The other.
+    release : str
+        The pinned **Release**.
+
+    Returns
+    -------
+    str
+        A shell command, unquoted and unfenced — the caller decides how to set it.
+
+    Examples
+    --------
+    >>> homology_prepare_command("Homo sapiens", "Mus musculus", "116")
+    'python -c "from genome.homology import HomologySet; HomologySet(\'Homo sapiens\', \'Mus musculus\', \'116\')"'
+    """
+    call = (
+        f"from genome.homology import HomologySet; "
+        f"HomologySet({species!r}, {other_species!r}, {release!r})"
+    )
+    return f'python -c "{call}"'
 
 
 def pair_name(species: str, other_species: str) -> str:
@@ -734,13 +784,27 @@ def _prepare(
     if record is not None:
         return path, record
 
-    source = fetch.fetch_url(
-        row.source_url,
-        work_dir(directory),
-        known_hash=f"md5:{row.md5}",
-        fname=source_filename(row),
-        progressbar=progressbar,
-    )
+    try:
+        source = fetch.fetch_url(
+            row.source_url,
+            work_dir(directory),
+            known_hash=f"md5:{row.md5}",
+            fname=source_filename(row),
+            progressbar=progressbar,
+        )
+    except OSError as error:
+        # `OSError` alone, and not the `ValueError` a checksum mismatch raises: a pin that
+        # does not match names bytes that arrived, which is a different fact needing a
+        # different next action, and re-running the fetch would not repair it.
+        raise HomologySetNotDownloadedError(
+            f"the Compara release {row.release} homology set for {row.species!r} and "
+            f"{row.other_species!r} is not prepared here and {row.source_url} could not be "
+            f"fetched: {error}. Nothing else in this package needs the network, so this is "
+            f"the one step that does. Prepare it on a machine with internet — a login node, "
+            f"since the lab's compute nodes have none — with "
+            f"`{homology_prepare_command(row.species, row.other_species, row.release)}`, after "
+            f"which it is read from the Data dir and shared by every project on the machine."
+        ) from error
     staged = work_dir(directory) / f"{path.name}.part"
     rows, digest, nulls = _slice(source, staged, row=row)
     if rows == 0:
