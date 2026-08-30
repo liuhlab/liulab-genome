@@ -12,7 +12,7 @@ complement of every matrix and splits the results back by index: the first half 
 and the second is ``-``. A position reported against a reverse-complement matrix is
 already a **0-based half-open** start *in the forward frame* — the matrix moved, not the
 sequence — so nothing is subtracted from it and both strands land in one coordinate
-system. ``tests/test_scan.py`` asserts that against the engine rather than trusting it.
+system. ``tests/tf/test_scan.py`` asserts that against the engine rather than trusting it.
 
 **The engine scores in nats and this package reports bits.** MOODS is handed
 :meth:`~genome.tf.motif.motif.Motif.log_odds` scaled by ``ln 2`` and its scores are

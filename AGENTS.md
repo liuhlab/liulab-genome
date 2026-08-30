@@ -59,8 +59,8 @@ mechanises it.**
 - **The suite is two lanes, and together they are all of it.** `-m aligner` against its negation is
   total, so no test falls between them. A test needing `samtools` or `bedtools` runs inside the pixi
   env — gate it with a skip when the binary is absent. A test needing **STAR or chromap** is
-  different: those live in optional features, so gate it with `_needs` in `tests/test_aligner.py`,
-  which applies the marker and the skip under one name. Never the skip alone — that test would sit in
+  different: those live in optional features, so gate it with `_needs` in
+  `tests/aligner/test_aligner.py`, which applies the marker and the skip under one name. Never the skip alone — that test would sit in
   the unit lane and skip itself green, which is what the split exists to end.
 - **Docstrings: NumPy structure is mechanised** — ruff selects `D` with the numpy convention — so the
   bar is what ruff cannot check. At least one runnable example on a public object. A subclass
@@ -68,7 +68,8 @@ mechanises it.**
   one-liner is enough for a small `_helper`.
 - **Errors are actionable:** say what was wrong and what the caller should do, with a specific
   exception type, never a bare `Exception`.
-- **Side effects live at the edges** — `io/`, `external.py`, `cli.py` — not in the pure core.
+- **Side effects live at each context's own edge** — `assembly/`, `annotation/`, `store/`,
+  `external.py`, `cli.py` — never in the pure core, which is `region.py` and `seq.py`.
 - **Name the idea, never the number.** No rule number and no document section number anywhere outside
   the Records column above. A record number is permanent; an R-number is positional and re-points
   silently when a row is inserted. Held at review; no guard test.

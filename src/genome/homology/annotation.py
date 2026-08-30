@@ -2,8 +2,8 @@
 
 The crossing a caller makes once they have homologs and want to join them to their own
 counts matrix, and the whole of it is one existing call:
-:meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids`, used **unchanged**. Nothing is
-added to :class:`~genome.genome.Genome` for it and no mixin is introduced — a **Homology
+:meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids`, used **unchanged**. Nothing is
+added to :class:`~genome.assembly.genome.Genome` for it and no mixin is introduced — a **Homology
 set** is usable with no genome open, and a ``Genome``-level convenience would quietly
 re-introduce the assembly this design removed.
 
@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 from genome.homology.compara import HomologyAnswer, HomologyLink
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only, and the cycle it avoids
-    from genome.io.annotation import AnnotationRegistry
+    from genome.annotation import AnnotationRegistry
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ class ResolvedHomologs:
 
     :func:`resolve_homologs`'s answer, and the crossing a caller makes once they have
     homologs and want to join them to their own counts matrix. The hop itself is
-    :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids`, used unchanged.
+    :meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids`, used unchanged.
 
     **The Homology type is the publisher's and stands** (ADR-0020). An annotation that
     spells one gene of an ``ortholog_one2many`` link and not the other leaves a view that
@@ -134,7 +134,7 @@ class ResolvedHomologs:
         **Flattening loses what the mapping carries**: which asked stem reached the gene,
         and under what **Homology type**. It keeps every id rather than one per partner,
         since one stem may be spelled by two gene ids — the pseudoautosomal case
-        :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids` answers with both of.
+        :meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids` answers with both of.
         """
         return [gene_id for ids in self.gene_ids.values() for gene_id in ids]
 
@@ -192,7 +192,7 @@ def resolve_homologs(
     answer : HomologyAnswer
         What :meth:`~genome.homology.compara.HomologySet.homologs` returned. Whatever it
         was filtered to is what is crossed: this adds nothing back and removes no more.
-    registry : genome.io.annotation.registry.AnnotationRegistry
+    registry : genome.annotation.registry.AnnotationRegistry
         The registry of the **Assembly** whose annotation the ids should be in.
     name : str, optional
         The **Registered name** to resolve against. Omitted, that assembly's **Default
@@ -209,15 +209,15 @@ def resolve_homologs(
     ------
     ValueError
         If ``name`` is omitted and no **Default annotation** is decided.
-    genome.io.annotation.registry.AnnotationNotRegisteredError
+    genome.annotation.registry.AnnotationNotRegisteredError
         If nothing of that name is registered there.
-    genome.io.annotation.stems.NoGeneFeaturesError
+    genome.annotation.stems.NoGeneFeaturesError
         If its database holds no gene at all.
 
     Examples
     --------
     >>> from genome.homology import HomologySet, resolve_homologs
-    >>> from genome.io.annotation import AnnotationRegistry
+    >>> from genome.annotation import AnnotationRegistry
     >>> answer = HomologySet("Homo sapiens", "Mus musculus").homologs(   # doctest: +SKIP
     ...     ["ENSG00000141510"]
     ... )

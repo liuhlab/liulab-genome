@@ -1,4 +1,4 @@
-"""Tests for genome.io.annotation.registry — the four states, and what may be asked of them.
+"""Tests for genome.annotation.registry — the four states, and what may be asked of them.
 
 ``AnnotationRegistry`` and the three scans it settles at construction, the **Default
 annotation** rule, the status report, the gene categories an annotation declares, and the
@@ -13,21 +13,21 @@ from pathlib import Path
 
 import pytest
 
-from genome.gene_list import (
+from genome.annotation import GtfAnnotation
+from genome.annotation.curated import (
     GeneCategoryNotDeclaredError,
     GeneListAssemblyMismatchError,
     NoGeneCategoriesError,
     curated_gene_list,
 )
-from genome.io.annotation import GtfAnnotation
-from genome.io.annotation.registration import (
+from genome.annotation.registration import (
     ChromosomeMismatchError,
     MergeSource,
     annotation_dir,
     annotation_register_command,
     register_merged_gtf,
 )
-from genome.io.annotation.registry import (
+from genome.annotation.registry import (
     AnnotationNotRegisteredError,
     AnnotationRegistry,
     AnnotationStatus,
@@ -39,8 +39,8 @@ from genome.io.annotation.registry import (
     list_annotations,
     list_broken_annotations,
 )
-from genome.io.completion import UnfinishedRegistrationError, record_path, work_dir
-from genome.io.registration import AssemblyDir
+from genome.assembly.registration import AssemblyDir
+from genome.store.completion import UnfinishedRegistrationError, record_path, work_dir
 
 from ..conftest import FakeFetch
 from .conftest import (

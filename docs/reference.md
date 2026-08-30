@@ -5,13 +5,13 @@
     [Sequences](sequences.md) and [CLI](cli.md) — are the primary documentation; reach
     for this one for a signature or a parameter you already know you want.
 
-## `genome.genome`
+## `genome.assembly.genome`
 
-::: genome.genome
+::: genome.assembly.genome
 
-## `genome.chimera`
+## `genome.assembly.chimera`
 
-::: genome.chimera
+::: genome.assembly.chimera
 
 ## `genome.region`
 
@@ -45,13 +45,17 @@
 
 ::: genome.shipped_writer
 
-## `genome.metadata`
+## `genome.assembly.metadata`
 
-::: genome.metadata
+::: genome.assembly.metadata
 
-## `genome.gene_list`
+## `genome.annotation.metadata`
 
-::: genome.gene_list
+::: genome.annotation.metadata
+
+## `genome.annotation.curated`
+
+::: genome.annotation.curated
 
 ## `genome.workers`
 
@@ -169,61 +173,69 @@
 
 ::: genome.external
 
-## `genome.io.source`
+## `genome.assembly.source`
 
-::: genome.io.source
+::: genome.assembly.source
 
-## `genome.io.components`
+## `genome.assembly.components`
 
-::: genome.io.components
+::: genome.assembly.components
 
-## `genome.io.fetch`
+## `genome.store.fetch`
 
-::: genome.io.fetch
+::: genome.store.fetch
 
-## `genome.io.download`
+## `genome.assembly.download`
 
-::: genome.io.download
+::: genome.assembly.download
 
-## `genome.io.fasta`
+## `genome.assembly.fasta`
 
-::: genome.io.fasta
+::: genome.assembly.fasta
 
-## `genome.io.annotation.registration`
+## `genome.annotation.registration`
 
-::: genome.io.annotation.registration
+::: genome.annotation.registration
 
-## `genome.io.annotation.registry`
+## `genome.annotation.registry`
 
-::: genome.io.annotation.registry
+::: genome.annotation.registry
 
-## `genome.io.annotation.stems`
+## `genome.annotation.stems`
 
-::: genome.io.annotation.stems
+::: genome.annotation.stems
 
-## `genome.io.annotation.database`
+## `genome.annotation.database`
 
-::: genome.io.annotation.database
+::: genome.annotation.database
 
-## `genome.io.twobit`
+## `genome.assembly.twobit`
 
-::: genome.io.twobit
+::: genome.assembly.twobit
 
-## `genome.io.completion`
+## `genome.store.completion`
 
-::: genome.io.completion
+::: genome.store.completion
 
-## `genome.io.registration`
+## `genome.assembly.registration`
 
-::: genome.io.registration
+::: genome.assembly.registration
 
-## `genome.io.prepared`
+## `genome.store.data_dir`
 
-::: genome.io.prepared
+::: genome.store.data_dir
 
-## `genome.io.chimera`
+## `genome.store.prepared`
 
-::: genome.io.chimera
+::: genome.store.prepared
+
+## `genome.store.checksum`
+
+::: genome.store.checksum
+
+## `genome.assembly.chimera_build`
+
+::: genome.assembly.chimera_build
 
 ## `genome.cli`
 

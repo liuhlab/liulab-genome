@@ -28,7 +28,7 @@ and half a file cannot be held to a duplicate-key rule. The rule is about the FA
 the aligner inputs, which are three to six orders of magnitude larger and are streamed everywhere
 they are touched.
 
-**The shipped gene lists are not Shipped tables**, which is why :mod:`genome.gene_list` does not
+**The shipped gene lists are not Shipped tables**, which is why :mod:`genome.annotation.curated` does not
 read through this module. Those are JSON keyed by **Registered name**, nested rather than tabular:
 no header, no columns, no rows, and a duplicate rule about a gene id appearing in two categories
 rather than about a repeated key. The only thing they share with a table here is being found by
@@ -106,11 +106,11 @@ class MetadataRowError(ShippedTableError):
     Raised by :func:`parse_cell` for the curated tables that declare their columns as a frozen
     dataclass — the **Assembly metadata** and **Annotation metadata** tables and the **Xref
     source** table — for a cell no column's type can read and for a blank cell in a column that
-    has no unknown. Re-exported from :mod:`genome.metadata`, which is where those tables live.
+    has no unknown. Re-exported from :mod:`genome.assembly.metadata`, which is where those tables live.
 
     Examples
     --------
-    >>> from genome.metadata import AssemblyMetadata
+    >>> from genome.assembly.metadata import AssemblyMetadata
     >>> try:
     ...     AssemblyMetadata.from_row({"assembly_name": "tiny", "ncbi_taxid": "many"})
     ... except MetadataRowError as error:

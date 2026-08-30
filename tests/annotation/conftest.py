@@ -12,16 +12,16 @@ binaries, so nothing here is gated on a tool skip.
 Nothing touches the network either: the shared ``fake_fetch`` fixture replaces the
 package's one fetch step with a copy out of ``tests/data``, and the annotation table is
 injected as an in-memory :class:`AnnotationMetadata` record rather than faked as a TSV —
-the shipped table is tested in test_metadata.
+the shipped table is tested in test_metadata beside it.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from genome.io.annotation import AnnotationRegistry, GtfAnnotation
-from genome.io.registration import AssemblyDir
-from genome.metadata import AnnotationMetadata
+from genome.annotation import AnnotationRegistry, GtfAnnotation
+from genome.annotation.metadata import AnnotationMetadata
+from genome.assembly.registration import AssemblyDir
 
 # A minimal but valid GTF: one gene with a transcript and an exon. Standard
 # gene/transcript features are declared, so the default no-inference path applies.

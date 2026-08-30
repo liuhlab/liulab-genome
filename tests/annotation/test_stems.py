@@ -1,4 +1,4 @@
-"""Tests for genome.io.annotation.stems — a **Gene id stem** against an annotation's ids.
+"""Tests for genome.annotation.stems — a **Gene id stem** against an annotation's ids.
 
 The seam the Xref, Orthology and TF contexts all cross, and the first surface here to open
 the **Annotation database**, so every test registers a fixture GTF for real and asks the
@@ -15,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from genome.io.annotation.database import gene_ids
-from genome.io.annotation.registration import MergeSource, register_merged_gtf
-from genome.io.annotation.registry import AnnotationNotRegisteredError, AnnotationRegistry
-from genome.io.annotation.stems import NoGeneFeaturesError
+from genome.annotation.database import gene_ids
+from genome.annotation.registration import MergeSource, register_merged_gtf
+from genome.annotation.registry import AnnotationNotRegisteredError, AnnotationRegistry
+from genome.annotation.stems import NoGeneFeaturesError
 
 from .conftest import (
     _BARE_GTF,

@@ -8,7 +8,7 @@ factor is.
 
 **A census is keyed by Gene id stem and an annotation is not**, so
 :mod:`genome.tf.gene.annotation` is what puts one into a registered **Annotation**'s own
-gene ids. It crosses :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids` and adds
+gene ids. It crosses :meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids` and adds
 nothing to the registry to do it: which species selects the census, and what a row of it
 says, are this half's business and not the Annotation context's.
 

@@ -9,7 +9,7 @@ inside it, the way a **Motif set** already is.
 
 **Preparing it is not this module's**, and none of the steps that fetch are here: an
 **Xref set** is a **Prepared set**, so what is declared here is the URL, the checksum and
-the reader, and :mod:`genome.io.prepared` owns the working area, the fetch, the digest and
+the reader, and :mod:`genome.store.prepared` owns the working area, the fetch, the digest and
 the **Completion marker**.
 
 **Two directions and only two**, to the hub and from it (ADR-0017).
@@ -67,17 +67,17 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Protocol
 
-from genome.io.completion import RegistrationMismatchError
-from genome.io.prepared import (
+from genome.assembly.metadata import species_slug
+from genome.store.completion import RegistrationMismatchError
+from genome.store.data_dir import prepared_data_dir
+from genome.store.prepared import (
     Checksum,
     PreparedSetNotDownloadedError,
     PreparedSource,
     SourceReader,
     prepare,
     unpacked_lines,
-    xref_data_dir,
 )
-from genome.metadata import species_slug
 from genome.xref.alliance import ALLIANCE, read_alliance
 from genome.xref.bgi import ALLIANCE_BGI, BGI_SYMBOL_LIMIT, read_bgi
 from genome.xref.ensembl import ENSEMBL_TSV, read_ensembl
@@ -93,6 +93,33 @@ from genome.xref.symbols import (
     fold_symbol,
     normalise_symbol,
 )
+
+#: Subdirectory of the **Data dir** holding **Xref set**s, beside ``motif/`` and for the
+#: same reason: an identifier is a name and not a place.
+XREF_SUBDIR = "xref"
+
+
+def xref_data_dir() -> Path:
+    """Return the directory holding **Xref set**s, which belong to no **Assembly**.
+
+    The Xref context's own root under the **Data dir**, declared here because this is where
+    its **Prepared set** is fetched into and read from.
+
+    Returns
+    -------
+    pathlib.Path
+        ``<liulab_data>/xref``. Nothing is created by asking.
+
+    Examples
+    --------
+    >>> import os
+    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
+    >>> xref_data_dir()
+    PosixPath('/scratch/liulab/xref')
+    >>> del os.environ["LIULAB_DATA"]
+    """
+    return prepared_data_dir(XREF_SUBDIR)
+
 
 #: What a **Completion marker** written here calls the thing it recorded, beside the
 #: ``genome``, ``annotation`` and ``index`` kinds the assembly tree writes.
@@ -124,7 +151,7 @@ class XrefReader(Protocol):
     What a source *is*, beside its row in the curated table: a pure function from the
     publisher's lines to this package's triples, which is what makes adding a source data
     plus a reader rather than a refactor. It opens nothing and downloads nothing —
-    :func:`genome.io.prepared.prepare` has already fetched and unpacked the bytes, and is
+    :func:`genome.store.prepared.prepare` has already fetched and unpacked the bytes, and is
     hashing them past this, by the time one of these is called.
     """
 
@@ -417,7 +444,7 @@ class ResolvedStems:
     every row.
 
     **A foreign id naming two stems answers with both**, and nothing picks one — the same
-    guarantee :class:`~genome.io.annotation.stems.ResolvedGeneIds` gives for a stem naming two gene ids.
+    guarantee :class:`~genome.annotation.stems.ResolvedGeneIds` gives for a stem naming two gene ids.
     **What named nothing rides back** in :attr:`unresolved` rather than shortening the
     answer.
 
@@ -744,7 +771,7 @@ class ResolvedSymbols:
 class XrefSet:
     """One species, one **Xref source**, one pinned **Release**, prepared on disk.
 
-    **Constructing one prepares it**, as opening a :class:`~genome.genome.Genome` does: the
+    **Constructing one prepares it**, as opening a :class:`~genome.assembly.genome.Genome` does: the
     publisher's file is fetched on the first construction, sliced to this species and
     written under :func:`xref_set_dir`, and every construction after re-reads what is there
     and fetches nothing. It answers with no genome open and belongs to no assembly.
@@ -846,7 +873,7 @@ class XrefSet:
         If an evidence filter is named and this source's file grades nothing.
     genome.xref.evidence.EmptyEvidenceFilterError
         If an evidence filter is named and it keeps none of the release's rows.
-    genome.io.completion.RegistrationMismatchError
+    genome.store.completion.RegistrationMismatchError
         If the **Completion marker** disagrees with what is on disk, either about the
         slice's size or about its checksum — both mean unfinished rather than present.
 
@@ -1331,7 +1358,7 @@ def _source(row: XrefMetadata, *, directory: Path, evidence: tuple[str, ...]) ->
     """Return what this **Xref set** declares: a URL, a checksum and how to slice it.
 
     Everything else — the working area, the fetch, the digest, the staged rename and the
-    **Completion marker** — is :mod:`genome.io.prepared`'s, which is why nothing in this
+    **Completion marker** — is :mod:`genome.store.prepared`'s, which is why nothing in this
     module fetches. What is declared here is what makes one xref set differ from another.
     """
     return PreparedSource(

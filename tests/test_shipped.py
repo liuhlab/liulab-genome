@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import pytest
 
-from genome import gene_list
-from genome import metadata as metadata_module
+from genome.annotation import curated
+from genome.annotation import metadata as annotation_module
+from genome.assembly import metadata as assembly_module
+from genome.assembly.metadata import MetadataRowError
 from genome.homology import metadata as homology_module
-from genome.metadata import MetadataRowError
 from genome.shipped import FALSE_CELL, TRUE_CELL, ShippedTable, ShippedTableError, parse_cell
 from genome.tf import link as link_module
 from genome.tf.cofactor import table as cofactor_module
@@ -31,8 +32,8 @@ from genome.xref import metadata as xref_module
 #: them, which only a list of all of them can check. Adding a table means adding a line here,
 #: and :func:`test_every_module_that_reads_a_shipped_table_declares_one` is what says so.
 _TABLES: dict[str, ShippedTable] = {
-    "assembly_metadata": metadata_module._ASSEMBLY_TABLE,
-    "annotation_metadata": metadata_module._ANNOTATION_TABLE,
+    "assembly_metadata": assembly_module._ASSEMBLY_TABLE,
+    "annotation_metadata": annotation_module._ANNOTATION_TABLE,
     "xref_metadata": xref_module._XREF_TABLE,
     "homology_metadata": homology_module._HOMOLOGY_METADATA,
     "census_metadata": census_module.CENSUS_METADATA_FORMAT,
@@ -45,7 +46,8 @@ _TABLES: dict[str, ShippedTable] = {
 
 #: The modules that own one, and the one module that reads shipped data and owns none.
 _READERS = (
-    metadata_module,
+    assembly_module,
+    annotation_module,
     xref_module,
     homology_module,
     census_module,
@@ -130,7 +132,7 @@ def test_every_module_that_reads_a_shipped_table_declares_one_and_gene_list_does
         assert declared, f"{module.__name__} reads shipped data and declares no table"
         assert all(table in _TABLES.values() for table in declared)
 
-    assert not [value for value in vars(gene_list).values() if isinstance(value, ShippedTable)]
+    assert not [value for value in vars(curated).values() if isinstance(value, ShippedTable)]
 
 
 # ---------------------------------------------------------------------------------------
@@ -317,12 +319,13 @@ def _raises(table: ShippedTable, text: str) -> str:
 
 
 def test_the_names_that_moved_still_resolve_from_everywhere_they_used_to() -> None:
-    # `species_slug` was imported from `genome.metadata` by nine modules and re-exported by
-    # two more; `parse_cell` claimed in its own docstring to be the reader every curated table
-    # shares. Both now live with the reader, and every path to them still answers — with the
-    # same object, so a caller comparing them by identity is not surprised either.
-    from genome.metadata import parse_cell as from_metadata
-    from genome.metadata import species_slug as slug_from_metadata
+    # `species_slug` was imported from the curated-table module by nine modules and
+    # re-exported by two more; `parse_cell` claimed in its own docstring to be the reader
+    # every curated table shares. Both now live with the reader, and every path to them still
+    # answers — with the same object, so a caller comparing them by identity is not surprised
+    # either.
+    from genome.assembly.metadata import parse_cell as from_metadata
+    from genome.assembly.metadata import species_slug as slug_from_metadata
     from genome.shipped import species_slug as slug_from_shipped
     from genome.tf.cofactor import species_slug as slug_from_cofactor
     from genome.tf.gene import species_slug as slug_from_gene

@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING, Any
 from genome.aligner.aligner import Aligner
 
 if TYPE_CHECKING:
+    from genome.assembly.genome import Genome
     from genome.external import ExternalTool
-    from genome.genome import Genome
 
 
 class STAR(Aligner):
@@ -28,17 +28,17 @@ class STAR(Aligner):
     A STAR index is splice-junction-aware: it is built against one gene
     annotation, so each annotation gets its own *genomeDir*. The bound GTF key
     selects that annotation (its path resolved via
-    :meth:`~genome.io.annotation.registry.AnnotationRegistry.path`) and names the index directory
+    :meth:`~genome.annotation.registry.AnnotationRegistry.path`) and names the index directory
     ``star_<gtf_key>``. STAR's index is the *genomeDir* directory itself, so
     :attr:`index_path` returns :attr:`index_dir`.
 
     Parameters
     ----------
-    genome : genome.genome.Genome
+    genome : genome.assembly.genome.Genome
         The genome whose reference FASTA will be indexed.
     gtf : str
         Name of a GTF annotation registered on ``genome`` (see
-        :meth:`~genome.io.annotation.registry.AnnotationRegistry.register_path`).
+        :meth:`~genome.annotation.registry.AnnotationRegistry.register_path`).
     tool : genome.external.ExternalTool, optional
         As :class:`~genome.aligner.aligner.Aligner`.
     """
@@ -84,7 +84,7 @@ class STAR(Aligner):
         ``overwrite=True``; a directory holding index files that no record
         vouches for raises rather than being silently rebuilt. The annotation GTF
         is resolved from the bound ``gtf`` key via
-        :meth:`~genome.io.annotation.registry.AnnotationRegistry.path` and passed to STAR as
+        :meth:`~genome.annotation.registry.AnnotationRegistry.path` and passed to STAR as
         ``--sjdbGTFfile`` for splice-junction-aware indexing.
 
         Only the most commonly tuned options are named below. Any other STAR
@@ -117,7 +117,7 @@ class STAR(Aligner):
 
         Raises
         ------
-        genome.io.completion.RegistrationError
+        genome.store.completion.RegistrationError
             If the index directory holds files without a record, a record that
             disagrees with them, or a record pinning a different assembly digest
             than the one registered now. Pass ``overwrite=True`` to rebuild.

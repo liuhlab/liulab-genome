@@ -17,11 +17,23 @@ import pytest
 from typer.testing import CliRunner, Result
 
 from genome import __version__ as genome_version
-from genome import metadata
+from genome.annotation import (
+    AnnotationRegistry,
+    GtfAnnotation,
+    MergeSource,
+    annotation_dir,
+    register_merged_gtf,
+)
+from genome.annotation import metadata as annotation_metadata
+from genome.annotation.curated import curated_gene_list
+from genome.annotation.metadata import AnnotationMetadata
+from genome.assembly import download as download_mod
+from genome.assembly import metadata
+from genome.assembly.fasta import PREPARATION_TOOLS, GenomeFiles
+from genome.assembly.metadata import AssemblyMetadata
 from genome.cli import app
 from genome.external import REQUIRED_TOOLS
 from genome.external import doctor as doctor_api
-from genome.gene_list import curated_gene_list
 from genome.homology import (
     DEFAULT_RELEASE as HOMOLOGY_RELEASE,
 )
@@ -32,19 +44,9 @@ from genome.homology import (
     homology_prepare_command,
     homology_species,
 )
-from genome.io import download as download_mod
-from genome.io import fetch as fetch_mod
-from genome.io.annotation import (
-    AnnotationRegistry,
-    GtfAnnotation,
-    MergeSource,
-    annotation_dir,
-    register_merged_gtf,
-)
-from genome.io.completion import RECORD_NAME, read_record, record_path, write_record
-from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
-from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.seq import DNA
+from genome.store import fetch as fetch_mod
+from genome.store.completion import RECORD_NAME, read_record, record_path, write_record
 from genome.tf.cofactor import CofactorTable, cofactor_table
 from genome.tf.gene import TFGeneTable, tf_gene_table
 from genome.tf.motif import MIN_MOTIF_LENGTH, hit_count, provenance_of, read_hits
@@ -76,32 +78,32 @@ from genome.xref import (
 from genome.xref import metadata as xref_metadata_mod
 
 from .conftest import CHIMERA_COMPONENTS, COMPONENT_ANNOTATION, FakeFetch
-from .test_homology import ABSENT as _NO_HOMOLOG
-from .test_homology import FIXTURES as _COMPARA_FIXTURES
-from .test_homology import ONE2MANY_HUMAN as _THREE_WORM_HOMOLOGS
-from .test_homology import ONE2MANY_WORMS as _THE_THREE_WORMS
-from .test_homology import ONE2ONE_HUMAN as _ONE_WORM_HOMOLOG
-from .test_homology import ONE2ONE_WORM as _THE_ONE_WORM
-from .test_homology import PAIRS as _HOMOLOGY_PAIRS
-from .test_homology import _stems as _homology_stems
-from .test_jaspar import FIXTURE as _MOTIF_FIXTURE
-from .test_jaspar import FIXTURE_COUNT as _MOTIF_COUNT
-from .test_jaspar import FIXTURE_MOTIFS as _MOTIF_RECORDS
-from .test_scan import FIXTURE as _PLANTED_FASTA
-from .test_xref import FIXTURE as _XREF_FIXTURE
-from .test_xref import HUMAN_GENE_WITHOUT_A_HUB as _XREF_NO_HUB
-from .test_xref import RELEASE as _XREF_RELEASE
-from .test_xref_symbols import ADCY3_STEM as _ADCY3_STEM
-from .test_xref_symbols import ADCY8_STEM as _ADCY8_STEM
-from .test_xref_symbols import AMBIGUOUS_SYMBOL as _AMBIGUOUS_SYMBOL
-from .test_xref_symbols import BGI_MOUSE as _BGI_MOUSE_FIXTURE
-from .test_xref_symbols import BMAL1 as _BMAL1_STEM
-from .test_xref_symbols import HGNC_FIXTURE as _HGNC_FIXTURE
-from .test_xref_symbols import HGNC_RELEASE as _HGNC_RELEASE
-from .test_xref_symbols import MOUSE_CASED_SYMBOL as _MOUSE_CASED_SYMBOL
-from .test_xref_symbols import RETIRED_EPIFACTORS_SYMBOL as _RETIRED_SYMBOL
-from .test_xref_symbols import RETIRED_EPIFACTORS_SYMBOL_TOO as _RETIRED_SYMBOL_TOO
-from .test_xref_symbols import _digest as _fixture_digest
+from .homology.test_homology import ABSENT as _NO_HOMOLOG
+from .homology.test_homology import FIXTURES as _COMPARA_FIXTURES
+from .homology.test_homology import ONE2MANY_HUMAN as _THREE_WORM_HOMOLOGS
+from .homology.test_homology import ONE2MANY_WORMS as _THE_THREE_WORMS
+from .homology.test_homology import ONE2ONE_HUMAN as _ONE_WORM_HOMOLOG
+from .homology.test_homology import ONE2ONE_WORM as _THE_ONE_WORM
+from .homology.test_homology import PAIRS as _HOMOLOGY_PAIRS
+from .homology.test_homology import _stems as _homology_stems
+from .tf.test_jaspar import FIXTURE as _MOTIF_FIXTURE
+from .tf.test_jaspar import FIXTURE_COUNT as _MOTIF_COUNT
+from .tf.test_jaspar import FIXTURE_MOTIFS as _MOTIF_RECORDS
+from .tf.test_scan import FIXTURE as _PLANTED_FASTA
+from .xref.test_xref import FIXTURE as _XREF_FIXTURE
+from .xref.test_xref import HUMAN_GENE_WITHOUT_A_HUB as _XREF_NO_HUB
+from .xref.test_xref import RELEASE as _XREF_RELEASE
+from .xref.test_xref_symbols import ADCY3_STEM as _ADCY3_STEM
+from .xref.test_xref_symbols import ADCY8_STEM as _ADCY8_STEM
+from .xref.test_xref_symbols import AMBIGUOUS_SYMBOL as _AMBIGUOUS_SYMBOL
+from .xref.test_xref_symbols import BGI_MOUSE as _BGI_MOUSE_FIXTURE
+from .xref.test_xref_symbols import BMAL1 as _BMAL1_STEM
+from .xref.test_xref_symbols import HGNC_FIXTURE as _HGNC_FIXTURE
+from .xref.test_xref_symbols import HGNC_RELEASE as _HGNC_RELEASE
+from .xref.test_xref_symbols import MOUSE_CASED_SYMBOL as _MOUSE_CASED_SYMBOL
+from .xref.test_xref_symbols import RETIRED_EPIFACTORS_SYMBOL as _RETIRED_SYMBOL
+from .xref.test_xref_symbols import RETIRED_EPIFACTORS_SYMBOL_TOO as _RETIRED_SYMBOL_TOO
+from .xref.test_xref_symbols import _digest as _fixture_digest
 
 runner = CliRunner()
 _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
@@ -144,7 +146,7 @@ _XREF_SPECIES = "Homo sapiens"
 #: The one gene the HGNC fixture spells all three ways, so that a single invocation of
 #: ``genome match-symbols`` can be asked for an approved, a previous and an alias match at
 #: once. The previous spelling is imported rather than written here: it is one of the 31
-#: measured EpiFactors rows and ``tests/test_xref_symbols.py`` is where that is recorded.
+#: measured EpiFactors rows and ``tests/xref/test_xref_symbols.py`` is where that is recorded.
 _APPROVED_SYMBOL, _ALIAS_SYMBOL = "BMAL1", "MOP3"
 
 #: The stem the second measured EpiFactors spelling reaches — EMSY's, as the shipped human
@@ -258,7 +260,7 @@ def offline_prepare(monkeypatch: pytest.MonkeyPatch) -> None:
 def motif_release(fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> FakeFetch:
     """Serve the committed transfac records as whichever **Release** is asked for.
 
-    The arrangement ``tests/test_jaspar.py`` uses: the count check that stands where a
+    The arrangement ``tests/tf/test_jaspar.py`` uses: the count check that stands where a
     **Completion marker** stands elsewhere is never switched off, only pointed at what the
     fake fetch actually serves.
     """
@@ -292,7 +294,7 @@ def _serve_compara(fake_fetch: FakeFetch, species: str, other: str) -> FakeFetch
 def xref_pinned(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> None:
     """Pin the curated **Xref source** rows to the committed Alliance fixture's digest.
 
-    The arrangement ``tests/test_xref.py`` uses: the checksum check that holds a truncated
+    The arrangement ``tests/xref/test_xref.py`` uses: the checksum check that holds a truncated
     download to be an error rather than a quietly short answer is never switched off, only
     pointed at what the fake fetch actually serves. Every other cell survives, the real URL
     among them, so what the command prints as provenance is the shipped row's own.
@@ -315,7 +317,7 @@ def xref_release(fake_fetch: FakeFetch, xref_pinned: None) -> FakeFetch:
 def symbol_pinned(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> dict[str, Path]:
     """Pin the symbol-carrying **Xref source** rows to the fixtures cut out of their files.
 
-    ``tests/test_xref_symbols.py``'s arrangement: the checksum check is never switched off,
+    ``tests/xref/test_xref_symbols.py``'s arrangement: the checksum check is never switched off,
     only pointed at the bytes that actually arrive. The mapping it returns is what each
     URL should serve, so a fetch can be routed by URL and the human and the mouse set can
     be held at once — which one test below needs, the two sources matching different kinds.
@@ -685,7 +687,7 @@ class TestRegisterAnnotation:
     @pytest.fixture(autouse=True)
     def _offline(self, fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_fetch.serve("tiny.gtf.gz")
-        monkeypatch.setattr(metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
+        monkeypatch.setattr(annotation_metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
 
     def test_a_broken_directory_is_refused_force_repairs_it_and_the_repair_reports_correctly(
         self, liulab_data: Path
@@ -749,7 +751,7 @@ class TestRegisterAnnotation:
             url="https://mirror.example.invalid/annotations/ensembl_style.gtf",
             sha256=None,
         )
-        monkeypatch.setattr(metadata, "annotation_table", lambda: (ensembl_row,))
+        monkeypatch.setattr(annotation_metadata, "annotation_table", lambda: (ensembl_row,))
 
         refused = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
         assert refused.exit_code == 1
@@ -779,7 +781,7 @@ class TestRegisterAnnotation:
             url="https://mirror.example.invalid/annotations/bare.gtf",
             sha256=None,
         )
-        monkeypatch.setattr(metadata, "annotation_table", lambda: (bare_row,))
+        monkeypatch.setattr(annotation_metadata, "annotation_table", lambda: (bare_row,))
 
         inferred = runner.invoke(
             app, ["register-annotation", "tiny", "bare", "--infer-genes", "--infer-transcripts"]
@@ -905,7 +907,7 @@ class TestWhatARegistrationSaysAboutTheChromosomes:
     @pytest.fixture(autouse=True)
     def _offline(self, fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_fetch.serve("tiny.gtf.gz")
-        monkeypatch.setattr(metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
+        monkeypatch.setattr(annotation_metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
 
     @staticmethod
     def _prepare_assembly(liulab_data: Path) -> None:
@@ -1582,10 +1584,10 @@ class TestTFCofactorListCommand:
 class TestXrefCommand:
     """``genome xref`` — the shell surface over an **Xref set**, driven off the fixture.
 
-    Offline throughout, the way ``tests/test_xref.py`` is: the fake fetch serves the
+    Offline throughout, the way ``tests/xref/test_xref.py`` is: the fake fetch serves the
     committed Alliance slice and the curated rows are pinned to it, so the command prepares
     and reads a real set under the test's own data root. What is asserted here is the
-    command and not the hop — ``tests/test_xref.py`` owns that — so: the direction being
+    command and not the hop — ``tests/xref/test_xref.py`` owns that — so: the direction being
     named rather than sniffed out of the id strings, the stdout/stderr split that makes the
     output pipe, the ids that resolved to nothing staying visible in *both* renderings, and
     a non-zero exit naming the next action for each way it can fail.
@@ -1835,10 +1837,10 @@ class TestXrefCommand:
 class TestMatchSymbolsCommand:
     """``genome match-symbols`` — the shell surface over ``XrefSet.match_symbols``.
 
-    Offline throughout, the way ``tests/test_xref_symbols.py`` is: the fake fetch serves the
+    Offline throughout, the way ``tests/xref/test_xref_symbols.py`` is: the fake fetch serves the
     committed HGNC archive cut and the Alliance's MGI submission, routed by the URL the
     package built, and the curated rows are pinned to them. What is asserted here is the
-    command and not the match — ``tests/test_xref_symbols.py`` owns the three kinds, the
+    command and not the match — ``tests/xref/test_xref_symbols.py`` owns the three kinds, the
     folding and the asymmetry — so: a symbol reaching its genes from a shell at all, the
     kind of every match surviving the render, exact matching being what happens unless case
     is folded on purpose, the symbols that matched nothing staying visible in *both*
@@ -2143,10 +2145,10 @@ class TestMatchSymbolsCommand:
 class TestHomologsCommand:
     """``genome homologs`` — the shell surface over a **Homology set**, on the fixtures.
 
-    Offline throughout, the way ``tests/test_homology.py`` is: the fake fetch serves the
+    Offline throughout, the way ``tests/homology/test_homology.py`` is: the fake fetch serves the
     committed Compara subsamples and the command prepares and reads a real set under the
     test's own data root. What is asserted here is the command and not the set —
-    ``tests/test_homology.py`` owns the slice, the partition and the answer — so: all three
+    ``tests/homology/test_homology.py`` owns the slice, the partition and the answer — so: all three
     pairings reaching a shell, the publisher's **Homology type** surviving the render, the
     stdout/stderr split that makes the output pipe, the **Dropped partner**s and the null
     quality scores being said out loud, and a non-zero exit naming the next action for each
