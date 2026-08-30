@@ -2,7 +2,7 @@
 
 The crossing a caller makes once they have a census and want to join it to their own
 counts matrix, and the whole of the crossing is one existing call:
-:meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, used **unchanged**. This
+:meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids`, used **unchanged**. This
 module holds the half the registry has no stake in — which species selects the file, which
 file was read, what a row of it says, and what the two absences are — so the Annotation
 context answers *which gene ids does this stem name here* and nothing about transcription
@@ -11,7 +11,7 @@ factors.
 **The species is the assembly's own**, read from its curated metadata row and never passed
 in, so asking for human transcription factors while holding a mouse assembly is not
 expressible (ADR-0003). It is the only thing here that asks an assembly a question, which
-is why :mod:`genome.tf.species` owns the refusals rather than :mod:`genome.io.gtf`.
+is why :mod:`genome.tf.species` owns the refusals rather than :mod:`genome.io.annotation`.
 
 **Nothing here decides what a transcription factor is.** The verdict is the census's and
 travels with it: a **TF gene** carries the publisher's own **DBD family** and every
@@ -38,7 +38,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from genome.io.gtf import AnnotationRegistry, ResolvedGeneIds
+from genome.io.annotation import AnnotationRegistry, ResolvedGeneIds
 from genome.metadata import assembly_metadata, species_slug
 from genome.tf.gene.census import (
     TRUE_CELL,
@@ -65,7 +65,7 @@ class TFGene:
 
     ``gene_ids`` is a tuple because one stem may name more than one gene id in one
     annotation and this never picks one — see
-    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`. It is never empty: a stem
+    :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids`. It is never empty: a stem
     the annotation carries no gene for is in :attr:`TFGeneList.unresolved` instead of here.
 
     Attributes
@@ -207,7 +207,7 @@ class TFGeneList:
         """Every gene id, gene order then id order — a fresh list each call.
 
         **Every** id, not one per gene, for the reason
-        :attr:`~genome.io.gtf.ResolvedGeneIds.gene_ids` gives: flattening is where a
+        :attr:`~genome.io.annotation.stems.ResolvedGeneIds.gene_ids` gives: flattening is where a
         reader would take the first id of a stem that names two and lose the other.
         :attr:`genes` is what says which gene an id came from, and what the census said
         about it.
@@ -244,7 +244,7 @@ def resolve_tf_genes(
     The **TF gene table** :mod:`genome.tf.gene` ships for ``registry``'s assembly's
     species, met with one registered annotation: every **Gene id stem** the census is
     keyed by is resolved through
-    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids` into the gene ids that
+    :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids` into the gene ids that
     annotation actually spells, so the answer joins to a counts matrix with nothing left
     for the caller to normalise. A stem naming two gene ids answers with both, and the
     stems the annotation carries no gene for ride back on :attr:`TFGeneList.unresolved`
@@ -267,7 +267,7 @@ def resolve_tf_genes(
 
     Parameters
     ----------
-    registry : genome.io.gtf.AnnotationRegistry
+    registry : genome.io.annotation.registry.AnnotationRegistry
         The registry of the **Assembly** whose species selects the census and whose
         annotation the ids should be in. :class:`~genome.genome.Genome` holds one already.
     name : str, optional
@@ -292,14 +292,14 @@ def resolve_tf_genes(
         If no census ships for that species; the message names the ones that do.
     ValueError
         If ``name`` is omitted and no **Default annotation** is decided.
-    genome.io.gtf.AnnotationNotRegisteredError
+    genome.io.annotation.registry.AnnotationNotRegisteredError
         If nothing of that name is registered there.
-    genome.io.gtf.NoGeneFeaturesError
+    genome.io.annotation.stems.NoGeneFeaturesError
         If its database holds no gene at all.
 
     Examples
     --------
-    >>> from genome.io.gtf import AnnotationRegistry
+    >>> from genome.io.annotation import AnnotationRegistry
     >>> from genome.tf.gene import resolve_tf_genes
     >>> registry = AnnotationRegistry.locate("hg38")               # doctest: +SKIP
     >>> answer = resolve_tf_genes(registry, "gencode_v50")         # doctest: +SKIP
@@ -353,7 +353,7 @@ def tf_gene_list(
         Carry the genes the census assessed and turned down as well.
     cache_dir : str or pathlib.Path, optional
         Override which assembly directory is inspected, as
-        :meth:`~genome.io.gtf.AnnotationRegistry.locate` takes it.
+        :meth:`~genome.io.annotation.registry.AnnotationRegistry.locate` takes it.
 
     Returns
     -------
@@ -368,9 +368,9 @@ def tf_gene_list(
         If no census ships for that species.
     ValueError
         If ``annotation`` is omitted and no **Default annotation** is decided.
-    genome.io.gtf.AnnotationNotRegisteredError
+    genome.io.annotation.registry.AnnotationNotRegisteredError
         If that annotation is not registered here.
-    genome.io.gtf.NoGeneFeaturesError
+    genome.io.annotation.stems.NoGeneFeaturesError
         If its database holds no gene at all.
 
     Examples

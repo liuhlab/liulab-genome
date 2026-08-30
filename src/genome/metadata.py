@@ -590,7 +590,7 @@ def list_annotation_metadata(
     """Return every annotation the table offers for ``assembly``, in table order.
 
     What the lab supports for an assembly — a different question from what is
-    registered on this machine, which is :func:`~genome.io.gtf.list_annotations`.
+    registered on this machine, which is :func:`~genome.io.annotation.registry.list_annotations`.
 
     Parameters
     ----------

@@ -14,8 +14,8 @@ this annotation's own gene ids, what rode back unresolved, and that an assembly 
 published can answer for raises rather than answering with nothing.
 
 Nothing here prepares an assembly, fetches anything or reads the **Data dir**: every test
-registers one small GTF into ``tmp_path`` and asks. Registration itself is tested in
-test_gtf, whose fixture helpers are reused rather than spelled again.
+registers one small GTF into ``tmp_path`` and asks. Registration itself is tested under
+``tests/annotation/``, whose fixture helpers are reused rather than spelled again.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from genome.io.gtf import AnnotationNotRegisteredError, AnnotationRegistry
+from genome.io.annotation import AnnotationNotRegisteredError, AnnotationRegistry
 from genome.metadata import assembly_metadata
 from genome.tf.cofactor import UNIFORM_COLUMNS as COFACTOR_UNIFORM_COLUMNS
 from genome.tf.cofactor import (
@@ -45,7 +45,8 @@ from genome.tf.gene import (
 )
 from genome.tf.species import UnknownSpeciesError
 
-from .test_gtf import _CHIMERA, _CURATED, _CURATED_ASSEMBLY, _gtf_declaring, _register_by_path
+from .annotation.conftest import _CHIMERA, _CURATED, _CURATED_ASSEMBLY, _register_by_path
+from .annotation.test_stems import _gtf_declaring
 
 
 def _registry_declaring(

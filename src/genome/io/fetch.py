@@ -1,7 +1,8 @@
 """The package's one fetch step — every byte it downloads comes through here.
 
 A module of its own because two things fetch: :mod:`genome.io.download`, which brings an
-assembly's FASTA over the network, and :mod:`genome.io.gtf`, which brings an annotation's
+assembly's FASTA over the network, and :mod:`genome.io.annotation.registration`, which
+brings an annotation's
 GTF. While the step lived under the downloader the second of those was an import back
 into it, and that was the last edge of a cycle — ``download`` reaches ``chimera`` to
 build one, ``chimera`` reaches ``gtf`` to merge the annotations, and ``gtf`` reached

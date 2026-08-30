@@ -1,7 +1,7 @@
 """Where a shipped **Cofactor table** meets one registered **Annotation**'s gene ids.
 
 :mod:`genome.tf.gene.annotation` for the cofactor half, in the same shape and against the
-same one call — :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, used
+same one call — :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids`, used
 **unchanged**. It is a second caller of one resolver and not a second crossing: the two
 halves differ in which shipped file is read and in what a row of it says, and in nothing
 else, so a caller who has read one answer has read both.
@@ -30,7 +30,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from genome.io.gtf import AnnotationRegistry, ResolvedGeneIds
+from genome.io.annotation import AnnotationRegistry, ResolvedGeneIds
 from genome.metadata import assembly_metadata, species_slug
 from genome.tf.cofactor.table import (
     TRUE_CELL,
@@ -254,7 +254,7 @@ def resolve_tf_cofactors(registry: AnnotationRegistry, name: str | None = None) 
     species, met with one registered annotation, exactly as
     :func:`~genome.tf.gene.annotation.resolve_tf_genes` meets a census: every **Gene id
     stem** the table is keyed by is resolved through
-    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids` into the gene ids that
+    :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids` into the gene ids that
     annotation actually spells, so the answer joins to a counts matrix with nothing left
     for the caller to normalise. A stem naming two gene ids answers with both, and the
     stems the annotation carries no gene for ride back on
@@ -279,7 +279,7 @@ def resolve_tf_cofactors(registry: AnnotationRegistry, name: str | None = None) 
 
     Parameters
     ----------
-    registry : genome.io.gtf.AnnotationRegistry
+    registry : genome.io.annotation.registry.AnnotationRegistry
         The registry of the **Assembly** whose species selects the table and whose
         annotation the ids should be in. :class:`~genome.genome.Genome` holds one already.
     name : str, optional
@@ -303,14 +303,14 @@ def resolve_tf_cofactors(registry: AnnotationRegistry, name: str | None = None) 
         assemblies.
     ValueError
         If ``name`` is omitted and no **Default annotation** is decided.
-    genome.io.gtf.AnnotationNotRegisteredError
+    genome.io.annotation.registry.AnnotationNotRegisteredError
         If nothing of that name is registered there.
-    genome.io.gtf.NoGeneFeaturesError
+    genome.io.annotation.stems.NoGeneFeaturesError
         If its database holds no gene at all.
 
     Examples
     --------
-    >>> from genome.io.gtf import AnnotationRegistry
+    >>> from genome.io.annotation import AnnotationRegistry
     >>> from genome.tf.cofactor import resolve_tf_cofactors
     >>> registry = AnnotationRegistry.locate("mm39")                    # doctest: +SKIP
     >>> answer = resolve_tf_cofactors(registry, "gencode_vM39")         # doctest: +SKIP
@@ -377,9 +377,9 @@ def tf_cofactor_list(
         If no cofactor table ships for that species.
     ValueError
         If ``annotation`` is omitted and no **Default annotation** is decided.
-    genome.io.gtf.AnnotationNotRegisteredError
+    genome.io.annotation.registry.AnnotationNotRegisteredError
         If that annotation is not registered here.
-    genome.io.gtf.NoGeneFeaturesError
+    genome.io.annotation.stems.NoGeneFeaturesError
         If its database holds no gene at all.
 
     Examples

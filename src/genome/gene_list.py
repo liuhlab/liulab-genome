@@ -16,7 +16,7 @@ knows a category vocabulary.
 This module sits beside :mod:`genome.metadata` and for the same reason: it reads a shipped
 package resource, never the **Data dir** and never the network. It is pure — it holds no
 opinion about what is registered on this machine, which is
-:class:`~genome.io.gtf.AnnotationRegistry`'s question, and it is where that registry gets
+:class:`~genome.io.annotation.registry.AnnotationRegistry`'s question, and it is where that registry gets
 the answer it attributes and returns.
 
 **Absence is not emptiness**, and every accessor here is built around it.

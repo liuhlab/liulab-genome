@@ -40,7 +40,7 @@ out of another's bytes, so ``XrefSet("Homo sapiens")`` matches no symbol at all 
 naming the source that does.
 
 Putting an answer into your own annotation's gene ids is the call that already existed,
-:meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which is why the hub is the
+:meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids`, which is why the hub is the
 **Gene id stem**: what comes out of here goes straight in there.
 
 Examples

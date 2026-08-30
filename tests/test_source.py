@@ -209,8 +209,8 @@ def _module_level_imports(module: ModuleType) -> set[str]:
     tell *holds the module* from *holds the name it exports* — the distinction the fetch
     step's one patch point rests on (see test_fetch).
 
-    Shared with the guards in test_gtf and test_fetch: the assertions differ per module,
-    the reading of an import does not.
+    Shared with the guards in tests/annotation and test_fetch: the assertions differ per
+    module, the reading of an import does not.
     """
     assert module.__file__ is not None
     imported: set[str] = set()
@@ -223,14 +223,18 @@ def _module_level_imports(module: ModuleType) -> set[str]:
     return imported
 
 
-def test_the_seam_closes_the_download_gtf_chimera_cycle_in_one_direction_only() -> None:
+def test_the_seam_closes_the_download_annotation_chimera_cycle_in_one_direction_only() -> None:
     # Answering *what is this name* must cost none of what acting on the answer costs,
     # which is what lets the downloader import this at the top of the file. Were `source`
-    # to reach `gtf` (which imports the downloader) or `genome` (which imports
-    # everything), the resolution would go back behind a deferred import and take the
-    # cycle it was split out to close with it.
-    forbidden = {"genome.io.gtf", "genome.io.chimera", "genome.io.download", "genome.genome"}
-    assert _module_level_imports(source_module) & forbidden == set()
+    # to reach the annotation package (which imports the downloader) or `genome` (which
+    # imports everything), the resolution would go back behind a deferred import and take
+    # the cycle it was split out to close with it. A prefix for the annotation half, since
+    # every module of that package is out of bounds and a new one must not arrive
+    # unnoticed.
+    forbidden = {"genome.io.chimera", "genome.io.download", "genome.genome"}
+    reached = _module_level_imports(source_module)
+    assert reached & forbidden == set()
+    assert {name for name in reached if name.startswith("genome.io.annotation")} == set()
 
     # The seam the split left, in the one direction it runs. Resolving a name believes an
     # existing record before it consults the name, so it has to tell a chimera's record

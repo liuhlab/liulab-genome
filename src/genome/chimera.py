@@ -255,7 +255,7 @@ def suffixed(chromosome: str, component: str, separator: str) -> str:
     can detect.
 
     An empty ``chromosome`` is not refused, and gives back the tail alone: that is how
-    :func:`~genome.io.gtf.register_merged_gtf` spells the suffix it appends to a whole
+    :func:`~genome.io.annotation.registration.register_merged_gtf` spells the suffix it appends to a whole
     file's seqnames, validating the component and the separator once rather than per line.
     It is the one thing this function returns that is not a chromosome name, and
     :func:`split_suffixed` refuses to read it back as one.

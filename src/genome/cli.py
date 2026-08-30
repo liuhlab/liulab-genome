@@ -22,6 +22,14 @@ from genome.homology import NULL_CELL as _NULL_CELL
 from genome.homology import HomologyMetadata as _HomologyMetadata
 from genome.homology import HomologySet as _HomologySet
 from genome.homology.compara import HomologyAnswer as _HomologyAnswer
+from genome.io.annotation import GeneList as _GeneList
+from genome.io.annotation import GeneListSource as _GeneListSource
+from genome.io.annotation import RegisteredAnnotation as _RegisteredAnnotation
+from genome.io.annotation import annotation_status as _annotation_status
+from genome.io.annotation import gene_list as _gene_list
+from genome.io.annotation import gene_lists as _gene_lists
+from genome.io.annotation import register_annotation as _register_annotation
+from genome.io.annotation import register_gtf as _register_gtf
 from genome.io.components import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
 from genome.io.components import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
 from genome.io.components import ChimeraDetails as _ChimeraDetails
@@ -31,14 +39,6 @@ from genome.io.download import VerifiedAssembly as _VerifiedAssembly
 from genome.io.download import assembly_table_row as _assembly_table_row
 from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
-from genome.io.gtf import GeneList as _GeneList
-from genome.io.gtf import GeneListSource as _GeneListSource
-from genome.io.gtf import RegisteredAnnotation as _RegisteredAnnotation
-from genome.io.gtf import annotation_status as _annotation_status
-from genome.io.gtf import gene_list as _gene_list
-from genome.io.gtf import gene_lists as _gene_lists
-from genome.io.gtf import register_annotation as _register_annotation
-from genome.io.gtf import register_gtf as _register_gtf
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
 from genome.tf.cofactor import tf_cofactor_list as _tf_cofactor_list

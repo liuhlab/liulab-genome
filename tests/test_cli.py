@@ -34,15 +34,15 @@ from genome.homology import (
 )
 from genome.io import download as download_mod
 from genome.io import fetch as fetch_mod
-from genome.io.completion import RECORD_NAME, read_record, record_path, write_record
-from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
-from genome.io.gtf import (
+from genome.io.annotation import (
     AnnotationRegistry,
     GtfAnnotation,
     MergeSource,
     annotation_dir,
     register_merged_gtf,
 )
+from genome.io.completion import RECORD_NAME, read_record, record_path, write_record
+from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.metadata import AnnotationMetadata, AssemblyMetadata
 from genome.seq import DNA
 from genome.tf.cofactor import CofactorTable, cofactor_table
@@ -1287,7 +1287,7 @@ class TestTFGeneListCommand:
     The shipped censuses answer, as the shipped curated lists answer for gene categories:
     which genes are transcription factors is the census's judgement and no fixture stands
     in for it, so every expectation below is read off the shipped file. What is asserted
-    here is the command and not the crossing — ``tests/test_gtf.py`` owns that — so: the
+    here is the command and not the crossing — ``tests/annotation/`` owns that — so: the
     stdout/stderr split that makes the output pipe, the record ``--json`` emits, and a
     non-zero exit naming the next action for each of the three ways it can fail.
     """
@@ -1432,7 +1432,7 @@ class TestTFCofactorListCommand:
     The shipped tables answer, as the shipped censuses answer for TF genes: which genes a
     publisher lists as cofactors is that publisher's judgement and no fixture stands in for
     it, so every expectation below is read off the shipped file. What is asserted here is
-    the command and not the crossing — ``tests/test_gtf.py`` owns that — so: the
+    the command and not the crossing — ``tests/annotation/`` owns that — so: the
     stdout/stderr split that makes the output pipe, the record ``--json`` emits, and a
     non-zero exit naming the next action for each of the three ways it can fail.
 

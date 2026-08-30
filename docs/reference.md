@@ -185,9 +185,21 @@
 
 ::: genome.io.fasta
 
-## `genome.io.gtf`
+## `genome.io.annotation.registration`
 
-::: genome.io.gtf
+::: genome.io.annotation.registration
+
+## `genome.io.annotation.registry`
+
+::: genome.io.annotation.registry
+
+## `genome.io.annotation.stems`
+
+::: genome.io.annotation.stems
+
+## `genome.io.annotation.database`
+
+::: genome.io.annotation.database
 
 ## `genome.io.twobit`
 

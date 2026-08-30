@@ -10,6 +10,23 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **`io/gtf.py` split four ways, and gene id stem resolution became findable.** The largest
+  module in the package held four clusters that barely touched each other, and is now
+  `genome.io.annotation`, a package of four: `registration.py` puts an annotation on disk — the
+  fetch, the placement, the **Chromosome** check, the repair-command strings, the **Completion
+  marker**, the **Merged annotation** a chimera build derives, and the two registrars addressed
+  by assembly name; `registry.py` holds `AnnotationRegistry`, the three scans, the **Default
+  annotation** rule and the by-assembly-name questions; `stems.py` holds the **Gene id stem**
+  crossing that the Xref, Orthology and TF contexts all make; and `database.py` is the `gffutils`
+  adapter, sixty lines, **the only module in the package that imports the library** — held by a
+  test that reads every file under `src/` rather than only the four. Resolving stems still walks
+  the database's gene rows one at a time, now over a generator that yields off the cursor, so a
+  GENCODE-sized annotation is still never held in memory. `AnnotationRegistry` stays one class
+  with one interface and calls across the four. **Nothing a caller can see changed.** `genome`
+  and `genome.io` export exactly the names they exported before, `genome.__all__` is untouched,
+  and every command's `--json` emits the same keys in the same order. `tests/test_gtf.py` splits
+  the same four ways into `tests/annotation/`, with the shared registration helpers in one
+  `conftest.py`; every test that was there is still there, under its own name.
 <<<<<<< HEAD
 - **One module reads every shipped table, where six brought their own loader.** `genome.shipped`
   owns resource lookup, gzip, header validation, cell parsing, the blank-cell rules, duplicate-key

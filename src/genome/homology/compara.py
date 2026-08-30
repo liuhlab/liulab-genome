@@ -690,7 +690,7 @@ class HomologyAnswer:
     """The homologous genes one **Homology set** names for the stems it was asked about.
 
     :meth:`HomologySet.homologs`'s answer, in the shape
-    :class:`~genome.io.gtf.ResolvedGeneIds` establishes: every stem that named at least one
+    :class:`~genome.io.annotation.stems.ResolvedGeneIds` establishes: every stem that named at least one
     **Homology link** maps to all of them, in ask order, and no value is ever empty — a
     stem that named none is in :attr:`unresolved` instead. Nothing here picks a "best"
     homolog, and this package computes no ranking or quality score of its own.
