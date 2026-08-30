@@ -198,7 +198,10 @@ reportMissingTypeStubs = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-ra", "--strict-markers", "--strict-config"]
+# `-p no:anyio`: anyio arrives transitively and registers a `pytest11` entry point every
+# xdist worker imports at startup, though no test here is async. Nothing else installed
+# is dead weight — pytest-cov, xdist and hypothesis are all load-bearing.
+addopts = ["-ra", "--strict-markers", "--strict-config", "-p", "no:anyio"]
 xfail_strict = true
 filterwarnings = ["error"]
 markers = [

@@ -52,12 +52,31 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
+    # memelite's scan and compare engines are `@numba.njit(cache=True)`, and numba writes
+    # that cache beside the package it compiled — inside the pixi env. setup-pixi saves its
+    # env tarball straight after `pixi install`, which is BEFORE any test has run, so the
+    # compiled artifacts were never in it: every run recompiled from source. Measured at
+    # 27.5 s, which was 47% of this lane's whole wall and the single largest item in CI.
+    #
+    # Redirecting the cache to a path of our own is what makes it cacheable separately.
+    # It is 936 KB and restores in under a second.
+    env:
+      NUMBA_CACHE_DIR: ${{ github.workspace }}/.numba-cache
     steps:
       - uses: actions/checkout@v5
       - uses: prefix-dev/setup-pixi@v0.10.0
         with:
           environments: test
           locked: true
+      # Keyed on the lockfile: a compiled artifact is only valid for the numba and memelite
+      # that produced it, and the lock is what pins both. `restore-keys` is deliberately
+      # ABSENT — a stale-keyed cache would be restored and then rejected by numba's own
+      # magic-tuple check, paying the download for nothing and recompiling anyway.
+      - name: numba JIT cache
+        uses: actions/cache@v4
+        with:
+          path: .numba-cache
+          key: numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}
       - name: pytest -m 'not aligner'
         run: pixi run -e test test -- --durations=10
 
