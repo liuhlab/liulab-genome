@@ -63,14 +63,28 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   by a symbol HGNC has retired** — `ARNTL` for `BMAL1`, `C11orf30` for `EMSY` — and an approved-only
   join mis-keys or drops exactly those. Matching is **exact by default**, so `Brca1` asked of a human
   set matches nothing rather than half-working; `case_insensitive=True` is opt-in and still returns
-  **every** gene matched rather than picking one.
+  **every** gene matched rather than picking one. **From a shell it is `genome match-symbols
+  <species> <symbols>...`** — a command of its own, because a symbol is a verb of its own and not a
+  third direction of `genome xref`: it parses arguments, makes that one call and renders, so
+  `import genome` and the shell hit one code path and `--json` is `as_json()` verbatim. The matches
+  go to stdout tab-separated in the four columns `asked, symbol, gene_id_stem, kind` — the last three
+  being the keys `SymbolMatch.as_json()` writes, in its order, so the two renderings cannot drift —
+  with the heading, the URL, the counts and what this source could not have matched on stderr.
+  **Every symbol passed leaves with at least one row**, the ones that matched nothing getting one
+  with the other columns empty. `--case-insensitive` is the opt-in fold and still prints every match;
+  `--source` names an **Xref source**, and one that carries no symbols exits `1` naming the ones that
+  do.
 - **The two directions are deliberately not mirror images.** Away from the hub,
   `from_stems(stems, "symbol")` gives the authority's **single current approved symbol** — this is
   labelling a figure axis, and it is one-to-one by the authority's own construction. Toward it,
   `to_stems(ids, "symbol")` **raises** naming `match_symbols` rather than answering on approved
-  spellings alone, which is the failure above. The kind of each spelling is stored in the set's own
-  plain gzipped TSV — `symbol`, `previous_symbol`, `alias_symbol` in the namespace column — so a
-  collaborator reads it in a shell with `awk`.
+  spellings alone, which is the failure above. The shell says the same thing in its own words:
+  `genome xref --from-stems symbol` labels, `genome xref --to-stems symbol` exits `2` naming
+  `genome match-symbols` — a shell user cannot act on the name of a Python call — and the
+  `--to-stems` help no longer lists the namespace the command refuses, so help and behaviour agree.
+  The kind of each spelling is stored in the set's own plain gzipped TSV — `symbol`,
+  `previous_symbol`, `alias_symbol` in the namespace column — so a collaborator reads it in a shell
+  with `awk`.
 - **Two further Xref sources, and both pin.** `hgnc` is human's, from HGNC's **quarterly archive file
   of 2026-07-07**, and is the only one that publishes previous and alias spellings *typed*. Its
   reader **parses by header name and never by position**, because the schema has drifted from **52**

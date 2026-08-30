@@ -9,10 +9,11 @@ import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 import gffutils
 import pytest
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from genome import __version__ as genome_version
 from genome import metadata
@@ -49,12 +50,19 @@ from genome.tf.motif import MIN_MOTIF_LENGTH, hit_count, provenance_of, read_hit
 from genome.tf.motif import jaspar as jaspar_mod
 from genome.tf.motif.jaspar import MOTIF_COUNTS
 from genome.xref import (
+    ALIAS,
     ALLIANCE,
+    ALLIANCE_BGI,
+    APPROVED,
     ENSEMBL,
     ENSEMBL_TSV,
     ENTREZ,
     HGNC,
+    HGNC_ARCHIVE,
     MGI,
+    NAMESPACES,
+    PREVIOUS,
+    SYMBOL,
     UNIPROT,
     XrefSet,
     lookup_xref,
@@ -82,6 +90,17 @@ from .test_scan import FIXTURE as _PLANTED_FASTA
 from .test_xref import FIXTURE as _XREF_FIXTURE
 from .test_xref import HUMAN_GENE_WITHOUT_A_HUB as _XREF_NO_HUB
 from .test_xref import RELEASE as _XREF_RELEASE
+from .test_xref_symbols import ADCY3_STEM as _ADCY3_STEM
+from .test_xref_symbols import ADCY8_STEM as _ADCY8_STEM
+from .test_xref_symbols import AMBIGUOUS_SYMBOL as _AMBIGUOUS_SYMBOL
+from .test_xref_symbols import BGI_MOUSE as _BGI_MOUSE_FIXTURE
+from .test_xref_symbols import BMAL1 as _BMAL1_STEM
+from .test_xref_symbols import HGNC_FIXTURE as _HGNC_FIXTURE
+from .test_xref_symbols import HGNC_RELEASE as _HGNC_RELEASE
+from .test_xref_symbols import MOUSE_CASED_SYMBOL as _MOUSE_CASED_SYMBOL
+from .test_xref_symbols import RETIRED_EPIFACTORS_SYMBOL as _RETIRED_SYMBOL
+from .test_xref_symbols import RETIRED_EPIFACTORS_SYMBOL_TOO as _RETIRED_SYMBOL_TOO
+from .test_xref_symbols import _digest as _fixture_digest
 
 runner = CliRunner()
 _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
@@ -120,6 +139,21 @@ _MOUSE_ASSEMBLY, _MOUSE_ANNOTATION = "mm39", "gencode_vM39"
 #: fixture carries the two things the command's shape exists for: a foreign id naming two
 #: **Gene id stem**s, and a real gene with no Ensembl cross-reference to reach at all.
 _XREF_SPECIES = "Homo sapiens"
+
+#: The one gene the HGNC fixture spells all three ways, so that a single invocation of
+#: ``genome match-symbols`` can be asked for an approved, a previous and an alias match at
+#: once. The previous spelling is imported rather than written here: it is one of the 31
+#: measured EpiFactors rows and ``tests/test_xref_symbols.py`` is where that is recorded.
+_APPROVED_SYMBOL, _ALIAS_SYMBOL = "BMAL1", "MOP3"
+
+#: The stem the second measured EpiFactors spelling reaches — EMSY's, as the shipped human
+#: **Cofactor table** records it, which is the table the 801-row measurement was made on.
+_EMSY_STEM = "ENSG00000158636"
+
+#: A symbol MGI has retired, asked of the mouse set to show what *cannot* be matched there:
+#: that source publishes one current approved spelling per gene, so this comes back
+#: unresolved and the answer must say why rather than letting it read as an absent gene.
+_MOUSE_RETIRED_SYMBOL = "Arntl"
 
 #: The three species ``genome homologs`` is exercised against, spelled as the shipped
 #: provenance table spells them. All three pairings among them must answer, which is an
@@ -270,6 +304,61 @@ def xref_release(fake_fetch: FakeFetch, xref_pinned: None) -> FakeFetch:
     """Serve the committed Alliance slice as the publisher's file, pinned to it."""
     fake_fetch.serve(_XREF_FIXTURE)
     return fake_fetch
+
+
+@pytest.fixture
+def symbol_pinned(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> dict[str, Path]:
+    """Pin the symbol-carrying **Xref source** rows to the fixtures cut out of their files.
+
+    ``tests/test_xref_symbols.py``'s arrangement: the checksum check is never switched off,
+    only pointed at the bytes that actually arrive. The mapping it returns is what each
+    URL should serve, so a fetch can be routed by URL and the human and the mouse set can
+    be held at once — which one test below needs, the two sources matching different kinds.
+    """
+    by_url = {
+        lookup_xref(_XREF_SPECIES, HGNC_ARCHIVE).url: data_dir / _HGNC_FIXTURE,
+        lookup_xref(_MOUSE, ALLIANCE_BGI).url: data_dir / _BGI_MOUSE_FIXTURE,
+    }
+    rows = tuple(
+        replace(row, source_checksum=f"md5:{_fixture_digest(by_url[row.url])}")
+        if row.url in by_url
+        else row
+        for row in xref_table()
+    )
+    monkeypatch.setattr(xref_metadata_mod, "xref_table", lambda: rows)
+    return by_url
+
+
+@pytest.fixture
+def symbol_sources(
+    fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch, symbol_pinned: dict[str, Path]
+) -> FakeFetch:
+    """Serve each symbol source's publisher file, routed by the URL the package built."""
+
+    def route(url: str, dest_dir: Path, **kwargs: Any) -> Path:
+        fake_fetch.serve(symbol_pinned[url])
+        return fake_fetch(url, dest_dir, **kwargs)
+
+    monkeypatch.setattr(fetch_mod, "fetch_url", route)
+    return fake_fetch
+
+
+def _help_text(*command: str) -> str:
+    """One command's ``--help``, with the box rules and the wrapping taken out of the words.
+
+    Rich draws the options in a bordered table, so a sentence too long for one line arrives
+    with a ``│`` and a newline through the middle of it. What a test asserts is what the help
+    *says*, so the drawing goes and the whitespace collapses.
+    """
+    rendered = _output(runner.invoke(app, [*command, "--help"]))
+    return " ".join(rendered.replace("│", " ").split())
+
+
+def _match_symbols(*arguments: str) -> Result:
+    """Ask the human HGNC set, the one shipped source that carries all three kinds."""
+    return runner.invoke(
+        app, ["match-symbols", _XREF_SPECIES, "--source", HGNC_ARCHIVE, *arguments]
+    )
 
 
 class TestVersion:
@@ -1928,6 +2017,29 @@ class TestXrefCommand:
         assert result.stdout == ""
         assert HGNC in _output(result)
 
+    def test_the_symbol_namespace_toward_the_hub_names_the_command_that_answers_it(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # The API refuses this call naming `match_symbols(symbols)`, which is a Python call
+        # and no next action at all for someone in a shell. The surface owns which of *its*
+        # spellings to reach for, so the refusal happens here and names the command.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", SYMBOL, _RETIRED_SYMBOL])
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        assert "genome match-symbols" in _output(result)
+        # Refused before anything was fetched: no set has to be prepared to know that this
+        # direction is answered by another command.
+        assert xref_release.calls == []
+
+    def test_the_to_stems_help_no_longer_offers_the_namespace_it_refuses(self) -> None:
+        # Help and behaviour agree or the command advertises a conversion it will not make.
+        offered = _help_text("xref")
+
+        assert ", ".join(name for name in NAMESPACES if name != SYMBOL) in offered
+        assert ", ".join(NAMESPACES) not in offered
+        assert "genome match-symbols" in offered
+
     def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
         self, monkeypatch: pytest.MonkeyPatch, xref_pinned: None
     ) -> None:
@@ -1965,6 +2077,298 @@ class TestXrefCommand:
         runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
 
         assert xref_release.last.progressbar is True
+
+
+class TestMatchSymbolsCommand:
+    """``genome match-symbols`` — the shell surface over ``XrefSet.match_symbols``.
+
+    Offline throughout, the way ``tests/test_xref_symbols.py`` is: the fake fetch serves the
+    committed HGNC archive cut and the Alliance's MGI submission, routed by the URL the
+    package built, and the curated rows are pinned to them. What is asserted here is the
+    command and not the match — ``tests/test_xref_symbols.py`` owns the three kinds, the
+    folding and the asymmetry — so: a symbol reaching its genes from a shell at all, the
+    kind of every match surviving the render, exact matching being what happens unless case
+    is folded on purpose, the symbols that matched nothing staying visible in *both*
+    renderings, and a non-zero exit naming the next action for each way it can fail.
+
+    It is a command of its own rather than a third direction of ``genome xref`` for the
+    reason ``match_symbols`` is a verb of its own: a symbol matches spellings the authority
+    has retired, answers with every gene any of them names, and carries a kind on each
+    match, so it is neither of that command's two hops and does not render as one.
+
+    The strongest claim here is that the command holds no logic the API does not, and it is
+    checked the only way that can be: ``--json`` is asserted equal to what the same call
+    answers in Python, whole, both exactly and folded.
+    """
+
+    def test_a_symbol_reaches_the_gene_it_names(self, symbol_sources: FakeFetch) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\t{APPROVED}"
+        ]
+
+    def test_a_retired_spelling_from_the_measured_epifactors_set_resolves(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The failure the whole symbol feature exists to prevent, reached from a shell: of
+        # EpiFactors v2.0's 801 human rows, 31 spell the gene by a symbol HGNC has since
+        # retired, and a join that knows approved spellings only drops exactly those.
+        result = _match_symbols(_RETIRED_SYMBOL, _RETIRED_SYMBOL_TOO)
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_RETIRED_SYMBOL}\t{_RETIRED_SYMBOL}\t{_BMAL1_STEM}\t{PREVIOUS}",
+            f"{_RETIRED_SYMBOL_TOO}\t{_RETIRED_SYMBOL_TOO}\t{_EMSY_STEM}\t{PREVIOUS}",
+        ]
+
+    def test_every_match_says_which_kind_of_spelling_it_was(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # One gene, spelled three ways, in one call. Which kind matched is the answer's and
+        # not a detail: without it a retired spelling and a current one read alike.
+        result = _match_symbols(_APPROVED_SYMBOL, _RETIRED_SYMBOL, _ALIAS_SYMBOL)
+
+        assert result.exit_code == 0
+        assert [line.split("\t") for line in result.stdout.splitlines()] == [
+            [_APPROVED_SYMBOL, _APPROVED_SYMBOL, _BMAL1_STEM, APPROVED],
+            [_RETIRED_SYMBOL, _RETIRED_SYMBOL, _BMAL1_STEM, PREVIOUS],
+            [_ALIAS_SYMBOL, _ALIAS_SYMBOL, _BMAL1_STEM, ALIAS],
+        ]
+
+    def test_a_symbol_naming_two_genes_prints_both_and_nothing_picks_one(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # `ADCY3` is HGNC's approved symbol for one gene and a symbol it retired from
+        # another, so ambiguity is the ordinary case rather than an edge one, and the shell
+        # is handed both with the kind that distinguishes them.
+        result = _match_symbols(_AMBIGUOUS_SYMBOL)
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_AMBIGUOUS_SYMBOL}\t{_AMBIGUOUS_SYMBOL}\t{_ADCY3_STEM}\t{APPROVED}",
+            f"{_AMBIGUOUS_SYMBOL}\t{_AMBIGUOUS_SYMBOL}\t{_ADCY8_STEM}\t{PREVIOUS}",
+        ]
+
+    def test_matching_is_exact_unless_case_is_folded_on_purpose(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The species is fixed by the set, so a mouse-cased spelling asked of a human set is
+        # the wrong authority's rather than a typo to absorb — and saying so beats half
+        # working.
+        result = _match_symbols(_MOUSE_CASED_SYMBOL)
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [f"{_MOUSE_CASED_SYMBOL}\t\t\t"]
+        assert "exact" in result.stderr
+
+    def test_case_insensitive_matching_is_opt_in_and_still_returns_every_match(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # Convenience never costs correctness: folding widens what matches and narrows
+        # nothing, so the ambiguity that was there exactly is still there folded — and the
+        # authority's own spelling comes back beside the one that was asked about.
+        result = _match_symbols("adcy3", "--case-insensitive")
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"adcy3\t{_AMBIGUOUS_SYMBOL}\t{_ADCY3_STEM}\t{APPROVED}",
+            f"adcy3\t{_AMBIGUOUS_SYMBOL}\t{_ADCY8_STEM}\t{PREVIOUS}",
+        ]
+        assert "case-insensitive" in result.stderr
+
+    def test_symbols_that_matched_nothing_stay_in_the_human_output(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # What your list holds and this release does not is the one thing a hand-rolled
+        # join drops silently, so it gets a row here like everything else.
+        result = _match_symbols(_APPROVED_SYMBOL, "nosuchgene")
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\t{APPROVED}",
+            "nosuchgene\t\t\t",
+        ]
+        assert "1 this release matched nothing for" in result.stderr
+
+    def test_symbols_that_matched_nothing_stay_in_the_json(self, symbol_sources: FakeFetch) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL, "nosuchgene", "--json")
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["unresolved"] == ["nosuchgene"]
+        assert "nosuchgene" not in payload["resolved"]
+
+    def test_json_is_the_answer_the_api_renders(self, symbol_sources: FakeFetch) -> None:
+        asked = [_AMBIGUOUS_SYMBOL, _RETIRED_SYMBOL, "nosuchgene"]
+
+        result = _match_symbols(*asked, "--json")
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet(_XREF_SPECIES, HGNC_ARCHIVE).match_symbols(asked).as_json()
+        )
+
+    def test_json_is_the_answer_the_api_renders_folded_too(self, symbol_sources: FakeFetch) -> None:
+        asked = [_MOUSE_CASED_SYMBOL, "adcy3"]
+
+        result = _match_symbols(*asked, "--case-insensitive", "--json")
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet(_XREF_SPECIES, HGNC_ARCHIVE)
+            .match_symbols(asked, case_insensitive=True)
+            .as_json()
+        )
+
+    def test_the_matches_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert result.exit_code == 0
+        assert result.stdout == f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\tapproved\n"
+        # Which authority said so, and when, is what a reader needs and what a pipeline
+        # must not be handed: it goes beside the matches rather than among them.
+        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in result.stderr
+        assert _XREF_SPECIES in result.stderr
+        assert lookup_xref(_XREF_SPECIES, HGNC_ARCHIVE).url in result.stderr
+        assert "gene symbols -> gene id stems" in result.stderr
+
+    def test_the_text_columns_are_the_json_matches_own_values_so_the_two_cannot_drift(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        text = _match_symbols(_AMBIGUOUS_SYMBOL)
+        payload = _match_symbols(_AMBIGUOUS_SYMBOL, "--json")
+
+        matches = _json.loads(payload.stdout)["resolved"][_AMBIGUOUS_SYMBOL]
+        assert text.stdout.splitlines() == [
+            "\t".join([_AMBIGUOUS_SYMBOL, match["symbol"], match["gene_id_stem"], match["kind"]])
+            for match in matches
+        ]
+
+    def test_the_answer_names_the_source_and_release_that_produced_it(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL, "--json")
+
+        payload = _json.loads(result.stdout)
+        assert (payload["source"], payload["release"]) == (HGNC_ARCHIVE, _HGNC_RELEASE)
+        assert (payload["species"], payload["case_insensitive"]) == (_XREF_SPECIES, False)
+
+    def test_a_source_matching_current_symbols_only_says_so_before_it_reads_as_absent(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # MGI's submission publishes one current approved symbol per gene, so a spelling it
+        # retired matches nothing — and an answer that did not say why would look exactly
+        # like a gene that is not in the release.
+        result = runner.invoke(
+            app, ["match-symbols", _MOUSE, "--source", ALLIANCE_BGI, _MOUSE_RETIRED_SYMBOL]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [f"{_MOUSE_RETIRED_SYMBOL}\t\t\t"]
+        assert f"on {APPROVED} spellings" in result.stderr
+        for missing in (PREVIOUS, ALIAS):
+            assert missing in result.stderr
+
+    def test_a_set_that_matches_every_kind_carries_no_such_note(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert f"on {APPROVED}, {PREVIOUS}, {ALIAS} spellings" in result.stderr
+        assert "limits" not in result.stderr
+
+    def test_a_source_that_carries_no_symbols_exits_one_naming_the_ones_that_do(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # The Alliance's cross-reference file carries no human symbol at all, measured on
+        # the whole 25 MB file — so asking it is a different failure from a gene that is
+        # absent, and the message names the sources that would answer.
+        result = runner.invoke(app, ["match-symbols", _XREF_SPECIES, _APPROVED_SYMBOL])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert HGNC_ARCHIVE in _output(result)
+        assert ALLIANCE_BGI in _output(result)
+
+    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["match-symbols", "Danio rerio", _APPROVED_SYMBOL])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        for species in xref_species():
+            assert species in _output(result)
+        assert symbol_sources.calls == []
+
+    def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = runner.invoke(
+            app, ["match-symbols", _XREF_SPECIES, "--source", "ncbi", _APPROVED_SYMBOL]
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert HGNC_ARCHIVE in _output(result)
+
+    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
+        self, monkeypatch: pytest.MonkeyPatch, symbol_pinned: dict[str, Path]
+    ) -> None:
+        def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
+            raise ConnectionError("the compute node has no internet")
+
+        monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE) in _output(result)
+        assert "login node" in _output(result)
+
+    def test_a_set_left_unfinished_exits_one_naming_the_repair(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        directory = xref_set_dir(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE)
+        directory.mkdir(parents=True)
+        (directory / xref_slice_name(_XREF_SPECIES)).write_bytes(b"half a file")
+
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE) in _output(result)
+
+    def test_the_other_direction_is_still_the_xref_commands_to_answer(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The pair reads coherently or neither does: away from the hub a stem takes the
+        # authority's one current approved spelling, which is a two-column hop like every
+        # other and stays on `genome xref`.
+        result = runner.invoke(
+            app,
+            ["xref", _XREF_SPECIES, "--source", HGNC_ARCHIVE, "--from-stems", SYMBOL, _BMAL1_STEM],
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
+
+    def test_the_progress_display_is_suppressed_under_json(self, symbol_sources: FakeFetch) -> None:
+        _match_symbols(_APPROVED_SYMBOL, "--json")
+
+        assert symbol_sources.last.progressbar is False
+
+    def test_the_progress_display_is_drawn_without_it(self, symbol_sources: FakeFetch) -> None:
+        _match_symbols(_APPROVED_SYMBOL)
+
+        assert symbol_sources.last.progressbar is True
 
 
 class TestHomologsCommand:
