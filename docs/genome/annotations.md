@@ -71,6 +71,8 @@ worm.annotations.broken                           # []
 
 A name in none of the three is the fourth state: not here, and not offered either. There is
 no `len()`, no `in` and no iterating over `worm.annotations`, so name the list you mean.
+**`if worm.annotations:` is always true and asks nothing**; `if worm.annotations.registered:`
+is the question.
 
 `genome annotation list` prints what is here against what the table offers:
 

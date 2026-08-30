@@ -35,7 +35,7 @@ scan never pays for a thousand plant matrices.
 Constructing a `JasparDatabase` prepares it. The first construction of a given release and
 tax group fetches the file, checks that it holds the number of motifs that release is known
 to hold, and records that it finished. Every construction after that re-reads what is there
-and touches the network not at all.
+and needs no network.
 
 The files land in the shared [data directory](../index.md#the-data-directory), where every project on the machine reads the same copy.
 
@@ -67,8 +67,8 @@ ctcf.counts.shape     # (4, 15)
 ```
 
 `counts` is the matrix itself, four rows in `A`, `C`, `G`, `T` order and one column per
-position. It is read-only, so a motif cannot be edited into a different motif behind its own
-identity.
+position. It is read-only, so nothing can change a motif's matrix while it keeps the same
+id.
 
 **A motif name is a label and several motifs can carry it**, which is why indexing by one
 that is not unique refuses rather than picking:
@@ -141,7 +141,7 @@ Every scan in this package answers with the same table, one row per hit.
 | `strand` | `+` or `-`, never `.`. A scan knows which of the two it scored. |
 | `score` | The log-odds score in bits. Not a p-value. |
 
-What the scan was is on `frame.attrs`, so a table never has to be asked where it came from:
+What the scan was is on `frame.attrs`, so a table always says where it came from:
 
 ```python
 hits.attrs["threshold"]              # 0.0001
@@ -205,8 +205,7 @@ hits = read_hits("/tmp/sacCer3_hits.parquet")
 hits.attrs["background"]    # (0.303, 0.194, 0.199, 0.304)
 ```
 
-`hit_count` counts the rows off the file's footer without reading one of them, which is the
-point of a scan that streamed to disk in the first place:
+`hit_count` counts the rows off the file's footer without reading one of them:
 
 ```python
 hit_count("/tmp/sacCer3_hits.parquet")    # 2302168
