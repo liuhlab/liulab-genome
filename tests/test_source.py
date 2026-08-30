@@ -75,25 +75,23 @@ def _chimera_details(*components: str) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 
 
-def test_a_name_the_table_does_not_list_is_fetched_from_the_derived_url(tmp_path: Path) -> None:
+def test_the_fetch_a_name_falls_through_to_is_pinned_derived_or_blank_falls_back(
+    tmp_path: Path,
+) -> None:
+    # A name the shipped table does not list is fetched from the derived golden-path URL...
     source = resolve_source(
         AssemblyDir.locate("hg38", tmp_path), metadata=None, golden_path_url=_GOLDEN
     )
-
     assert source == FetchedSource(url=_GOLDEN, derived=True)
 
-
-def test_a_row_that_pins_a_source_answers_outright_and_is_not_derived(tmp_path: Path) -> None:
-    source = resolve_source(
+    # ...a row that pins a source answers outright and is not derived, `derived` being
+    # the whole difference that decides whether the name is checked at UCSC first...
+    pinned = resolve_source(
         AssemblyDir.locate("tiny", tmp_path), metadata=_row(_PINNED_URL), golden_path_url=_GOLDEN
     )
+    assert pinned == FetchedSource(url=_PINNED_URL, derived=False)
 
-    # `derived` is the whole difference between the two, and it is what decides whether
-    # the assembly name is checked at UCSC before a byte is downloaded.
-    assert source == FetchedSource(url=_PINNED_URL, derived=False)
-
-
-def test_a_blank_pin_falls_back_to_the_derived_url() -> None:
+    # ...and a blank pin is the same as no pin at all.
     assert fetched_source(_row(""), _GOLDEN).url == _GOLDEN
 
 
@@ -102,25 +100,23 @@ def test_a_blank_pin_falls_back_to_the_derived_url() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_name_whose_parts_are_all_listed_assemblies_is_a_component_set(tmp_path: Path) -> None:
+def test_a_name_is_read_as_a_component_set_only_when_both_halves_are_assemblies(
+    tmp_path: Path,
+) -> None:
     # Both parts are in the shipped table, which is what tells a chimera's name from a
     # free-form local key on a machine holding neither.
-    source = resolve_source(
+    chimera = resolve_source(
         AssemblyDir.locate("ce11_ecHT115", tmp_path), metadata=None, golden_path_url=_GOLDEN
     )
+    assert chimera == ComponentSource(("ce11", "ecHT115"))
 
-    assert source == ComponentSource(("ce11", "ecHT115"))
-
-
-def test_a_name_whose_parts_are_nobodys_assembly_is_just_a_name(tmp_path: Path) -> None:
-    source = resolve_source(
+    # Neither half being nobody's assembly reads as one plain name instead...
+    plain = resolve_source(
         AssemblyDir.locate("my_ref", tmp_path), metadata=None, golden_path_url=_GOLDEN
     )
+    assert plain == FetchedSource(url=_GOLDEN, derived=True)
 
-    assert source == FetchedSource(url=_GOLDEN, derived=True)
-
-
-def test_a_name_with_no_underscore_never_reaches_the_split(tmp_path: Path) -> None:
+    # ...and a name with no underscore never reaches the split in the first place.
     assert isinstance(
         resolve_source(
             AssemblyDir.locate("hg38", tmp_path), metadata=None, golden_path_url=_GOLDEN
@@ -159,40 +155,30 @@ def test_only_a_prepared_component_counts_when_the_table_lists_neither(
 # ---------------------------------------------------------------------------
 
 
-def test_a_chimeras_own_record_says_what_it_is_made_of(tmp_path: Path) -> None:
-    _record_a_genome(tmp_path, "ce11_ecHT115", _chimera_details("ce11", "ecHT115"))
-
-    source = resolve_source(
-        AssemblyDir.locate("ce11_ecHT115", tmp_path), metadata=None, golden_path_url=_GOLDEN
-    )
-
-    assert source == ComponentSource(("ce11", "ecHT115"))
-
-
-def test_a_plain_record_keeps_a_chimera_shaped_name_whatever_it_was_registered_as(
+def test_an_own_record_is_believed_outright_over_the_name_and_over_no_record_at_all(
     tmp_path: Path,
 ) -> None:
-    # The reason the record comes first: `ce11_ecHT115` seeded years ago from somebody's
-    # own FASTA is not a chimera, and no amount of the name looking like one may change
-    # what a finished registration already is.
-    _record_a_genome(tmp_path, "ce11_ecHT115", None)
+    # A chimera's own record says what it is made of...
+    chimera_dir = tmp_path / "chimera"
+    _record_a_genome(chimera_dir, "ce11_ecHT115", _chimera_details("ce11", "ecHT115"))
+    assert resolve_source(
+        AssemblyDir.locate("ce11_ecHT115", chimera_dir), metadata=None, golden_path_url=_GOLDEN
+    ) == ComponentSource(("ce11", "ecHT115"))
 
-    source = resolve_source(
-        AssemblyDir.locate("ce11_ecHT115", tmp_path), metadata=None, golden_path_url=_GOLDEN
-    )
+    # ...and the reason the record comes first: `ce11_ecHT115` seeded years ago from
+    # somebody's own FASTA is not a chimera, and no amount of the name looking like one
+    # may change what a finished registration already is.
+    plain_dir = tmp_path / "plain"
+    _record_a_genome(plain_dir, "ce11_ecHT115", None)
+    assert resolve_source(
+        AssemblyDir.locate("ce11_ecHT115", plain_dir), metadata=None, golden_path_url=_GOLDEN
+    ) == FetchedSource(url=_GOLDEN, derived=True)
 
-    assert source == FetchedSource(url=_GOLDEN, derived=True)
-
-
-def test_a_record_that_is_lost_falls_through_to_the_name(tmp_path: Path) -> None:
-    _record_a_genome(tmp_path, "ce11_ecHT115", None)
-    (tmp_path / ".completion.json").unlink()
-
-    source = resolve_source(
-        AssemblyDir.locate("ce11_ecHT115", tmp_path), metadata=None, golden_path_url=_GOLDEN
-    )
-
-    assert source == ComponentSource(("ce11", "ecHT115"))
+    # A record that is lost, though, falls all the way through to the name.
+    (plain_dir / ".completion.json").unlink()
+    assert resolve_source(
+        AssemblyDir.locate("ce11_ecHT115", plain_dir), metadata=None, golden_path_url=_GOLDEN
+    ) == ComponentSource(("ce11", "ecHT115"))
 
 
 # ---------------------------------------------------------------------------
@@ -237,18 +223,15 @@ def _module_level_imports(module: ModuleType) -> set[str]:
     return imported
 
 
-def test_resolving_a_name_imports_nothing_that_builds_one() -> None:
-    # The seam, asserted. Answering *what is this name* must cost none of what acting on
-    # the answer costs, which is what lets the downloader import this at the top of the
-    # file. Were `source` to reach `gtf` (which imports the downloader) or `genome` (which
-    # imports everything), the resolution would go back behind a deferred import and take
-    # the cycle it was split out to close with it.
+def test_the_seam_closes_the_download_gtf_chimera_cycle_in_one_direction_only() -> None:
+    # Answering *what is this name* must cost none of what acting on the answer costs,
+    # which is what lets the downloader import this at the top of the file. Were `source`
+    # to reach `gtf` (which imports the downloader) or `genome` (which imports
+    # everything), the resolution would go back behind a deferred import and take the
+    # cycle it was split out to close with it.
     forbidden = {"genome.io.gtf", "genome.io.chimera", "genome.io.download", "genome.genome"}
-
     assert _module_level_imports(source_module) & forbidden == set()
 
-
-def test_resolving_a_name_reads_the_record_half_and_nothing_reads_back() -> None:
     # The seam the split left, in the one direction it runs. Resolving a name believes an
     # existing record before it consults the name, so it has to tell a chimera's record
     # from any other — one call into `components`. Nothing in `components` needs a name
@@ -256,9 +239,7 @@ def test_resolving_a_name_reads_the_record_half_and_nothing_reads_back() -> None
     assert "genome.io.components" in _module_level_imports(source_module)
     assert "genome.io.source" not in _module_level_imports(components_module)
 
-
-def test_the_downloader_reads_the_resolution_without_deferring_it() -> None:
-    # The other half: four deferred imports paid for the old arrangement, and the only one
-    # left is the build, which opens a whole Genome per component.
+    # The other half: four deferred imports paid for the old arrangement, and the only
+    # one left is the build, which opens a whole Genome per component.
     assert "genome.io.source" in _module_level_imports(download_module)
     assert "genome.io.chimera" not in _module_level_imports(download_module)

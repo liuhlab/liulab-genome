@@ -55,6 +55,12 @@ from genome.tf.motif import mixin as mixin_module
 from .conftest import DATA_DIR, install_network_guard
 from .test_source import _module_level_imports
 
+# Every test here spawns its own worker processes. Under `--dist=loadgroup` that pins
+# them to ONE xdist worker, so they run one at a time rather than eight of them forking
+# pools at once — which oversubscribed the box and made the lane's wall bimodal, 13.5 s
+# or 16.1 s depending purely on how they happened to be scheduled.
+pytestmark = pytest.mark.xdist_group("spawns_mixin")
+
 #: The committed FASTA prepared as an assembly, and the name it is prepared under. See
 #: ``tests/data/README.md`` for what was planted in it.
 FIXTURE = "planted_motifs.fa"
@@ -170,24 +176,17 @@ def into_local_frame(frame: pd.DataFrame, region: Region) -> set[tuple[Any, ...]
 
 
 class TestThePlantedSites:
-    def test_a_plus_strand_region_answers_in_chromosome_coordinates(
+    def test_a_plus_strand_region_lifts_local_coordinates_into_chromosome_ones(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
         # The everyday case, and the whole point: the scan saw bases starting at zero and
-        # the answer is where those bases are.
-        region = Region("plantedI", 50, 200, "+")
-
-        assert sites(assembly.scan_regions(ctcf, region)) == {("plantedI", *FORWARD_SITE)}
-
-    def test_the_region_local_answer_is_a_different_number(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
-        # What a caller gets without this method — 50, not 100 — so the assertion above is
-        # a translation and not a coincidence.
+        # the answer is where those bases are — not the region-local number (50, not 100)
+        # a plain scan of the fetched bases would have answered with.
         region = Region("plantedI", 50, 200, "+")
         local = ctcf.scan(assembly.fetch_sequence(region), region.chrom)
 
         assert sites(local) == {("plantedI", 50, 65, "+")}
+        assert sites(assembly.scan_regions(ctcf, region)) == {("plantedI", *FORWARD_SITE)}
 
     def test_a_minus_strand_region_flips_the_interval_and_the_strand(
         self, assembly: Genome, ctcf: MotifSet
@@ -202,25 +201,20 @@ class TestThePlantedSites:
         assert sites(local) == {("plantedI", 85, 100, "-")}
         assert sites(assembly.scan_regions(ctcf, region)) == {("plantedI", *FORWARD_SITE)}
 
-    def test_the_planted_reverse_site_is_reported_on_the_minus_strand(
+    def test_the_planted_reverse_site_is_reported_correctly_from_either_region_strand(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
-        # The other planted word is the same consensus reverse-complemented, so it is a
-        # '-' hit over those very bases — from a plus-strand region, where nothing flips.
-        region = Region("plantedI", 250, 400, "+")
+        # The other planted word is the same consensus reverse-complemented, so from a
+        # plus-strand region — where nothing flips — it is a '-' hit over those bases.
+        plus = Region("plantedI", 250, 400, "+")
+        assert sites(assembly.scan_regions(ctcf, plus)) == {("plantedI", *REVERSE_SITE)}
 
-        assert sites(assembly.scan_regions(ctcf, region)) == {("plantedI", *REVERSE_SITE)}
-
-    def test_the_planted_reverse_site_survives_a_minus_strand_region(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         # And flipping a region that holds it flips it twice, which is not a flip: a '+'
         # hit in the fetched frame is a '-' hit on the chromosome.
-        region = Region("plantedI", 250, 400, "-")
-        local = ctcf.scan(assembly.fetch_sequence(region), region.chrom)
-
+        minus = Region("plantedI", 250, 400, "-")
+        local = ctcf.scan(assembly.fetch_sequence(minus), minus.chrom)
         assert sites(local) == {("plantedI", 85, 100, "+")}
-        assert sites(assembly.scan_regions(ctcf, region)) == {("plantedI", *REVERSE_SITE)}
+        assert sites(assembly.scan_regions(ctcf, minus)) == {("plantedI", *REVERSE_SITE)}
 
     def test_a_region_holding_both_sites_answers_with_both(
         self, assembly: Genome, ctcf: MotifSet
@@ -239,26 +233,21 @@ class TestThePlantedSites:
 
 
 class TestTheCoordinateArithmetic:
-    def test_a_whole_chromosome_reads_the_same_from_either_strand(
+    def test_the_answer_does_not_depend_on_which_strand_the_region_was_fetched_as(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
         # The invariant behind the two assertions above, stated over every hit: which way
         # round a region was fetched is not a property of the sites in it.
         forward = assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"))
         reverse = assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "-"))
-
         assert sites(forward) == sites(reverse)
 
-    def test_an_unknown_strand_is_not_flipped_and_is_not_promoted(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         # '.' means nobody knows, and the fetch hands back forward bases for it, so there
         # is nothing to flip — the coordinates match the '+' region's rather than being
         # decided by calling the strand '+'.
         unknown = assembly.scan_regions(ctcf, Region("plantedI", 50, 200, "."))
-        forward = assembly.scan_regions(ctcf, Region("plantedI", 50, 200, "+"))
-
-        assert sites(unknown) == sites(forward) == {("plantedI", *FORWARD_SITE)}
+        plus = assembly.scan_regions(ctcf, Region("plantedI", 50, 200, "+"))
+        assert sites(unknown) == sites(plus) == {("plantedI", *FORWARD_SITE)}
 
     def test_the_lifted_length_is_the_length_the_scan_found(
         self, assembly: Genome, ctcf: MotifSet
@@ -310,62 +299,45 @@ class TestTheCoordinateArithmetic:
 
 
 class TestTheTable:
-    def test_the_columns_and_dtypes_are_the_hit_table_contract(
+    def test_the_schema_and_chromosome_names_are_correct(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
         hits = assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "-"))
-
         assert list(hits.columns) == list(HIT_COLUMNS)
         assert [str(dtype) for dtype in hits.dtypes] == list(HIT_DTYPES.values())
 
-    def test_hits_carry_the_assembly_s_own_chromosome_names(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         # Not the region key the scan was driven with, and not a locus string: the name
         # this assembly spells the chromosome with, which is why an unknown one raises
         # rather than being carried through.
         regions = [Region("plantedI", 0, LENGTH, "-"), Region("plantedII", 0, LENGTH, "+")]
+        by_two = assembly.scan_regions(ctcf, regions)
+        assert set(by_two["sequence_name"]) <= set(assembly.chromosomes)
+        assert "plantedI" in set(by_two["sequence_name"])
 
-        hits = assembly.scan_regions(ctcf, regions)
-
-        assert set(hits["sequence_name"]) <= set(assembly.chromosomes)
-        assert "plantedI" in set(hits["sequence_name"])
-
-    def test_the_assembly_is_recorded_rather_than_inferred(
+    def test_the_assembly_and_the_scan_s_own_provenance_both_travel(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
-        hits = assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"))
-
-        assert hits.attrs["assembly"] == ASSEMBLY
-
-    def test_the_scan_s_own_provenance_still_travels(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
-        # Extended, not replaced: the background, threshold, release, tax group and the
-        # two motif lists are all still there beside the assembly.
         hits = assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"), threshold=1e-3)
 
+        # Extended, not replaced: the background, threshold, release, tax group and the
+        # two motif lists are all still there beside the assembly.
         assert set(hits.attrs) == set(REGION_HIT_PROVENANCE)
+        assert hits.attrs["assembly"] == ASSEMBLY
         assert hits.attrs["threshold"] == 1e-3
         assert hits.attrs["motifs_scanned"] == (CTCF,)
         assert hits.attrs["release"] is None
 
-    def test_no_regions_is_an_empty_table_that_still_says_what_it_was(
+    def test_no_regions_or_no_hits_is_an_empty_table_that_still_says_what_it_was(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
-        hits = assembly.scan_regions(ctcf, [])
+        no_regions = assembly.scan_regions(ctcf, [])
+        assert no_regions.empty
+        assert list(no_regions.columns) == list(HIT_COLUMNS)
+        assert no_regions.attrs["assembly"] == ASSEMBLY
 
-        assert hits.empty
-        assert list(hits.columns) == list(HIT_COLUMNS)
-        assert hits.attrs["assembly"] == ASSEMBLY
-
-    def test_a_region_with_no_hits_is_an_empty_table_and_not_an_error(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
-        hits = assembly.scan_regions(ctcf, Region("plantedI", 400, 500, "-"))
-
-        assert hits.empty
-        assert hits.attrs["assembly"] == ASSEMBLY
+        no_hits = assembly.scan_regions(ctcf, Region("plantedI", 400, 500, "-"))
+        assert no_hits.empty
+        assert no_hits.attrs["assembly"] == ASSEMBLY
 
 
 # ---------------------------------------------------------------------------
@@ -379,37 +351,27 @@ class TestTheScanArgumentsReachTheScan:
     reachable from here or it is reachable nowhere.
     """
 
-    def test_the_background_defaults_to_uniform_under_the_floor(
+    def test_background_modes_are_forwarded_to_the_scan(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
         # 600 bases is far under the derivation floor, so 'auto' stays uniform — which is
         # what makes the derived answer below a different number and not a coincidence.
-        hits = assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"))
+        default = assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"))
+        assert default.attrs["background"] == UNIFORM_BACKGROUND
 
-        assert hits.attrs["background"] == UNIFORM_BACKGROUND
-
-    def test_a_derived_background_is_the_regions_own_composition(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         # The mode reaches the scan, and what it derives from is the very bases the scan
         # saw: the same region scanned region-locally records the same background.
         region = Region("plantedI", 0, LENGTH, "+")
         local = ctcf.scan(assembly.fetch_sequence(region), region.chrom, background="derive")
+        derived = assembly.scan_regions(ctcf, region, background="derive")
+        assert derived.attrs["background"] == local.attrs["background"] != UNIFORM_BACKGROUND
 
-        hits = assembly.scan_regions(ctcf, region, background="derive")
-
-        assert hits.attrs["background"] == local.attrs["background"] != UNIFORM_BACKGROUND
-
-    def test_four_frequencies_are_forwarded_as_given(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
-        hits = assembly.scan_regions(
+        given_background = assembly.scan_regions(
             ctcf, Region("plantedI", 0, LENGTH, "+"), background=[0.4, 0.1, 0.1, 0.4]
         )
+        assert given_background.attrs["background"] == (0.4, 0.1, 0.1, 0.4)
 
-        assert hits.attrs["background"] == (0.4, 0.1, 0.1, 0.4)
-
-    def test_a_background_that_is_not_one_is_refused(
+    def test_a_bad_background_or_worker_count_is_refused(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
         with pytest.raises(ValueError, match="auto, uniform, derive"):
@@ -418,6 +380,8 @@ class TestTheScanArgumentsReachTheScan:
                 Region("plantedI", 0, LENGTH, "+"),
                 background="gc",  # type: ignore[arg-type]
             )
+        with pytest.raises(ValueError, match="at least 1"):
+            assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"), workers=0)
 
     def test_two_workers_answer_with_the_identical_table(
         self, assembly: Genome, dense: MotifSet
@@ -433,41 +397,28 @@ class TestTheScanArgumentsReachTheScan:
         assert [str(dtype) for dtype in shared.dtypes] == list(HIT_DTYPES.values())
         assert shared.attrs == serial.attrs
 
-    def test_zero_workers_is_refused(self, assembly: Genome, ctcf: MotifSet) -> None:
-        with pytest.raises(ValueError, match="at least 1"):
-            assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"), workers=0)
-
 
 class TestSeveralRegions:
-    def test_two_regions_on_one_chromosome_are_both_scanned(
+    def test_two_regions_are_both_scanned_overlapping_ones_answer_separately_and_one_needs_no_list(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
         # A mapping keyed by chromosome could hold only one of these, which is why the
         # scan is keyed by position and the name is put back afterwards.
         regions = [Region("plantedI", 0, 200, "+"), Region("plantedI", 250, 400, "+")]
-
         assert sites(assembly.scan_regions(ctcf, regions)) == {
             ("plantedI", *FORWARD_SITE),
             ("plantedI", *REVERSE_SITE),
         }
 
-    def test_overlapping_regions_each_answer_for_themselves(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         # The same site seen twice is two rows, one per region — deduplicating would be
         # deciding for the caller which of two peaks a hit belongs to.
         overlapping = [Region("plantedI", 0, 200, "+"), Region("plantedI", 50, 250, "-")]
-
         hits = assembly.scan_regions(ctcf, overlapping)
-
         assert len(hits) == 2
         assert sites(hits) == {("plantedI", *FORWARD_SITE)}
 
-    def test_a_single_region_needs_no_collection_around_it(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
+        # And a single region needs no collection built around it.
         one = Region("plantedI", 0, LENGTH, "+")
-
         assert rows(assembly.scan_regions(ctcf, one)) == rows(assembly.scan_regions(ctcf, [one]))
 
 
@@ -477,22 +428,15 @@ class TestSeveralRegions:
 
 
 class TestTheRawFormIsUntouched:
-    def test_scanning_a_mapping_of_sequences_is_still_region_local(
+    def test_scanning_a_mapping_of_sequences_is_still_region_local_and_names_no_assembly(
         self, assembly: Genome, ctcf: MotifSet
     ) -> None:
         region = Region("plantedI", 50, 200, "+")
-
         local = ctcf.scan_sequences({"peak1": assembly.fetch_sequence(region)})
-
         assert sites(local) == {("peak1", 50, 65, "+")}
 
-    def test_scanning_a_mapping_of_sequences_names_no_assembly(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         # A motif belongs to no assembly, and neither does a table scanned from bases
         # nobody said where they came from.
-        local = ctcf.scan_sequences({"peak1": assembly.fetch_sequence(Region("plantedI", 0, 600))})
-
         assert "assembly" not in local.attrs
 
 
@@ -502,35 +446,23 @@ class TestTheRawFormIsUntouched:
 
 
 class TestRefusals:
-    def test_a_locus_string_is_refused_and_names_the_way_to_build_a_region(
-        self, assembly: Genome, ctcf: MotifSet
+    def test_bad_arguments_are_refused_and_name_the_next_action(
+        self, assembly: Genome, ctcf: MotifSet, tmp_path: Path
     ) -> None:
         # A string is iterable, so this would otherwise be read letter by letter; and it
         # carries no strand, which is the one thing this method is about.
         with pytest.raises(TypeError, match=r"Region\.from_string"):
             assembly.scan_regions(ctcf, "plantedI:0-600")  # type: ignore[arg-type]
 
-    def test_a_region_on_an_unknown_chromosome_raises(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         with pytest.raises(ValueError, match="unknown chromosome"):
             assembly.scan_regions(ctcf, Region("chrNope", 0, 100, "+"))
 
-    def test_a_region_past_the_end_of_its_chromosome_raises(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         with pytest.raises(ValueError, match="exceeds"):
             assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH + 1, "+"))
 
-    def test_a_threshold_that_is_not_a_p_value_raises(
-        self, assembly: Genome, ctcf: MotifSet
-    ) -> None:
         with pytest.raises(ValueError, match="p-value"):
             assembly.scan_regions(ctcf, Region("plantedI", 0, LENGTH, "+"), threshold=5.0)
 
-    def test_an_output_path_is_refused_and_names_both_ways_to_write_one(
-        self, assembly: Genome, ctcf: MotifSet, tmp_path: Path
-    ) -> None:
         # The one scan argument that cannot be forwarded: Parquet hands back a path, and a
         # path holds nothing to lift. Refused by name rather than by an unexpected keyword,
         # and refused before anything is fetched or scanned.
@@ -539,9 +471,6 @@ class TestRefusals:
                 ctcf, Region("plantedI", 0, LENGTH, "+"), output=tmp_path / "hits.parquet"
             )
 
-    def test_the_refusal_comes_before_any_sequence_is_fetched(
-        self, assembly: Genome, ctcf: MotifSet, tmp_path: Path
-    ) -> None:
         # A region this assembly could not fetch would raise its own error first if the
         # refusal came later, which would tell the caller about the wrong problem.
         with pytest.raises(TypeError, match="scan_regions cannot stream"):
@@ -556,15 +485,13 @@ class TestRefusals:
 
 
 class TestTheDependencyDirection:
-    def test_the_mixin_names_the_genome_under_type_checking_only(self) -> None:
+    def test_the_dependency_edge_runs_from_genome_to_motif_and_never_back(self) -> None:
         # A motif belongs to no assembly and a motif set is usable with no genome open,
         # so the edge runs Genome to motif and never back. An import at module level here
-        # would be the back edge, whatever the type annotations said.
-        assert "genome.genome" not in _module_level_imports(mixin_module)
-
-    def test_the_genome_reaches_the_mixin_without_deferring_it(self) -> None:
-        # The other half: a base class cannot be imported lazily, so this edge is a plain
+        # would be the back edge, whatever the type annotations said; the other half is
+        # that a base class cannot itself be imported lazily, so that edge is a plain
         # module-level import and is meant to be.
+        assert "genome.genome" not in _module_level_imports(mixin_module)
         assert "genome.tf.motif.mixin" in _module_level_imports(genome_module)
 
     def test_a_genome_is_one(self, assembly: Genome) -> None:

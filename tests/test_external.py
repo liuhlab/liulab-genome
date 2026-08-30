@@ -61,28 +61,32 @@ def on_path(
 # -- locating a binary ------------------------------------------------------
 
 
-def test_a_tool_on_path_resolves_to_it(on_path: Callable[[str, str], Path]) -> None:
-    written = on_path("faToTwoBit", "exit 0")
-
-    assert InstalledTool("faToTwoBit").path == str(written)
-
-
-def test_resolution_falls_back_to_the_interpreters_own_bin(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
+def test_a_tool_on_path_resolves_to_it_falls_back_to_the_interpreters_bin_and_is_cached(
+    on_path: Callable[[str, str], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    stub_binary: StubBinary,
 ) -> None:
+    written = on_path("faToTwoBit", "exit 0")
+    tool = InstalledTool("faToTwoBit")
+
+    assert tool.path == str(written)
+    written.unlink()  # gone from disk; the answer was remembered, not looked up again
+
+    assert tool.path == str(written)
+
     # Running the env's interpreter without PATH activated: the normal lookup misses,
     # but the tool sits beside sys.executable (the conda/pixi bin/), so resolution falls
     # back to that directory.
     bin_dir = tmp_path / "bin"
-    written = stub_binary(bin_dir, "faToTwoBit", "exit 0")
-
+    fallback = stub_binary(bin_dir, "twoBitInfo", "exit 0")
     monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(external.sys, "executable", str(bin_dir / "python"))
 
-    assert InstalledTool("faToTwoBit").path == str(written)
+    assert InstalledTool("twoBitInfo").path == str(fallback)
 
 
-def test_a_tool_that_is_nowhere_raises_with_the_command_that_installs_it(
+def test_a_tool_that_is_nowhere_raises_naming_the_command_that_installs_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("PATH", "")
@@ -97,101 +101,62 @@ def test_a_tool_that_is_nowhere_raises_with_the_command_that_installs_it(
     assert "pixi add ucsc-fatotwobit" in message
     assert "pixi shell" in message
 
-
-def test_a_tool_nobody_catalogued_still_names_a_plausible_command() -> None:
+    # The same instructions, asked for directly rather than raised: a tool nobody
+    # catalogued still names a plausible command, and a catalogued one quotes its own
+    # homepage too.
     assert "pixi add bowtie2" in RecordingTool("bowtie2").install_instructions()
-
-
-def test_install_instructions_quote_the_tools_own_homepage() -> None:
     assert "https://github.com/alexdobin/STAR" in RecordingTool("STAR").install_instructions()
-
-
-def test_the_path_is_located_once(on_path: Callable[[str, str], Path]) -> None:
-    written = on_path("samtools", "exit 0")
-    tool = InstalledTool("samtools")
-
-    assert tool.path == str(written)
-    written.unlink()  # gone from disk; the answer was remembered, not looked up again
-
-    assert tool.path == str(written)
 
 
 # -- asking a tool what it is -----------------------------------------------
 
 
-def test_version_is_the_first_line_of_what_the_tool_says(
+def test_version_is_the_first_line_of_stdout_or_falls_back_to_stderr(
     on_path: Callable[[str, str], Path],
 ) -> None:
     on_path("samtools", "echo 'samtools 1.21'; echo 'Using htslib 1.21'")
-
     assert InstalledTool("samtools").version == "samtools 1.21"
 
-
-def test_version_falls_back_to_stderr(on_path: Callable[[str, str], Path]) -> None:
     # Different tools choose differently; chromap answers on stderr.
     on_path("chromap", "echo '0.3.2-r518' >&2")
-
     assert InstalledTool("chromap").version == "0.3.2-r518"
 
 
-def test_a_tool_that_rejects_the_flag_reports_no_version_rather_than_raising(
-    on_path: Callable[[str, str], Path],
+def test_a_tool_that_declines_to_identify_itself_reports_no_version_but_absence_raises(
+    on_path: Callable[[str, str], Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # What several UCSC binaries do: `faToTwoBit --version` exits non-zero saying the
-    # option is not valid. That is a tool declining to identify itself, not a failure.
-    on_path("faToTwoBit", "echo '--version is not a valid option' >&2; exit 255")
+    # option is not valid. That is a tool declining to identify itself, not a failure,
+    # and the "" it reports is remembered exactly as a real answer would be.
+    tally = tmp_path / "asked"
+    on_path(
+        "faToTwoBit", f"echo x >> {tally}; echo '--version is not a valid option' >&2; exit 255"
+    )
 
     assert InstalledTool("faToTwoBit").version == ""
+    assert InstalledTool("faToTwoBit").version == ""
+    assert tally.read_text() == "x\n"
 
-
-def test_a_tool_that_is_absent_raises_rather_than_reporting_no_version(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # The two answers must stay apart: "" means it ran and would not say.
+    # The two answers must stay apart: "" means it ran and would not say, so a tool that
+    # is not there at all still raises rather than being folded into that same "".
     monkeypatch.setenv("PATH", "")
-    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "bin" / "python"))
-
+    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
     with pytest.raises(ToolNotFoundError):
-        _ = InstalledTool("faToTwoBit").version
+        _ = InstalledTool("twoBitInfo").version
 
 
-def test_the_version_is_asked_for_once(on_path: Callable[[str, str], Path], tmp_path: Path) -> None:
-    # Recording a build's provenance must not cost a subprocess per mention of it.
+def test_the_version_is_asked_for_once_per_binary(
+    on_path: Callable[[str, str], Path], tmp_path: Path
+) -> None:
+    # Recording a build's provenance must not cost a subprocess per mention of it — not
+    # for the same object asked twice, and not for a second object naming the same path,
+    # which is the waste a build re-asking per step would otherwise pay.
     tally = tmp_path / "asked"
     on_path("samtools", f"echo x >> {tally}; echo 'samtools 1.21'")
     tool = InstalledTool("samtools")
 
     assert tool.version == tool.version == "samtools 1.21"
-    assert tally.read_text() == "x\n"
-
-
-def test_the_version_is_asked_for_once_per_binary_not_once_per_object(
-    on_path: Callable[[str, str], Path], tmp_path: Path
-) -> None:
-    # The waste the per-object cache above never reached: a build constructs a fresh tool
-    # for each step, so preparing one assembly asked samtools its version once per step
-    # for an answer that cannot change under a running process.
-    tally = tmp_path / "asked"
-    on_path("samtools", f"echo x >> {tally}; echo 'samtools 1.21'")
-
     assert InstalledTool("samtools").version == "samtools 1.21"
-    assert InstalledTool("samtools").version == "samtools 1.21"
-
-    assert tally.read_text() == "x\n"
-
-
-def test_a_tool_that_declines_to_identify_itself_is_remembered_as_declining(
-    on_path: Callable[[str, str], Path], tmp_path: Path
-) -> None:
-    # "" is an answer rather than a missing one, and it costs the same subprocess to
-    # learn. Remembering on truthiness instead of on presence would re-probe exactly the
-    # two UCSC binaries every preparation runs, which is most of what there was to save.
-    tally = tmp_path / "asked"
-    on_path("faToTwoBit", f"echo x >> {tally}; echo 'nope' >&2; exit 255")
-
-    assert InstalledTool("faToTwoBit").version == ""
-    assert InstalledTool("faToTwoBit").version == ""
-
     assert tally.read_text() == "x\n"
 
 
@@ -212,26 +177,22 @@ def test_two_binaries_of_the_same_name_each_answer_for_themselves(
     monkeypatch.setenv("PATH", str(new))
     assert InstalledTool("samtools").version == "samtools 1.21"
 
-
-def test_a_tool_that_was_missing_is_found_once_it_is_installed(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
-) -> None:
-    # Absence is never remembered. Only an answer a binary actually gave is kept, so
-    # locating stays per object and a tool installed midway through a process is found.
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    monkeypatch.setenv("PATH", str(bin_dir))
-    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
+    # Absence is never remembered, either. Only an answer a binary actually gave is
+    # kept, so locating stays per object and a tool installed midway through a process
+    # is found.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
 
     with pytest.raises(ToolNotFoundError):
         _ = InstalledTool("faToTwoBit").version
 
-    stub_binary(bin_dir, "faToTwoBit", "echo 'faToTwoBit v456'")
+    stub_binary(empty, "faToTwoBit", "echo 'faToTwoBit v456'")
 
     assert InstalledTool("faToTwoBit").version == "faToTwoBit v456"
 
 
-def test_clearing_the_cache_sends_the_next_ask_back_to_the_binary(
+def test_clearing_the_cache_sends_the_next_ask_back_but_a_recording_tool_bypasses_it(
     on_path: Callable[[str, str], Path], tmp_path: Path
 ) -> None:
     # The documented way out, and what the suite's autouse fixture calls: without it a
@@ -245,8 +206,6 @@ def test_clearing_the_cache_sends_the_next_ask_back_to_the_binary(
     assert InstalledTool("samtools").version == "samtools 1.21"
     assert tally.read_text() == "x\nx\n"
 
-
-def test_a_recording_tool_answers_for_itself_rather_than_from_the_shared_cache() -> None:
     # The cache belongs to the installed adapter, where the subprocess is. Stand-ins of
     # one name share a path and report the versions they were each told to all the same —
     # which every aligner test in the suite is standing on.
@@ -257,29 +216,19 @@ def test_a_recording_tool_answers_for_itself_rather_than_from_the_shared_cache()
 # -- running a tool ---------------------------------------------------------
 
 
-def test_run_returns_captured_stdout(on_path: Callable[[str, str], Path]) -> None:
-    on_path("samtools", "echo hello")
-
-    assert InstalledTool("samtools").run(["faidx"]) == "hello\n"
-
-
-def test_run_passes_its_arguments_through(on_path: Callable[[str, str], Path]) -> None:
-    on_path("samtools", 'echo "$@"')
-
-    assert InstalledTool("samtools").run(["faidx", "hg38.fa"]) == "faidx hg38.fa\n"
-
-
-def test_run_uses_the_working_directory_it_is_given(
+def test_run_returns_captured_stdout_with_arguments_and_working_directory_honoured(
     on_path: Callable[[str, str], Path], tmp_path: Path
 ) -> None:
+    on_path("samtools", 'echo "ran: $@"')
+    assert InstalledTool("samtools").run(["faidx", "hg38.fa"]) == "ran: faidx hg38.fa\n"
+
     on_path("STAR", "pwd")
     where = tmp_path / "index"
     where.mkdir()
-
     assert InstalledTool("STAR").run(["--runMode"], cwd=where).strip() == str(where)
 
 
-def test_a_captured_failure_carries_the_tools_own_stderr(
+def test_a_captured_failure_carries_stderr_and_a_missing_tool_raises_before_anything_else(
     on_path: Callable[[str, str], Path],
 ) -> None:
     on_path("samtools", "echo boom >&2; exit 1")
@@ -292,33 +241,25 @@ def test_a_captured_failure_carries_the_tools_own_stderr(
     assert "boom" in message
     assert "'nope.fa'" in message  # the args, so the failing call is identifiable
 
+    with pytest.raises(ToolNotFoundError, match="pixi"):
+        InstalledTool("definitely-not-a-real-tool-xyz").run([])
 
-def test_an_inherited_failure_points_at_the_output_already_printed(
+
+def test_run_with_no_capture_streams_instead_of_returning_and_still_raises_on_failure(
     on_path: Callable[[str, str], Path], capfd: pytest.CaptureFixture[str]
 ) -> None:
+    on_path("STAR", "echo 'started ..... done'")
+    assert InstalledTool("STAR").run(["--runMode"], capture=False) == ""
+    assert "started" in capfd.readouterr().out
+
     # The long-build flavour: nothing is captured, so the tool's diagnostics reach the
     # console live and the message sends the reader there rather than repeating nothing.
     on_path("STAR", "echo 'EXITING because of FATAL ERROR' >&2; exit 1")
-
     with pytest.raises(RuntimeError, match="see its output above") as raised:
         InstalledTool("STAR").run(["--runMode", "genomeGenerate"], capture=False)
 
     assert "STAR failed (exit 1)" in str(raised.value)
     assert "FATAL ERROR" in capfd.readouterr().err
-
-
-def test_run_with_no_capture_streams_rather_than_returning(
-    on_path: Callable[[str, str], Path], capfd: pytest.CaptureFixture[str]
-) -> None:
-    on_path("STAR", "echo 'started ..... done'")
-
-    assert InstalledTool("STAR").run(["--runMode"], capture=False) == ""
-    assert "started" in capfd.readouterr().out
-
-
-def test_running_a_tool_that_is_not_there_raises_before_anything_else() -> None:
-    with pytest.raises(ToolNotFoundError, match="pixi"):
-        InstalledTool("definitely-not-a-real-tool-xyz").run([])
 
 
 # -- the freshness rule, and the run built on it ----------------------------
@@ -338,97 +279,63 @@ def test_is_fresh_rules(tmp_path: Path, touch_newer_than: Callable[..., None]) -
     touch_newer_than(src, out)
     assert is_fresh(out, [src]) is False  # input regenerated -> stale
 
-
-def test_an_input_that_does_not_exist_is_ignored(tmp_path: Path) -> None:
     # The caller validates the inputs it requires; a missing one never makes a built
     # output look stale, which would rebuild it forever.
-    out = tmp_path / "out"
-    out.write_text("y")
-
     assert is_fresh(out, [tmp_path / "never-existed"]) is True
 
 
-def test_run_to_runs_when_the_output_is_missing(tmp_path: Path) -> None:
+def test_run_to_runs_missing_skips_fresh_reruns_stale_and_overwrite_forces(
+    tmp_path: Path, touch_newer_than: Callable[..., None], monkeypatch: pytest.MonkeyPatch
+) -> None:
     tool = RecordingTool("samtools")
     src = tmp_path / "in"
     src.write_text("x")
     out = tmp_path / "out"
 
+    # missing output -> runs
     result = tool.run_to(["build", str(out)], output=out, inputs=[src])
-
     assert result == out
     assert [call.args for call in tool.calls] == [("build", str(out))]
 
-
-def test_run_to_skips_the_tool_when_the_output_is_fresh(
-    tmp_path: Path, touch_newer_than: Callable[..., None]
-) -> None:
-    tool = RecordingTool("samtools")
-    src = tmp_path / "in"
-    src.write_text("x")
-    out = tmp_path / "out"
     out.write_text("cached")
     touch_newer_than(out, src)
-
+    # fresh -> skipped, the tool not run again
     assert tool.run_to(["build"], output=out, inputs=[src]) == out
-    assert tool.calls == []
-
-
-def test_run_to_reruns_when_an_input_is_newer(
-    tmp_path: Path, touch_newer_than: Callable[..., None]
-) -> None:
-    # The stale case, driven through `run_to` rather than through `is_fresh` alone: an
-    # output that exists is not thereby fresh, and a regenerated input must rebuild it.
-    tool = RecordingTool("samtools")
-    src = tmp_path / "in"
-    src.write_text("x")
-    out = tmp_path / "out"
-    out.write_text("cached")
-    touch_newer_than(src, out)  # input regenerated after the output
-
-    assert tool.run_to(["build"], output=out, inputs=[src]) == out
-    assert [call.args for call in tool.calls] == [("build",)]
-
-
-def test_run_to_overwrite_forces_the_run(
-    tmp_path: Path, touch_newer_than: Callable[..., None]
-) -> None:
-    tool = RecordingTool("samtools")
-    src = tmp_path / "in"
-    src.write_text("x")
-    out = tmp_path / "out"
-    out.write_text("cached")
-    touch_newer_than(out, src)
-
-    tool.run_to(["build"], output=out, inputs=[src], overwrite=True)
-
     assert len(tool.calls) == 1
 
+    touch_newer_than(src, out)  # input regenerated after the output
+    # stale -> reruns
+    assert tool.run_to(["build"], output=out, inputs=[src]) == out
+    assert [call.args for call in tool.calls][-1] == ("build",)
+    assert len(tool.calls) == 2
 
-def test_a_fresh_output_is_served_without_the_tool_being_installed(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, touch_newer_than: Callable[..., None]
-) -> None:
-    # Freshness is decided before anything is located, so re-preparing an assembly on a
-    # machine that has lost samtools still answers rather than raising.
-    monkeypatch.setenv("PATH", "")
-    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "bin" / "python"))
-    src = tmp_path / "in"
-    src.write_text("x")
-    out = tmp_path / "out"
-    out.write_text("cached")
     touch_newer_than(out, src)
+    # fresh again, but overwrite forces the run regardless
+    tool.run_to(["build"], output=out, inputs=[src], overwrite=True)
+    assert len(tool.calls) == 3
 
-    assert InstalledTool("samtools").run_to(["faidx"], output=out, inputs=[src]) == out
+    # And freshness is decided before anything is located, so re-preparing an assembly
+    # on a machine that has lost samtools still answers rather than raising.
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr(external.sys, "executable", str(tmp_path / "nowhere" / "python"))
+    real_src = tmp_path / "real-in"
+    real_src.write_text("x")
+    real_out = tmp_path / "real-out"
+    real_out.write_text("cached")
+    touch_newer_than(real_out, real_src)
+
+    result = InstalledTool("samtools").run_to(["faidx"], output=real_out, inputs=[real_src])
+    assert result == real_out
 
 
 # -- the recording adapter --------------------------------------------------
 
 
-def test_the_recording_tool_records_everything_a_call_carries(tmp_path: Path) -> None:
+def test_the_recording_tool_is_a_real_adapter_that_records_calls_back_and_fails_like_one(
+    tmp_path: Path,
+) -> None:
     tool = RecordingTool("STAR", version="2.7.11b")
-
     tool.run(["--runMode", "genomeGenerate"], cwd=tmp_path, capture=False)
-
     (call,) = tool.calls
     assert call.args == ("--runMode", "genomeGenerate")
     assert call.cwd == tmp_path
@@ -436,28 +343,19 @@ def test_the_recording_tool_records_everything_a_call_carries(tmp_path: Path) ->
     assert tool.version == "2.7.11b"
     assert tool.path == "/fake/STAR"
 
-
-def test_the_recording_tool_fails_the_way_a_real_one_does() -> None:
-    # The point of it being a real adapter: the failure message is the base class's, so a
-    # test driving the failure path is driving the code that ships.
-    tool = RecordingTool("chromap")
-    tool.exit_code = 1
-
-    with pytest.raises(RuntimeError, match=r"chromap failed \(exit 1\)"):
-        tool.run(["--build-index"])
-
-
-def test_the_recording_tool_calls_back_as_each_call_is_made(tmp_path: Path) -> None:
     seen: list[Path | None] = []
-    tool = RecordingTool("STAR", on_run=lambda call: seen.append(call.cwd))
-
-    tool.run(["a"], cwd=tmp_path)
-    tool.run(["b"])
-
+    callback_tool = RecordingTool("STAR", on_run=lambda call: seen.append(call.cwd))
+    callback_tool.run(["a"], cwd=tmp_path)
+    callback_tool.run(["b"])
     assert seen == [tmp_path, None]
 
+    # The point of it being a real adapter: the failure message is the base class's, so
+    # a test driving the failure path is driving the code that ships.
+    failing_tool = RecordingTool("chromap")
+    failing_tool.exit_code = 1
+    with pytest.raises(RuntimeError, match=r"chromap failed \(exit 1\)"):
+        failing_tool.run(["--build-index"])
 
-def test_both_adapters_are_the_same_interface() -> None:
     assert issubclass(InstalledTool, ExternalTool)
     assert issubclass(RecordingTool, ExternalTool)
 
@@ -473,10 +371,14 @@ def test_doctor_checks_exactly_the_tools_preparing_an_assembly_uses() -> None:
     assert "bedtools" not in REQUIRED_TOOLS
 
 
-def test_doctor_reports_a_tool_that_will_not_identify_itself_rather_than_hiding_it(
+def test_doctor_raises_naming_a_missing_tool_and_reports_one_that_declines_to_identify(
     on_path: Callable[[str, str], Path],
 ) -> None:
     on_path("samtools", "echo 'samtools 1.21'")
+
+    with pytest.raises(ToolNotFoundError, match="faToTwoBit is not installed"):
+        doctor()
+
     on_path("faToTwoBit", "echo 'nope' >&2; exit 255")
     on_path("twoBitInfo", "echo 'nope' >&2; exit 255")
 
@@ -487,26 +389,13 @@ def test_doctor_reports_a_tool_that_will_not_identify_itself_rather_than_hiding_
     }
 
 
-def test_doctor_raises_naming_the_tool_that_is_missing(
-    on_path: Callable[[str, str], Path],
-) -> None:
-    on_path("samtools", "echo 'samtools 1.21'")
-
-    with pytest.raises(ToolNotFoundError, match="faToTwoBit is not installed"):
-        doctor()
-
-
 @pytest.mark.skipif(not _BINARIES_PRESENT, reason="preparation tools not on PATH")
-def test_a_version_string_identifies_the_tool_it_came_from() -> None:
-    # The claim `doctor` below cannot make: non-empty is not the same as *this* tool's,
+def test_doctor_and_version_answer_for_every_required_tool_against_the_real_binaries() -> None:
+    # The claim `doctor` above cannot make: non-empty is not the same as *this* tool's,
     # and a resolver pointing at the wrong binary would satisfy non-empty happily.
     assert "samtools" in InstalledTool("samtools").version.lower()
 
-
-@pytest.mark.skipif(not _BINARIES_PRESENT, reason="preparation tools not on PATH")
-def test_doctor_answers_for_every_required_tool_against_the_real_binaries() -> None:
     result = doctor()
-
     assert set(result) == set(REQUIRED_TOOLS)
     for name, reported in result.items():
         assert reported.strip() != "", f"{name} reported nothing at all"

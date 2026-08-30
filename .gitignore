@@ -56,3 +56,6 @@ playground/
 
 # Agent worktrees — transient, and each is a git repo of its own.
 .claude/worktrees/
+
+# Redirected numba JIT cache (see .github/workflows/ci.yml); local runs cache in-env.
+.numba-cache/

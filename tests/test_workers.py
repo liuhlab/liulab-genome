@@ -35,62 +35,53 @@ def outside_an_allocation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestTheLibraryDefault:
-    def test_it_is_one(self) -> None:
+    def test_it_is_one_and_ignores_the_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # An imported library that started a pool would make an unguarded caller script
         # re-execute itself under the spawn start method.
         assert DEFAULT_WORKERS == 1
-
-    def test_one_resolves_to_one_without_reading_anything(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
         monkeypatch.setenv("SLURM_CPUS_PER_TASK", "8")
         assert resolve_workers(DEFAULT_WORKERS) == 1
 
 
 class TestAnExplicitCountIsHonoured:
-    @pytest.mark.parametrize("workers", [1, 2, 4, 64])
-    def test_a_number_is_taken_as_given(self, workers: int) -> None:
-        assert resolve_workers(workers) == workers
-
-    def test_it_beats_the_allocation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_an_explicit_count_is_taken_as_given_and_beats_the_allocation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for workers in (1, 2, 4, 64):
+            assert resolve_workers(workers) == workers
         # A caller who says 2 gets 2, on a laptop or in a sixteen-CPU allocation.
         monkeypatch.setenv("SLURM_CPUS_PER_TASK", "16")
         assert resolve_workers(2) == 2
 
-    @pytest.mark.parametrize("workers", [0, -1])
-    def test_fewer_than_one_says_what_one_and_none_mean(self, workers: int) -> None:
-        with pytest.raises(ValueError, match="at least 1"):
-            resolve_workers(workers)
+    def test_fewer_than_one_says_what_one_and_none_mean(self) -> None:
+        for workers in (0, -1):
+            with pytest.raises(ValueError, match="at least 1"):
+                resolve_workers(workers)
 
 
 class TestResolvingFromTheEnvironment:
-    def test_the_slurm_allocation_comes_first(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_slurm_variables_are_read_in_priority_order(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert SLURM_CPU_VARS == ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE")
         monkeypatch.setenv("SLURM_CPUS_PER_TASK", "3")
         assert resolve_workers(None) == 3
-
-    def test_cpus_per_task_beats_cpus_on_node(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # The task's own share is what this process may use; the node's is the job's.
-        monkeypatch.setenv("SLURM_CPUS_PER_TASK", "2")
         monkeypatch.setenv("SLURM_CPUS_ON_NODE", "16")
-        assert resolve_workers(None) == 2
+        assert resolve_workers(None) == 3
+        monkeypatch.delenv("SLURM_CPUS_PER_TASK")
+        assert resolve_workers(None) == 16  # falls back to the node's count alone
 
-    def test_cpus_on_node_is_the_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("SLURM_CPUS_ON_NODE", "5")
-        assert resolve_workers(None) == 5
-
-    @pytest.mark.parametrize("value", ["", "   ", "2(x3)", "many", "0", "-4"])
-    def test_a_value_that_is_not_a_count_is_ignored(
-        self, monkeypatch: pytest.MonkeyPatch, value: str
+    def test_a_value_that_is_not_a_count_falls_through_rather_than_crashing(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # Slurm writes "2(x3)" on a heterogeneous job. Falling through beats crashing, and
         # beats reading a 2 out of it that was never meant.
-        monkeypatch.setenv("SLURM_CPUS_PER_TASK", value)
-        assert resolve_workers(None) == resolve_workers(None)
-        assert resolve_workers(None) >= 1
-
-    def test_an_unreadable_value_falls_through_to_the_next_variable(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+        for value in ["", "   ", "2(x3)", "many", "0", "-4"]:
+            monkeypatch.setenv("SLURM_CPUS_PER_TASK", value)
+            assert resolve_workers(None) == resolve_workers(None)
+            assert resolve_workers(None) >= 1
+        # And falls through to the next variable, not straight to 1.
         monkeypatch.setenv("SLURM_CPUS_PER_TASK", "2(x3)")
         monkeypatch.setenv("SLURM_CPUS_ON_NODE", "7")
         assert resolve_workers(None) == 7
@@ -99,9 +90,6 @@ class TestResolvingFromTheEnvironment:
         found = resolve_workers(None)
         assert found >= 1
         assert found <= (os.cpu_count() or 1)
-
-    def test_the_variables_it_reads_are_the_two_named(self) -> None:
-        assert SLURM_CPU_VARS == ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE")
 
 
 class TestNothingIsStarted:

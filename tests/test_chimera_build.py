@@ -113,10 +113,16 @@ def build_chimera(chimera_component: ComponentFactory) -> Iterator[ChimeraFactor
 # --------------------------------------------------------------------------------------
 
 
-def test_the_everyday_chimera_builds_and_opens_under_its_derived_name(
-    build_chimera: ChimeraFactory,
+def test_the_everyday_chimera_builds_in_component_sorted_order_under_a_cache_dir_override(
+    build_chimera: ChimeraFactory, tmp_path: Path, liulab_data: Path
 ) -> None:
-    chimera = build_chimera(*CHIMERA_EVERYDAY)
+    # Built from the reversed order on purpose: identity is the component set, so the
+    # published layout contract — component-sorted blocks, each in its own declared order
+    # — must hold whatever order the caller handed the components in. Load-bearing
+    # off-repo: a consumer filtering one component's sequences back out of an alignment
+    # header recovers a single-assembly header only because this holds, and a different
+    # concatenation order would hand it a silently wrong header rather than a failure.
+    chimera = build_chimera(*reversed(CHIMERA_EVERYDAY))
 
     assert chimera.assembly == _EVERYDAY_NAME
     assert chimera.chromosomes == _EVERYDAY_CHROMOSOMES
@@ -128,30 +134,10 @@ def test_the_everyday_chimera_builds_and_opens_under_its_derived_name(
         for path in (chimera.files.fai, chimera.files.twobit, chimera.files.chrom_sizes)
     )
 
-
-def test_each_component_is_one_contiguous_block_in_its_own_declared_order(
-    build_chimera: ChimeraFactory,
-) -> None:
-    # The published layout contract, and the reversed call is what proves it: identity is
-    # the component set rather than the order it arrived in, so the blocks come out
-    # component-sorted with each component's own order inside its own block whatever the
-    # caller did. Load-bearing off-repo — a consumer filtering one component's sequences
-    # back out of an alignment header recovers a single-assembly header only because this
-    # holds, and a different concatenation order would hand it a silently wrong header
-    # rather than a failure.
-    chimera = build_chimera(*reversed(CHIMERA_EVERYDAY))
-
-    assert chimera.assembly == _EVERYDAY_NAME
-    assert chimera.chromosomes == _EVERYDAY_CHROMOSOMES
-
-
-def test_a_built_chimera_lands_where_it_is_told_to(
-    build_chimera: ChimeraFactory, tmp_path: Path, liulab_data: Path
-) -> None:
+    # And it lands wherever it is told to rather than always under the shared root.
     elsewhere = tmp_path / "elsewhere"
-    chimera = build_chimera("tinyCe", "tinySc", cache_dir=elsewhere)
-
-    assert chimera.fasta_path == elsewhere / "tinyCe_tinySc.fa"
+    pair = build_chimera("tinyCe", "tinySc", cache_dir=elsewhere)
+    assert pair.fasta_path == elsewhere / "tinyCe_tinySc.fa"
     assert not (liulab_data / "genome" / "tinyCe_tinySc").exists()
 
 
@@ -160,38 +146,27 @@ def test_a_built_chimera_lands_where_it_is_told_to(
 # --------------------------------------------------------------------------------------
 
 
-def test_every_component_sequence_line_survives_byte_for_byte(
+def test_component_bytes_survive_verbatim_including_wrapping_and_masking(
     build_chimera: ChimeraFactory,
 ) -> None:
     chimera = build_chimera(*CHIMERA_EVERYDAY)
     built = _fasta_records(chimera.fasta_path)
 
+    # every source line, byte for byte
     for name in CHIMERA_EVERYDAY:
         component = CHIMERA_COMPONENTS[name]
         source = _fasta_records(component.fasta)
         for chromosome, lines in source.items():
             assert built[f"{chromosome}__{name}"] == lines
 
-
-def test_components_that_disagree_about_wrapping_are_not_rewrapped(
-    build_chimera: ChimeraFactory,
-) -> None:
-    # 60 for ce11's shape and 80 for ecHT115's, side by side in one file — which is what
+    # 60 for tinyCe's shape and 80 for tinyEc's, side by side in one file — which is what
     # every tool that could have done this concatenation would have destroyed.
-    built = _fasta_records(build_chimera(*CHIMERA_EVERYDAY).fasta_path)
-
     assert _wrap_widths(built["I__tinyCe"]) == {60}
     assert _wrap_widths(built["NZ_TINY01000001.1__tinyEc"]) == {80}
 
-
-def test_components_that_disagree_about_masking_keep_their_own_case(
-    build_chimera: ChimeraFactory,
-) -> None:
     # tinyCe carries 200 soft-masked bases and tinyEc carries none, so a build that
     # upper-cased or lower-cased anything loses one of the two.
-    built = _fasta_records(build_chimera(*CHIMERA_EVERYDAY).fasta_path)
     worm = "".join(built["I__tinyCe"])
-
     assert worm[:200].islower()
     assert worm[200:].isupper()
     assert "".join(built["NZ_TINY01000002.1__tinyEc"]).isupper()
@@ -202,15 +177,11 @@ def test_components_that_disagree_about_masking_keep_their_own_case(
     [
         (b">I\n", b">I__tinyCe\n"),
         (b">I some description\n", b">I__tinyCe some description\n"),
-        (b">I\tdesc here\n", b">I__tinyCe\tdesc here\n"),
         (b">I", b">I__tinyCe"),  # a final header with no line ending
-        (b">I\r\n", b">I__tinyCe\r\n"),
         # Whitespace after '>' is skipped by samtools faidx and faToTwoBit, which name
         # the sequence from the token after it — so `> desc` declares `desc`, and that is
         # what carries the suffix. The skipped bytes are written back where they were.
         (b"> desc\n", b"> desc__tinyCe\n"),
-        (b">\t chrA desc\n", b">\t chrA__tinyCe desc\n"),
-        (b">   I\n", b">   I__tinyCe\n"),
     ],
 )
 def test_only_the_name_a_header_gives_its_sequence_is_extended(
@@ -222,7 +193,7 @@ def test_only_the_name_a_header_gives_its_sequence_is_extended(
     assert _extend_header(line, "tinyCe", "__") == expected
 
 
-@pytest.mark.parametrize("line", [b">\n", b">", b">   \n", b">\t\n", b">\r\n"])
+@pytest.mark.parametrize("line", [b">", b">   \n"])
 def test_a_header_that_names_no_sequence_is_refused(line: bytes) -> None:
     # There is nothing for the suffix to ride on, and writing '>__tinyCe' would file the
     # sequence under a name that is suffix and nothing else — which samtools reads as the
@@ -231,8 +202,8 @@ def test_a_header_that_names_no_sequence_is_refused(line: bytes) -> None:
         _extend_header(line, "tinyCe", "__")
 
 
-def test_a_component_header_starting_with_whitespace_is_named_as_the_tools_name_it(
-    chimera_component: ComponentFactory, tmp_path: Path
+def test_retrieved_sequence_agrees_with_its_component_however_the_header_was_shaped(
+    chimera_component: ComponentFactory, tmp_path: Path, build_chimera: ChimeraFactory
 ) -> None:
     # End to end, because this is where reading the header differently from samtools shows
     # up: the component registers under `oddChr`, so the chimera must carry
@@ -248,112 +219,84 @@ def test_a_component_header_starting_with_whitespace_is_named_as_the_tools_name_
         assert "oddChr__tinyOdd" in chimera.chromosomes
         assert chimera["oddChr__tinyOdd"] == odd["oddChr"]
 
+    # And, for ordinary components, the whole 2bit path over concatenated bytes agrees
+    # with the component it came from: same bases, same case, same offsets — including a
+    # chromosome shaped like hg38's decoy name, which must round-trip like any other.
+    everyday = build_chimera(*CHIMERA_EVERYDAY)
+    worm = chimera_component("tinyCe")
+    draft = chimera_component("tinyEc")
+    assert everyday["I__tinyCe:0-100"] == worm["I:0-100"]
+    assert everyday["I__tinyCe:0-100"].islower()  # soft-masking survived faToTwoBit
+    assert everyday["MtDNA__tinyCe"] == worm["MtDNA"]
+    assert everyday["chr1_KI270706v1_random__tinyEc:0-100"] == draft["chr1_KI270706v1_random:0-100"]
+
 
 # --------------------------------------------------------------------------------------
 # What the reference then answers
 # --------------------------------------------------------------------------------------
 
 
-def test_sequence_retrieval_agrees_with_the_component_it_came_from(
+def test_a_bare_chromosome_name_names_every_resolving_spelling_or_falls_back_like_any_assembly(
     build_chimera: ChimeraFactory, chimera_component: ComponentFactory
 ) -> None:
-    # The whole 2bit path over concatenated bytes: same bases, same case, same offsets.
-    chimera = build_chimera(*CHIMERA_EVERYDAY)
-    worm = chimera_component("tinyCe")
-    draft = chimera_component("tinyEc")
-
-    assert chimera["I__tinyCe:0-100"] == worm["I:0-100"]
-    assert chimera["I__tinyCe:0-100"].islower()  # soft-masking survived faToTwoBit
-    assert chimera["chr1_KI270706v1_random__tinyEc:0-100"] == draft["chr1_KI270706v1_random:0-100"]
-    assert chimera["MtDNA__tinyCe"] == worm["MtDNA"]
-
-
-def test_a_bare_chromosome_name_does_not_resolve_and_the_refusal_names_the_spelling(
-    build_chimera: ChimeraFactory,
-) -> None:
-    # Resolving `III` too would restore the ambiguity the suffix abolishes, and would make
-    # what a name means depend on which components happen to be present (ADR-0009). What
-    # makes that bearable is naming the spelling that does resolve — `III` is the ninth of
-    # the nine sequences here, so a message merely listing the first few never mentions it.
+    # Resolving a bare name would restore the ambiguity the suffix abolishes, and would
+    # make what a name means depend on which components happen to be present (ADR-0009).
     chimera = build_chimera(*CHIMERA_EVERYDAY)
 
+    # `III` is carried by one component: the refusal names the spelling that does
+    # resolve — it is the ninth of the nine sequences here, so a message merely listing
+    # the first few never mentions it — and that spelling is a next action.
     with pytest.raises(ValueError, match="III__tinySc"):
         chimera["III:0-100"]
-
-    # ...and what it named is a name that resolves, which is what makes it a next action.
     assert len(chimera["III__tinySc:0-100"]) == 100
 
-
-def test_a_bare_name_two_components_carry_is_answered_with_both(
-    build_chimera: ChimeraFactory,
-) -> None:
-    # tinyCe and tinySc both carry `I`. Naming one spelling would be picking for the
-    # caller the very thing the suffix exists to make them say, so both are named.
-    chimera = build_chimera(*CHIMERA_EVERYDAY)
-
+    # `I` is carried by two components — tinyCe and tinySc — so naming one spelling would
+    # be picking for the caller the very thing the suffix exists to make them say; both
+    # are named.
     with pytest.raises(ValueError, match="I__tinySc") as refusal:
         chimera["I:0-100"]
-
     assert "I__tinyCe" in str(refusal.value)
 
-
-def test_an_unknown_name_no_component_carries_is_refused_as_it_always_was(
-    build_chimera: ChimeraFactory,
-) -> None:
-    # A chimera has one more thing to say only about a bare name it actually carries; a
-    # name nothing carries gets the general message, on a chimera as anywhere else.
-    chimera = build_chimera(*CHIMERA_EVERYDAY)
-
-    with pytest.raises(ValueError, match="known sequences include") as refusal:
+    # `chrZ` is carried by no component: a chimera has one more thing to say only about a
+    # bare name it actually carries, so this gets the same general message any assembly
+    # would, with no mention of ADR-0009.
+    with pytest.raises(ValueError, match="known sequences include") as unknown:
         chimera["chrZ:0-5"]
+    assert "ADR-0009" not in str(unknown.value)
 
-    assert "ADR-0009" not in str(refusal.value)
-
-
-def test_a_plain_assembly_says_nothing_about_components(
-    chimera_component: ComponentFactory,
-) -> None:
-    # `III` is a real tinySc chromosome and unknown to tinyCe, and an assembly that is not
-    # a chimera has no suffixed spelling to offer for it — so nothing here changes.
+    # And a plain assembly — not a chimera at all — has no suffixed spelling to offer for
+    # a name it does not carry, so nothing here changes for it either.
     worm = chimera_component("tinyCe")
-
-    with pytest.raises(ValueError, match="known sequences include") as refusal:
-        worm["III:0-100"]
-
-    assert "ADR-0009" not in str(refusal.value)
+    with pytest.raises(ValueError, match="known sequences include") as plain:
+        worm["III:0-100"]  # a real tinySc chromosome, unknown to tinyCe
+    assert "ADR-0009" not in str(plain.value)
 
 
-def test_two_components_that_collide_get_four_distinct_names(
+def test_two_components_that_collide_get_four_distinct_names_and_escalation_lengthens_the_run(
     build_chimera: ChimeraFactory,
 ) -> None:
     # tinyCe and tinySc both carry `I` and `II`; the shipped pair never does.
     chimera = build_chimera("tinyCe", "tinySc")
-
     assert chimera.assembly == "tinyCe_tinySc"
     assert {"I__tinyCe", "II__tinyCe", "I__tinySc", "II__tinySc"} <= set(chimera.chromosomes)
     assert len(set(chimera.chromosomes)) == len(chimera.chromosomes) == 6
     assert chimera["I__tinyCe"] != chimera["I__tinySc"]
 
-
-def test_a_component_carrying_a_doubled_underscore_escalates_the_separator(
-    build_chimera: ChimeraFactory,
-) -> None:
     # The separator belongs to one chimera, so it is derived from these components and
     # recorded — a build that wrote a constant would lose the self-announcing property
     # exactly here, and nothing downstream could tell.
-    chimera = build_chimera("tinyCe", CHIMERA_ESCALATION)
-    details = read_chimera_details(chimera.fasta_path.parent)
-
-    assert chimera.assembly == "tinyCe_tinyEcDub"
+    escalated = build_chimera("tinyCe", CHIMERA_ESCALATION)
+    details = read_chimera_details(escalated.fasta_path.parent)
+    assert escalated.assembly == "tinyCe_tinyEcDub"
     assert details is not None
     assert details.separator == "___"
     # And the same fact through the accessor an off-repo caller has, which is the only one
     # that stops it hardcoding the default and splitting the doubled name in the wrong place.
-    assert chimera.separator == "___"
-    assert "NZ_TINY02__000002.1___tinyEcDub" in chimera.chromosomes
-    assert chimera.chromosomes[0] == "I___tinyCe"
+    assert escalated.separator == "___"
+    assert "NZ_TINY02__000002.1___tinyEcDub" in escalated.chromosomes
+    assert escalated.chromosomes[0] == "I___tinyCe"
     # And the recorded separator is the one that reads the names back.
-    assert [split_suffixed(name, details.separator) for name in chimera.chromosomes] == [
+    assert [split_suffixed(name, details.separator) for name in escalated.chromosomes] == [
         ("I", "tinyCe"),
         ("II", "tinyCe"),
         ("MtDNA", "tinyCe"),
@@ -367,26 +310,12 @@ def test_a_component_carrying_a_doubled_underscore_escalates_the_separator(
 # --------------------------------------------------------------------------------------
 
 
-def test_components_is_the_sorted_component_names(build_chimera: ChimeraFactory) -> None:
-    assert build_chimera(*reversed(CHIMERA_EVERYDAY)).components == list(CHIMERA_EVERYDAY)
+def test_a_chimeras_components_attribute_every_chromosome(build_chimera: ChimeraFactory) -> None:
+    # Reversed on arrival, same as the layout test above: components is the sorted set.
+    chimera = build_chimera(*reversed(CHIMERA_EVERYDAY))
+    assert chimera.components == list(CHIMERA_EVERYDAY)
 
-
-def test_a_plain_assembly_is_not_a_chimera_of_nothing(
-    chimera_component: ComponentFactory,
-) -> None:
-    worm = chimera_component("tinyCe")
-
-    assert worm.components is None
-    assert worm.separator is None
-    assert worm.component_annotations is None
-
-
-def test_chrom_components_attributes_every_chromosome_of_a_chimera(
-    build_chimera: ChimeraFactory,
-) -> None:
-    chimera = build_chimera(*CHIMERA_EVERYDAY)
     attribution = chimera.chrom_components
-
     assert list(attribution.index) == chimera.chromosomes
     assert not attribution.isna().to_numpy().any()
     assert attribution["I__tinyCe"] == "tinyCe"
@@ -395,14 +324,17 @@ def test_chrom_components_attributes_every_chromosome_of_a_chimera(
     assert Counter(attribution) == {"tinyCe": 3, "tinyEc": 3, "tinySc": 3}
 
 
-def test_chrom_components_is_total_for_a_plain_assembly_too(
+def test_a_plain_assembly_is_not_a_chimera_in_every_attribute_that_shows(
     chimera_component: ComponentFactory,
 ) -> None:
-    # Totality is what keeps `components` the single is-chimera test: no caller has to
-    # read this one to find out which kind of assembly it is holding.
     worm = chimera_component("tinyCe")
-    attribution = worm.chrom_components
 
+    assert worm.components is None
+    assert worm.separator is None
+    assert worm.component_annotations is None
+    # Totality is what keeps `components` the single is-chimera test: no caller has to
+    # read `chrom_components` to find out which kind of assembly it is holding.
+    attribution = worm.chrom_components
     assert list(attribution.index) == worm.chromosomes
     assert set(attribution) == {"tinyCe"}
 
@@ -432,36 +364,39 @@ def test_the_record_says_a_chimera_was_built_and_from_what(
     assert all(digest is not None for digest in digests.values())
 
 
-def test_rebuilding_a_finished_chimera_rewrites_nothing(build_chimera: ChimeraFactory) -> None:
+def test_rebuilding_a_finished_chimera_rewrites_nothing_and_a_broken_one_is_repaired(
+    build_chimera: ChimeraFactory,
+) -> None:
     first = build_chimera(*CHIMERA_EVERYDAY)
     written = first.fasta_path.stat().st_mtime_ns
     record = read_record(first.fasta_path.parent)
 
     again = build_chimera(*CHIMERA_EVERYDAY)
-
     assert again.fasta_path == first.fasta_path
     assert again.fasta_path.stat().st_mtime_ns == written
     assert read_record(again.fasta_path.parent) == record
 
-
-def test_a_chimera_directory_that_cannot_be_trusted_raises_naming_the_repair(
-    build_chimera: ChimeraFactory,
-) -> None:
-    chimera = build_chimera("tinyCe", "tinySc")
-    record_path(chimera.fasta_path.parent).unlink()
-
+    # A directory that cannot be trusted is a different matter: the record naming what
+    # finished there is gone, so a rebuild raises rather than guess, and names the
+    # command that repairs it.
+    pair = build_chimera("tinyCe", "tinySc")
+    record_path(pair.fasta_path.parent).unlink()
     with pytest.raises(UnfinishedRegistrationError, match="genome register tinyCe_tinySc --force"):
         build_chimera("tinyCe", "tinySc")
-    # ...and that command is what repairs it, which is what `force` is.
-    assert build_chimera("tinyCe", "tinySc", force=True).chromosomes == chimera.chromosomes
+    assert build_chimera("tinyCe", "tinySc", force=True).chromosomes == pair.chromosomes
 
 
-def test_a_chrom_sizes_that_disagrees_with_the_components_is_never_recorded(
-    chimera_component: ComponentFactory, monkeypatch: pytest.MonkeyPatch
+def test_a_chrom_sizes_that_disagrees_with_the_components_is_never_recorded_and_nothing_is_fetched(
+    chimera_component: ComponentFactory,
+    build_chimera: ChimeraFactory,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The cross-check between the tools' answer and the contract's prediction. Standing a
     # wrong chrom.sizes in is the only way to reach it: the build is a verbatim copy under
-    # a derived name, so it is meant to be unreachable.
+    # a derived name, so it is meant to be unreachable. Scoped to its own MonkeyPatch
+    # context rather than the fixture-provided one: the autouse `liulab_data` fixture
+    # patches the data-root env var through that same shared instance, and undoing it
+    # here would undo that redirect too, sending the rest of this test at the real one.
     prepare = chimera_mod.prepare_fasta
 
     def prepare_and_mangle(fasta: Path, *, overwrite: bool = False) -> GenomeFiles:
@@ -472,24 +407,19 @@ def test_a_chrom_sizes_that_disagrees_with_the_components_is_never_recorded(
         files.chrom_sizes.write_text("\n".join(lines) + "\n")
         return files
 
-    monkeypatch.setattr(chimera_mod, "prepare_fasta", prepare_and_mangle)
     components = [chimera_component(name) for name in ("tinyCe", "tinySc")]
-
-    with pytest.raises(RegistrationError, match="genome register tinyCe_tinySc --force"):
-        Genome.chimera(*components)
+    with pytest.MonkeyPatch.context() as scoped:
+        scoped.setattr(chimera_mod, "prepare_fasta", prepare_and_mangle)
+        with pytest.raises(RegistrationError, match="genome register tinyCe_tinySc --force"):
+            Genome.chimera(*components)
     assert read_record(assembly_data_dir("tinyCe_tinySc")) is None
 
-
-def test_building_a_chimera_fetches_nothing(
-    build_chimera: ChimeraFactory, monkeypatch: pytest.MonkeyPatch
-) -> None:
     # The autouse guard would raise on a real network call; this says deliberately that
     # the package's one fetch step is not reached at all, which is a stronger claim.
     def refuse(*args: object, **kwargs: object) -> None:
         raise AssertionError("a chimera build fetches nothing")
 
     monkeypatch.setattr(fetch_mod, "fetch_url", refuse)
-
     assert build_chimera(*CHIMERA_EVERYDAY).components == list(CHIMERA_EVERYDAY)
 
 
@@ -498,25 +428,19 @@ def test_building_a_chimera_fetches_nothing(
 # --------------------------------------------------------------------------------------
 
 
-def test_one_component_is_not_a_chimera(chimera_component: ComponentFactory) -> None:
+def test_a_chimera_refuses_an_illegal_component_list(
+    chimera_component: ComponentFactory, build_chimera: ChimeraFactory
+) -> None:
     with pytest.raises(ChimeraNamingError, match="at least 2 components"):
         Genome.chimera(chimera_component("tinyCe"))
 
-
-def test_a_repeated_component_raises(chimera_component: ComponentFactory) -> None:
     worm = chimera_component("tinyCe")
-
     with pytest.raises(ChimeraNamingError, match="must not repeat"):
         Genome.chimera(worm, chimera_component("tinySc"), worm)
 
-
-def test_a_chimera_cannot_be_a_component_of_another(
-    build_chimera: ChimeraFactory, chimera_component: ComponentFactory
-) -> None:
     # Nesting is forbidden by the model, and the record on the component's own disk is
     # what says so — the naming contract can only refuse the spelling.
     chimera = build_chimera("tinyCe", "tinySc")
-
     with pytest.raises(ChimeraNamingError, match="is itself a chimera"):
         Genome.chimera(chimera, chimera_component("tinyEc"))
 

@@ -8,6 +8,10 @@ reader as text rather than laid down as files.
 The category names are **data**. They come from whatever a curated list declares and
 differ per annotation, so what is asserted below is structure and never a closed set of
 names — a curator adding one must not break a test.
+
+One test below walks every shipped file's categories and gene ids — the whole-table
+structural invariant that catches a newly dropped-in file with no code change here,
+alongside the coverage check that every annotation the table lists ships one at all.
 """
 
 from __future__ import annotations
@@ -80,28 +84,39 @@ def _shipped(annotation: str) -> CuratedGeneList:
 # ---------------------------------------------------------------------------------------
 
 
-def test_the_package_ships_curated_gene_lists_at_all() -> None:
+def test_the_package_ships_sorted_deduplicated_annotations_covering_every_table_row() -> None:
     # The guard under every parametrized test below: with no files at all each of those
     # would collect zero cases and pass, which is exactly the silent zero #111 is about.
-    assert curated_annotations()
-
-
-def test_the_shipped_annotations_are_sorted_and_each_named_once() -> None:
     annotations = curated_annotations()
 
+    assert annotations
     assert list(annotations) == sorted(annotations)
     assert len(set(annotations)) == len(annotations)
 
+    # A row added without a list is then a decision someone made out loud, rather than an
+    # annotation that answers *absent* for every category and nobody noticed.
+    missing = sorted(set(_TABLE_ASSEMBLIES) - set(annotations))
+    assert missing == sorted(_WITHOUT_A_CURATED_LIST)
+
 
 @pytest.mark.parametrize("annotation", curated_annotations())
-def test_every_shipped_file_is_valid(annotation: str) -> None:
+def test_every_shipped_file_is_valid_matches_its_assembly_and_answers_the_universal_category(
+    annotation: str,
+) -> None:
     # Loading is what validates, so a file that cannot be trusted raises here rather than
     # answering. The assertions below are the same invariants said again, so that a
-    # loosened loader is caught by a failure naming the offending file.
+    # loosened loader is caught by a failure naming the offending file. The fact the
+    # assembly guard rests on: a curated list is pinned to one assembly's annotation, and
+    # the table is where that pairing is written down.
     where = f"{annotation}{GENE_LIST_SUFFIX}"
     listed = _shipped(annotation)
 
     assert listed.annotation == annotation, f"{where}: names another annotation"
+    assert listed.assembly == _TABLE_ASSEMBLIES.get(annotation), (
+        f"{where}: names an assembly the annotation table does not file it under"
+    )
+    assert _UNIVERSAL_CATEGORY in listed.categories
+
     assert listed.categories, f"{where}: declares no categories"
     seen: dict[str, str] = {}
     for name, category in listed.categories.items():
@@ -119,42 +134,16 @@ def test_every_shipped_file_is_valid(annotation: str) -> None:
             seen[gene_id] = name
 
 
-@pytest.mark.parametrize("annotation", curated_annotations())
-def test_every_shipped_file_names_the_assembly_the_table_files_it_under(annotation: str) -> None:
-    # The fact the assembly guard rests on: a curated list is pinned to one assembly's
-    # annotation, and the table is where that pairing is written down.
-    where = f"{annotation}{GENE_LIST_SUFFIX}"
-
-    assert _shipped(annotation).assembly == _TABLE_ASSEMBLIES.get(annotation), (
-        f"{where}: names an assembly the annotation table does not file it under"
-    )
-
-
-@pytest.mark.parametrize("annotation", curated_annotations())
-def test_every_shipped_file_can_answer_the_category_this_was_opened_for(annotation: str) -> None:
-    assert _UNIVERSAL_CATEGORY in _shipped(annotation).categories
-
-
-def test_every_annotation_the_table_lists_ships_a_curated_list() -> None:
-    # A row added without a list is then a decision someone made out loud, rather than an
-    # annotation that answers *absent* for every category and nobody noticed.
-    missing = sorted(set(_TABLE_ASSEMBLIES) - set(curated_annotations()))
-
-    assert missing == sorted(_WITHOUT_A_CURATED_LIST)
-
-
 # ---------------------------------------------------------------------------------------
 # The raw absence: one function's ``None``, and nobody else's
 # ---------------------------------------------------------------------------------------
 
 
-def test_an_annotation_no_list_ships_for_is_none() -> None:
+def test_an_annotation_no_list_ships_for_and_a_path_shaped_name_both_reach_nothing() -> None:
     assert curated_gene_list("no_such_annotation") is None
 
-
-def test_a_name_that_is_a_path_reaches_nothing() -> None:
-    # Names are looked up among what ships rather than joined onto the resource directory,
-    # so a name shaped like a path finds nothing instead of walking out of it.
+    # Names are looked up among what ships rather than joined onto the resource
+    # directory, so a name shaped like a path finds nothing instead of walking out of it.
     assert curated_gene_list("../annotation_metadata") is None
     assert curated_gene_list("") is None
 
@@ -164,102 +153,81 @@ def test_a_name_that_is_a_path_reaches_nothing() -> None:
 # ---------------------------------------------------------------------------------------
 
 
-def test_a_well_formed_file_reads_back_as_its_categories() -> None:
+def test_a_well_formed_file_reads_back_as_its_categories_in_file_order() -> None:
     listed = _read(_payload())
-
     assert listed.annotation == "mine"
     assert listed.assembly == "tiny"
     assert list(listed.categories) == ["rRNA"]
     assert listed.categories["rRNA"].gene_ids == ("g1", "g2")
 
-
-def test_categories_keep_the_order_the_file_spells_them_in() -> None:
     spelled = {
         name: {"description": "d", "source": "s", "gene_ids": [f"{name}-1"]}
         for name in ("zeta", "alpha", "mu")
     }
-
     assert list(_read(_payload(categories=spelled)).categories) == ["zeta", "alpha", "mu"]
 
 
-def test_text_that_is_not_json_names_the_file() -> None:
+def test_invalid_json_and_a_mismatched_annotation_field_both_raise_and_name_the_file() -> None:
     with pytest.raises(CuratedGeneListError, match=f"mine{GENE_LIST_SUFFIX}"):
         _read("{not json at all")
 
-
-@pytest.mark.parametrize("missing", ["annotation", "assembly", "categories"])
-def test_a_missing_key_names_the_key(missing: str) -> None:
-    body = json.loads(_payload())
-    del body[missing]
-
-    with pytest.raises(CuratedGeneListError, match=missing):
-        _read(json.dumps(body))
-
-
-def test_an_annotation_field_disagreeing_with_the_file_name_raises() -> None:
     with pytest.raises(CuratedGeneListError, match="theirs"):
         _read(_payload(annotation="theirs"))
 
 
-def test_a_file_declaring_no_categories_at_all_raises() -> None:
+def test_a_missing_top_level_key_names_the_key() -> None:
+    # Three keys, three independent failure modes: each is checked in its own block so a
+    # future refusal that only catches two of the three still fails here.
+    for missing in ("annotation", "assembly", "categories"):
+        body = json.loads(_payload())
+        del body[missing]
+
+        with pytest.raises(CuratedGeneListError, match=missing):
+            _read(json.dumps(body))
+
+
+def test_various_malformed_category_payloads_each_raise_and_name_the_offender() -> None:
     # Absence is spelled by shipping no file. A file that declares nothing would be a
     # second spelling of it, and the one that reads as emptiness.
     with pytest.raises(CuratedGeneListError, match="categories"):
         _read(_payload(categories={}))
 
-
-def test_a_declared_category_with_no_gene_ids_raises() -> None:
     empty = {"rRNA": {"description": "d", "source": "s", "gene_ids": []}}
-
     with pytest.raises(CuratedGeneListError, match="rRNA"):
         _read(_payload(categories=empty))
 
-
-@pytest.mark.parametrize("blank", ["description", "source"])
-def test_a_category_that_explains_nothing_raises(blank: str) -> None:
-    entry: dict[str, Any] = {"description": "d", "source": "s", "gene_ids": ["g1"]}
-    entry[blank] = "   "
-
-    with pytest.raises(CuratedGeneListError, match=blank):
-        _read(_payload(categories={"rRNA": entry}))
-
-
-def test_the_same_gene_id_twice_in_one_category_raises() -> None:
     doubled = {"rRNA": {"description": "d", "source": "s", "gene_ids": ["g1", "g1"]}}
-
     with pytest.raises(CuratedGeneListError, match="g1"):
         _read(_payload(categories=doubled))
 
-
-def test_the_same_gene_id_in_two_categories_raises() -> None:
     # A caller summing two categories would count that gene twice, which is the swing
     # #111 measured rather than a tidiness complaint.
     both = {
         "rRNA": {"description": "d", "source": "s", "gene_ids": ["g1"]},
         "Mt_rRNA": {"description": "d", "source": "s", "gene_ids": ["g1"]},
     }
-
     with pytest.raises(CuratedGeneListError, match="g1"):
         _read(_payload(categories=both))
 
-
-@pytest.mark.parametrize("malformed", [[], "rRNA", 3])
-def test_categories_that_are_not_a_mapping_raise(malformed: Any) -> None:
-    with pytest.raises(CuratedGeneListError, match="categories"):
-        _read(_payload(categories=malformed))
-
-
-@pytest.mark.parametrize("malformed", [{"rRNA": ["g1"]}, {"rRNA": "g1"}])
-def test_a_category_that_is_not_an_object_raises(malformed: Any) -> None:
-    with pytest.raises(CuratedGeneListError, match="rRNA"):
-        _read(_payload(categories=malformed))
-
-
-def test_a_gene_id_that_is_not_text_raises() -> None:
     numeric = {"rRNA": {"description": "d", "source": "s", "gene_ids": [1, 2]}}
-
     with pytest.raises(CuratedGeneListError, match="rRNA"):
         _read(_payload(categories=numeric))
+
+
+def test_a_category_that_explains_nothing_or_is_shaped_wrong_raises() -> None:
+    for blank in ("description", "source"):
+        entry: dict[str, Any] = {"description": "d", "source": "s", "gene_ids": ["g1"]}
+        entry[blank] = "   "
+        with pytest.raises(CuratedGeneListError, match=blank):
+            _read(_payload(categories={"rRNA": entry}))
+
+    for not_a_mapping in ([], 3):
+        with pytest.raises(CuratedGeneListError, match="categories"):
+            _read(_payload(categories=not_a_mapping))
+
+    for not_an_object in ({"rRNA": ["g1"]}, {"rRNA": "g1"}):
+        with pytest.raises(CuratedGeneListError, match="rRNA"):
+            _read(_payload(categories=not_an_object))
 
 
 # ---------------------------------------------------------------------------------------
@@ -267,23 +235,20 @@ def test_a_gene_id_that_is_not_text_raises() -> None:
 # ---------------------------------------------------------------------------------------
 
 
-def test_a_list_answers_for_the_assembly_it_was_curated_against() -> None:
+def test_a_list_answers_for_its_own_assembly_and_refuses_a_mismatch_as_a_non_lookup_defect() -> (
+    None
+):
     assert _read(_payload()).check_assembly("tiny") is None
 
-
-def test_a_list_refuses_to_answer_for_another_assembly() -> None:
     # A same-named annotation registered against a different assembly: answering would
     # hand back another species' gene ids, so it raises rather than answering.
     with pytest.raises(GeneListAssemblyMismatchError) as excinfo:
         _read(_payload()).check_assembly("hg38")
-
     message = str(excinfo.value)
     assert "tiny" in message
     assert "hg38" in message
 
-
-def test_the_assembly_mismatch_is_a_defect_in_what_ships_rather_than_a_lookup() -> None:
-    # It is not one of the two absences: nothing is missing, and a caller catching
+    # It is not one of the two absences below: nothing is missing, and a caller catching
     # LookupError for absence must not swallow this.
     assert issubclass(GeneListAssemblyMismatchError, CuratedGeneListError)
     assert not issubclass(GeneListAssemblyMismatchError, LookupError)
@@ -294,7 +259,7 @@ def test_the_assembly_mismatch_is_a_defect_in_what_ships_rather_than_a_lookup() 
 # ---------------------------------------------------------------------------------------
 
 
-def test_the_two_absences_are_distinguishable_and_both_are_lookups() -> None:
+def test_the_two_absences_are_distinguishable_lookups_with_helpful_messages() -> None:
     # A caller may catch the pair and still act differently on each, which is exactly what
     # #111 asks for: *no categories at all* and *not this category* are different facts.
     assert issubclass(NoGeneCategoriesError, LookupError)
@@ -302,35 +267,26 @@ def test_the_two_absences_are_distinguishable_and_both_are_lookups() -> None:
     assert not issubclass(NoGeneCategoriesError, GeneCategoryNotDeclaredError)
     assert not issubclass(GeneCategoryNotDeclaredError, NoGeneCategoriesError)
 
-
-def test_declaring_no_categories_says_who_does_and_what_would_fix_it() -> None:
     error = NoGeneCategoriesError("mine", "tiny", ("wormbase_ws298", "gencode_v50"))
-
     message = str(error)
     assert "mine" in message
     assert "wormbase_ws298" in message
     assert "gencode_v50" in message
     assert (error.annotation, error.assembly) == ("mine", "tiny")
 
-
-def test_declaring_no_categories_names_the_contributors_of_a_merge() -> None:
     # For a merged annotation nothing would be fixed by shipping a list under the merged
     # name: it is the contributing annotations that need one.
-    error = NoGeneCategoriesError("a+b", "x_y", ("gencode_v50",), contributors=("a", "b"))
+    merged = NoGeneCategoriesError("a+b", "x_y", ("gencode_v50",), contributors=("a", "b"))
+    assert "a+b" in str(merged)
+    assert "a, b" in str(merged)
 
-    assert "a+b" in str(error)
-    assert "a, b" in str(error)
-
-
-def test_a_category_nobody_declared_lists_the_ones_that_are() -> None:
-    error = GeneCategoryNotDeclaredError("mine", "tiny", "tRNA", ("rRNA", "Mt_rRNA"))
-
-    message = str(error)
-    assert "tRNA" in message
-    assert "rRNA" in message
-    assert "Mt_rRNA" in message
-    assert error.category == "tRNA"
-    assert error.declared == ("rRNA", "Mt_rRNA")
+    declared_error = GeneCategoryNotDeclaredError("mine", "tiny", "tRNA", ("rRNA", "Mt_rRNA"))
+    declared_message = str(declared_error)
+    assert "tRNA" in declared_message
+    assert "rRNA" in declared_message
+    assert "Mt_rRNA" in declared_message
+    assert declared_error.category == "tRNA"
+    assert declared_error.declared == ("rRNA", "Mt_rRNA")
 
 
 # ---------------------------------------------------------------------------------------
@@ -338,20 +294,16 @@ def test_a_category_nobody_declared_lists_the_ones_that_are() -> None:
 # ---------------------------------------------------------------------------------------
 
 
-def test_a_category_carries_its_own_name_and_its_ids_in_file_order() -> None:
+def test_a_category_carries_its_fields_and_a_curated_list_is_frozen() -> None:
     category = CuratedCategory(
         category="rRNA",
         description="the mature ribosomal RNA genes",
         source="WormBase WS298",
         gene_ids=("b", "a"),
     )
-
     assert category.category == "rRNA"
     assert category.gene_ids == ("b", "a")
 
-
-def test_a_curated_list_is_frozen() -> None:
     listed = _read(_payload())
-
     with pytest.raises(AttributeError):
         listed.assembly = "hg38"  # type: ignore[misc]

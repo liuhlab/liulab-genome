@@ -376,47 +376,34 @@ def _match_symbols(*arguments: str) -> Result:
 
 
 class TestVersion:
-    def test_version_prints_string(self) -> None:
-        result = runner.invoke(app, ["version"])
-        assert result.exit_code == 0
-        assert result.stdout.strip() != ""
+    def test_version_reports_the_same_string_as_text_and_json(self) -> None:
+        text_result = runner.invoke(app, ["version"])
+        json_result = runner.invoke(app, ["version", "--json"])
 
-    def test_version_json(self) -> None:
-        result = runner.invoke(app, ["version", "--json"])
-        assert result.exit_code == 0
-        assert _json.loads(result.stdout) == {"version": genome_version}
-
-    def test_json_and_text_report_the_same_version(self) -> None:
-        text = runner.invoke(app, ["version"]).stdout.strip()
-        payload = _json.loads(runner.invoke(app, ["version", "--json"]).stdout)
-        assert payload["version"] == text
+        assert text_result.exit_code == 0
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
+        assert payload == {"version": genome_version}
+        assert text_result.stdout.strip() == payload["version"]
 
 
 class TestRevcomp:
-    def test_basic(self) -> None:
-        result = runner.invoke(app, ["revcomp", "ATCG"])
-        assert result.exit_code == 0
-        assert result.stdout.strip() == "CGAT"
+    def test_reverses_complements_preserves_case_and_reports_json(self) -> None:
+        assert runner.invoke(app, ["revcomp", "ATCG"]).stdout.strip() == "CGAT"
 
-    def test_preserves_case(self) -> None:
-        result = runner.invoke(app, ["revcomp", "aTcG"])
-        assert result.exit_code == 0
-        assert result.stdout.strip() == "CgAt"
+        cased = runner.invoke(app, ["revcomp", "aTcG"])
+        assert cased.exit_code == 0
+        assert cased.stdout.strip() == "CgAt"
 
-    def test_json(self) -> None:
-        result = runner.invoke(app, ["revcomp", "ATCG", "--json"])
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
-        assert payload == {"input": "ATCG", "reverse_complement": "CGAT"}
+        json_result = runner.invoke(app, ["revcomp", "ATCG", "--json"])
+        assert json_result.exit_code == 0
+        assert _json.loads(json_result.stdout) == {"input": "ATCG", "reverse_complement": "CGAT"}
 
-    def test_invalid_input_exits_2(self) -> None:
+    def test_invalid_input_exits_2_naming_the_base_and_the_alphabet(self) -> None:
         result = runner.invoke(app, ["revcomp", "ATCX"])
         assert result.exit_code == 2
         assert "error" in _output(result).lower()
         assert "X" in _output(result)  # the base it could not complement
-
-    def test_error_names_the_alphabet_it_was_held_to(self) -> None:
-        result = runner.invoke(app, ["revcomp", "ATCX"])
         assert "{ACGT}" in _output(result)
 
     def test_alphabet_comes_from_the_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -434,20 +421,30 @@ class TestRevcomp:
 
 @pytest.mark.skipif(not _BINARIES_PRESENT, reason="samtools/bedtools not on PATH")
 class TestDoctor:
-    def test_doctor_text(self) -> None:
-        result = runner.invoke(app, ["doctor"])
-        assert result.exit_code == 0
+    def test_reports_every_tool_as_text_and_json(self) -> None:
+        text = runner.invoke(app, ["doctor"])
+        json_result = runner.invoke(app, ["doctor", "--json"])
+
+        assert text.exit_code == 0
+        assert json_result.exit_code == 0
         for tool in REQUIRED_TOOLS:
-            assert tool in result.stdout
-
-    def test_doctor_json(self) -> None:
-        result = runner.invoke(app, ["doctor", "--json"])
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
-        assert set(payload.keys()) == set(REQUIRED_TOOLS)
+            assert tool in text.stdout
+        assert set(_json.loads(json_result.stdout).keys()) == set(REQUIRED_TOOLS)
 
 
-class TestRegister:
+class _OfflineTinyFasta:
+    """Serve the committed ``tiny.fa.gz`` in place of any download, for a whole class.
+
+    Shared by every class below whose tests need nothing more than that one fixture
+    file offline — one definition rather than a copy of the same three lines in each.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
+        fake_fetch.serve("tiny.fa.gz")
+
+
+class TestRegister(_OfflineTinyFasta):
     """``genome register`` — prepare an assembly and say what landed.
 
     Offline throughout: ``fake_fetch`` serves the committed ``tiny.fa.gz`` in place of
@@ -457,23 +454,19 @@ class TestRegister:
     disagree with.
     """
 
-    @pytest.fixture(autouse=True)
-    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
-        fake_fetch.serve("tiny.fa.gz")
-
-    def test_registers_and_reports_where_it_landed(self, liulab_data: Path) -> None:
+    def test_registers_and_reports_where_it_landed_as_text_and_json(
+        self, liulab_data: Path
+    ) -> None:
         result = runner.invoke(app, ["register", "tiny"])
-
         assert result.exit_code == 0
         assert str(liulab_data / "genome" / "tiny") in result.stdout
         assert _TINY_FA_SHA256 in result.stdout
         assert (liulab_data / "genome" / "tiny" / "tiny.fa").is_file()
 
-    def test_json(self, liulab_data: Path) -> None:
-        result = runner.invoke(app, ["register", "tiny", "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        # Already registered: answered from the record, and the same digest either way.
+        json_result = runner.invoke(app, ["register", "tiny", "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["assembly"] == "tiny"
         assert payload["directory"] == str(liulab_data / "genome" / "tiny")
         assert payload["sha256"] == _TINY_FA_SHA256
@@ -484,36 +477,30 @@ class TestRegister:
             "tiny.fa.fai",
         ]
 
-    def test_a_broken_directory_exits_non_zero_naming_the_repair(self, liulab_data: Path) -> None:
+    def test_a_broken_directory_is_refused_force_repairs_it_and_a_source_never_asks_ucsc(
+        self, liulab_data: Path, data_dir: Path
+    ) -> None:
         directory = liulab_data / "genome" / "tiny"
         directory.mkdir(parents=True)
         (directory / "tiny.fa").write_text("half a genome\n")
 
-        result = runner.invoke(app, ["register", "tiny"])
+        refused = runner.invoke(app, ["register", "tiny"])
+        assert refused.exit_code == 1
+        assert "genome register tiny --force" in _output(refused)
 
-        assert result.exit_code == 1
-        assert "genome register tiny --force" in _output(result)
+        repaired = runner.invoke(app, ["register", "tiny", "--force", "--json"])
+        assert repaired.exit_code == 0
+        assert _json.loads(repaired.stdout)["sha256"] == _TINY_FA_SHA256
 
-    def test_force_repairs_what_the_error_named(self, liulab_data: Path) -> None:
-        directory = liulab_data / "genome" / "tiny"
-        directory.mkdir(parents=True)
-        (directory / "tiny.fa").write_text("half a genome\n")
-
-        result = runner.invoke(app, ["register", "tiny", "--force", "--json"])
-
-        assert result.exit_code == 0
-        assert _json.loads(result.stdout)["sha256"] == _TINY_FA_SHA256
-
-    def test_registering_from_a_source_never_asks_ucsc(self, data_dir: Path) -> None:
-        result = runner.invoke(
-            app, ["register", "tiny", "--source", str(data_dir / "tiny.fa.gz"), "--json"]
+        sourced = runner.invoke(
+            app,
+            ["register", "tiny_from_source", "--source", str(data_dir / "tiny.fa.gz"), "--json"],
         )
+        assert sourced.exit_code == 0
+        assert _json.loads(sourced.stdout)["source_url"] == str(data_dir / "tiny.fa.gz")
 
-        assert result.exit_code == 0
-        assert _json.loads(result.stdout)["source_url"] == str(data_dir / "tiny.fa.gz")
 
-
-class TestRegisterResolvesTheName:
+class TestRegisterResolvesTheName(_OfflineTinyFasta):
     """What a name means, settled by four checks in order — and the two refusals.
 
     A record already here, then a source the caller named, then a name whose every part
@@ -524,128 +511,99 @@ class TestRegisterResolvesTheName:
     gate exists to prevent.
     """
 
-    @pytest.fixture(autouse=True)
-    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
-        fake_fetch.serve("tiny.fa.gz")
-
-    def test_a_source_the_caller_named_settles_a_name_that_would_read_as_a_chimera(
+    def test_a_named_source_an_unlisted_download_and_a_bad_name_are_each_resolved_correctly(
         self, data_dir: Path, fake_fetch: FakeFetch
     ) -> None:
+        # What a --component flag would have bought, bought for less: the components are
+        # in the name, so typing them in the wrong order is detectable — and none of
+        # this touches the network.
+        mis_ordered = runner.invoke(app, ["register", "ecHT115_ce11"])
+        assert mis_ordered.exit_code == 1
+        assert "`genome register ce11_ecHT115`" in _output(mis_ordered)
+
+        missing = runner.invoke(app, ["register", "ce11_ecHT115"])
+        assert missing.exit_code == 1
+        assert "`genome register ce11`" in _output(missing)
+        assert "`genome register ecHT115`" in _output(missing)
+
+        # --force repairs a directory; it does not answer the question of what belongs
+        # in one, so it is not a bypass of the same gate.
+        forced = runner.invoke(app, ["register", "ce11_ecHT115", "--force"])
+        assert forced.exit_code == 1
+        assert "`genome register ce11`" in _output(forced)
+        assert fake_fetch.calls == []
+
         # hg38 and mm10 are both listed, so the name alone reads as two assemblies and
         # would refuse on a machine holding neither. Saying where the bytes come from is
-        # the caller answering the question, and it is believed.
+        # the caller answering the question, and it is believed — and still without
+        # touching the network.
         source = data_dir / "tiny.fa.gz"
-
         result = runner.invoke(app, ["register", "hg38_mm10", "--source", str(source), "--json"])
-
         assert result.exit_code == 0
         payload = _json.loads(result.stdout)
         assert payload["source_url"] == str(source)
         assert "components" not in payload["details"]
         assert fake_fetch.calls == []
 
-    def test_an_existing_record_says_what_to_rebuild_rather_than_the_name(
-        self, data_dir: Path, fake_fetch: FakeFetch
-    ) -> None:
-        # The clause that stops a plain hg38_mm10 seeded years ago from silently becoming
-        # a chimera: it was registered as an ordinary assembly, so that is what --force
-        # registers again.
-        assert (
-            runner.invoke(
-                app, ["register", "hg38_mm10", "--source", str(data_dir / "tiny.fa.gz")]
-            ).exit_code
-            == 0
-        )
-
-        result = runner.invoke(app, ["register", "hg38_mm10", "--force", "--json"])
-
-        assert result.exit_code == 0
-        assert "components" not in _json.loads(result.stdout)["details"]
-        assert fake_fetch.last.url.endswith("hg38_mm10.fa.gz")
-
-    def test_only_a_lost_record_falls_back_to_the_name(
-        self, data_dir: Path, liulab_data: Path
-    ) -> None:
-        # …and with the record gone, the name is all that is left: the same directory now
-        # reads as a chimera of hg38 and mm10, neither of which this machine has.
-        assert (
-            runner.invoke(
-                app, ["register", "hg38_mm10", "--source", str(data_dir / "tiny.fa.gz")]
-            ).exit_code
-            == 0
-        )
-        record_path(liulab_data / "genome" / "hg38_mm10").unlink()
-
-        result = runner.invoke(app, ["register", "hg38_mm10", "--force"])
-
-        assert result.exit_code == 1
-        assert "`genome register hg38`" in _output(result)
-        assert "`genome register mm10`" in _output(result)
-
-    def test_a_mis_ordered_name_is_refused_by_naming_the_canonical_spelling(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        # What a --component flag would have bought, bought for less: the components are
-        # in the name, so typing them in the wrong order is detectable.
-        result = runner.invoke(app, ["register", "ecHT115_ce11"])
-
-        assert result.exit_code == 1
-        assert "`genome register ce11_ecHT115`" in _output(result)
-        assert fake_fetch.calls == []
-
-    def test_a_cold_machine_names_the_missing_component_rather_than_downloading(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        result = runner.invoke(app, ["register", "ce11_ecHT115"])
-
-        assert result.exit_code == 1
-        assert "`genome register ce11`" in _output(result)
-        assert "`genome register ecHT115`" in _output(result)
-        assert fake_fetch.calls == []
-
-    def test_force_is_not_a_bypass_of_the_gate(self, fake_fetch: FakeFetch) -> None:
-        # It repairs a directory; it does not answer the question of what belongs in one.
-        result = runner.invoke(app, ["register", "ce11_ecHT115", "--force"])
-
-        assert result.exit_code == 1
-        assert "`genome register ce11`" in _output(result)
-        assert fake_fetch.calls == []
-
-    def test_a_name_neither_prepared_nor_listed_is_downloaded_as_it_always_was(
-        self, fake_fetch: FakeFetch
-    ) -> None:
         # The whole separation between ce11_ecHT115 and a free-form local key: neither
         # `my` nor `ref` is an assembly here or in the table, so `my_ref` is one name
         # somebody chose and the download is the answer it always was (ADR-0003).
-        result = runner.invoke(app, ["register", "my_ref", "--json"])
-
-        assert result.exit_code == 0
+        unlisted = runner.invoke(app, ["register", "my_ref", "--json"])
+        assert unlisted.exit_code == 0
         assert fake_fetch.last.url.endswith("my_ref.fa.gz")
-        assert "components" not in _json.loads(result.stdout)["details"]
+        assert "components" not in _json.loads(unlisted.stdout)["details"]
+
+    def test_an_existing_record_is_rebuilt_by_force_until_it_is_lost(
+        self, data_dir: Path, liulab_data: Path, fake_fetch: FakeFetch
+    ) -> None:
+        # The clause that stops a plain hg38_mm10 seeded years ago from silently becoming
+        # a chimera: it was registered as an ordinary assembly, so that is what --force
+        # registers again — and only once the record is gone does the same directory read
+        # as a chimera of hg38 and mm10, neither of which this machine has.
+        assert (
+            runner.invoke(
+                app, ["register", "hg38_mm10", "--source", str(data_dir / "tiny.fa.gz")]
+            ).exit_code
+            == 0
+        )
+
+        rebuilt = runner.invoke(app, ["register", "hg38_mm10", "--force", "--json"])
+        assert rebuilt.exit_code == 0
+        assert "components" not in _json.loads(rebuilt.stdout)["details"]
+        assert fake_fetch.last.url.endswith("hg38_mm10.fa.gz")
+
+        record_path(liulab_data / "genome" / "hg38_mm10").unlink()
+        lost = runner.invoke(app, ["register", "hg38_mm10", "--force"])
+        assert lost.exit_code == 1
+        assert "`genome register hg38`" in _output(lost)
+        assert "`genome register mm10`" in _output(lost)
 
 
-class TestVerify:
+class TestVerify(_OfflineTinyFasta):
     """``genome verify`` — re-read a FASTA and check it against the official row."""
 
-    @pytest.fixture(autouse=True)
-    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
-        fake_fetch.serve("tiny.fa.gz")
+    def test_reports_the_digest_as_text_and_json_a_mismatch_or_nothing_registered(
+        self, data_dir: Path
+    ) -> None:
+        # sacCer3's row pins the real genome's digest; the fixture is a subsample of it,
+        # so this is the mismatch a copy from a bad mirror would produce.
+        mismatch = runner.invoke(app, ["verify", "sacCer3", "--fasta", str(data_dir / "tiny.fa")])
+        assert mismatch.exit_code == 1
+        assert "sha256 mismatch" in _output(mismatch)
 
-    def test_reports_the_digest_of_a_registered_assembly(self) -> None:
+        unregistered = runner.invoke(app, ["verify", "tiny"])
+        assert unregistered.exit_code == 1
+        assert "genome register tiny" in _output(unregistered)
+
         assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
 
         result = runner.invoke(app, ["verify", "tiny"])
-
         assert result.exit_code == 0
         assert _TINY_FA_SHA256 in result.stdout
 
-    def test_json(self) -> None:
-        assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
-
-        result = runner.invoke(app, ["verify", "tiny", "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        json_result = runner.invoke(app, ["verify", "tiny", "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["sha256"] == _TINY_FA_SHA256
         # No row lists "tiny", so what it is held to is the digest its own registration
         # recorded — the fallback, and the payload says which answered.
@@ -656,24 +614,8 @@ class TestVerify:
         # rather than a status that would read as a check somebody made.
         assert payload["components"] is None
 
-    def test_a_hand_copied_fasta_is_checkable_against_the_official_row(
-        self, data_dir: Path
-    ) -> None:
-        # sacCer3's row pins the real genome's digest; the fixture is a subsample of it,
-        # so this is the mismatch a copy from a bad mirror would produce.
-        result = runner.invoke(app, ["verify", "sacCer3", "--fasta", str(data_dir / "tiny.fa")])
 
-        assert result.exit_code == 1
-        assert "sha256 mismatch" in _output(result)
-
-    def test_nothing_registered_exits_non_zero_naming_the_command(self) -> None:
-        result = runner.invoke(app, ["verify", "tiny"])
-
-        assert result.exit_code == 1
-        assert "genome register tiny" in _output(result)
-
-
-class TestWhatAVerifiedDigestWasHeldTo:
+class TestWhatAVerifiedDigestWasHeldTo(_OfflineTinyFasta):
     """Three answers, three sentences — and never one wording covering two of them.
 
     Being held to the digest the lab pinned, being held to the one this machine last
@@ -681,11 +623,18 @@ class TestWhatAVerifiedDigestWasHeldTo:
     cannot tell them apart reads the weakest as the strongest.
     """
 
-    @pytest.fixture(autouse=True)
-    def _offline(self, fake_fetch: FakeFetch, offline_prepare: None) -> None:
-        fake_fetch.serve("tiny.fa.gz")
+    def test_the_record_the_row_and_nothing_at_all_each_say_a_different_sentence(
+        self, monkeypatch: pytest.MonkeyPatch, data_dir: Path
+    ) -> None:
+        assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
 
-    def test_the_row_pinned_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        record_pinned = runner.invoke(app, ["verify", "tiny"])
+        assert record_pinned.exit_code == 0
+        assert "own registration recorded" in record_pinned.stdout
+        assert "not an independent pin" in record_pinned.stdout
+
+        # Once the metadata table pins its own digest for the same assembly, that row is
+        # what a re-run is held to — a stronger claim than the record it already trusted.
         row = AssemblyMetadata(
             assembly_name="tiny",
             species="Testus minimus",
@@ -697,31 +646,17 @@ class TestWhatAVerifiedDigestWasHeldTo:
             sha256=_TINY_FA_SHA256,
         )
         monkeypatch.setattr(metadata, "assembly_table", lambda: (row,))
+        row_pinned = runner.invoke(app, ["verify", "tiny"])
+        assert row_pinned.exit_code == 0
+        assert "matches the digest the metadata table pins for it" in row_pinned.stdout
 
-        assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
-        result = runner.invoke(app, ["verify", "tiny"])
-
-        assert result.exit_code == 0
-        assert "matches the digest the metadata table pins for it" in result.stdout
-
-    def test_the_record_pinned_it(self) -> None:
-        assert runner.invoke(app, ["register", "tiny"]).exit_code == 0
-
-        result = runner.invoke(app, ["verify", "tiny"])
-
-        assert result.exit_code == 0
-        assert "own registration recorded" in result.stdout
-        assert "not an independent pin" in result.stdout
-
-    def test_nothing_pinned_it(self, data_dir: Path) -> None:
         # A FASTA handed over by hand, checked against an assembly whose row pins nothing
         # and which is not registered here: there is no digest to be held to at all.
-        result = runner.invoke(
+        nothing_pinned = runner.invoke(
             app, ["verify", "ce11_ecHT115", "--fasta", str(data_dir / "tiny.fa"), "--json"]
         )
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        assert nothing_pinned.exit_code == 0
+        payload = _json.loads(nothing_pinned.stdout)
         assert (payload["expected"], payload["expected_from"], payload["verified"]) == (
             None,
             None,
@@ -731,10 +666,11 @@ class TestWhatAVerifiedDigestWasHeldTo:
         # not what is being verified.
         assert payload["components"] is None
 
-        human = runner.invoke(app, ["verify", "ce11_ecHT115", "--fasta", str(data_dir / "tiny.fa")])
-
-        assert "nothing to check it against" in human.stdout
-        assert "components" not in human.stdout
+        nothing_pinned_human = runner.invoke(
+            app, ["verify", "ce11_ecHT115", "--fasta", str(data_dir / "tiny.fa")]
+        )
+        assert "nothing to check it against" in nothing_pinned_human.stdout
+        assert "components" not in nothing_pinned_human.stdout
 
 
 class TestRegisterAnnotation:
@@ -751,61 +687,55 @@ class TestRegisterAnnotation:
         fake_fetch.serve("tiny.gtf.gz")
         monkeypatch.setattr(metadata, "annotation_table", lambda: (_TINY_ANNOTATION,))
 
-    def test_registers_and_reports_where_it_landed(self, liulab_data: Path) -> None:
-        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
-
+    def test_a_broken_directory_is_refused_force_repairs_it_and_the_repair_reports_correctly(
+        self, liulab_data: Path
+    ) -> None:
         directory = liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101"
+        directory.mkdir(parents=True)
+        (directory / "ensgene_v101.db").write_bytes(b"half a database")
+
+        refused = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+        assert refused.exit_code == 1
+        assert "genome register-annotation tiny ensgene_v101 --force" in _output(refused)
+
+        repaired = runner.invoke(
+            app, ["register-annotation", "tiny", "ensgene_v101", "--force", "--json"]
+        )
+        assert repaired.exit_code == 0
+        assert _json.loads(repaired.stdout)["sha256"] == _TINY_GTF_SHA256
+
+        # Already registered by the repair above: answered from the same record, text
+        # and json alike.
+        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
         assert result.exit_code == 0
         assert str(directory) in result.stdout
         assert _TINY_GTF_SHA256 in result.stdout
         assert (directory / "ensgene_v101.gtf").is_file()
         assert (directory / "ensgene_v101.db").is_file()
 
-    def test_json(self, liulab_data: Path) -> None:
-        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101", "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        json_result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101", "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["assembly"] == "tiny"
         assert payload["name"] == "ensgene_v101"
-        assert payload["directory"] == str(liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101")
+        assert payload["directory"] == str(directory)
         assert payload["source_url"] == _ANNOTATION_URL
         assert payload["sha256"] == _TINY_GTF_SHA256
         assert sorted(payload["files"]) == ["ensgene_v101.db", "ensgene_v101.gtf"]
 
-    def test_a_name_no_row_lists_exits_non_zero_saying_what_is_offered(self) -> None:
-        result = runner.invoke(app, ["register-annotation", "tiny", "nope"])
-
-        assert result.exit_code == 1
-        assert "ensgene_v101" in _output(result)
+        unlisted = runner.invoke(app, ["register-annotation", "tiny", "nope"])
+        assert unlisted.exit_code == 1
+        assert "ensgene_v101" in _output(unlisted)
         # …and the command that registers a GTF the table does not list, since that is
         # what a caller who named an unlisted annotation is most likely reaching for.
-        assert "genome register-gtf tiny" in _output(result)
+        assert "genome register-gtf tiny" in _output(unlisted)
 
-    def test_a_broken_directory_exits_non_zero_naming_the_repair(self, liulab_data: Path) -> None:
-        directory = liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101"
-        directory.mkdir(parents=True)
-        (directory / "ensgene_v101.db").write_bytes(b"half a database")
-
-        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
-
-        assert result.exit_code == 1
-        assert "genome register-annotation tiny ensgene_v101 --force" in _output(result)
-
-    def test_force_repairs_what_the_error_named(self, liulab_data: Path) -> None:
-        directory = liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101"
-        directory.mkdir(parents=True)
-        (directory / "ensgene_v101.db").write_bytes(b"half a database")
-
-        result = runner.invoke(
-            app, ["register-annotation", "tiny", "ensgene_v101", "--force", "--json"]
-        )
-
-        assert result.exit_code == 0
-        assert _json.loads(result.stdout)["sha256"] == _TINY_GTF_SHA256
-
-    def test_the_chromosome_check_is_stood_down_from_the_command_line(
-        self, fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch, liulab_data: Path
+    def test_the_chromosome_check_is_stood_down_and_feature_inference_is_reachable(
+        self,
+        fake_fetch: FakeFetch,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        liulab_data: Path,
     ) -> None:
         # The committed Ensembl-spelled GTF (I, II, III) against a UCSC-spelled
         # assembly (chrI, chrII, chrIII): refused by default, and registered anyway
@@ -814,43 +744,34 @@ class TestRegisterAnnotation:
         assembly_dir = liulab_data / "genome" / "tiny"
         assembly_dir.mkdir(parents=True)
         (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
-        row = replace(
+        ensembl_row = replace(
             _TINY_ANNOTATION,
             url="https://mirror.example.invalid/annotations/ensembl_style.gtf",
             sha256=None,
         )
-        monkeypatch.setattr(metadata, "annotation_table", lambda: (row,))
+        monkeypatch.setattr(metadata, "annotation_table", lambda: (ensembl_row,))
 
         refused = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
-
         assert refused.exit_code == 1
         assert "chromosome" in _output(refused)
 
-        result = runner.invoke(
+        stood_down = runner.invoke(
             app,
             ["register-annotation", "tiny", "ensgene_v101", "--no-check-chromosomes", "--json"],
         )
-
-        assert result.exit_code == 0
-        details = _json.loads(result.stdout)["details"]
+        assert stood_down.exit_code == 0
+        details = _json.loads(stood_down.stdout)["details"]
         assert details["chromosomes_checked"] is False
         # The reason rides in `details` as the record holds it — no second spelling of it
         # for the JSON surface to drift from.
         assert details["chromosomes_unchecked_because"] == "caller-override"
 
-    def test_feature_inference_is_reachable_for_a_listed_annotation_too(
-        self,
-        fake_fetch: FakeFetch,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        liulab_data: Path,
-    ) -> None:
         # Nothing says a listed annotation declares genes and transcripts, so the
         # inference the API exposes has to be reachable on this command as well.
         bare = tmp_path / "bare.gtf"
         bare.write_text(_BARE_GTF)
         fake_fetch.serve(bare)
-        row = replace(
+        bare_row = replace(
             _TINY_ANNOTATION,
             name="bare",
             provider="somebody",
@@ -858,13 +779,12 @@ class TestRegisterAnnotation:
             url="https://mirror.example.invalid/annotations/bare.gtf",
             sha256=None,
         )
-        monkeypatch.setattr(metadata, "annotation_table", lambda: (row,))
+        monkeypatch.setattr(metadata, "annotation_table", lambda: (bare_row,))
 
-        result = runner.invoke(
+        inferred = runner.invoke(
             app, ["register-annotation", "tiny", "bare", "--infer-genes", "--infer-transcripts"]
         )
-
-        assert result.exit_code == 0
+        assert inferred.exit_code == 0
         database = liulab_data / "genome" / "tiny" / "gtf" / "bare" / "bare.db"
         assert _feature_types(database) == ["exon", "gene", "transcript"]
 
@@ -878,85 +798,60 @@ class TestRegisterGtf:
     under this test's own root.
     """
 
-    def test_registers_a_gtf_no_row_lists_and_reports_where_it_landed(
-        self, data_dir: Path, liulab_data: Path
+    def test_registers_reports_as_text_json_is_listed_and_a_missing_gtf_is_refused(
+        self, tmp_path: Path, data_dir: Path, liulab_data: Path
     ) -> None:
         source = data_dir / "tiny.gtf"
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "mine"
 
         result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine"])
-
-        directory = liulab_data / "genome" / "tiny" / "gtf" / "mine"
         assert result.exit_code == 0
         assert str(directory) in result.stdout
         assert str(source) in result.stdout
         assert (directory / "mine.gtf").is_file()
         assert (directory / "mine.db").is_file()
 
-    def test_json(self, data_dir: Path, liulab_data: Path) -> None:
-        source = data_dir / "tiny.gtf"
-
-        result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine", "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        json_result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine", "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["assembly"] == "tiny"
         assert payload["name"] == "mine"
-        assert payload["directory"] == str(liulab_data / "genome" / "tiny" / "gtf" / "mine")
+        assert payload["directory"] == str(directory)
         assert payload["source_url"] == str(source)
         assert payload["sha256"] == _TINY_GTF_SHA256
         assert sorted(payload["files"]) == ["mine.db", "mine.gtf"]
 
-    def test_it_is_then_listed_as_registered_but_not_offered(self, data_dir: Path) -> None:
-        assert (
-            runner.invoke(
-                app, ["register-gtf", "tiny", str(data_dir / "tiny.gtf"), "mine"]
-            ).exit_code
-            == 0
-        )
-
-        result = runner.invoke(app, ["annotations", "tiny", "--json"])
-
-        assert result.exit_code == 0
-        rows = _json.loads(result.stdout)["annotations"]
+        listed = runner.invoke(app, ["annotations", "tiny", "--json"])
+        assert listed.exit_code == 0
+        rows = _json.loads(listed.stdout)["annotations"]
         assert [(row["name"], row["offered"], row["registered"]) for row in rows] == [
             ("mine", False, True)
         ]
 
-    def test_a_gtf_that_is_not_there_exits_non_zero_saying_what_to_pass(
-        self, tmp_path: Path
-    ) -> None:
-        result = runner.invoke(app, ["register-gtf", "tiny", str(tmp_path / "nope.gtf"), "mine"])
+        missing = runner.invoke(app, ["register-gtf", "tiny", str(tmp_path / "nope.gtf"), "mine"])
+        assert missing.exit_code == 1
+        assert "GTF file not found" in _output(missing)
 
-        assert result.exit_code == 1
-        assert "GTF file not found" in _output(result)
-
-    def test_a_broken_directory_exits_non_zero_naming_the_repair(
+    def test_a_broken_directory_is_refused_and_force_repairs_it(
         self, data_dir: Path, liulab_data: Path
     ) -> None:
         source = data_dir / "tiny.gtf"
-        directory = liulab_data / "genome" / "tiny" / "gtf" / "mine"
+        directory = liulab_data / "genome" / "tiny" / "gtf" / "broken"
         directory.mkdir(parents=True)
-        (directory / "mine.db").write_bytes(b"half a database")
+        (directory / "broken.db").write_bytes(b"half a database")
 
-        result = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine"])
+        refused = runner.invoke(app, ["register-gtf", "tiny", str(source), "broken"])
+        assert refused.exit_code == 1
+        assert f"genome register-gtf tiny {source} broken --force" in _output(refused)
 
-        assert result.exit_code == 1
-        assert f"genome register-gtf tiny {source} mine --force" in _output(result)
-
-    def test_force_repairs_what_the_error_named(self, data_dir: Path, liulab_data: Path) -> None:
-        directory = liulab_data / "genome" / "tiny" / "gtf" / "mine"
-        directory.mkdir(parents=True)
-        (directory / "mine.db").write_bytes(b"half a database")
-
-        result = runner.invoke(
-            app, ["register-gtf", "tiny", str(data_dir / "tiny.gtf"), "mine", "--force", "--json"]
+        repaired = runner.invoke(
+            app, ["register-gtf", "tiny", str(source), "broken", "--force", "--json"]
         )
+        assert repaired.exit_code == 0
+        assert _json.loads(repaired.stdout)["sha256"] == _TINY_GTF_SHA256
 
-        assert result.exit_code == 0
-        assert _json.loads(result.stdout)["sha256"] == _TINY_GTF_SHA256
-
-    def test_the_chromosome_check_is_stood_down_from_the_command_line(
-        self, data_dir: Path, liulab_data: Path
+    def test_the_chromosome_check_is_stood_down_and_feature_inference_is_reachable(
+        self, tmp_path: Path, data_dir: Path, liulab_data: Path
     ) -> None:
         # The committed Ensembl-spelled GTF (I, II, III) against a UCSC-spelled assembly
         # (chrI, chrII, chrIII): the assembly's chrom.sizes is found from its name, so
@@ -967,37 +862,30 @@ class TestRegisterGtf:
         (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
 
         refused = runner.invoke(app, ["register-gtf", "tiny", str(source), "mine"])
-
         assert refused.exit_code == 1
         assert "chromosome" in _output(refused)
 
-        result = runner.invoke(
+        stood_down = runner.invoke(
             app, ["register-gtf", "tiny", str(source), "mine", "--no-check-chromosomes", "--json"]
         )
-
-        assert result.exit_code == 0
-        details = _json.loads(result.stdout)["details"]
+        assert stood_down.exit_code == 0
+        details = _json.loads(stood_down.stdout)["details"]
         assert details["chromosomes_checked"] is False
         assert details["chromosomes_unchecked_because"] == "caller-override"
 
-    def test_a_bare_exon_level_gtf_is_registrable_with_feature_inference(
-        self, tmp_path: Path, liulab_data: Path
-    ) -> None:
         # Without the flags the database holds exons and nothing else — genes and
         # transcripts are what a caller registers an annotation for.
-        source = tmp_path / "bare.gtf"
-        source.write_text(_BARE_GTF)
+        bare = tmp_path / "bare.gtf"
+        bare.write_text(_BARE_GTF)
         gtf_root = liulab_data / "genome" / "tiny" / "gtf"
-
-        assert runner.invoke(app, ["register-gtf", "tiny", str(source), "exons"]).exit_code == 0
+        assert runner.invoke(app, ["register-gtf", "tiny", str(bare), "exons"]).exit_code == 0
         assert _feature_types(gtf_root / "exons" / "exons.db") == ["exon"]
 
-        result = runner.invoke(
+        inferred = runner.invoke(
             app,
-            ["register-gtf", "tiny", str(source), "genes", "--infer-genes", "--infer-transcripts"],
+            ["register-gtf", "tiny", str(bare), "genes", "--infer-genes", "--infer-transcripts"],
         )
-
-        assert result.exit_code == 0
+        assert inferred.exit_code == 0
         assert _feature_types(gtf_root / "genes" / "genes.db") == ["exon", "gene", "transcript"]
 
 
@@ -1026,37 +914,33 @@ class TestWhatARegistrationSaysAboutTheChromosomes:
         assembly_dir.mkdir(parents=True, exist_ok=True)
         (assembly_dir / "tiny.chrom.sizes").write_text("chrI\t10000\nchrII\t10000\nchrIII\t10000\n")
 
-    def test_a_check_that_ran_is_reported_by_both_commands(
-        self, tmp_path: Path, data_dir: Path
+    def test_a_check_that_ran_or_had_nothing_to_run_against_says_which(
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
-        # Reported rather than left to silence, which would read exactly the same as a
-        # surface that had nothing good to say.
-        self._prepare_assembly(tmp_path)
+        # No chrom.sizes yet: the assembly is not registered here, and registering it is
+        # exactly what would let the names be verified — the one state that advises.
+        nothing_to_check = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+        assert nothing_to_check.exit_code == 0
+        assert "chromosomes not checked" in nothing_to_check.stdout
+        assert self._ADVICE in nothing_to_check.stdout
+        shutil.rmtree(liulab_data / "genome" / "tiny" / "gtf" / "ensgene_v101")
 
+        # A check that ran is reported by both commands rather than left to silence,
+        # which would read exactly the same as a surface that had nothing good to say.
+        self._prepare_assembly(liulab_data)
         by_name = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
         by_path = runner.invoke(app, ["register-gtf", "tiny", str(data_dir / "tiny.gtf"), "mine"])
-
         for result in (by_name, by_path):
             assert result.exit_code == 0
             assert "chromosomes checked" in result.stdout
             assert self._ADVICE not in result.stdout
 
-    def test_nothing_to_check_against_is_the_state_that_advises(self) -> None:
-        # No chrom.sizes: the assembly is not registered here yet, and registering it is
-        # exactly what would let the names be verified.
-        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
-
-        assert result.exit_code == 0
-        assert "chromosomes not checked" in result.stdout
-        assert self._ADVICE in result.stdout
-
-    def test_standing_the_check_down_is_advised_nothing_by_either_command(
-        self, tmp_path: Path, data_dir: Path
+    def test_standing_the_check_down_or_an_old_record_is_advised_nothing_wrong(
+        self, data_dir: Path, liulab_data: Path
     ) -> None:
         # The bug this fixes: the assembly is registered, the caller turned the check off
         # deliberately, and being told to register the assembly first is wrong.
-        self._prepare_assembly(tmp_path)
-
+        self._prepare_assembly(liulab_data)
         by_name = runner.invoke(
             app, ["register-annotation", "tiny", "ensgene_v101", "--no-check-chromosomes"]
         )
@@ -1070,31 +954,24 @@ class TestWhatARegistrationSaysAboutTheChromosomes:
                 "--no-check-chromosomes",
             ],
         )
-
         for result in (by_name, by_path):
             assert result.exit_code == 0
             assert "stood down" in result.stdout
             assert self._ADVICE not in result.stdout
 
-    def test_a_record_written_before_the_reason_existed_reports_it_as_unknown(
-        self, tmp_path: Path, liulab_data: Path
-    ) -> None:
-        # An annotation registered by an older version, reported by re-running the
-        # command over it: the record returned is the one already on disk, whose bare
-        # `false` stands for either reason. Neither may be claimed, and neither raises.
-        self._prepare_assembly(tmp_path)
-        assert runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"]).exit_code == 0
+        # A record written before the reason existed reports it as unknown: the record
+        # returned is the one already on disk, whose bare `false` stands for either
+        # reason. Neither may be claimed, and neither raises.
         path = record_path(annotation_dir(liulab_data / "genome" / "tiny", "ensgene_v101"))
         written = _json.loads(path.read_text())
         written["details"] = {"chromosomes_checked": False}
         path.write_text(_json.dumps(written))
 
-        result = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
-
-        assert result.exit_code == 0
-        assert "does not say why" in result.stdout
-        assert self._ADVICE not in result.stdout
-        assert "stood down" not in result.stdout
+        unknown = runner.invoke(app, ["register-annotation", "tiny", "ensgene_v101"])
+        assert unknown.exit_code == 0
+        assert "does not say why" in unknown.stdout
+        assert self._ADVICE not in unknown.stdout
+        assert "stood down" not in unknown.stdout
 
 
 class TestAnnotations:
@@ -1105,11 +982,10 @@ class TestAnnotations:
     and flags it as the default.
     """
 
-    def test_an_assembly_with_nothing_registered_is_the_case_it_serves(
+    def test_nothing_registered_reports_as_text_and_json_and_an_unlisted_assembly_is_empty(
         self, liulab_data: Path
     ) -> None:
         result = runner.invoke(app, ["annotations", "hg38"])
-
         assert result.exit_code == 0
         assert "gencode_v50" in result.stdout
         assert "offered, not registered" in result.stdout
@@ -1117,11 +993,9 @@ class TestAnnotations:
         # Nothing was prepared to answer the question — the assembly is not even there.
         assert not (liulab_data / "genome" / "hg38").exists()
 
-    def test_json(self, liulab_data: Path) -> None:
-        result = runner.invoke(app, ["annotations", "hg38", "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        json_result = runner.invoke(app, ["annotations", "hg38", "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["assembly"] == "hg38"
         assert payload["directory"] == str(liulab_data / "genome" / "hg38")
         assert payload["default_annotation"] == "gencode_v50"
@@ -1129,13 +1003,17 @@ class TestAnnotations:
             (row["name"], row["offered"], row["registered"]) for row in payload["annotations"]
         ] == [("gencode_v50", True, False)]
 
-    def test_it_sets_what_is_registered_here_against_what_is_offered(
+        unlisted = runner.invoke(app, ["annotations", "tiny"])
+        assert unlisted.exit_code == 0
+        assert "tiny" in unlisted.stdout
+
+    def test_it_sets_registered_against_offered_and_a_broken_offered_one_names_its_repair(
         self, data_dir: Path, liulab_data: Path
     ) -> None:
-        _register("hg38", liulab_data / "genome" / "hg38", data_dir / "tiny.gtf", "mine")
+        assembly_dir = liulab_data / "genome" / "hg38"
+        _register("hg38", assembly_dir, data_dir / "tiny.gtf", "mine")
 
         result = runner.invoke(app, ["annotations", "hg38", "--json"])
-
         assert result.exit_code == 0
         payload = _json.loads(result.stdout)
         assert [
@@ -1147,48 +1025,23 @@ class TestAnnotations:
         # The table's flag decides the default, whatever this machine happens to hold.
         assert payload["default_annotation"] == "gencode_v50"
 
-    def test_an_assembly_no_row_lists_reports_an_empty_answer_rather_than_failing(self) -> None:
-        result = runner.invoke(app, ["annotations", "tiny"])
-
-        assert result.exit_code == 0
-        assert "tiny" in result.stdout
-
-    def test_a_broken_offered_annotation_reads_as_broken_and_names_its_repair(
-        self, data_dir: Path, liulab_data: Path
-    ) -> None:
         # It used to read `offered, not registered` — indistinguishable from one nobody
         # had ever fetched — and the closing line sent the reader to a command that
         # would itself raise and demand --force.
-        assembly_dir = liulab_data / "genome" / "hg38"
         _register("hg38", assembly_dir, data_dir / "tiny.gtf", "gencode_v50")
         record_path(annotation_dir(assembly_dir, "gencode_v50")).unlink()
 
-        result = runner.invoke(app, ["annotations", "hg38"])
-
-        assert result.exit_code == 0
-        assert "offered, not registered" not in result.stdout
-        assert "broken" in result.stdout
-        assert "genome register-annotation hg38 gencode_v50 --force" in result.stdout
+        broken = runner.invoke(app, ["annotations", "hg38"])
+        assert broken.exit_code == 0
+        assert "offered, not registered" not in broken.stdout
+        assert "broken" in broken.stdout
+        assert "genome register-annotation hg38 gencode_v50 --force" in broken.stdout
         default_line = next(
-            line for line in result.stdout.splitlines() if line.startswith("default:")
+            line for line in broken.stdout.splitlines() if line.startswith("default:")
         )
         assert "--force" in default_line
 
-    def test_a_broken_unlisted_annotation_is_listed_at_all(
-        self, data_dir: Path, liulab_data: Path
-    ) -> None:
-        assembly_dir = liulab_data / "genome" / "hg38"
-        annotation = _register("hg38", assembly_dir, data_dir / "tiny.gtf", "mine")
-        annotation.db.write_bytes(b"truncated")
-
-        result = runner.invoke(app, ["annotations", "hg38"])
-
-        assert result.exit_code == 0
-        assert "mine" in result.stdout
-        assert "broken" in result.stdout
-        assert f"genome register-gtf hg38 {data_dir / 'tiny.gtf'} mine --force" in result.stdout
-
-    def test_json_carries_the_broken_state_and_the_repair(
+    def test_a_broken_unlisted_annotation_is_listed_and_json_carries_its_broken_state(
         self, data_dir: Path, liulab_data: Path
     ) -> None:
         assembly_dir = liulab_data / "genome" / "hg38"
@@ -1196,10 +1049,15 @@ class TestAnnotations:
         annotation = _register("hg38", assembly_dir, data_dir / "tiny.gtf", "mine")
         annotation.db.write_bytes(b"truncated")
 
-        result = runner.invoke(app, ["annotations", "hg38", "--json"])
-
+        result = runner.invoke(app, ["annotations", "hg38"])
         assert result.exit_code == 0
-        rows = {row["name"]: row for row in _json.loads(result.stdout)["annotations"]}
+        assert "mine" in result.stdout
+        assert "broken" in result.stdout
+        assert f"genome register-gtf hg38 {data_dir / 'tiny.gtf'} mine --force" in result.stdout
+
+        json_result = runner.invoke(app, ["annotations", "hg38", "--json"])
+        assert json_result.exit_code == 0
+        rows = {row["name"]: row for row in _json.loads(json_result.stdout)["annotations"]}
         assert rows["mine"]["broken"] is True
         assert rows["mine"]["registered"] is False
         assert rows["mine"]["repair"].endswith("mine --force")
@@ -1223,9 +1081,8 @@ class TestTableRow:
     def _offline(self, fake_fetch: FakeFetch) -> None:
         fake_fetch.serve("tiny.fa.gz")
 
-    def test_prints_the_row_to_paste(self) -> None:
+    def test_prints_the_row_as_text_and_json_and_reports_an_existing_pin(self) -> None:
         result = runner.invoke(app, ["table-row", "hg38"])
-
         assert result.exit_code == 0
         row = result.stdout.strip().split("\t")
         assert row[:8] == [
@@ -1244,27 +1101,22 @@ class TestTableRow:
         assert row[metadata.METADATA_FIELDS.index("intron_length_cap")] == "1000000"
         assert row[metadata.METADATA_FIELDS.index("intron_length_cap_rationale")]
 
-    def test_json(self) -> None:
-        result = runner.invoke(app, ["table-row", "hg38", "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        json_result = runner.invoke(app, ["table-row", "hg38", "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["assembly_name"] == "hg38"
         assert payload["ncbi_taxid"] == 9606
         assert payload["sha256"] == _TINY_FA_SHA256
 
-    def test_an_existing_pin_is_reported_rather_than_enforced(self) -> None:
         # sacCer3's row already pins the real genome's digest, and the fixture is a
         # subsample of it, so the two disagree. This is the command a maintainer runs
         # precisely when an upstream file has changed and the pin must be regenerated,
-        # so it prints what actually arrived instead of refusing. Checking a FASTA
-        # against the official row is what verifying an assembly is for.
-        result = runner.invoke(app, ["table-row", "sacCer3"])
-
-        assert result.exit_code == 0
-        row = result.stdout.strip().split("\t")
-        assert row[0] == "sacCer3"
-        assert row[metadata.METADATA_FIELDS.index("sha256")] == _TINY_FA_SHA256
+        # so it prints what actually arrived instead of refusing.
+        mismatched = runner.invoke(app, ["table-row", "sacCer3"])
+        assert mismatched.exit_code == 0
+        mismatched_row = mismatched.stdout.strip().split("\t")
+        assert mismatched_row[0] == "sacCer3"
+        assert mismatched_row[metadata.METADATA_FIELDS.index("sha256")] == _TINY_FA_SHA256
 
     def test_a_chimera_is_refused_before_anything_is_downloaded(
         self, fake_fetch: FakeFetch
@@ -1326,14 +1178,13 @@ class TestGeneCategoryCommands:
             chrom_sizes=chrom_sizes,
         )
 
-    def test_only_the_gene_ids_reach_stdout_so_the_output_pipes(
+    def test_only_the_gene_ids_reach_stdout_annotation_may_be_named_and_json_keeps_sources_apart(
         self, liulab_data: Path, data_dir: Path
     ) -> None:
         self._registered(liulab_data, data_dir)
         category = self._declared("ensgene_v101")[0]
 
         result = runner.invoke(app, ["gene-list", "sacCer3", category])
-
         assert result.exit_code == 0
         assert result.stdout == "".join(
             f"{gene_id}\n" for gene_id in self._ids("ensgene_v101", category)
@@ -1342,29 +1193,15 @@ class TestGeneCategoryCommands:
         assert category in result.stderr
         assert "ensgene_v101" in result.stderr
 
-    def test_the_annotation_may_be_named_instead_of_defaulted(
-        self, liulab_data: Path, data_dir: Path
-    ) -> None:
-        self._registered(liulab_data, data_dir)
-        category = self._declared("ensgene_v101")[0]
-
-        result = runner.invoke(
+        named = runner.invoke(
             app, ["gene-list", "sacCer3", category, "--annotation", "ensgene_v101"]
         )
+        assert named.exit_code == 0
+        assert named.stdout.splitlines() == list(self._ids("ensgene_v101", category))
 
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == list(self._ids("ensgene_v101", category))
-
-    def test_gene_list_json_carries_the_ids_and_keeps_the_sources_apart(
-        self, liulab_data: Path, data_dir: Path
-    ) -> None:
-        self._registered(liulab_data, data_dir)
-        category = self._declared("ensgene_v101")[0]
-
-        result = runner.invoke(app, ["gene-list", "sacCer3", category, "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        json_result = runner.invoke(app, ["gene-list", "sacCer3", category, "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert list(payload) == ["assembly", "annotation", "category", "gene_ids", "sources"]
         assert payload["assembly"] == "sacCer3"
         assert payload["gene_ids"] == list(self._ids("ensgene_v101", category))
@@ -1373,14 +1210,13 @@ class TestGeneCategoryCommands:
         ]
         assert payload["sources"][0]["component"] is None
 
-    def test_gene_categories_prints_one_row_per_category_with_its_count(
-        self, liulab_data: Path, data_dir: Path
+    def test_gene_categories_prints_rows_json_and_a_merged_annotations_per_component_split(
+        self, liulab_data: Path, data_dir: Path, tmp_path: Path
     ) -> None:
         self._registered(liulab_data, data_dir)
         declared = self._declared("ensgene_v101")
 
         result = runner.invoke(app, ["gene-categories", "sacCer3"])
-
         assert result.exit_code == 0
         lines = result.stdout.splitlines()
         assert lines[0] == "categories for sacCer3 / ensgene_v101"
@@ -1389,86 +1225,60 @@ class TestGeneCategoryCommands:
             str(len(self._ids("ensgene_v101", category))) for category in declared
         ]
 
-    def test_gene_categories_json_is_every_category_as_gene_list_answers_one(
-        self, liulab_data: Path, data_dir: Path
-    ) -> None:
-        self._registered(liulab_data, data_dir)
-
-        result = runner.invoke(app, ["gene-categories", "sacCer3", "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
-        assert [entry["category"] for entry in payload] == list(self._declared("ensgene_v101"))
+        json_result = runner.invoke(app, ["gene-categories", "sacCer3", "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
+        assert [entry["category"] for entry in payload] == list(declared)
         assert all(entry["gene_ids"] for entry in payload)
 
-    def test_a_merged_annotation_shows_the_per_component_split(
-        self, liulab_data: Path, tmp_path: Path
-    ) -> None:
         # The case #111 was opened over: worm rRNA and its food's arrive as one category
         # and must stay distinguishable inside it.
         self._merged(liulab_data, tmp_path)
+        merged = runner.invoke(app, ["gene-categories", "ce11_ecHT115"])
+        assert merged.exit_code == 0
+        merged_lines = merged.stdout.splitlines()
+        assert (
+            merged_lines[0] == "categories for ce11_ecHT115 / wormbase_ws298+refseq_rs_2025_06_26"
+        )
+        assert any("(ce11: " in line and "ecHT115: " in line for line in merged_lines[1:])
 
-        result = runner.invoke(app, ["gene-categories", "ce11_ecHT115"])
-
-        assert result.exit_code == 0
-        lines = result.stdout.splitlines()
-        assert lines[0] == "categories for ce11_ecHT115 / wormbase_ws298+refseq_rs_2025_06_26"
-        assert any("(ce11: " in line and "ecHT115: " in line for line in lines[1:])
-
-    def test_a_merged_annotations_gene_list_attributes_every_source(
-        self, liulab_data: Path, tmp_path: Path
-    ) -> None:
-        self._merged(liulab_data, tmp_path)
         shared = next(
             category
             for category in self._declared("wormbase_ws298")
             if category in self._declared("refseq_rs_2025_06_26")
         )
-
-        result = runner.invoke(app, ["gene-list", "ce11_ecHT115", shared, "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
-        assert [source["component"] for source in payload["sources"]] == ["ce11", "ecHT115"]
-        assert payload["gene_ids"] == [
+        gene_list = runner.invoke(app, ["gene-list", "ce11_ecHT115", shared, "--json"])
+        assert gene_list.exit_code == 0
+        merged_payload = _json.loads(gene_list.stdout)
+        assert [source["component"] for source in merged_payload["sources"]] == ["ce11", "ecHT115"]
+        assert merged_payload["gene_ids"] == [
             *self._ids("wormbase_ws298", shared),
             *self._ids("refseq_rs_2025_06_26", shared),
         ]
 
-    def test_an_annotation_no_curated_list_ships_for_exits_one_saying_so(
+    def test_missing_curated_list_unregistered_annotation_or_unknown_category_exits_one(
         self, liulab_data: Path, data_dir: Path
     ) -> None:
+        unregistered = runner.invoke(app, ["gene-categories", "sacCer3"])
+        assert unregistered.exit_code == 1
+        assert "genome register-annotation sacCer3 ensgene_v101" in _output(unregistered)
+
+        self._registered(liulab_data, data_dir)
+        bad_category = runner.invoke(app, ["gene-list", "sacCer3", "no_such_category"])
+        assert bad_category.exit_code == 1
+        assert bad_category.stdout == ""
+        assert "no_such_category" in _output(bad_category)
+        for category in self._declared("ensgene_v101"):
+            assert category in _output(bad_category)
+
         # Not an empty list of genes and not exit 0: the caller has to be able to tell
         # *nothing is known here* from *there are none of these genes*.
         _register("tiny", liulab_data / "genome" / "tiny", data_dir / "tiny.gtf", "mine")
-
-        result = runner.invoke(app, ["gene-list", "tiny", "rRNA"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "no curated gene list ships" in _output(result)
-        assert "ensgene_v101" in _output(result)  # …and which annotations do have one
-
-    def test_a_category_the_annotation_does_not_declare_exits_one_listing_the_ones_it_does(
-        self, liulab_data: Path, data_dir: Path
-    ) -> None:
-        self._registered(liulab_data, data_dir)
-
-        result = runner.invoke(app, ["gene-list", "sacCer3", "no_such_category"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "no_such_category" in _output(result)
-        for category in self._declared("ensgene_v101"):
-            assert category in _output(result)
-
-    def test_an_unregistered_annotation_exits_one_naming_the_command_that_registers_it(
-        self, liulab_data: Path
-    ) -> None:
-        result = runner.invoke(app, ["gene-categories", "sacCer3"])
-
-        assert result.exit_code == 1
-        assert "genome register-annotation sacCer3 ensgene_v101" in _output(result)
+        no_list = runner.invoke(app, ["gene-list", "tiny", "rRNA"])
+        assert no_list.exit_code == 1
+        assert no_list.stdout == ""
+        assert "no curated gene list ships" in _output(no_list)
+        assert "ensgene_v101" in _output(no_list)  # …and which annotations do have one
 
 
 class TestTFGeneListCommand:
@@ -1506,12 +1316,13 @@ class TestTFGeneListCommand:
         """``count`` gene ids, one per assessed-positive stem, versioned as GENCODE spells them."""
         return [f"{stem}.1" for stem in self._census(assembly).assessed_positive[:count]]
 
-    def test_only_the_gene_ids_reach_stdout_so_the_output_pipes(self, liulab_data: Path) -> None:
+    def test_ids_naming_and_json_work_for_human_and_a_mouse_census_answers_empty(
+        self, liulab_data: Path
+    ) -> None:
         gene_ids = self._positive(_TF_ASSEMBLY, 2)
         self._registered(liulab_data, *gene_ids)
 
         result = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY])
-
         assert result.exit_code == 0
         assert result.stdout == "".join(f"{gene_id}\n" for gene_id in gene_ids)
         # Whose judgement it is must be printed and must not cost the pipe, so it goes
@@ -1523,27 +1334,23 @@ class TestTFGeneListCommand:
         unresolved = len(self._census(_TF_ASSEMBLY).assessed_positive) - len(gene_ids)
         assert f"2 genes, 2 gene ids, {unresolved} stems" in result.stderr
 
-    def test_the_annotation_may_be_named_instead_of_defaulted(self, liulab_data: Path) -> None:
-        gene_ids = self._positive(_TF_ASSEMBLY, 1)
-        self._registered(liulab_data, *gene_ids, name="mine")
+        named_ids = self._positive(_TF_ASSEMBLY, 1)
+        self._registered(liulab_data, *named_ids, name="mine")
+        named = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY, "--annotation", "mine"])
+        assert named.exit_code == 0
+        assert named.stdout.splitlines() == named_ids
+        assert f"{_TF_ASSEMBLY} / mine" in named.stderr
 
-        result = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY, "--annotation", "mine"])
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == gene_ids
-        assert f"{_TF_ASSEMBLY} / mine" in result.stderr
-
-    def test_json_carries_the_genes_the_provenance_and_the_unresolved_stems(
-        self, liulab_data: Path
-    ) -> None:
+        # The record `--json` emits carries the genes, the provenance and the stems this
+        # annotation carries no gene for, not dropped.
         census = self._census(_TF_ASSEMBLY)
         stem = census.assessed_positive[0]
-        self._registered(liulab_data, f"{stem}.1")
-
-        result = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY, "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        self._registered(liulab_data, f"{stem}.1", name="json")
+        json_result = runner.invoke(
+            app, ["tf-gene-list", _TF_ASSEMBLY, "--annotation", "json", "--json"]
+        )
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert list(payload) == [
             "assembly",
             "annotation",
@@ -1553,10 +1360,10 @@ class TestTFGeneListCommand:
             "gene_ids",
             "unresolved",
         ]
-        assert (payload["assembly"], payload["annotation"]) == (_TF_ASSEMBLY, _TF_ANNOTATION)
+        assert (payload["assembly"], payload["annotation"]) == (_TF_ASSEMBLY, "json")
         assert payload["gene_ids"] == [f"{stem}.1"]
         assert payload["provenance"]["pubmed_id"] == census.provenance.pubmed_id
-        assert payload["unresolved"]  # what this annotation carries no gene for, not dropped
+        assert payload["unresolved"]
         cells = dict(
             zip(census.columns, census.rows[census.gene_id_stems.index(stem)], strict=True)
         )
@@ -1564,79 +1371,59 @@ class TestTFGeneListCommand:
         assert gene["dbd_family"] == cells["dbd_family"]
         assert gene["judgements"]["tf_assessment"] == cells["tf_assessment"]
 
-    def test_a_mouse_assembly_is_answered_by_the_census_published_for_mouse(
-        self, liulab_data: Path
-    ) -> None:
         # The verdict travels with the census that reached it, so which one spoke is a
         # fact about the assembly's species and never about which one came first.
-        gene_ids = self._positive(_MOUSE_ASSEMBLY, 1)
-        self._registered(liulab_data, *gene_ids, assembly=_MOUSE_ASSEMBLY, name=_MOUSE_ANNOTATION)
+        mouse_ids = self._positive(_MOUSE_ASSEMBLY, 1)
+        self._registered(liulab_data, *mouse_ids, assembly=_MOUSE_ASSEMBLY, name=_MOUSE_ANNOTATION)
+        mouse = runner.invoke(app, ["tf-gene-list", _MOUSE_ASSEMBLY])
+        assert mouse.exit_code == 0
+        assert mouse.stdout.splitlines() == mouse_ids
+        assert "Mus musculus" in mouse.stderr
+        assert self._census(_MOUSE_ASSEMBLY).provenance.attribution() in mouse.stderr
+        assert self._census(_TF_ASSEMBLY).provenance.publisher not in mouse.stderr
 
-        result = runner.invoke(app, ["tf-gene-list", _MOUSE_ASSEMBLY])
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == gene_ids
-        assert "Mus musculus" in result.stderr
-        assert self._census(_MOUSE_ASSEMBLY).provenance.attribution() in result.stderr
-        assert self._census(_TF_ASSEMBLY).provenance.publisher not in result.stderr
-
-    def test_a_census_recording_nothing_beyond_the_uniform_columns_still_emits_json(
-        self, liulab_data: Path
-    ) -> None:
         # AnimalTFDB ships the four uniform columns and no more, so every mouse gene's
         # judgements are empty. A surface reaching for a **TF assessment** that is not
         # there would raise here rather than print, which is why nothing does.
-        gene_ids = self._positive(_MOUSE_ASSEMBLY, 1)
-        self._registered(liulab_data, *gene_ids, assembly=_MOUSE_ASSEMBLY, name=_MOUSE_ANNOTATION)
+        mouse_json = runner.invoke(app, ["tf-gene-list", _MOUSE_ASSEMBLY, "--json"])
+        assert mouse_json.exit_code == 0
+        mouse_gene = _json.loads(mouse_json.stdout)["genes"][0]
+        assert mouse_gene["judgements"] == {}
+        assert mouse_gene["dbd_family"]  # the uniform four are there all the same
 
-        result = runner.invoke(app, ["tf-gene-list", _MOUSE_ASSEMBLY, "--json"])
-
-        assert result.exit_code == 0
-        gene = _json.loads(result.stdout)["genes"][0]
-        assert gene["judgements"] == {}
-        assert gene["dbd_family"]  # the uniform four are there all the same
-
-    def test_an_unregistered_annotation_exits_one_naming_the_command_that_registers_it(
+    def test_an_unregistered_annotation_an_unsupported_species_or_an_unknown_assembly_exits_one(
         self, liulab_data: Path
     ) -> None:
-        result = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY])
+        unregistered = runner.invoke(app, ["tf-gene-list", _TF_ASSEMBLY])
+        assert unregistered.exit_code == 1
+        assert unregistered.stdout == ""
+        assert f"genome register-annotation {_TF_ASSEMBLY} {_TF_ANNOTATION}" in _output(
+            unregistered
+        )
 
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert f"genome register-annotation {_TF_ASSEMBLY} {_TF_ANNOTATION}" in _output(result)
-
-    def test_a_species_no_census_ships_for_exits_one_naming_the_species_that_have_one(
-        self, liulab_data: Path
-    ) -> None:
-        # Human gene ids registered for a worm assembly: the species is the assembly's own
-        # and never what the GTF happens to hold, so this is refused rather than answered.
+        # Human gene ids registered for a worm assembly: the species is the assembly's
+        # own and never what the GTF happens to hold, so this is refused rather than
+        # answered.
         self._registered(
             liulab_data, *self._positive(_TF_ASSEMBLY, 1), assembly="ce11", name="wormbase_ws298"
         )
+        no_census = runner.invoke(app, ["tf-gene-list", "ce11"])
+        assert no_census.exit_code == 1
+        assert no_census.stdout == ""
+        assert "no TF census ships" in _output(no_census)
+        assert "Caenorhabditis elegans" in _output(no_census)
+        assert "Homo sapiens" in _output(no_census)  # …and what may be asked about instead
 
-        result = runner.invoke(app, ["tf-gene-list", "ce11"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "no TF census ships" in _output(result)
-        assert "Caenorhabditis elegans" in _output(result)
-        assert "Homo sapiens" in _output(result)  # …and what may be asked about instead
-
-    def test_an_assembly_nothing_names_a_species_for_exits_one_saying_so(
-        self, liulab_data: Path
-    ) -> None:
         # Not the same fact as no census ships: the question was which species this is,
         # and no row answered it. An unlisted local key is the ordinary way in.
         self._registered(
             liulab_data, *self._positive(_TF_ASSEMBLY, 1), assembly="tiny", name="mine"
         )
-
-        result = runner.invoke(app, ["tf-gene-list", "tiny", "--annotation", "mine"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "nothing says what species 'tiny' is" in _output(result)
-        assert "Homo sapiens" in _output(result)
+        unknown_species = runner.invoke(app, ["tf-gene-list", "tiny", "--annotation", "mine"])
+        assert unknown_species.exit_code == 1
+        assert unknown_species.stdout == ""
+        assert "nothing says what species 'tiny' is" in _output(unknown_species)
+        assert "Homo sapiens" in _output(unknown_species)
 
 
 class TestTFCofactorListCommand:
@@ -1679,12 +1466,13 @@ class TestTFCofactorListCommand:
         """``count`` gene ids, one per listed stem, versioned as GENCODE spells them."""
         return [f"{stem}.1" for stem in self._table(assembly).cofactor_stems[:count]]
 
-    def test_only_the_gene_ids_reach_stdout_so_the_output_pipes(self, liulab_data: Path) -> None:
+    def test_only_the_gene_ids_reach_stdout_the_annotation_may_be_named_and_json_carries_it_all(
+        self, liulab_data: Path
+    ) -> None:
         gene_ids = self._listed(_MOUSE_ASSEMBLY, 2)
         self._registered(liulab_data, *gene_ids)
 
         result = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY])
-
         assert result.exit_code == 0
         assert result.stdout == "".join(f"{gene_id}\n" for gene_id in gene_ids)
         # Whose list it is must be printed and must not cost the pipe, so it goes beside
@@ -1696,27 +1484,23 @@ class TestTFCofactorListCommand:
         unresolved = len(self._table(_MOUSE_ASSEMBLY).cofactor_stems) - len(gene_ids)
         assert f"2 cofactors, 2 gene ids, {unresolved} stems" in result.stderr
 
-    def test_the_annotation_may_be_named_instead_of_defaulted(self, liulab_data: Path) -> None:
-        gene_ids = self._listed(_MOUSE_ASSEMBLY, 1)
-        self._registered(liulab_data, *gene_ids, name="mine")
+        named_ids = self._listed(_MOUSE_ASSEMBLY, 1)
+        self._registered(liulab_data, *named_ids, name="mine")
+        named = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY, "--annotation", "mine"])
+        assert named.exit_code == 0
+        assert named.stdout.splitlines() == named_ids
+        assert f"{_MOUSE_ASSEMBLY} / mine" in named.stderr
 
-        result = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY, "--annotation", "mine"])
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == gene_ids
-        assert f"{_MOUSE_ASSEMBLY} / mine" in result.stderr
-
-    def test_json_carries_the_cofactors_the_provenance_and_the_unresolved_stems(
-        self, liulab_data: Path
-    ) -> None:
+        # The record `--json` emits carries the cofactors, the provenance and the stems
+        # this annotation carries no gene for, not dropped.
         table = self._table(_MOUSE_ASSEMBLY)
         stem = table.cofactor_stems[0]
-        self._registered(liulab_data, f"{stem}.1")
-
-        result = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY, "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        self._registered(liulab_data, f"{stem}.1", name="json")
+        json_result = runner.invoke(
+            app, ["tf-cofactor-list", _MOUSE_ASSEMBLY, "--annotation", "json", "--json"]
+        )
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert list(payload) == [
             "assembly",
             "annotation",
@@ -1726,13 +1510,13 @@ class TestTFCofactorListCommand:
             "gene_ids",
             "unresolved",
         ]
-        assert (payload["assembly"], payload["annotation"]) == (_MOUSE_ASSEMBLY, _MOUSE_ANNOTATION)
+        assert (payload["assembly"], payload["annotation"]) == (_MOUSE_ASSEMBLY, "json")
         assert payload["gene_ids"] == [f"{stem}.1"]
         # One provenance record per publisher that contributed, never one flattened row.
         assert [source["pubmed_id"] for source in payload["provenance"]["sources"]] == [
             source.pubmed_id for source in table.provenance.sources
         ]
-        assert payload["unresolved"]  # what this annotation carries no gene for, not dropped
+        assert payload["unresolved"]
         cells = dict(zip(table.columns, table.rows[table.gene_id_stems.index(stem)], strict=True))
         cofactor = payload["cofactors"][0]
         assert (cofactor["symbol"], cofactor["source"]) == (cells["symbol"], cells["source"])
@@ -1758,49 +1542,41 @@ class TestTFCofactorListCommand:
         assert refused.exit_code == 1
         assert "no TF census ships" in _output(refused)
 
-    def test_an_unregistered_annotation_exits_one_naming_the_command_that_registers_it(
+    def test_an_unregistered_annotation_an_unsupported_species_or_an_unknown_assembly_exits_one(
         self, liulab_data: Path
     ) -> None:
-        result = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
+        unregistered = runner.invoke(app, ["tf-cofactor-list", _MOUSE_ASSEMBLY])
+        assert unregistered.exit_code == 1
+        assert unregistered.stdout == ""
         next_action = f"genome register-annotation {_MOUSE_ASSEMBLY} {_MOUSE_ANNOTATION}"
-        assert next_action in _output(result)
+        assert next_action in _output(unregistered)
 
-    def test_a_species_no_cofactor_table_ships_for_exits_one_naming_the_species_that_have_one(
-        self, liulab_data: Path
-    ) -> None:
-        # Mouse gene ids registered for a yeast assembly: the species is the assembly's own
-        # and never what the GTF happens to hold, so this is refused rather than answered.
+        # Mouse gene ids registered for a yeast assembly: the species is the assembly's
+        # own and never what the GTF happens to hold, so this is refused rather than
+        # answered.
         self._registered(
             liulab_data, *self._listed(_MOUSE_ASSEMBLY, 1), assembly="sacCer3", name="ensgene_v101"
         )
+        no_table = runner.invoke(app, ["tf-cofactor-list", "sacCer3"])
+        assert no_table.exit_code == 1
+        assert no_table.stdout == ""
+        assert "no cofactor table ships" in _output(no_table)
+        assert "Saccharomyces cerevisiae" in _output(no_table)
+        assert "Mus musculus" in _output(no_table)  # …and what may be asked about instead
 
-        result = runner.invoke(app, ["tf-cofactor-list", "sacCer3"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "no cofactor table ships" in _output(result)
-        assert "Saccharomyces cerevisiae" in _output(result)
-        assert "Mus musculus" in _output(result)  # …and what may be asked about instead
-
-    def test_an_assembly_nothing_names_a_species_for_exits_one_saying_so(
-        self, liulab_data: Path
-    ) -> None:
         # Not the same fact as no table ships: the question was which species this is, and
         # no row answered it. The message says which shipped table could not be chosen, so
         # a cofactor question is never refused with a sentence about a census.
         self._registered(
             liulab_data, *self._listed(_MOUSE_ASSEMBLY, 1), assembly="tiny", name="mine"
         )
-
-        result = runner.invoke(app, ["tf-cofactor-list", "tiny", "--annotation", "mine"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "nothing says what species 'tiny' is, so no cofactor table" in _output(result)
-        assert "Mus musculus" in _output(result)
+        unknown_species = runner.invoke(app, ["tf-cofactor-list", "tiny", "--annotation", "mine"])
+        assert unknown_species.exit_code == 1
+        assert unknown_species.stdout == ""
+        assert "nothing says what species 'tiny' is, so no cofactor table" in _output(
+            unknown_species
+        )
+        assert "Mus musculus" in _output(unknown_species)
 
 
 class TestXrefCommand:
@@ -1819,239 +1595,196 @@ class TestXrefCommand:
     calls answer in Python, whole, in both directions.
     """
 
-    def test_it_converts_foreign_ids_to_gene_id_stems(self, xref_release: FakeFetch) -> None:
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "672"])
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
+    def test_it_converts_ids_never_infers_the_direction_and_json_matches_the_api(
+        self, xref_release: FakeFetch
+    ) -> None:
+        to_stems = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "672"])
+        assert to_stems.exit_code == 0
+        assert to_stems.stdout.splitlines() == [
             "7157\tENSG00000141510",
             "672\tENSG00000012048",
         ]
 
-    def test_it_converts_gene_id_stems_to_foreign_ids(self, xref_release: FakeFetch) -> None:
-        result = runner.invoke(
+        from_stems = runner.invoke(
             app, ["xref", _XREF_SPECIES, "--from-stems", HGNC, "ENSG00000141510"]
         )
+        assert from_stems.exit_code == 0
+        assert from_stems.stdout.splitlines() == ["ENSG00000141510\tHGNC:11998"]
 
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == ["ENSG00000141510\tHGNC:11998"]
-
-    def test_the_direction_is_named_and_never_inferred_from_the_ids(
-        self, xref_release: FakeFetch
-    ) -> None:
-        # One string, one namespace, two directions, two different answers. `HGNC:11998` is
-        # an HGNC id and is not a **Gene id stem**, and nothing here works that out from the
-        # characters: the flag says which way the hop goes, and asking the wrong way answers
-        # *nothing found* rather than quietly turning around.
+        # One string, one namespace, two directions, two different answers. `HGNC:11998`
+        # is an HGNC id and is not a **Gene id stem**, and nothing here works that out
+        # from the characters: the flag says which way the hop goes, and asking the wrong
+        # way answers *nothing found* rather than quietly turning around.
         toward = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998"])
         away = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", HGNC, "HGNC:11998"])
-
         assert toward.exit_code == away.exit_code == 0
         assert toward.stdout.splitlines() == ["HGNC:11998\tENSG00000141510"]
         assert away.stdout.splitlines() == ["HGNC:11998\t"]
 
-    def test_naming_no_direction_exits_two_naming_both_flags(self, xref_release: FakeFetch) -> None:
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "7157"])
+        # The strongest claim here is that the command holds no logic the API does not:
+        # `--json` is asserted equal to what the same call answers in Python, whole, in
+        # both directions.
+        to_stems_asked = ["7157", "8086", "999999999"]
+        json_toward = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, *to_stems_asked, "--json"]
+        )
+        assert json_toward.exit_code == 0
+        assert (
+            _json.loads(json_toward.stdout)
+            == XrefSet(_XREF_SPECIES).to_stems(to_stems_asked, ENTREZ).as_json()
+        )
 
-        assert result.exit_code == 2
-        assert result.stdout == ""
-        assert "--to-stems" in _output(result)
-        assert "--from-stems" in _output(result)
+        from_stems_asked = ["ENSG00000141510", "ENSG00000012048", "ENSG00000288541"]
+        json_away = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--from-stems", UNIPROT, *from_stems_asked, "--json"]
+        )
+        assert json_away.exit_code == 0
+        assert (
+            _json.loads(json_away.stdout)
+            == XrefSet(_XREF_SPECIES).from_stems(from_stems_asked, UNIPROT).as_json()
+        )
 
-    def test_naming_both_directions_exits_two(self, xref_release: FakeFetch) -> None:
-        result = runner.invoke(
+        # Naming zero or two directions exits 2 before anything is resolved.
+        neither = runner.invoke(app, ["xref", _XREF_SPECIES, "7157"])
+        assert neither.exit_code == 2
+        assert neither.stdout == ""
+        assert "--to-stems" in _output(neither)
+        assert "--from-stems" in _output(neither)
+
+        both = runner.invoke(
             app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "--from-stems", HGNC, "7157"]
         )
+        assert both.exit_code == 2
+        assert both.stdout == ""
+        assert "exactly one" in _output(both)
 
-        assert result.exit_code == 2
-        assert result.stdout == ""
-        assert "exactly one" in _output(result)
-
-    def test_json_is_the_answer_the_api_renders_toward_the_hub(
-        self, xref_release: FakeFetch
-    ) -> None:
-        asked = ["7157", "8086", "999999999"]
-
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, *asked, "--json"])
-
-        assert result.exit_code == 0
-        assert (
-            _json.loads(result.stdout) == XrefSet(_XREF_SPECIES).to_stems(asked, ENTREZ).as_json()
-        )
-
-    def test_json_is_the_answer_the_api_renders_away_from_the_hub(
-        self, xref_release: FakeFetch
-    ) -> None:
-        asked = ["ENSG00000141510", "ENSG00000012048", "ENSG00000288541"]
-
-        result = runner.invoke(
-            app, ["xref", _XREF_SPECIES, "--from-stems", UNIPROT, *asked, "--json"]
-        )
-
-        assert result.exit_code == 0
-        assert (
-            _json.loads(result.stdout)
-            == XrefSet(_XREF_SPECIES).from_stems(asked, UNIPROT).as_json()
-        )
-
-    def test_the_pairs_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
+    def test_the_render_keeps_every_id_the_provenance_beside_it_and_ambiguity_intact(
         self, xref_release: FakeFetch
     ) -> None:
         result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
-
         assert result.exit_code == 0
         assert result.stdout == "7157\tENSG00000141510\n"
-        # Which publisher said so, and when, is what a reader needs and what a pipeline must
-        # not be handed: it goes beside the pairs rather than among them.
+        # Which publisher said so, and when, is what a reader needs and what a pipeline
+        # must not be handed: it goes beside the pairs rather than among them.
         assert f"{ALLIANCE} {_XREF_RELEASE}" in result.stderr
         assert _XREF_SPECIES in result.stderr
         assert lookup_xref(_XREF_SPECIES).url in result.stderr
         assert f"{ENTREZ} ids -> gene id stems" in result.stderr
 
-    def test_ids_that_resolved_to_nothing_stay_in_the_human_output(
-        self, xref_release: FakeFetch
-    ) -> None:
-        # The one thing a hand-rolled join drops. `HGNC:10041` is a real human gene the
-        # Alliance lists with no Ensembl cross-reference at all, so it has no hub to reach.
-        result = runner.invoke(
-            app, ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998", _XREF_NO_HUB]
-        )
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
-            "HGNC:11998\tENSG00000141510",
-            f"{_XREF_NO_HUB}\t",
-        ]
-        assert "1 this release names none for" in result.stderr
-
-    def test_ids_that_resolved_to_nothing_stay_in_the_json(self, xref_release: FakeFetch) -> None:
-        result = runner.invoke(
-            app,
-            ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998", _XREF_NO_HUB, "--json"],
-        )
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
-        assert payload["unresolved"] == [_XREF_NO_HUB]
-        assert _XREF_NO_HUB not in payload["resolved"]
-
-    def test_an_id_naming_two_stems_prints_both_and_nothing_picks_one(
-        self, xref_release: FakeFetch
-    ) -> None:
         # 6.2% of human HGNC ids name two stems in this release, so this is the ordinary
-        # case rather than an edge one.
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "8086"])
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
+        # case rather than an edge one, and nothing here picks between them.
+        ambiguous = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "8086"])
+        assert ambiguous.exit_code == 0
+        assert ambiguous.stdout.splitlines() == [
             "8086\tENSG00000094914",
             "8086\tENSG00000291836",
         ]
 
-    def test_the_answer_names_the_source_and_release_that_produced_it(
-        self, xref_release: FakeFetch
-    ) -> None:
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
-
-        payload = _json.loads(result.stdout)
-        assert (payload["source"], payload["release"]) == (ALLIANCE, _XREF_RELEASE)
-        assert (payload["species"], payload["namespace"]) == (_XREF_SPECIES, ENTREZ)
-
-    def test_a_source_may_be_named(self, xref_release: FakeFetch) -> None:
-        result = runner.invoke(
-            app, ["xref", _XREF_SPECIES, "--source", ALLIANCE, "--to-stems", ENTREZ, "7157"]
+        # The one thing a hand-rolled join drops. `HGNC:10041` is a real human gene the
+        # Alliance lists with no Ensembl cross-reference at all, so it has no hub to
+        # reach, and it stays visible in both renderings rather than being dropped.
+        unresolved = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998", _XREF_NO_HUB]
         )
+        assert unresolved.exit_code == 0
+        assert unresolved.stdout.splitlines() == [
+            "HGNC:11998\tENSG00000141510",
+            f"{_XREF_NO_HUB}\t",
+        ]
+        assert "1 this release names none for" in unresolved.stderr
 
-        assert result.exit_code == 0
-        assert result.stdout == "7157\tENSG00000141510\n"
-        assert f"{ALLIANCE} {_XREF_RELEASE}" in result.stderr
-
-    def test_omitting_the_source_uses_the_default_xref_source(
-        self, xref_release: FakeFetch
-    ) -> None:
-        named = runner.invoke(
-            app,
-            ["xref", _XREF_SPECIES, "--source", ALLIANCE, "--to-stems", ENTREZ, "7157", "--json"],
+        unresolved_json = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998", _XREF_NO_HUB, "--json"]
         )
-        defaulted = runner.invoke(
-            app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"]
-        )
+        assert unresolved_json.exit_code == 0
+        payload = _json.loads(unresolved_json.stdout)
+        assert payload["unresolved"] == [_XREF_NO_HUB]
+        assert _XREF_NO_HUB not in payload["resolved"]
 
-        assert named.exit_code == defaulted.exit_code == 0
-        assert _json.loads(defaulted.stdout) == _json.loads(named.stdout)
-        assert lookup_xref(_XREF_SPECIES).default is True
-
-    def test_the_defaulted_answer_is_the_one_the_api_renders(self, xref_release: FakeFetch) -> None:
-        # Which default an unnamed source is filled in with is the API's decision, named by
-        # handing it the namespace the flags carried — so the command and the Python call
-        # cannot resolve differently. The symbol namespace is the case that matters and
-        # `TestMatchSymbolsCommand` asserts it; this is the same claim for every other one.
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
-
-        assert result.exit_code == 0
-        assert (
-            _json.loads(result.stdout)
-            == XrefSet.for_namespace(_XREF_SPECIES, ENTREZ).to_stems(["7157"], ENTREZ).as_json()
-        )
-
-    def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
+    def test_an_unsupported_source_species_or_namespace_exits_one_but_a_named_source_resolves(
         self, xref_release: FakeFetch
     ) -> None:
         # "ncbi" rather than a source that merely happens to be unlisted today: NCBI Gene
         # is excluded on purpose, being rebuilt in place with no retrievable old release
         # (ADR-0018), so this stays a miss however many sources the table grows.
-        result = runner.invoke(
+        bad_source = runner.invoke(
             app, ["xref", _XREF_SPECIES, "--source", "ncbi", "--to-stems", ENTREZ, "7157"]
         )
+        assert bad_source.exit_code == 1
+        assert bad_source.stdout == ""
+        assert ALLIANCE in _output(bad_source)
+        assert ENSEMBL_TSV in _output(bad_source)
 
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert ALLIANCE in _output(result)
-        assert ENSEMBL_TSV in _output(result)
-
-    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
-        self, xref_release: FakeFetch
-    ) -> None:
-        result = runner.invoke(app, ["xref", "Danio rerio", "--to-stems", ENTREZ, "7157"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
+        bad_species = runner.invoke(app, ["xref", "Danio rerio", "--to-stems", ENTREZ, "7157"])
+        assert bad_species.exit_code == 1
+        assert bad_species.stdout == ""
         for species in xref_species():
-            assert species in _output(result)
-        # Refused before anything was fetched: a species with no Ensembl presence has no hub
-        # to hang a namespace off and is unanswerable by design, not pending a download.
+            assert species in _output(bad_species)
+        # Refused before anything was fetched: a species with no Ensembl presence has no
+        # hub to hang a namespace off and is unanswerable by design, not pending a download.
         assert xref_release.calls == []
 
-    def test_a_namespace_the_source_does_not_carry_exits_one_naming_the_ones_it_does(
-        self, xref_release: FakeFetch
-    ) -> None:
-        # The three species have three different authorities, so a human set asked for MGI
-        # ids fails loudly rather than answering nothing — the failure that would otherwise
-        # look like a gene list with no matches.
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", MGI, "MGI:88276"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
+        # The three species have three different authorities, so a human set asked for
+        # MGI ids fails loudly rather than answering nothing — in either direction — the
+        # failure that would otherwise look like a gene list with no matches.
+        bad_namespace = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", MGI, "MGI:88276"])
+        assert bad_namespace.exit_code == 1
+        assert bad_namespace.stdout == ""
         for namespace in (ENSEMBL, ENTREZ, UNIPROT, HGNC):
-            assert namespace in _output(result)
+            assert namespace in _output(bad_namespace)
 
-    def test_the_reverse_direction_refuses_the_same_namespace(
-        self, xref_release: FakeFetch
-    ) -> None:
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", MGI, "ENSG00000141510"])
+        bad_namespace_reverse = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--from-stems", MGI, "ENSG00000141510"]
+        )
+        assert bad_namespace_reverse.exit_code == 1
+        assert bad_namespace_reverse.stdout == ""
+        assert HGNC in _output(bad_namespace_reverse)
 
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert HGNC in _output(result)
+        # Refused before any of these real hops touched the network — a source may be
+        # named, and omitting it defaults exactly as the API does.
+        named = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--source", ALLIANCE, "--to-stems", ENTREZ, "7157"]
+        )
+        assert named.exit_code == 0
+        assert named.stdout == "7157\tENSG00000141510\n"
+        assert f"{ALLIANCE} {_XREF_RELEASE}" in named.stderr
 
-    def test_the_symbol_namespace_toward_the_hub_names_the_command_that_answers_it(
+        # Which default an unnamed source is filled in with is the API's decision, named
+        # by handing it the namespace the flags carried — so the command and the Python
+        # call cannot resolve differently. The symbol namespace is the case that matters
+        # and `TestMatchSymbolsCommand` asserts it; this is the same claim for every
+        # other one.
+        named_json = runner.invoke(
+            app,
+            ["xref", _XREF_SPECIES, "--source", ALLIANCE, "--to-stems", ENTREZ, "7157", "--json"],
+        )
+        defaulted_json = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"]
+        )
+        assert named_json.exit_code == defaulted_json.exit_code == 0
+        defaulted_payload = _json.loads(defaulted_json.stdout)
+        assert defaulted_payload == _json.loads(named_json.stdout)
+        assert lookup_xref(_XREF_SPECIES).default is True
+        assert (defaulted_payload["source"], defaulted_payload["release"]) == (
+            ALLIANCE,
+            _XREF_RELEASE,
+        )
+        assert (defaulted_payload["species"], defaulted_payload["namespace"]) == (
+            _XREF_SPECIES,
+            ENTREZ,
+        )
+        assert (
+            defaulted_payload
+            == XrefSet.for_namespace(_XREF_SPECIES, ENTREZ).to_stems(["7157"], ENTREZ).as_json()
+        )
+
+    def test_the_symbol_namespace_toward_the_hub_names_match_symbols_and_the_help_agrees(
         self, xref_release: FakeFetch
     ) -> None:
         # The API refuses this call naming `match_symbols(symbols)`, which is a Python call
         # and no next action at all for someone in a shell. The surface owns which of *its*
         # spellings to reach for, so the refusal happens here and names the command.
         result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", SYMBOL, _RETIRED_SYMBOL])
-
         assert result.exit_code == 2
         assert result.stdout == ""
         assert "genome match-symbols" in _output(result)
@@ -2059,50 +1792,43 @@ class TestXrefCommand:
         # direction is answered by another command.
         assert xref_release.calls == []
 
-    def test_the_to_stems_help_no_longer_offers_the_namespace_it_refuses(self) -> None:
         # Help and behaviour agree or the command advertises a conversion it will not make.
         offered = _help_text("xref")
-
         assert ", ".join(name for name in NAMESPACES if name != SYMBOL) in offered
         assert ", ".join(NAMESPACES) not in offered
         assert "genome match-symbols" in offered
 
-    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
+    def test_a_set_not_downloaded_or_left_unfinished_exits_one_naming_the_fix(
         self, monkeypatch: pytest.MonkeyPatch, xref_pinned: None
     ) -> None:
         def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
             raise ConnectionError("the compute node has no internet")
 
         monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+        not_downloaded = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+        assert not_downloaded.exit_code == 1
+        assert not_downloaded.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE) in _output(
+            not_downloaded
+        )
+        assert "login node" in _output(not_downloaded)
 
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert xref_prepare_command(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE) in _output(result)
-        assert "login node" in _output(result)
-
-    def test_a_set_left_unfinished_exits_one_naming_the_repair(
-        self, xref_release: FakeFetch
-    ) -> None:
+        # A leftover half-written slice is caught before the (still-broken) fetch ever
+        # runs: the completion check runs first, so the two never race.
         directory = xref_set_dir(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE)
         directory.mkdir(parents=True)
         (directory / xref_slice_name(_XREF_SPECIES)).write_bytes(b"half a file")
-
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert xref_prepare_command(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE) in _output(result)
+        unfinished = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+        assert unfinished.exit_code == 1
+        assert unfinished.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE) in _output(unfinished)
 
     def test_the_progress_display_is_suppressed_under_json(self, xref_release: FakeFetch) -> None:
         runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
-
         assert xref_release.last.progressbar is False
 
     def test_the_progress_display_is_drawn_without_it(self, xref_release: FakeFetch) -> None:
         runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
-
         assert xref_release.last.progressbar is True
 
 
@@ -2128,35 +1854,13 @@ class TestMatchSymbolsCommand:
     answers in Python, whole, both exactly and folded.
     """
 
-    def test_a_symbol_reaches_the_gene_it_names(self, symbol_sources: FakeFetch) -> None:
-        result = _match_symbols(_APPROVED_SYMBOL)
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
-            f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\t{APPROVED}"
-        ]
-
-    def test_a_retired_spelling_from_the_measured_epifactors_set_resolves(
-        self, symbol_sources: FakeFetch
-    ) -> None:
-        # The failure the whole symbol feature exists to prevent, reached from a shell: of
-        # EpiFactors v2.0's 801 human rows, 31 spell the gene by a symbol HGNC has since
-        # retired, and a join that knows approved spellings only drops exactly those.
-        result = _match_symbols(_RETIRED_SYMBOL, _RETIRED_SYMBOL_TOO)
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
-            f"{_RETIRED_SYMBOL}\t{_RETIRED_SYMBOL}\t{_BMAL1_STEM}\t{PREVIOUS}",
-            f"{_RETIRED_SYMBOL_TOO}\t{_RETIRED_SYMBOL_TOO}\t{_EMSY_STEM}\t{PREVIOUS}",
-        ]
-
-    def test_every_match_says_which_kind_of_spelling_it_was(
+    def test_every_match_says_its_kind_and_matching_is_exact_unless_case_is_folded(
         self, symbol_sources: FakeFetch
     ) -> None:
         # One gene, spelled three ways, in one call. Which kind matched is the answer's and
-        # not a detail: without it a retired spelling and a current one read alike.
+        # not a detail: without it a retired spelling and a current one read alike — and a
+        # single approved symbol on its own comes back the same way, unadorned.
         result = _match_symbols(_APPROVED_SYMBOL, _RETIRED_SYMBOL, _ALIAS_SYMBOL)
-
         assert result.exit_code == 0
         assert [line.split("\t") for line in result.stdout.splitlines()] == [
             [_APPROVED_SYMBOL, _APPROVED_SYMBOL, _BMAL1_STEM, APPROVED],
@@ -2164,54 +1868,52 @@ class TestMatchSymbolsCommand:
             [_ALIAS_SYMBOL, _ALIAS_SYMBOL, _BMAL1_STEM, ALIAS],
         ]
 
-    def test_a_symbol_naming_two_genes_prints_both_and_nothing_picks_one(
-        self, symbol_sources: FakeFetch
-    ) -> None:
-        # `ADCY3` is HGNC's approved symbol for one gene and a symbol it retired from
-        # another, so ambiguity is the ordinary case rather than an edge one, and the shell
-        # is handed both with the kind that distinguishes them.
-        result = _match_symbols(_AMBIGUOUS_SYMBOL)
+        # The failure the whole symbol feature exists to prevent, reached from a shell: of
+        # EpiFactors v2.0's 801 human rows, 31 spell the gene by a symbol HGNC has since
+        # retired, and a join that knows approved spellings only drops exactly those.
+        retired = _match_symbols(_RETIRED_SYMBOL, _RETIRED_SYMBOL_TOO)
+        assert retired.exit_code == 0
+        assert retired.stdout.splitlines() == [
+            f"{_RETIRED_SYMBOL}\t{_RETIRED_SYMBOL}\t{_BMAL1_STEM}\t{PREVIOUS}",
+            f"{_RETIRED_SYMBOL_TOO}\t{_RETIRED_SYMBOL_TOO}\t{_EMSY_STEM}\t{PREVIOUS}",
+        ]
 
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
+        # `ADCY3` is HGNC's approved symbol for one gene and a symbol it retired from
+        # another, so ambiguity is the ordinary case rather than an edge one, and the
+        # shell is handed both with the kind that distinguishes them.
+        ambiguous = _match_symbols(_AMBIGUOUS_SYMBOL)
+        assert ambiguous.exit_code == 0
+        assert ambiguous.stdout.splitlines() == [
             f"{_AMBIGUOUS_SYMBOL}\t{_AMBIGUOUS_SYMBOL}\t{_ADCY3_STEM}\t{APPROVED}",
             f"{_AMBIGUOUS_SYMBOL}\t{_AMBIGUOUS_SYMBOL}\t{_ADCY8_STEM}\t{PREVIOUS}",
         ]
 
-    def test_matching_is_exact_unless_case_is_folded_on_purpose(
-        self, symbol_sources: FakeFetch
-    ) -> None:
         # The species is fixed by the set, so a mouse-cased spelling asked of a human set is
         # the wrong authority's rather than a typo to absorb — and saying so beats half
         # working.
-        result = _match_symbols(_MOUSE_CASED_SYMBOL)
+        exact = _match_symbols(_MOUSE_CASED_SYMBOL)
+        assert exact.exit_code == 0
+        assert exact.stdout.splitlines() == [f"{_MOUSE_CASED_SYMBOL}\t\t\t"]
+        assert "exact" in exact.stderr
 
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [f"{_MOUSE_CASED_SYMBOL}\t\t\t"]
-        assert "exact" in result.stderr
-
-    def test_case_insensitive_matching_is_opt_in_and_still_returns_every_match(
-        self, symbol_sources: FakeFetch
-    ) -> None:
         # Convenience never costs correctness: folding widens what matches and narrows
         # nothing, so the ambiguity that was there exactly is still there folded — and the
         # authority's own spelling comes back beside the one that was asked about.
-        result = _match_symbols("adcy3", "--case-insensitive")
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
+        folded = _match_symbols("adcy3", "--case-insensitive")
+        assert folded.exit_code == 0
+        assert folded.stdout.splitlines() == [
             f"adcy3\t{_AMBIGUOUS_SYMBOL}\t{_ADCY3_STEM}\t{APPROVED}",
             f"adcy3\t{_AMBIGUOUS_SYMBOL}\t{_ADCY8_STEM}\t{PREVIOUS}",
         ]
-        assert "case-insensitive" in result.stderr
+        assert "case-insensitive" in folded.stderr
 
-    def test_symbols_that_matched_nothing_stay_in_the_human_output(
+    def test_json_carries_unresolved_symbols_matches_the_api_and_agrees_with_the_text(
         self, symbol_sources: FakeFetch
     ) -> None:
         # What your list holds and this release does not is the one thing a hand-rolled
-        # join drops silently, so it gets a row here like everything else.
+        # join drops silently, so it gets a row here like everything else — in both
+        # renderings.
         result = _match_symbols(_APPROVED_SYMBOL, "nosuchgene")
-
         assert result.exit_code == 0
         assert result.stdout.splitlines() == [
             f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\t{APPROVED}",
@@ -2219,133 +1921,115 @@ class TestMatchSymbolsCommand:
         ]
         assert "1 this release matched nothing for" in result.stderr
 
-    def test_symbols_that_matched_nothing_stay_in_the_json(self, symbol_sources: FakeFetch) -> None:
-        result = _match_symbols(_APPROVED_SYMBOL, "nosuchgene", "--json")
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        json_result = _match_symbols(_APPROVED_SYMBOL, "nosuchgene", "--json")
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["unresolved"] == ["nosuchgene"]
         assert "nosuchgene" not in payload["resolved"]
 
-    def test_json_is_the_answer_the_api_renders(self, symbol_sources: FakeFetch) -> None:
-        asked = [_AMBIGUOUS_SYMBOL, _RETIRED_SYMBOL, "nosuchgene"]
-
-        result = _match_symbols(*asked, "--json")
-
-        assert result.exit_code == 0
+        # The strongest claim here is that the command holds no logic the API does not:
+        # `--json` is asserted equal to what the same call answers in Python, whole, both
+        # exactly and folded.
+        exact_asked = [_AMBIGUOUS_SYMBOL, _RETIRED_SYMBOL, "nosuchgene"]
+        exact = _match_symbols(*exact_asked, "--json")
+        assert exact.exit_code == 0
         assert (
-            _json.loads(result.stdout)
-            == XrefSet(_XREF_SPECIES, HGNC_ARCHIVE).match_symbols(asked).as_json()
+            _json.loads(exact.stdout)
+            == XrefSet(_XREF_SPECIES, HGNC_ARCHIVE).match_symbols(exact_asked).as_json()
         )
 
-    def test_json_is_the_answer_the_api_renders_folded_too(self, symbol_sources: FakeFetch) -> None:
-        asked = [_MOUSE_CASED_SYMBOL, "adcy3"]
-
-        result = _match_symbols(*asked, "--case-insensitive", "--json")
-
-        assert result.exit_code == 0
+        folded_asked = [_MOUSE_CASED_SYMBOL, "adcy3"]
+        folded = _match_symbols(*folded_asked, "--case-insensitive", "--json")
+        assert folded.exit_code == 0
         assert (
-            _json.loads(result.stdout)
+            _json.loads(folded.stdout)
             == XrefSet(_XREF_SPECIES, HGNC_ARCHIVE)
-            .match_symbols(asked, case_insensitive=True)
+            .match_symbols(folded_asked, case_insensitive=True)
             .as_json()
         )
 
-    def test_the_matches_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
-        self, symbol_sources: FakeFetch
-    ) -> None:
-        result = _match_symbols(_APPROVED_SYMBOL)
-
-        assert result.exit_code == 0
-        assert result.stdout == f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\tapproved\n"
+        # The matches go to stdout and the provenance to stderr so the output pipes.
+        stdout_result = _match_symbols(_APPROVED_SYMBOL)
+        assert stdout_result.exit_code == 0
+        assert (
+            stdout_result.stdout
+            == f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\tapproved\n"
+        )
         # Which authority said so, and when, is what a reader needs and what a pipeline
         # must not be handed: it goes beside the matches rather than among them.
-        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in result.stderr
-        assert _XREF_SPECIES in result.stderr
-        assert lookup_xref(_XREF_SPECIES, HGNC_ARCHIVE).url in result.stderr
-        assert "gene symbols -> gene id stems" in result.stderr
+        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in stdout_result.stderr
+        assert _XREF_SPECIES in stdout_result.stderr
+        assert lookup_xref(_XREF_SPECIES, HGNC_ARCHIVE).url in stdout_result.stderr
+        assert "gene symbols -> gene id stems" in stdout_result.stderr
 
-    def test_the_text_columns_are_the_json_matches_own_values_so_the_two_cannot_drift(
-        self, symbol_sources: FakeFetch
-    ) -> None:
+        source_json = _match_symbols(_APPROVED_SYMBOL, "--json")
+        source_payload = _json.loads(source_json.stdout)
+        assert (source_payload["source"], source_payload["release"]) == (
+            HGNC_ARCHIVE,
+            _HGNC_RELEASE,
+        )
+        assert (source_payload["species"], source_payload["case_insensitive"]) == (
+            _XREF_SPECIES,
+            False,
+        )
+
+        # The whole claim that the command holds no logic: every text cell printed is a
+        # value the JSON answer put there, in the order the JSON answer writes it.
         text = _match_symbols(_AMBIGUOUS_SYMBOL)
-        payload = _match_symbols(_AMBIGUOUS_SYMBOL, "--json")
-
-        matches = _json.loads(payload.stdout)["resolved"][_AMBIGUOUS_SYMBOL]
+        text_payload = _match_symbols(_AMBIGUOUS_SYMBOL, "--json")
+        matches = _json.loads(text_payload.stdout)["resolved"][_AMBIGUOUS_SYMBOL]
         assert text.stdout.splitlines() == [
             "\t".join([_AMBIGUOUS_SYMBOL, match["symbol"], match["gene_id_stem"], match["kind"]])
             for match in matches
         ]
 
-    def test_the_answer_names_the_source_and_release_that_produced_it(
-        self, symbol_sources: FakeFetch
-    ) -> None:
-        result = _match_symbols(_APPROVED_SYMBOL, "--json")
-
-        payload = _json.loads(result.stdout)
-        assert (payload["source"], payload["release"]) == (HGNC_ARCHIVE, _HGNC_RELEASE)
-        assert (payload["species"], payload["case_insensitive"]) == (_XREF_SPECIES, False)
-
-    def test_a_source_matching_current_symbols_only_says_so_before_it_reads_as_absent(
+    def test_a_symbol_or_mouse_symbol_needs_no_source_named_and_json_matches_the_api(
         self, symbol_sources: FakeFetch
     ) -> None:
         # MGI's submission publishes one current approved symbol per gene, so a spelling it
         # retired matches nothing — and an answer that did not say why would look exactly
-        # like a gene that is not in the release.
-        result = runner.invoke(
+        # like a gene that is not in the release. A set that matches every kind carries no
+        # such note.
+        limited = runner.invoke(
             app, ["match-symbols", _MOUSE, "--source", ALLIANCE_BGI, _MOUSE_RETIRED_SYMBOL]
         )
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [f"{_MOUSE_RETIRED_SYMBOL}\t\t\t"]
-        assert f"on {APPROVED} spellings" in result.stderr
+        assert limited.exit_code == 0
+        assert limited.stdout.splitlines() == [f"{_MOUSE_RETIRED_SYMBOL}\t\t\t"]
+        assert f"on {APPROVED} spellings" in limited.stderr
         for missing in (PREVIOUS, ALIAS):
-            assert missing in result.stderr
+            assert missing in limited.stderr
 
-    def test_a_set_that_matches_every_kind_carries_no_such_note(
-        self, symbol_sources: FakeFetch
-    ) -> None:
-        result = _match_symbols(_APPROVED_SYMBOL)
+        full = _match_symbols(_APPROVED_SYMBOL)
+        assert f"on {APPROVED}, {PREVIOUS}, {ALIAS} spellings" in full.stderr
+        assert "limits" not in full.stderr
 
-        assert f"on {APPROVED}, {PREVIOUS}, {ALIAS} spellings" in result.stderr
-        assert "limits" not in result.stderr
-
-    def test_a_symbol_needs_no_source_named(self, symbol_sources: FakeFetch) -> None:
         # The papercut this command was landed with: human's default xref source is the
         # Alliance, which carries no human symbol, so this exited 1 on the first try. The
         # question now picks the default (ADR-0021) and the retired spelling resolves.
-        result = runner.invoke(app, ["match-symbols", _XREF_SPECIES, _RETIRED_SYMBOL])
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
+        human = runner.invoke(app, ["match-symbols", _XREF_SPECIES, _RETIRED_SYMBOL])
+        assert human.exit_code == 0
+        assert human.stdout.splitlines() == [
             f"{_RETIRED_SYMBOL}\t{_RETIRED_SYMBOL}\t{_BMAL1_STEM}\t{PREVIOUS}"
         ]
-        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in result.stderr
+        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in human.stderr
 
-    def test_mouse_needs_no_source_named_either(self, symbol_sources: FakeFetch) -> None:
-        # Mouse's symbols come from a third source again, so the flag holds for it or it is
-        # a human special case wearing a general name.
-        result = runner.invoke(app, ["match-symbols", _MOUSE, _MOUSE_APPROVED_SYMBOL])
-
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [
+        # Mouse's symbols come from a third source again, so the flag holds for it or it
+        # is a human special case wearing a general name.
+        mouse = runner.invoke(app, ["match-symbols", _MOUSE, _MOUSE_APPROVED_SYMBOL])
+        assert mouse.exit_code == 0
+        assert mouse.stdout.splitlines() == [
             f"{_MOUSE_APPROVED_SYMBOL}\t{_MOUSE_APPROVED_SYMBOL}\t{_TRP53_STEM}\t{APPROVED}"
         ]
-        assert ALLIANCE_BGI in result.stderr
+        assert ALLIANCE_BGI in mouse.stderr
 
-    def test_the_json_with_no_source_is_what_the_api_renders_the_same_way(
-        self, symbol_sources: FakeFetch
-    ) -> None:
-        # The strongest form of "the CLI is a thin client" for the new path: the command and
+        # The strongest form of "the CLI is a thin client" for this path: the command and
         # the Python call fill the default in one place, so they cannot resolve differently.
-        asked = [_RETIRED_SYMBOL, "nosuchgene"]
-
-        result = runner.invoke(app, ["match-symbols", _XREF_SPECIES, *asked, "--json"])
-
-        assert result.exit_code == 0
+        json_asked = [_RETIRED_SYMBOL, "nosuchgene"]
+        json_result = runner.invoke(app, ["match-symbols", _XREF_SPECIES, *json_asked, "--json"])
+        assert json_result.exit_code == 0
         assert (
-            _json.loads(result.stdout)
-            == XrefSet.for_symbols(_XREF_SPECIES).match_symbols(asked).as_json()
+            _json.loads(json_result.stdout)
+            == XrefSet.for_symbols(_XREF_SPECIES).match_symbols(json_asked).as_json()
         )
 
     def test_a_source_carrying_no_symbols_named_on_purpose_exits_one_naming_what_to_pass(
@@ -2364,100 +2048,84 @@ class TestMatchSymbolsCommand:
         assert HGNC_ARCHIVE in _output(result)
         assert ALLIANCE_BGI not in _output(result)
 
-    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
+    def test_an_unsupported_species_or_an_unlisted_source_exits_one_naming_the_alternatives(
         self, symbol_sources: FakeFetch
     ) -> None:
-        result = runner.invoke(app, ["match-symbols", "Danio rerio", _APPROVED_SYMBOL])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
+        bad_species = runner.invoke(app, ["match-symbols", "Danio rerio", _APPROVED_SYMBOL])
+        assert bad_species.exit_code == 1
+        assert bad_species.stdout == ""
         for species in xref_species():
-            assert species in _output(result)
+            assert species in _output(bad_species)
         assert symbol_sources.calls == []
 
-    def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
-        self, symbol_sources: FakeFetch
-    ) -> None:
-        result = runner.invoke(
+        bad_source = runner.invoke(
             app, ["match-symbols", _XREF_SPECIES, "--source", "ncbi", _APPROVED_SYMBOL]
         )
+        assert bad_source.exit_code == 1
+        assert bad_source.stdout == ""
+        assert HGNC_ARCHIVE in _output(bad_source)
 
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert HGNC_ARCHIVE in _output(result)
-
-    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
+    def test_a_set_not_downloaded_or_left_unfinished_exits_one_naming_the_fix(
         self, monkeypatch: pytest.MonkeyPatch, symbol_pinned: dict[str, Path]
     ) -> None:
         def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
             raise ConnectionError("the compute node has no internet")
 
         monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+        not_downloaded = _match_symbols(_APPROVED_SYMBOL)
+        assert not_downloaded.exit_code == 1
+        assert not_downloaded.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE) in _output(
+            not_downloaded
+        )
+        assert "login node" in _output(not_downloaded)
 
-        result = _match_symbols(_APPROVED_SYMBOL)
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert xref_prepare_command(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE) in _output(result)
-        assert "login node" in _output(result)
-
-    def test_a_set_left_unfinished_exits_one_naming_the_repair(
-        self, symbol_sources: FakeFetch
-    ) -> None:
+        # A leftover half-written slice is caught before the (still-broken) fetch ever
+        # runs: the completion check runs first, so the two never race.
         directory = xref_set_dir(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE)
         directory.mkdir(parents=True)
         (directory / xref_slice_name(_XREF_SPECIES)).write_bytes(b"half a file")
+        unfinished = _match_symbols(_APPROVED_SYMBOL)
+        assert unfinished.exit_code == 1
+        assert unfinished.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE) in _output(
+            unfinished
+        )
 
-        result = _match_symbols(_APPROVED_SYMBOL)
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert xref_prepare_command(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE) in _output(result)
-
-    def test_the_other_direction_is_still_the_xref_commands_to_answer(
+    def test_the_labelling_direction_needs_no_source_and_is_the_call_the_api_makes(
         self, symbol_sources: FakeFetch
     ) -> None:
         # The pair reads coherently or neither does: away from the hub a stem takes the
         # authority's one current approved spelling, which is a two-column hop like every
         # other and stays on `genome xref`.
-        result = runner.invoke(
+        named = runner.invoke(
             app,
             ["xref", _XREF_SPECIES, "--source", HGNC_ARCHIVE, "--from-stems", SYMBOL, _BMAL1_STEM],
         )
+        assert named.exit_code == 0
+        assert named.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
 
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
-
-    def test_the_labelling_direction_needs_no_source_named_either(
-        self, symbol_sources: FakeFetch
-    ) -> None:
         # The same papercut in the other direction: labelling a stem is a symbol question
-        # too, so the source the question fills in is the same one, and the rule reads as a
-        # rule rather than as one command's special case.
-        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", SYMBOL, _BMAL1_STEM])
+        # too, so the source the question fills in is the same one, and the rule reads as
+        # a rule rather than as one command's special case.
+        defaulted = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", SYMBOL, _BMAL1_STEM])
+        assert defaulted.exit_code == 0
+        assert defaulted.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
+        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in defaulted.stderr
 
-        assert result.exit_code == 0
-        assert result.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
-        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in result.stderr
-
-    def test_the_labelling_direction_is_the_call_the_api_makes_for_it(
-        self, symbol_sources: FakeFetch
-    ) -> None:
-        # The command holds no logic the API does not: it hands the namespace it was given
-        # to the constructor that fills the question's default in, and renders. It once
-        # chose the opener itself, which made this exact Python call raise where the shell
-        # answered — two code paths for one question, which is what this asserts is gone.
-        # The mouse stem is asked of the human set on purpose: it resolves to nothing, so
-        # the two renderings have to agree about what was missed as well as what was found.
+        # The command holds no logic the API does not: it hands the namespace it was
+        # given to the constructor that fills the question's default in, and renders. It
+        # once chose the opener itself, which made this exact Python call raise where the
+        # shell answered — two code paths for one question, which is what this asserts is
+        # gone. The mouse stem is asked of the human set on purpose: it resolves to
+        # nothing, so the two renderings have to agree about what was missed too.
         asked = [_BMAL1_STEM, _TRP53_STEM]
-
-        result = runner.invoke(
+        api_check = runner.invoke(
             app, ["xref", _XREF_SPECIES, "--from-stems", SYMBOL, *asked, "--json"]
         )
-
-        assert result.exit_code == 0
+        assert api_check.exit_code == 0
         assert (
-            _json.loads(result.stdout)
+            _json.loads(api_check.stdout)
             == XrefSet.for_namespace(_XREF_SPECIES, SYMBOL).from_stems(asked, SYMBOL).as_json()
         )
 
@@ -2502,13 +2170,11 @@ class TestHomologsCommand:
         assert result.exit_code == 0
         assert len(result.stdout.splitlines()) == links
 
-    def test_a_stem_prints_every_homolog_with_the_publishers_own_type_and_picks_none(
-        self, fake_fetch: FakeFetch
+    def test_the_type_column_carries_the_publishers_label_and_defaults_to_orthologs(
+        self, fake_fetch: FakeFetch, data_dir: Path
     ) -> None:
         _serve_compara(fake_fetch, _HUMAN, _WORM)
-
         result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _THREE_WORM_HOMOLOGS])
-
         assert result.exit_code == 0
         rows = [line.split("\t") for line in result.stdout.splitlines()]
         assert [row[1] for row in rows] == list(_THE_THREE_WORMS)
@@ -2516,31 +2182,35 @@ class TestHomologsCommand:
         # rows in front of you: three partners here and the type still reads one2many.
         assert {row[2] for row in rows} == {"ortholog_one2many"}
 
-    def test_orthologs_are_the_default_answer(self, fake_fetch: FakeFetch, data_dir: Path) -> None:
         _serve_compara(fake_fetch, _MOUSE, _WORM)
-        asked = _homology_stems(data_dir, _MOUSE, _WORM)
-
-        result = runner.invoke(app, ["homologs", _MOUSE, _WORM, *asked])
-
-        assert result.exit_code == 0
-        types = {line.split("\t")[2] for line in result.stdout.splitlines()}
+        default_asked = _homology_stems(data_dir, _MOUSE, _WORM)
+        default = runner.invoke(app, ["homologs", _MOUSE, _WORM, *default_asked])
+        assert default.exit_code == 0
+        types = {line.split("\t")[2] for line in default.stdout.splitlines()}
         assert types
         assert all(kind.startswith("ortholog_") for kind in types)
-        assert "orthologs" in result.stderr
+        assert "orthologs" in default.stderr
 
-    def test_paralogs_come_back_only_on_request_and_the_heading_says_which_was_asked(
-        self, fake_fetch: FakeFetch, data_dir: Path
-    ) -> None:
-        # Release 116 publishes no cross-species paralogy for these pairs — counted over
-        # the whole human dump — so what is asserted is that the flag reaches the API and
-        # that the render says which question was asked, not that a paralogy row appeared.
-        # Claiming one would claim something about the publisher that is not true.
+        # *Not an ortholog* stays distinguishable from *absent* because the publisher's
+        # own label is a column of every row rather than a filter applied before
+        # printing: a duplication label would print in the same place `ortholog_one2one`
+        # does now. Release 116 publishes no cross-species paralogy for this pair —
+        # counted over the whole human dump — so what is asserted is that the flag
+        # reaches the API and the render says which question was asked, not that a
+        # paralogy row appeared: claiming one would claim something about the publisher
+        # that is not true.
         _serve_compara(fake_fetch, _HUMAN, _WORM)
         asked = _homology_stems(data_dir, _HUMAN, _WORM)
+        paralogs_included = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs"])
+        assert paralogs_included.exit_code == 0
+        assert {line.split("\t")[2] for line in paralogs_included.stdout.splitlines()} == {
+            "ortholog_one2one",
+            "ortholog_one2many",
+            "ortholog_many2many",
+        }
 
         result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs", "--json"])
         heading = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs"])
-
         assert result.exit_code == heading.exit_code == 0
         assert (
             _json.loads(result.stdout)
@@ -2550,83 +2220,49 @@ class TestHomologsCommand:
         )
         assert "paralogy included" in heading.stderr
 
-    def test_a_paralogy_link_would_be_marked_by_the_type_column_it_already_carries(
-        self, fake_fetch: FakeFetch, data_dir: Path
-    ) -> None:
-        # *Not an ortholog* stays distinguishable from *absent* because the publisher's own
-        # label is a column of every row rather than a filter applied before printing: a
-        # duplication label would print in the same place `ortholog_one2one` does now.
-        _serve_compara(fake_fetch, _HUMAN, _WORM)
-        asked = _homology_stems(data_dir, _HUMAN, _WORM)
-
-        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs"])
-
-        assert result.exit_code == 0
-        assert {line.split("\t")[2] for line in result.stdout.splitlines()} == {
-            "ortholog_one2one",
-            "ortholog_one2many",
-            "ortholog_many2many",
-        }
-
-    def test_json_is_the_answer_the_api_renders(
+    def test_json_matches_the_api_text_matches_the_json_and_nothing_is_ever_dropped(
         self, fake_fetch: FakeFetch, data_dir: Path
     ) -> None:
         _serve_compara(fake_fetch, _MOUSE, _HUMAN)
         asked = [*_homology_stems(data_dir, _MOUSE, _HUMAN), _NO_HOMOLOG]
-
         result = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, *asked, "--json"])
-
         assert result.exit_code == 0
         assert (
             _json.loads(result.stdout)
             == HomologySet(_MOUSE, _HUMAN, progressbar=False).homologs(asked).as_json()
         )
 
-    def test_the_links_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        _serve_compara(fake_fetch, _HUMAN, _WORM)
-        row = homology_metadata(_HUMAN, _WORM, HOMOLOGY_RELEASE)
-        assert row is not None
-
-        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
-
-        assert result.exit_code == 0
-        assert result.stdout.startswith(f"{_ONE_WORM_HOMOLOG}\t{_THE_ONE_WORM}\tortholog_one2one\t")
-        assert len(result.stdout.splitlines()) == 1
-        # Who asserted it, and from which release and file, is what a reader needs and what
-        # a pipeline must not be handed: it goes beside the links rather than among them.
-        assert row.attribution() in result.stderr
-        assert f"{_HUMAN} -> {_WORM}" in result.stderr
-
-    def test_the_text_columns_are_the_json_links_own_values_so_the_two_cannot_drift(
-        self, fake_fetch: FakeFetch
-    ) -> None:
         # The whole claim that the command holds no logic: every cell printed is a value
-        # the API put in the answer, in the order the API writes it, with the publisher's
-        # own `NULL` where it recorded nothing.
-        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
-        asked = "ENSMUSG00000074698"
-
-        text = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, asked])
-        rendered = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, asked, "--json"])
-
-        links = _json.loads(rendered.stdout)["resolved"][asked]
+        # the API put in the answer, in the order the API writes it, with the
+        # publisher's own `NULL` where it recorded nothing.
+        text_asked = "ENSMUSG00000074698"
+        text = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, text_asked])
+        rendered = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, text_asked, "--json"])
+        links = _json.loads(rendered.stdout)["resolved"][text_asked]
         assert text.stdout.splitlines() == [
             "\t".join("NULL" if value is None else str(value) for value in link.values())
             for link in links
         ]
 
-    def test_a_stem_this_release_names_no_homolog_for_stays_in_the_human_output(
-        self, fake_fetch: FakeFetch
-    ) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        row = homology_metadata(_HUMAN, _WORM, HOMOLOGY_RELEASE)
+        assert row is not None
+        single = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+        assert single.exit_code == 0
+        assert single.stdout.startswith(f"{_ONE_WORM_HOMOLOG}\t{_THE_ONE_WORM}\tortholog_one2one\t")
+        assert len(single.stdout.splitlines()) == 1
+        # Who asserted it, and from which release and file, is what a reader needs and
+        # what a pipeline must not be handed: it goes beside the links rather than among
+        # them.
+        assert row.attribution() in single.stderr
+        assert f"{_HUMAN} -> {_WORM}" in single.stderr
+
         # The one thing a hand-rolled join drops. A stem with no link gets a row of its
         # own with every other column empty, so nothing leaves shorter than it arrived —
-        # and empty is not `NULL`, which would claim a link the publisher scored nothing on.
+        # and empty is not `NULL`, which would claim a link the publisher scored nothing
+        # on — and it stays visible in both renderings rather than being dropped.
         _serve_compara(fake_fetch, _HUMAN, _WORM)
-
         result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, _NO_HOMOLOG])
-
         assert result.exit_code == 0
         rows = result.stdout.splitlines()
         assert len(rows) == 2
@@ -2634,176 +2270,132 @@ class TestHomologsCommand:
         assert set(rows[1].split("\t")[1:]) == {""}
         assert "1 this release names no homolog for" in result.stderr
 
-    def test_a_stem_that_named_nothing_stays_in_the_json(self, fake_fetch: FakeFetch) -> None:
-        _serve_compara(fake_fetch, _HUMAN, _WORM)
-
-        result = runner.invoke(
+        json_result = runner.invoke(
             app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, _NO_HOMOLOG, "--json"]
         )
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["unresolved"] == [_NO_HOMOLOG]
         assert _NO_HOMOLOG not in payload["resolved"]
 
-    def test_a_worm_pairing_names_the_null_quality_scores_before_a_filter_empties(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        # Compara records neither score on any link of *either* worm pairing, so a shell
-        # user about to write `awk -F'\t' '$6 > 50'` is told the column is null throughout
-        # rather than discovering it when the filter comes back empty.
-        _serve_compara(fake_fetch, _HUMAN, _WORM)
-
-        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
-        payload = _json.loads(
-            runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--json"]).stdout
-        )
-
-        assert result.exit_code == 0
-        # The line that says it, not merely the word appearing somewhere: the column list
-        # above it names every column, so a warning nobody wrote would pass a looser check.
-        (quality,) = [
-            line for line in result.stderr.splitlines() if line.strip().startswith("quality")
-        ]
-        for column in QUALITY_SCORE_COLUMNS:
-            assert column in quality
-        assert "empties" in quality
-        assert payload["null_quality_scores"] == list(QUALITY_SCORE_COLUMNS)
-
-    def test_the_scored_pairing_says_so_rather_than_staying_silent(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        # A pair Compara did score says that too: silence would read the same as a warning
-        # nobody printed.
-        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
-
-        result = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, "ENSMUSG00000074698"])
-
-        assert result.exit_code == 0
-        (quality,) = [
-            line for line in result.stderr.splitlines() if line.strip().startswith("quality")
-        ]
-        assert "carry values" in quality
-        assert "empties" not in quality
-
-    def test_the_dropped_partners_are_reported_where_an_answer_was_narrowed(
-        self, fake_fetch: FakeFetch, data_dir: Path
-    ) -> None:
         # Counted *and* named, both off the answer. None are dropped on release 116 — it
-        # publishes no cross-species paralogy for the ortholog filter to remove — and zero
-        # is printed as an answer rather than left as a silence.
-        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        # publishes no cross-species paralogy for the ortholog filter to remove — and
+        # zero is printed as an answer rather than left as a silence.
         asked = _homology_stems(data_dir, _HUMAN, _WORM)
-
-        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked])
-        payload = _json.loads(
+        dropped = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked])
+        dropped_payload = _json.loads(
             runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--json"]).stdout
         )
+        assert dropped.exit_code == 0
+        assert "dropped partners" in dropped.stderr
+        assert dropped_payload["dropped_partners"] == []
 
-        assert result.exit_code == 0
-        assert "dropped partners" in result.stderr
-        assert payload["dropped_partners"] == []
+        # Compara records neither score on any link of *either* worm pairing, so a shell
+        # user about to write `awk -F'\t' '$6 > 50'` is told the column is null
+        # throughout rather than discovering it when the filter comes back empty.
+        null_result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+        null_payload = _json.loads(
+            runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--json"]).stdout
+        )
+        assert null_result.exit_code == 0
+        # The line that says it, not merely the word appearing somewhere: the column
+        # list above it names every column, so a warning nobody wrote would pass a
+        # looser check.
+        (null_quality,) = [
+            line for line in null_result.stderr.splitlines() if line.strip().startswith("quality")
+        ]
+        for column in QUALITY_SCORE_COLUMNS:
+            assert column in null_quality
+        assert "empties" in null_quality
+        assert null_payload["null_quality_scores"] == list(QUALITY_SCORE_COLUMNS)
 
-    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
-        self, fake_fetch: FakeFetch
+        # A pair Compara did score says that too: silence would read the same as a
+        # warning nobody printed.
+        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
+        scored = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, "ENSMUSG00000074698"])
+        assert scored.exit_code == 0
+        (scored_quality,) = [
+            line for line in scored.stderr.splitlines() if line.strip().startswith("quality")
+        ]
+        assert "carry values" in scored_quality
+        assert "empties" not in scored_quality
+
+    def test_every_way_homologs_can_be_refused_exits_one_naming_the_fix(
+        self, monkeypatch: pytest.MonkeyPatch, fake_fetch: FakeFetch
     ) -> None:
-        result = runner.invoke(app, ["homologs", "Danio rerio", _HUMAN, _ONE_WORM_HOMOLOG])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
+        unsupported = runner.invoke(app, ["homologs", "Danio rerio", _HUMAN, _ONE_WORM_HOMOLOG])
+        assert unsupported.exit_code == 1
+        assert unsupported.stdout == ""
         for species in homology_species():
-            assert species in _output(result)
-        # Refused before anything was fetched: nobody pinned this species, which must never
-        # read as this species having no homologs.
+            assert species in _output(unsupported)
+        # Refused before anything was fetched: nobody pinned this species, which must
+        # never read as this species having no homologs.
         assert fake_fetch.calls == []
 
-    def test_a_pair_of_one_species_exits_one_because_a_set_relates_two(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        result = runner.invoke(app, ["homologs", _HUMAN, "homo_sapiens", _ONE_WORM_HOMOLOG])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "two different species" in _output(result)
+        same_species = runner.invoke(app, ["homologs", _HUMAN, "homo_sapiens", _ONE_WORM_HOMOLOG])
+        assert same_species.exit_code == 1
+        assert same_species.stdout == ""
+        assert "two different species" in _output(same_species)
         assert fake_fetch.calls == []
 
-    def test_a_release_that_is_not_pinned_exits_one_naming_the_ones_that_are(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        result = runner.invoke(
+        bad_release = runner.invoke(
             app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--release", "115"]
         )
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert HOMOLOGY_RELEASE in _output(result)
+        assert bad_release.exit_code == 1
+        assert bad_release.stdout == ""
+        assert HOMOLOGY_RELEASE in _output(bad_release)
         assert fake_fetch.calls == []
 
-    def test_a_versioned_gene_id_exits_one_naming_the_stem_to_pass(
-        self, fake_fetch: FakeFetch
-    ) -> None:
         # Compara writes its ids bare, so the versioned spelling would match nothing and
         # come back unresolved looking exactly like a gene it never placed in a tree.
         _serve_compara(fake_fetch, _HUMAN, _WORM)
+        versioned = runner.invoke(app, ["homologs", _HUMAN, _WORM, f"{_ONE_WORM_HOMOLOG}.18"])
+        assert versioned.exit_code == 1
+        assert versioned.stdout == ""
+        assert _ONE_WORM_HOMOLOG in _output(versioned)
 
-        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, f"{_ONE_WORM_HOMOLOG}.18"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert _ONE_WORM_HOMOLOG in _output(result)
-
-    def test_a_pair_taken_from_the_wrong_compara_file_exits_one_naming_the_other_file(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        # The published partition, not a staged one: the real release-116 human dump holds
-        # zero human/mouse rows. Serving it for that pair is what a release that had
-        # re-partitioned looks like from a shell, and it must be an error naming the other
-        # file rather than an empty answer that reads as *these species share no homologs*.
+        # The published partition, not a staged one: the real release-116 human dump
+        # holds zero human/mouse rows. Serving it for that pair is what a release that
+        # had re-partitioned looks like from a shell, and it must be an error naming the
+        # other file rather than an empty answer that reads as *these species share no
+        # homologs*.
         fake_fetch.serve(_COMPARA_FIXTURES[_HUMAN])
+        wrong_file = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+        assert wrong_file.exit_code == 1
+        assert wrong_file.stdout == ""
+        assert "homo_sapiens/Compara.116.protein_default.homologies.tsv.gz" in _output(wrong_file)
+        assert "homology_metadata.tsv" in _output(wrong_file)
 
-        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "homo_sapiens/Compara.116.protein_default.homologies.tsv.gz" in _output(result)
-        assert "homology_metadata.tsv" in _output(result)
-
-    def test_a_dump_that_is_not_comparas_exits_one_naming_the_columns_it_should_have(
-        self, fake_fetch: FakeFetch
-    ) -> None:
         fake_fetch.serve("tiny.gtf.gz")
+        not_comparas = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+        assert not_comparas.exit_code == 1
+        assert not_comparas.stdout == ""
+        assert "gene_stable_id" in _output(not_comparas)
 
-        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+        # A set that cannot be downloaded, and one left unfinished by a run killed
+        # mid-way, are the two remaining ways this command refuses.
+        real_fetch = fetch_mod.fetch_url
 
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "gene_stable_id" in _output(result)
-
-    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
         def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
             raise ConnectionError("the compute node has no internet")
 
         monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+        not_downloaded = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+        assert not_downloaded.exit_code == 1
+        assert not_downloaded.stdout == ""
+        assert homology_prepare_command(_HUMAN, _MOUSE, HOMOLOGY_RELEASE) in _output(not_downloaded)
+        assert "login node" in _output(not_downloaded)
 
-        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert homology_prepare_command(_HUMAN, _MOUSE, HOMOLOGY_RELEASE) in _output(result)
-        assert "login node" in _output(result)
-
-    def test_a_set_left_unfinished_exits_one_naming_the_repair(self, fake_fetch: FakeFetch) -> None:
+        # Restore the real (fake-serving) fetch to prepare a set, then delete only its
+        # completion marker, so this is what a run killed mid-way leaves behind.
+        monkeypatch.setattr(fetch_mod, "fetch_url", real_fetch)
         _serve_compara(fake_fetch, _HUMAN, _WORM)
         prepared = HomologySet(_HUMAN, _WORM, progressbar=False)
         (prepared.path.parent / RECORD_NAME).unlink()
-
-        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
-
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert "rm -rf" in _output(result)
+        unfinished = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+        assert unfinished.exit_code == 1
+        assert unfinished.stdout == ""
+        assert "rm -rf" in _output(unfinished)
 
     def test_the_progress_display_is_suppressed_under_json(self, fake_fetch: FakeFetch) -> None:
         _serve_compara(fake_fetch, _HUMAN, _WORM)
@@ -2948,45 +2540,33 @@ class TestChimeraFromTheCommandLine:
         assert f"  annotation  {COMPONENT_ANNOTATION}+{COMPONENT_ANNOTATION}" in result.stdout
         assert (liulab_data / "genome" / "tinyCe_tinySc" / "tinyCe_tinySc.fa").is_file()
 
-    def test_a_build_with_nothing_to_merge_says_so_rather_than_saying_nothing(self) -> None:
+    def test_a_build_with_nothing_to_merge_the_json_payload_and_verify_all_agree(
+        self, liulab_data: Path
+    ) -> None:
         self._register_components("tinyCe", "tinySc")
 
         result = runner.invoke(app, ["register", "tinyCe_tinySc"])
-
         assert result.exit_code == 0, _output(result)
         assert "  annotation  none" in result.stdout
 
-    def test_the_json_payload_is_the_record_untouched(self) -> None:
         # It already carried the components, which is why nothing was added to it.
-        self._register_components("tinyCe", "tinySc")
-
-        result = runner.invoke(app, ["register", "tinyCe_tinySc", "--json"])
-
-        assert result.exit_code == 0
-        payload = _json.loads(result.stdout)
+        json_result = runner.invoke(app, ["register", "tinyCe_tinySc", "--json"])
+        assert json_result.exit_code == 0
+        payload = _json.loads(json_result.stdout)
         assert payload["source_url"] is None
         assert [entry["name"] for entry in payload["details"]["components"]] == [
             "tinyCe",
             "tinySc",
         ]
 
-    def test_verify_says_the_components_are_unchanged(self) -> None:
-        self._register_components("tinyCe", "tinySc")
-        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
+        verify_json = runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"])
+        verify_payload = _json.loads(verify_json.stdout)
+        verify_human = runner.invoke(app, ["verify", "tinyCe_tinySc"])
+        assert verify_payload["components"] == "unchanged"
+        assert "components  unchanged" in verify_human.stdout
 
-        payload = _json.loads(runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"]).stdout)
-        human = runner.invoke(app, ["verify", "tinyCe_tinySc"])
-
-        assert payload["components"] == "unchanged"
-        assert "components  unchanged" in human.stdout
-
-    def test_a_component_that_pinned_nothing_reads_as_unknown_rather_than_as_a_pass(
-        self, liulab_data: Path
-    ) -> None:
-        # The line prints either way: a chimera whose components could not be compared is
-        # unproven, and silence would be exactly what a pass looks like.
-        self._register_components("tinyCe", "tinySc")
-        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
+        # The line prints either way: a chimera whose components could not be compared
+        # is unproven, and silence would be exactly what a pass looks like.
         directory = liulab_data / "genome" / "tinyCe_tinySc"
         record = read_record(directory)
         assert record is not None
@@ -2994,38 +2574,21 @@ class TestChimeraFromTheCommandLine:
             entry["sha256"] = None
         write_record(directory, record)
 
-        payload = _json.loads(runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"]).stdout)
-        human = runner.invoke(app, ["verify", "tinyCe_tinySc"])
+        unknown_json = runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"])
+        unknown_payload = _json.loads(unknown_json.stdout)
+        unknown_human = runner.invoke(app, ["verify", "tinyCe_tinySc"])
+        assert unknown_payload["components"] == "unknown"
+        assert unknown_human.exit_code == 0
+        assert "components  unknown" in unknown_human.stdout
 
-        assert payload["components"] == "unknown"
-        assert human.exit_code == 0
-        assert "components  unknown" in human.stdout
-
-    def test_opening_by_name_catches_a_component_registered_again_underneath(
-        self, tmp_path: Path
-    ) -> None:
-        # The hole this closes: opening by name returned from the chimera's own record,
-        # which vouches for its files and can say nothing about the ones they were
-        # copied from. Only building and verifying used to ask.
-        self._register_components("tinyCe", "tinySc")
-        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
-        corrected = str(_corrected_component(tmp_path / "corrected.fa"))
-        assert (
-            runner.invoke(app, ["register", "tinySc", "--force", "--source", corrected]).exit_code
-            == 0
-        )
-
-        result = runner.invoke(app, ["register", "tinyCe_tinySc"])
-
-        assert result.exit_code == 1
-        assert _CHIMERA_REPAIR in _output(result)
-
-    def test_the_repair_a_chimera_error_names_is_the_command_that_repairs_it(
+    def test_the_named_repair_rebuilds_a_mismatched_or_a_lost_record_by_name(
         self, tmp_path: Path, liulab_data: Path
     ) -> None:
         # Run verbatim, not paraphrased: this command used to route to the downloader and
         # fail with "Unknown UCSC assembly", so every chimera error quoted a repair nobody
-        # could follow.
+        # could follow. And the hole this closes: opening by name used to return from the
+        # chimera's own record, which vouches for its files and can say nothing about the
+        # ones they were copied from — only building and verifying used to ask.
         self._register_components("tinyCe", "tinySc")
         assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
         corrected = str(_corrected_component(tmp_path / "corrected.fa"))
@@ -3034,10 +2597,10 @@ class TestChimeraFromTheCommandLine:
             == 0
         )
         refused = runner.invoke(app, ["register", "tinyCe_tinySc"])
+        assert refused.exit_code == 1
         assert _CHIMERA_REPAIR in _output(refused)
 
         repaired = runner.invoke(app, _CHIMERA_REPAIR.split()[1:])
-
         assert repaired.exit_code == 0, _output(repaired)
         # Rebuilt, not merely re-recorded: the corrected component's bases are in it.
         fasta = (liulab_data / "genome" / "tinyCe_tinySc" / "tinyCe_tinySc.fa").read_text()
@@ -3045,22 +2608,16 @@ class TestChimeraFromTheCommandLine:
         verified = runner.invoke(app, ["verify", "tinyCe_tinySc", "--json"])
         assert _json.loads(verified.stdout)["components"] == "unchanged"
 
-    def test_a_lost_record_is_rebuilt_from_the_name_by_the_command_it_names(
-        self, liulab_data: Path
-    ) -> None:
         # The residual a lost record leaves: the name is the only surviving information
         # about what this directory was, and it is enough.
-        self._register_components("tinyCe", "tinySc")
-        assert runner.invoke(app, ["register", "tinyCe_tinySc"]).exit_code == 0
         record_path(liulab_data / "genome" / "tinyCe_tinySc").unlink()
-        refused = runner.invoke(app, ["register", "tinyCe_tinySc"])
-        assert refused.exit_code == 1
-        assert _CHIMERA_REPAIR in _output(refused)
+        refused_again = runner.invoke(app, ["register", "tinyCe_tinySc"])
+        assert refused_again.exit_code == 1
+        assert _CHIMERA_REPAIR in _output(refused_again)
 
-        repaired = runner.invoke(app, _CHIMERA_REPAIR.split()[1:])
-
-        assert repaired.exit_code == 0, _output(repaired)
-        assert "  components  tinyCe, tinySc" in repaired.stdout
+        repaired_again = runner.invoke(app, _CHIMERA_REPAIR.split()[1:])
+        assert repaired_again.exit_code == 0, _output(repaired_again)
+        assert "  components  tinyCe, tinySc" in repaired_again.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -3068,6 +2625,7 @@ class TestChimeraFromTheCommandLine:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.xdist_group("spawns_mixin")
 class TestMotifScan:
     """The batch scan: what the summary says, where each half of the answer goes.
 
@@ -3120,17 +2678,15 @@ class TestMotifScan:
             "output": str(output),
         }
 
-    def test_the_summary_goes_to_stdout_and_the_hits_to_the_named_file(
+    def test_the_summary_goes_to_stdout_hits_to_the_file_and_the_human_form_agrees(
         self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
     ) -> None:
         # The whole reason the hits are written rather than printed: stdout is one JSON
         # document and nothing else, whatever the scan found.
         output = tmp_path / "hits.parquet"
-
         result = runner.invoke(
             app, ["motif-scan", str(planted_fasta), str(output), "--workers", "1", "--json"]
         )
-
         summary = self._summary(result)
         written = read_hits(output)
         assert len(written) > 0
@@ -3139,96 +2695,80 @@ class TestMotifScan:
         # The table's own provenance is what the summary was read off, so the two agree.
         assert written.attrs["release"] == summary["release"]
 
-    def test_the_human_summary_says_what_was_scanned_and_where_it_went(
-        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
-    ) -> None:
-        output = tmp_path / "hits.parquet"
-
-        result = runner.invoke(
-            app, ["motif-scan", str(planted_fasta), str(output), "--workers", "1"]
+        human_output = tmp_path / "human.parquet"
+        human = runner.invoke(
+            app, ["motif-scan", str(planted_fasta), str(human_output), "--workers", "1"]
         )
-
-        assert result.exit_code == 0, _output(result)
-        assert f"scanned 2 sequences with {_MOTIFS_LONG_ENOUGH} motifs" in result.stdout
-        assert str(output) in result.stdout
-        # Which motifs were left out is printed, not silently dropped: an absent factor is
-        # explainable only if the scan says it never scanned for it.
+        assert human.exit_code == 0, _output(human)
+        assert f"scanned 2 sequences with {_MOTIFS_LONG_ENOUGH} motifs" in human.stdout
+        assert str(human_output) in human.stdout
+        # Which motifs were left out is printed, not silently dropped: an absent factor
+        # is explainable only if the scan says it never scanned for it.
         for motif_id in _MOTIFS_TOO_SHORT:
-            assert motif_id in result.stdout
+            assert motif_id in human.stdout
 
-    def test_a_scan_that_found_nothing_still_writes_a_file_and_says_so(
-        self, motif_release: FakeFetch, tmp_path: Path
-    ) -> None:
-        empty = tmp_path / "unreadable.fa"
-        empty.write_text(">nothing\n" + "N" * 400 + "\n")
-        output = tmp_path / "hits.parquet"
-
-        result = runner.invoke(
-            app, ["motif-scan", str(empty), str(output), "--workers", "1", "--json"]
-        )
-
-        assert result.exit_code == 0, _output(result)
-        assert self._summary(result)["hits_written"] == 0
-        assert output.is_file()
-
-    def test_a_missing_fasta_exits_non_zero_naming_the_file(
-        self, motif_release: FakeFetch, tmp_path: Path
+    def test_a_missing_fasta_a_bad_argument_is_refused_and_an_empty_scan_still_writes(
+        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
     ) -> None:
         missing = tmp_path / "nowhere.fa"
-        output = tmp_path / "hits.parquet"
-
-        result = runner.invoke(
-            app, ["motif-scan", str(missing), str(output), "--workers", "1", "--json"]
+        missing_output = tmp_path / "missing.parquet"
+        missing_result = runner.invoke(
+            app, ["motif-scan", str(missing), str(missing_output), "--workers", "1", "--json"]
         )
-
-        assert result.exit_code == 1
-        assert "not found" in _output(result)
-        assert str(missing) in _output(result)
+        assert missing_result.exit_code == 1
+        assert "not found" in _output(missing_result)
+        assert str(missing) in _output(missing_result)
         # Nothing half-written to be mistaken for an answer.
-        assert not output.exists()
+        assert not missing_output.exists()
 
-    def test_a_release_this_package_does_not_prepare_is_refused_by_name(
-        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
-    ) -> None:
-        result = runner.invoke(
+        empty = tmp_path / "unreadable.fa"
+        empty.write_text(">nothing\n" + "N" * 400 + "\n")
+        empty_output = tmp_path / "empty.parquet"
+        empty_result = runner.invoke(
+            app, ["motif-scan", str(empty), str(empty_output), "--workers", "1", "--json"]
+        )
+        assert empty_result.exit_code == 0, _output(empty_result)
+        assert self._summary(empty_result)["hits_written"] == 0
+        assert empty_output.is_file()
+
+        bad_release = runner.invoke(
             app,
             ["motif-scan", str(planted_fasta), str(tmp_path / "hits.parquet"), "--release", "2019"],
         )
+        assert bad_release.exit_code == 1
+        assert "2024, 2026" in _output(bad_release)
 
-        assert result.exit_code == 1
-        assert "2024, 2026" in _output(result)
-
-    def test_a_threshold_that_is_not_a_p_value_is_refused(
-        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
-    ) -> None:
-        result = runner.invoke(
+        bad_threshold = runner.invoke(
             app,
             ["motif-scan", str(planted_fasta), str(tmp_path / "hits.parquet"), "--threshold", "5"],
         )
+        assert bad_threshold.exit_code == 1
+        assert "p-value" in _output(bad_threshold)
 
-        assert result.exit_code == 1
-        assert "p-value" in _output(result)
-
-    def test_zero_workers_is_refused_before_anything_is_scanned(
-        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
-    ) -> None:
         output = tmp_path / "hits.parquet"
-
-        result = runner.invoke(
+        zero_workers = runner.invoke(
             app, ["motif-scan", str(planted_fasta), str(output), "--workers", "0"]
         )
-
-        assert result.exit_code == 1
-        assert "at least 1" in _output(result)
+        assert zero_workers.exit_code == 1
+        assert "at least 1" in _output(zero_workers)
         assert not output.exists()
 
-    def test_a_background_mode_reaches_the_scan(
+    def test_a_background_mode_reaches_the_scan_or_is_refused_before_anything_runs(
         self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
     ) -> None:
+        # An invalid mode is refused first, on a set that has fetched nothing yet: not
+        # even the release is fetched before an argument this basic is checked.
+        bad_output = tmp_path / "bad.parquet"
+        bad = runner.invoke(
+            app, ["motif-scan", str(planted_fasta), str(bad_output), "--background", "gc"]
+        )
+        assert bad.exit_code == 2
+        assert not bad_output.exists()
+        assert not motif_release.calls
+
         # The parameter that decides the answer more than any other, and the summary
         # reports the one actually used rather than the one asked for.
         output = tmp_path / "hits.parquet"
-
         result = runner.invoke(
             app,
             [
@@ -3242,23 +2782,9 @@ class TestMotifScan:
                 "--json",
             ],
         )
-
         background = self._summary(result)["background"]
         assert background != [0.25, 0.25, 0.25, 0.25]
         assert list(provenance_of(output)["background"]) == background
-
-    def test_a_background_that_is_not_a_mode_is_refused_before_anything_runs(
-        self, motif_release: FakeFetch, planted_fasta: Path, tmp_path: Path
-    ) -> None:
-        output = tmp_path / "hits.parquet"
-
-        result = runner.invoke(
-            app, ["motif-scan", str(planted_fasta), str(output), "--background", "gc"]
-        )
-
-        assert result.exit_code == 2
-        assert not output.exists()
-        assert not motif_release.calls  # not even the release was fetched
 
     def test_the_worker_count_defaults_to_the_allocation(
         self,

@@ -24,15 +24,14 @@ from genome.io.utils import (
 )
 
 
-def test_sha256_file_digests_a_real_fixture(data_dir: Path) -> None:
+def test_sha256_file_digests_a_real_fixture_and_a_gzipped_form_differs_from_it(
+    data_dir: Path,
+) -> None:
     # The committed sacCer3 subsample, hashed independently with `shasum -a 256`.
     assert (
         sha256_file(data_dir / "tiny.fa")
         == "9316629bab14f9298a043f8b92e1e04a573b12d6a367ccc07c8f8040e5a13981"
     )
-
-
-def test_sha256_of_a_gzipped_file_differs_from_its_contents(data_dir: Path) -> None:
     # Why the metadata table records the unpacked digest: the archive's is a different
     # number entirely, and changes whenever the file is recompressed.
     assert sha256_file(data_dir / "tiny.fa.gz") != sha256_file(data_dir / "tiny.fa")
@@ -76,7 +75,7 @@ def test_checksum_mismatch_names_the_file_and_both_values() -> None:
     assert (err.expected, err.actual) == ("1a2b3c", "9f8e7d")
 
 
-def test_gunzip_round_trips(tmp_path: Path) -> None:
+def test_gunzip_round_trips_and_the_layer_carries_no_run_of_its_own(tmp_path: Path) -> None:
     payload = b"".join(b">seq%d\nACGTACGTNN\n" % i for i in range(1000))
     src = tmp_path / "data.gz"
     with gzip.open(src, "wb") as fh:
@@ -88,8 +87,6 @@ def test_gunzip_round_trips(tmp_path: Path) -> None:
     assert result == dest
     assert dest.read_bytes() == payload
 
-
-def test_this_layer_carries_no_run_of_its_own() -> None:
     # The fold, asserted. `_run` and `_run_to` were two lines each over
     # `ExternalTool.run`/`run_to` — a name-addressed restatement that existed so a test
     # could patch a module global, and that kept a second copy of the freshness branch

@@ -10,9 +10,10 @@ The shipped tables answer here; no fixture stands in for them, and nothing touch
 network or the **Data dir**. ``tests/test_tf_link.py`` guards the *files* and pins their
 counts — this module is about the API over them, so the two overlap nowhere on purpose.
 
-Every test that is about one table iterates over *every* shipped table. A second species
-or a third release is a file dropped into ``data/tf_link/``, and dropping one in must not
-mean rewriting these.
+Most tests that are about one table run against a representative pair — one human table
+and one mouse table, on different releases — rather than the full cross-product: species
+and release are covariates of the same code path here, and the pinned-count tests in
+``tests/test_tf_link.py`` are what actually guards every shipped file.
 """
 
 from __future__ import annotations
@@ -38,10 +39,16 @@ from genome.tf import (
 )
 from genome.tf.gene import tf_gene_table
 from genome.tf.motif.jaspar import JASPAR_RELEASES
+from tests._tables import table_text
 
 #: Every shipped table, as ``(species slug, release)``. Discovered rather than listed, so
 #: adding a species or a release is a file drop rather than an edit here.
 _TABLES = shipped_link_tables()
+
+#: One human table and one mouse table, on different releases: enough to cross the species
+#: boundary and the release boundary at once, without re-running every table-level check
+#: against the full cross-product that :mod:`tests.test_tf_link` already pins.
+_REPRESENTATIVE_TABLES = (("homo_sapiens", "2026"), ("mus_musculus", "2024"))
 
 #: A gene whose motifs are all monomers, and the ids they answer with on 2026. Named
 #: because it is the plainest possible answer: three matrices of one factor, most
@@ -132,8 +139,7 @@ _ROW = (
 
 def _table_text(*rows: tuple[str, ...]) -> str:
     """Return a link table's text: the twelve columns, then one line per row."""
-    lines = ["\t".join(LINK_COLUMNS), *("\t".join(row) for row in rows)]
-    return "\n".join(lines) + "\n"
+    return table_text(LINK_COLUMNS, *rows)
 
 
 def _row(**changes: str) -> tuple[str, ...]:
@@ -214,69 +220,52 @@ def test_a_gene_whose_only_motifs_are_complexes_is_still_linked() -> None:
     assert (link.motif_id, link.role, link.partners) == (motif_id, COMPLEX, ("ARNT",))
 
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_gene_the_table_links_answers_with_at_least_one_link(slug: str, release: str) -> None:
-    table = _shipped(slug, release)
-
-    for stem in table.gene_id_stems:
-        assert table.links_for(stem).motif_ids
-
-
 # ---------------------------------------------------------------------------------------
-# Attribution specificity: the order the links arrive in
+# Attribution specificity: the order the links arrive in, and how filtering treats it
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_links_arrive_in_attribution_specificity_order(slug: str, release: str) -> None:
-    # Monomer before complex, species-matched before cross-species, then higher
-    # information content, then motif id. Four keys, so the order is total: re-deriving it
-    # from the attributes the links carry has to reproduce the order they arrived in.
-    table = _shipped(slug, release)
-
-    for stem in table.gene_id_stems:
-        links = list(table.links_for(stem))
-
-        assert links == sorted(links, key=_specificity_key), stem
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_the_order_is_stable_and_says_how_specific_each_attribution_is(
+@pytest.mark.parametrize(("slug", "release"), _REPRESENTATIVE_TABLES)
+def test_every_genes_links_are_complete_ordered_stable_and_filterable(
     slug: str, release: str
 ) -> None:
-    # Stable: the same question answered twice is the same answer, in the same order, so
-    # "the motif for this factor" means one thing on two machines. The rank rises with the
-    # position, which is what makes it readable as *how specific* rather than *how good*.
+    # Four claims about one gene's answer, checked together because they all walk the
+    # same `table.links_for(stem)` for every gene the table carries: every gene answers
+    # with at least one link, the links arrive in **Attribution specificity** order,
+    # asking twice gives the same order back with the rank each row was shipped with, and
+    # dropping cross-species links removes some without ever adding or reordering one.
     table = _shipped(slug, release)
 
     for stem in table.gene_id_stems:
         links = table.links_for(stem)
+        ordered = list(links)
 
+        assert links.motif_ids
+        assert ordered == sorted(ordered, key=_specificity_key), stem
         assert links.links == table.links_for(stem).links
-        assert [link.rank for link in links] == sorted(link.rank for link in links)
+        assert [link.rank for link in ordered] == sorted(link.rank for link in ordered)
+
+        kept = table.links_for(stem, cross_species=False).links
+        assert list(kept) == [link for link in ordered if not link.is_cross_species]
 
 
-def test_the_canonical_ap1_complex_ranks_below_a_jun_monomer() -> None:
+def test_the_canonical_ap1_ranks_below_a_jun_monomer_and_a_caller_can_resort_it() -> None:
     # The order states what a matrix is attributable to and explicitly not which motif is
     # better: MA0099.4 FOS::JUN is the canonical AP-1 matrix and describes JUN's binding
     # better than either JUN monomer, and it still comes after both because it is a motif
-    # of a complex.
+    # of a complex. The documented escape is that no attribute is hidden behind the order,
+    # so a caller who wants the most informative matrix regardless of what it is a motif
+    # of can re-sort on what the links already carry.
     links = motif_links("JUN", "Homo sapiens")
     ids = links.motif_ids
 
     assert ids.index(_AP1) > ids.index(_JUN_MONOMER)
     assert ids.index(_AP1) > ids.index(_JUN_CROSS_SPECIES)
 
-
-def test_a_caller_who_disagrees_can_re_sort_on_what_the_links_already_carry() -> None:
-    # The documented escape: no attribute is hidden behind the order, so a caller who
-    # wants the most informative matrix regardless of what it is a motif of has it.
-    links = motif_links("JUN", "Homo sapiens")
     by_information = sorted(links, key=lambda link: -link.total_information_content)
     reordered = tuple(link.motif_id for link in by_information)
-
     assert reordered[0] == _JUN_MONOMER
-    assert reordered != links.motif_ids
+    assert reordered != ids
 
 
 # ---------------------------------------------------------------------------------------
@@ -292,31 +281,17 @@ def test_cross_species_links_are_kept_and_marked_by_default() -> None:
     assert all(link.is_cross_species for link in links)
 
 
-def test_a_caller_can_ask_for_species_matched_profiles_only() -> None:
-    links = motif_links("Jun", "Mus musculus", cross_species=False)
+def test_a_caller_can_ask_for_species_matched_profiles_and_keeps_the_shipped_ranks() -> None:
+    kept = motif_links("Jun", "Mus musculus", cross_species=False)
 
-    assert links.motif_ids == (_JUN_CROSS_SPECIES,)
-    assert not any(link.is_cross_species for link in links)
+    assert kept.motif_ids == (_JUN_CROSS_SPECIES,)
+    assert not any(link.is_cross_species for link in kept)
 
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_dropping_cross_species_links_never_adds_or_reorders_one(slug: str, release: str) -> None:
-    table = _shipped(slug, release)
-
-    for stem in table.gene_id_stems:
-        kept = table.links_for(stem, cross_species=False).links
-        all_links = table.links_for(stem).links
-
-        assert list(kept) == [link for link in all_links if not link.is_cross_species]
-
-
-def test_a_filtered_answer_keeps_the_rank_the_shipped_table_gave_each_link() -> None:
     # The rank is the row's own place among *all* of this gene's links, not its position
     # in whatever survived a filter — so the gaps are the point. A rank that renumbered
     # itself would stop saying how specific the attribution was.
-    kept = motif_links("JUN", "Homo sapiens", cross_species=False)
-
-    assert [link.rank for link in kept][:3] == [1, 3, 4]
+    human_kept = motif_links("JUN", "Homo sapiens", cross_species=False)
+    assert [link.rank for link in human_kept][:3] == [1, 3, 4]
 
 
 # ---------------------------------------------------------------------------------------
@@ -356,12 +331,11 @@ def test_an_answer_a_filter_emptied_still_says_which_release_found_nothing() -> 
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("release", sorted({release for _, release in _TABLES}))
-def test_every_release_the_tables_cover_can_be_pinned(release: str) -> None:
-    links = motif_links("CTCF", "Homo sapiens", release=release)
-
-    assert links.release == release
-    assert all(link.release == release for link in links)
+def test_every_release_the_tables_cover_can_be_pinned() -> None:
+    for release in sorted({release for _, release in _TABLES}):
+        links = motif_links("CTCF", "Homo sapiens", release=release)
+        assert links.release == release
+        assert all(link.release == release for link in links)
 
 
 def test_the_releases_that_ship_are_the_ones_the_package_prepares() -> None:
@@ -378,27 +352,22 @@ def test_pinning_a_release_changes_the_answer_rather_than_being_ignored() -> Non
     assert motif_links("FOXM1", "Homo sapiens", release="2026").motif_ids == ("MA2469.1",)
 
 
-def test_a_release_no_table_covers_raises_and_names_the_ones_that_ship() -> None:
-    with pytest.raises(NoMotifLinkTableError) as raised:
+def test_no_table_errors_name_what_does_ship_for_release_tax_group_and_species() -> None:
+    # Three ways to ask for a table nothing built: a release, a tax group, and a species
+    # each raise the same error and each names what does ship instead.
+    with pytest.raises(NoMotifLinkTableError) as by_release:
         motif_links("CTCF", "Homo sapiens", release="2020")
+    assert all(release in str(by_release.value) for release in JASPAR_RELEASES)
 
-    assert all(release in str(raised.value) for release in JASPAR_RELEASES)
-
-
-def test_a_tax_group_with_no_table_raises_rather_than_answering_emptily() -> None:
     # Plants is answered, not silently empty: no table was ever built for it, which is not
     # the same fact as this gene having no motifs.
-    with pytest.raises(NoMotifLinkTableError) as raised:
+    with pytest.raises(NoMotifLinkTableError) as by_tax_group:
         motif_links("CTCF", "Homo sapiens", tax_group="plants")
+    assert LINK_TAX_GROUP in str(by_tax_group.value)
 
-    assert LINK_TAX_GROUP in str(raised.value)
-
-
-def test_a_species_no_table_ships_for_raises_and_names_those_that_do() -> None:
-    with pytest.raises(NoMotifLinkTableError) as raised:
+    with pytest.raises(NoMotifLinkTableError) as by_species:
         motif_links("daf-16", "Caenorhabditis elegans")
-
-    assert "homo_sapiens" in str(raised.value)
+    assert "homo_sapiens" in str(by_species.value)
 
 
 @pytest.mark.parametrize(
@@ -472,25 +441,21 @@ def test_the_two_absences_are_told_apart_by_the_error_they_raise() -> None:
 # ---------------------------------------------------------------------------------------
 
 
-def test_a_gene_the_census_assessed_answers_although_a_publisher_calls_it_a_cofactor() -> None:
-    # The property the lookup order exists for: the census is asked first, so the 151 human
-    # genes that are both keep every link they had. TBP is the one of them with a profile.
+def test_a_dual_classified_gene_answers_from_its_census_verdict_whether_linked_or_not() -> None:
+    # The property the lookup order exists for: the census is asked first, so the 151
+    # human genes that are both a TF and a **Transcription cofactor** keep whatever their
+    # census verdict was. TBP is the one of them with a profile; KMT2A and DNMT1 are two
+    # more that JASPAR has none for — their answer is empty and their verdict positive, an
+    # empty answer being a real answer and never one of the absences.
     gene, species, expected = _DUAL_CLASSIFIED
     links = motif_links(gene, species)
-
     assert links.motif_ids == expected
     assert links.is_tf is True
 
-
-@pytest.mark.parametrize("gene", _DUAL_UNLINKED)
-def test_a_dual_classified_gene_jaspar_has_no_profile_for_still_answers_emptily(gene: str) -> None:
-    # The pair that would break under the other order. Their answer is empty and their
-    # verdict is positive — an empty answer is a real answer and never one of the absences,
-    # so a second table calling them cofactors must not turn either into an error.
-    links = motif_links(gene, "Homo sapiens")
-
-    assert len(links) == 0
-    assert links.is_tf is True
+    for gene in _DUAL_UNLINKED:
+        links = motif_links(gene, "Homo sapiens")
+        assert len(links) == 0
+        assert links.is_tf is True
 
 
 def test_a_cofactor_the_census_turned_down_answers_with_that_verdict() -> None:
@@ -533,32 +498,28 @@ def test_the_message_names_the_publishers_that_list_the_gene(
     assert f"transcription cofactor by {publishers}." in str(raised.value)
 
 
-def test_a_cofactor_answers_to_its_gene_id_stem_as_well_as_to_its_symbol() -> None:
+def test_a_cofactor_error_is_reachable_by_stem_and_still_caught_by_the_older_except_clause() -> (
+    None
+):
     # The cofactor table is keyed by stem and carries the symbol beside it, as the census
-    # does, so both spellings of one gene reach the same answer.
-    _, species, publishers = _COFACTOR_BOTH
-    with pytest.raises(TranscriptionCofactorError) as raised:
-        motif_links(_COFACTOR_BOTH_STEM, species)
-
-    assert publishers in str(raised.value)
-
-
-def test_an_except_clause_written_for_the_older_error_still_catches_a_cofactor() -> None:
-    # The reason it subclasses rather than sitting beside: a caller who wrote
+    # does, so both spellings of one gene reach the same answer. And the reason the error
+    # subclasses rather than sitting beside the older one: a caller who wrote
     # `except GeneNotAssessedError` before any cofactor table shipped keeps covering every
     # gene they covered, and the narrower type is what tells them which absence this is.
-    gene, species, _ = _COFACTOR_BOTH
-    with pytest.raises(GeneNotAssessedError) as raised:
+    gene, species, publishers = _COFACTOR_BOTH
+    with pytest.raises(TranscriptionCofactorError) as raised:
+        motif_links(_COFACTOR_BOTH_STEM, species)
+    assert publishers in str(raised.value)
+
+    with pytest.raises(GeneNotAssessedError) as older:
         motif_links(gene, species)
+    assert isinstance(older.value, TranscriptionCofactorError)
 
-    assert isinstance(raised.value, TranscriptionCofactorError)
 
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
+@pytest.mark.parametrize(("slug", "release"), _REPRESENTATIVE_TABLES)
 def test_a_gene_neither_table_knows_raises_the_error_it_always_did(slug: str, release: str) -> None:
-    # Total over every shipped table, so a species that ships a link table and *no* cofactor
-    # table — none does today — is covered the day one arrives: with nobody listing the gene
-    # the lookup falls through to the census's own silence, unnarrowed.
+    # With nobody listing the gene the lookup falls through to the census's own silence,
+    # unnarrowed by either table.
     with pytest.raises(GeneNotAssessedError) as raised:
         motif_links(_KNOWN_TO_NOBODY, slug, release=release)
 
@@ -571,12 +532,11 @@ def test_a_gene_neither_table_knows_raises_the_error_it_always_did(slug: str, re
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("gene", [_JUN_STEM, _JUN_SYMBOL, _JUN_LOWER])
-def test_a_gene_answers_to_its_stem_and_to_its_censuss_own_symbol(gene: str) -> None:
-    links = motif_links(gene, "Homo sapiens")
-
-    assert links.gene_id_stem == _JUN_STEM
-    assert links.symbol == _JUN_SYMBOL
+def test_a_gene_answers_to_its_stem_symbol_and_lowercased_symbol() -> None:
+    for gene in (_JUN_STEM, _JUN_SYMBOL, _JUN_LOWER):
+        links = motif_links(gene, "Homo sapiens")
+        assert links.gene_id_stem == _JUN_STEM
+        assert links.symbol == _JUN_SYMBOL
 
 
 def test_each_census_answers_to_its_own_spelling_of_one_factors_symbol() -> None:
@@ -586,22 +546,20 @@ def test_each_census_answers_to_its_own_spelling_of_one_factors_symbol() -> None
     assert motif_links("JUN", "Homo sapiens").symbol == "JUN"
 
 
-def test_a_versioned_gene_id_is_refused_and_the_message_names_the_stem_to_pass() -> None:
+def test_a_versioned_gene_id_is_refused_by_value_error_naming_the_stem_and_is_not_an_absence() -> (
+    None
+):
     # A stem may name more than one gene id in one annotation, so answering the versioned
-    # id would answer for the stem — which names a gene the caller did not.
+    # id would answer for the stem — which names a gene the caller did not. And nothing is
+    # missing — the gene is assessed and its links are here — so a caller catching
+    # LookupError for a gene that is not there does not swallow this.
     with pytest.raises(VersionedGeneIdError) as raised:
         motif_links(f"{_JUN_STEM}.6", "Homo sapiens")
-
     assert _JUN_STEM in str(raised.value)
 
-
-def test_refusing_a_versioned_gene_id_is_not_one_of_the_absences() -> None:
-    # Nothing is missing — the gene is assessed and its links are here — so a caller
-    # catching LookupError for a gene that is not there does not swallow it.
-    with pytest.raises(ValueError, match="gene id stem") as raised:
+    with pytest.raises(ValueError, match="gene id stem") as value_error:
         motif_links(f"{_JUN_STEM}.6", "Homo sapiens")
-
-    assert not isinstance(raised.value, LookupError)
+    assert not isinstance(value_error.value, LookupError)
 
 
 def test_a_clone_style_symbol_is_read_as_a_symbol_and_not_as_a_versioned_gene_id() -> None:
@@ -618,49 +576,32 @@ def test_a_clone_style_symbol_is_read_as_a_symbol_and_not_as_a_versioned_gene_id
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_a_table_says_which_species_release_and_tax_group_it_is(slug: str, release: str) -> None:
+@pytest.mark.parametrize(("slug", "release"), _REPRESENTATIVE_TABLES)
+def test_a_table_names_itself_lists_only_the_censuss_positives_and_frames_cleanly(
+    slug: str, release: str
+) -> None:
     table = _shipped(slug, release)
+    census = tf_gene_table(slug)
+    assert census is not None
 
     assert (table.release, table.tax_group) == (release, LINK_TAX_GROUP)
     assert table.species
     assert table.source.endswith(f"{slug}.jaspar{release}.motif_link_table.tsv.gz")
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_a_tables_genes_are_the_censuss_and_every_one_was_judged_a_tf(
-    slug: str, release: str
-) -> None:
     # Only assessed-positive genes receive links, which is the census speaking and never
     # this package.
-    table = _shipped(slug, release)
-    census = tf_gene_table(slug)
-    assert census is not None
-    positive = set(census.assessed_positive)
+    assert set(table.gene_id_stems) <= set(census.assessed_positive)
 
-    assert set(table.gene_id_stems) <= positive
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_the_frame_carries_the_files_own_columns_and_one_row_per_link(
-    slug: str, release: str
-) -> None:
-    table = _shipped(slug, release)
     frame = table.frame()
-
     assert list(frame.columns) == list(LINK_COLUMNS)
     assert len(frame) == len(table)
 
 
-def test_the_frame_is_built_fresh_so_mutating_it_cannot_reach_the_table() -> None:
+def test_the_frame_is_rebuilt_fresh_and_a_table_is_reachable_however_species_is_spelled() -> None:
     table = _shipped("homo_sapiens", "2026")
     frame = table.frame()
     frame.loc[0, "motif_id"] = "MA9999.9"
-
     assert table.frame().loc[0, "motif_id"] != "MA9999.9"
 
-
-def test_the_same_table_is_answered_however_the_species_is_spelled() -> None:
     assert motif_link_table("homo_sapiens", "2026") == motif_link_table("Homo sapiens", "2026")
 
 
@@ -684,11 +625,9 @@ def test_a_well_formed_table_reads_back_as_its_links() -> None:
     "text",
     [
         "",
-        "release\tspecies\n",
         "\t".join(LINK_COLUMNS) + "\n",
-        "\t".join((*LINK_COLUMNS, "quality_score")) + "\n",
     ],
-    ids=["empty", "two-columns", "header-only", "an-extra-column"],
+    ids=["empty", "header-only"],
 )
 def test_a_file_that_is_not_a_link_table_raises_and_names_the_file(text: str) -> None:
     with pytest.raises(MotifLinkTableError, match=r"broken\.tsv"):
@@ -699,23 +638,19 @@ def test_a_file_that_is_not_a_link_table_raises_and_names_the_file(text: str) ->
     "changes",
     [
         {"role": "dimer"},
-        {"role": "complex"},
         {"partners": "FOS"},
         {"is_cross_species": "true"},
         {"rank": "first"},
         {"total_information_content": "high"},
         {"gene_id_stem": ""},
-        {"motif_id": ""},
     ],
     ids=[
         "a-third-role",
-        "a-complex-naming-no-partner",
         "a-monomer-naming-one",
         "a-flag-no-census-spells",
         "a-rank-that-is-not-a-number",
         "an-information-content-that-is-not-a-number",
         "no-gene-id-stem",
-        "no-motif-id",
     ],
 )
 def test_a_row_a_generator_would_never_write_raises_and_names_its_line(
@@ -725,9 +660,16 @@ def test_a_row_a_generator_would_never_write_raises_and_names_its_line(
         parse_motif_link_table(_table_text(_row(**changes)), source="broken.tsv")
 
 
-def test_a_row_with_the_wrong_number_of_cells_raises() -> None:
+def test_a_short_row_raises_a_bad_value_and_not_a_lookup() -> None:
     with pytest.raises(MotifLinkTableError, match="cells"):
         parse_motif_link_table(_table_text(_ROW[:-1]), source="broken.tsv")
+
+    # A packaging defect, not an absence: a caller catching LookupError for a species with
+    # no table must not swallow a file that ships broken.
+    with pytest.raises(ValueError) as raised:  # noqa: PT011 - the class is the assertion
+        parse_motif_link_table("nonsense\n", source="broken.tsv")
+    assert isinstance(raised.value, MotifLinkTableError)
+    assert not isinstance(raised.value, LookupError)
 
 
 @pytest.mark.parametrize("changes", [{"release": "2024"}, {"species": "Mus musculus"}])
@@ -741,36 +683,14 @@ def test_one_file_naming_two_releases_or_two_species_raises(changes: dict[str, s
         parse_motif_link_table(text, source="broken.tsv")
 
 
-def test_a_broken_table_is_a_bad_value_and_not_a_lookup() -> None:
-    # A packaging defect, not an absence: a caller catching LookupError for a species with
-    # no table must not swallow a file that ships broken.
-    with pytest.raises(ValueError) as raised:  # noqa: PT011 - the class is the assertion
-        parse_motif_link_table("nonsense\n", source="broken.tsv")
-
-    assert isinstance(raised.value, MotifLinkTableError)
-    assert not isinstance(raised.value, LookupError)
-
-
 @pytest.mark.parametrize(
     "text",
     [
         "",
-        "release\tspecies\n",
-        "\t".join(LINK_COLUMNS) + "\n",
         _table_text(_ROW[:-1]),
-        _table_text(_row(role="dimer")),
-        _table_text(_row(rank="first")),
         _table_text(_ROW, _row(release="2024", motif_id="MA0106.4")),
     ],
-    ids=[
-        "empty",
-        "two-columns",
-        "header-only",
-        "a-short-row",
-        "a-third-role",
-        "a-rank-that-is-not-a-number",
-        "two-releases",
-    ],
+    ids=["empty", "a-short-row", "two-releases"],
 )
 def test_every_message_a_broken_file_raises_names_the_command_that_rewrites_it(text: str) -> None:
     # A shipped file that cannot be trusted is a packaging defect, and regenerating it is

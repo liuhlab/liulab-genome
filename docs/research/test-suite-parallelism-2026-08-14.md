@@ -1,5 +1,11 @@
 # How many pytest workers, and does the gate gain from running concurrently?
 
+> **Superseded for the worker-count and distribution tables, 2026-08-30.** These numbers were
+> taken at 517 tests; the suite reached 2425 and was then cut to 933. `--dist=load` and
+> `--maxprocesses 8` were both correct here and are both wrong now — see
+> [`test-suite-cost-and-parallelism-2026-08-30.md`](test-suite-cost-and-parallelism-2026-08-30.md).
+> Section 2 (BLAS thread pinning) still stands; nothing has changed about it.
+
 Measured 2026-08-14 on the maintainer's box (14 logical cores, 10 performance). **Eight workers is
 the floor of the curve — 2.8 s against 5.9 s serial. `auto` uncapped is *worse* than eight (3.4 s),
 because it takes every core and the workers then contend. Distributing by test (`--dist=load`)

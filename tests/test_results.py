@@ -17,8 +17,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from genome.io import results as results_module
 from genome.io.completion import CompletionRecord, read_record, record_path
 from genome.io.gtf import AnnotationRegistry, annotation_dir
@@ -91,25 +89,17 @@ class TestTheStateARowIsIn:
     ordering in a renderer. It is the row's, and the renderer chooses column widths.
     """
 
-    def test_a_registered_one_the_table_offers_is_registered(self) -> None:
+    def test_the_four_states_and_brokens_precedence_over_both(self) -> None:
         assert _row(registered=True).state == "registered"
-
-    def test_one_the_table_offers_and_nobody_fetched_says_both_halves(self) -> None:
         assert _row().state == "offered, not registered"
-
-    def test_one_no_row_lists_is_registered_but_not_offered(self) -> None:
         assert _row(offered=False, registered=True, default=False).state == (
             "registered, not offered"
         )
-
-    def test_broken_beats_registered_rather_than_reading_as_neither(self) -> None:
-        # The precedence this property exists to state once: a directory nothing vouches
-        # for is not registered, so reporting the absence of a registration would be true
-        # and useless. What needs acting on is that it is broken.
+        # Broken beats registered rather than reading as neither: a directory nothing
+        # vouches for is not registered, so reporting the absence of a registration would
+        # be true and useless. What needs acting on is that it is broken.
         assert _row(broken=True).state == "broken"
-
-    def test_broken_beats_being_unlisted_too(self) -> None:
-        assert _row(offered=False, broken=True).state == "broken"
+        assert _row(offered=False, broken=True).state == "broken"  # and beats unlisted too
 
 
 class TestTheDefaultAnnotationLine:
@@ -120,42 +110,31 @@ class TestTheDefaultAnnotationLine:
     :func:`annotation_register_command`. Neither is concatenated here or in a surface.
     """
 
-    def test_nothing_decided_says_so_without_advising_anything(self) -> None:
+    def test_the_four_summary_lines(self) -> None:
         assert _status(None).default_summary == "default: (none)"
+        assert (
+            _status("gencode_v50", _row(registered=True)).default_summary == "default: gencode_v50"
+        )
 
-    def test_one_that_is_registered_needs_no_advice(self) -> None:
-        status = _status("gencode_v50", _row(registered=True))
-
-        assert status.default_summary == "default: gencode_v50"
-
-    def test_one_that_is_absent_names_the_command_that_registers_it(self) -> None:
-        status = _status("gencode_v50", _row())
-
-        assert status.default_summary == (
+        absent = _status("gencode_v50", _row())
+        assert absent.default_summary == (
             "default: gencode_v50 — not registered here; register it with "
             "`genome register-annotation hg38 gencode_v50`"
         )
+        # The command it names is the one the package spells once, not a copy of it.
+        assert annotation_register_command("hg38", "gencode_v50") in absent.default_summary
 
-    def test_the_command_it_names_is_the_one_the_package_spells_once(self) -> None:
-        status = _status("gencode_v50", _row())
-
-        assert annotation_register_command("hg38", "gencode_v50") in status.default_summary
-
-    def test_one_that_is_broken_quotes_the_repair_off_its_own_row(self) -> None:
         repair = "genome register-annotation hg38 gencode_v50 --force"
-        status = _status("gencode_v50", _row(broken=True, repair=repair))
-
-        assert status.default_summary == (
+        broken = _status("gencode_v50", _row(broken=True, repair=repair))
+        assert broken.default_summary == (
             f"default: gencode_v50 — broken here; repair it with `{repair}`"
         )
 
-    def test_a_default_this_disk_has_never_heard_of_is_the_fresh_machines_state(self) -> None:
         # Named by the table, and no row here is about it: there is no row to read
         # `registered` or `broken` off, and the answer is the one that registers it.
-        status = _status("gencode_v50")
-
-        assert status.default_row is None
-        assert "not registered here" in status.default_summary
+        fresh = _status("gencode_v50")
+        assert fresh.default_row is None
+        assert "not registered here" in fresh.default_summary
 
 
 class TestTheJsonKeysAndTheirOrder:
@@ -166,14 +145,10 @@ class TestTheJsonKeysAndTheirOrder:
     a key inside it, which is the only form that fails on an addition.
     """
 
-    def test_a_registered_assembly_is_the_record_then_where_it_landed(self) -> None:
-        registered = RegisteredAssembly(
-            assembly="hg38",
-            directory=Path("/data/genome/hg38"),
-            record=_record("genome", "hg38"),
-        )
-
-        assert list(registered.as_json()) == [
+    def test_registered_types_and_verified_assembly_pin_key_order_and_expected_from(self) -> None:
+        # A registered assembly and annotation are deliberately identical shapes: both are
+        # a record plus the two facts a record does not hold about itself.
+        record_keys = [
             "kind",
             "name",
             "files",
@@ -186,33 +161,19 @@ class TestTheJsonKeysAndTheirOrder:
             "assembly",
             "directory",
         ]
+        registered = RegisteredAssembly(
+            assembly="hg38", directory=Path("/data/genome/hg38"), record=_record("genome", "hg38")
+        )
+        assert list(registered.as_json()) == record_keys
         assert registered.as_json()["directory"] == "/data/genome/hg38"
 
-    def test_a_registered_annotation_serializes_to_the_same_shape(self) -> None:
-        # Deliberately identical to the assembly's: both are a record plus the two facts
-        # a record does not hold about itself, and a reader of either should not have to
-        # learn a second layout.
-        registered = RegisteredAnnotation(
+        annotation = RegisteredAnnotation(
             assembly="hg38",
             directory=Path("/data/genome/hg38/gtf/gencode_v50"),
             record=_record("annotation", "gencode_v50", chromosomes_checked=True),
         )
+        assert list(annotation.as_json()) == record_keys
 
-        assert list(registered.as_json()) == [
-            "kind",
-            "name",
-            "files",
-            "source_url",
-            "sha256",
-            "tool_versions",
-            "package_version",
-            "completed_at",
-            "details",
-            "assembly",
-            "directory",
-        ]
-
-    def test_a_verified_assembly_writes_verified_out_beside_what_it_is_read_from(self) -> None:
         checked = VerifiedAssembly(
             assembly="sacCer3",
             fasta=Path("/data/genome/sacCer3/sacCer3.fa"),
@@ -221,7 +182,6 @@ class TestTheJsonKeysAndTheirOrder:
             expected_from=EXPECTED_FROM_TABLE,
             components=None,
         )
-
         assert list(checked.as_json()) == [
             "assembly",
             "fasta",
@@ -234,7 +194,7 @@ class TestTheJsonKeysAndTheirOrder:
         assert checked.as_json()["verified"] is True
         assert checked.as_json()["fasta"] == "/data/genome/sacCer3/sacCer3.fa"
 
-    def test_what_pinned_a_digest_is_serialized_as_the_constant_the_cli_keys_on(self) -> None:
+        # `expected_from` is serialized as the constant the CLI keys on.
         def _from(expected_from: str | None) -> object:
             return VerifiedAssembly(
                 assembly="sacCer3",
@@ -249,7 +209,7 @@ class TestTheJsonKeysAndTheirOrder:
         assert _from(EXPECTED_FROM_RECORD) == "record"
         assert _from(None) is None
 
-    def test_a_status_row_is_its_fields_and_nothing_derived(self) -> None:
+    def test_a_status_row_and_the_status_around_it_serialize_with_no_derived_keys(self) -> None:
         assert list(_row().as_json()) == [
             "name",
             "offered",
@@ -264,15 +224,11 @@ class TestTheJsonKeysAndTheirOrder:
             "problem",
             "repair",
         ]
-
-    def test_the_state_is_not_a_key_because_it_is_read_from_three_that_are(self) -> None:
-        # Writing it out would be a second spelling of the precedence for a parser to
+        # Writing `state` out would be a second spelling of the precedence for a parser to
         # disagree with, and the three fields it comes from are all here already.
         assert "state" not in _row(broken=True).as_json()
 
-    def test_a_status_is_the_two_questions_and_the_rows_that_answer_them(self) -> None:
         status = _status("gencode_v50", _row(), _row(name="mine", offered=False, registered=True))
-
         assert list(status.as_json()) == [
             "assembly",
             "directory",
@@ -300,51 +256,33 @@ class TestReadingBackWhatWasChecked:
 
     _ADVICE = "register the assembly first"
 
-    def test_a_check_that_ran_says_so_rather_than_saying_nothing(self) -> None:
+    def test_each_check_state_reads_as_its_own_sentence_and_a_registration_reads_off_its_record(
+        self,
+    ) -> None:
         # Silence is not how a pass is reported: a surface printing nothing about the
         # check reads exactly like one printing that it passed.
-        summary = chromosome_check_summary(
+        checked = chromosome_check_summary(
             {"chromosomes_checked": True, "chromosomes_unchecked_because": None}
         )
+        assert "chromosomes checked" in checked
+        assert self._ADVICE not in checked
 
-        assert "chromosomes checked" in summary
-        assert self._ADVICE not in summary
-
-    def test_nothing_to_check_against_is_the_one_state_that_advises(self) -> None:
-        summary = chromosome_check_summary(
+        no_sizes = chromosome_check_summary(
             {"chromosomes_checked": False, "chromosomes_unchecked_because": "no-chrom-sizes"}
         )
+        assert "chromosomes not checked" in no_sizes
+        assert self._ADVICE in no_sizes
 
-        assert "chromosomes not checked" in summary
-        assert self._ADVICE in summary
-
-    def test_an_override_is_never_told_to_register_the_assembly(self) -> None:
-        # The bug this fixes: the assembly may well be registered, and the caller turned
-        # the check off on purpose. What is left to say is what the record does not vouch
-        # for, not what to do about it.
-        summary = chromosome_check_summary(
+        # An override is never told to register the assembly: it may well be registered,
+        # and the caller turned the check off on purpose.
+        overridden = chromosome_check_summary(
             {"chromosomes_checked": False, "chromosomes_unchecked_because": "caller-override"}
         )
+        assert "stood down" in overridden
+        assert self._ADVICE not in overridden
 
-        assert "stood down" in summary
-        assert self._ADVICE not in summary
-
-    def test_every_state_reads_as_its_own_sentence(self) -> None:
-        summaries = {
-            chromosome_check_summary(details)
-            for details in (
-                {"chromosomes_checked": True, "chromosomes_unchecked_because": None},
-                {"chromosomes_checked": False, "chromosomes_unchecked_because": "no-chrom-sizes"},
-                {"chromosomes_checked": False, "chromosomes_unchecked_because": "caller-override"},
-                {"chromosomes_checked": False},
-            )
-        }
-
-        assert len(summaries) == 4
-
-    def test_a_registration_answers_the_question_off_its_own_record(self) -> None:
-        # The surface never spells the two `details` keys: it holds what registering
-        # answered with, and asks that.
+        # A registration answers off its own record's details — the surface never spells
+        # the two `details` keys itself.
         registered = RegisteredAnnotation(
             assembly="hg38",
             directory=Path("/data/genome/hg38/gtf/gencode_v50"),
@@ -355,9 +293,27 @@ class TestReadingBackWhatWasChecked:
                 chromosomes_unchecked_because="caller-override",
             ),
         )
-
         assert registered.chromosome_check == chromosome_check_summary(registered.record.details)
         assert "stood down" in registered.chromosome_check
+
+    def test_every_known_state_is_distinct_and_an_unknown_reason_reads_as_unknown(self) -> None:
+        summaries = {
+            chromosome_check_summary(details)
+            for details in (
+                {"chromosomes_checked": True, "chromosomes_unchecked_because": None},
+                {"chromosomes_checked": False, "chromosomes_unchecked_because": "no-chrom-sizes"},
+                {"chromosomes_checked": False, "chromosomes_unchecked_because": "caller-override"},
+                {"chromosomes_checked": False},
+            )
+        }
+        assert len(summaries) == 4
+
+        # Forward as well as backward: a record from a later version claiming some third
+        # reason is one this version cannot report, which is the same as not knowing.
+        future = chromosome_check_summary(
+            {"chromosomes_checked": False, "chromosomes_unchecked_because": "some-later-reason"}
+        )
+        assert "does not say why" in future
 
     def test_a_record_written_before_the_reason_existed_reads_as_unknown(
         self, tmp_path: Path, data_dir: Path
@@ -380,51 +336,28 @@ class TestReadingBackWhatWasChecked:
         assert self._ADVICE not in summary  # nor is it claimed to be the override
         assert "stood down" not in summary
 
-    def test_a_reason_this_version_has_never_heard_of_reads_as_unknown_too(self) -> None:
-        # Forward as well as backward: a record from a later version claiming some third
-        # reason is one this version cannot report, which is the same as not knowing.
-        summary = chromosome_check_summary(
-            {"chromosomes_checked": False, "chromosomes_unchecked_because": "some-later-reason"}
-        )
-
-        assert "does not say why" in summary
-
 
 class TestARecordIsCarriedWholeRatherThanCopiedOut:
-    """The three properties that exist so a surface never re-reads a directory."""
+    """The properties that exist so a surface never re-reads a directory."""
 
-    @pytest.fixture
-    def registered(self) -> RegisteredAssembly:
-        return RegisteredAssembly(
-            assembly="hg38",
-            directory=Path("/data/genome/hg38"),
-            record=_record("genome", "hg38"),
+    def test_a_record_is_carried_whole_and_not_copied_out(self) -> None:
+        registered = RegisteredAssembly(
+            assembly="hg38", directory=Path("/data/genome/hg38"), record=_record("genome", "hg38")
         )
-
-    def test_the_files_come_off_the_record_sorted(self, registered: RegisteredAssembly) -> None:
         assert registered.file_names == ["hg38.db", "hg38.gtf"]
-
-    def test_the_list_is_a_fresh_one_each_call(self, registered: RegisteredAssembly) -> None:
         first = registered.file_names
         first.append("intruder")
+        assert registered.file_names == ["hg38.db", "hg38.gtf"]  # a fresh list each call
+        assert registered.chimera is None  # no build merged this one
 
-        assert registered.file_names == ["hg38.db", "hg38.gtf"]
-
-    def test_an_assembly_no_build_merged_is_not_a_chimera(
-        self, registered: RegisteredAssembly
-    ) -> None:
-        assert registered.chimera is None
-
-    def test_an_annotation_is_addressed_by_the_records_own_name(self) -> None:
-        registered = RegisteredAnnotation(
+        annotation = RegisteredAnnotation(
             assembly="hg38",
             directory=Path("/data/genome/hg38/gtf/gencode_v50"),
             record=_record("annotation", "gencode_v50"),
         )
-
-        assert registered.name == "gencode_v50"
-        assert registered.source_url == "https://example.org/x.gz"
-        assert registered.sha256 == "1a2b3c"
+        assert annotation.name == "gencode_v50"
+        assert annotation.source_url == "https://example.org/x.gz"
+        assert annotation.sha256 == "1a2b3c"
 
 
 def test_an_answer_imports_nothing_that_produces_one() -> None:

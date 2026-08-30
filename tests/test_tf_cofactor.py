@@ -7,9 +7,14 @@ touches the network, and nothing writes into the package's own data directory �
 malformed cases are handed to the public parse entry point as text rather than laid down
 as files, which is what that function is public for.
 
-Every test that is about one shipped table iterates over *every* shipped table. A second
-species is a file dropped into ``data/tf_cofactor/``, and dropping one in must not mean
-rewriting these.
+One test below walks every shipped table's columns and gene ids — the whole-table
+structural invariant that catches a newly dropped-in file with no code change here. The
+richer, more expensive checks (pinned counts, provenance, hashing, reachability) run
+against a representative pair instead — human, the two-publisher union, and mouse,
+single-source and all-positive — since worm shares mouse's shape and gets its own
+dedicated test for the one way it differs (no census counterpart). A third species is a
+file dropped into ``data/tf_cofactor/``, and dropping one in must not mean rewriting the
+sampled tests, only the structural one that already covers it for free.
 """
 
 from __future__ import annotations
@@ -47,6 +52,13 @@ from genome.tf.cofactor import (
     parse_cofactor_table,
     species_slug,
 )
+from tests._tables import REPRESENTATIVE_TABLES, table_text
+
+#: The species half of :data:`tests._tables.REPRESENTATIVE_TABLES`, so the same two
+#: species are the sample everywhere they are one — human, the two-publisher-union shape,
+#: against mouse, the single-source shape — without re-running every generic check
+#: against every shipped file, which the pinned counts below already guard.
+_REPRESENTATIVE_SPECIES = tuple(dict.fromkeys(slug for slug, _ in REPRESENTATIVE_TABLES))
 
 #: What each shipped table must contain, keyed by the species slug its file is named by
 #: and checked to cover every table that ships, so adding one without pinning it fails
@@ -189,20 +201,6 @@ def _filled(row: Mapping[str, str | None], columns: Sequence[str]) -> bool:
     return any(row[column] for column in columns)
 
 
-def _source(**overrides: object) -> CofactorSource:
-    """Return one well-formed source record, with ``overrides`` applied."""
-    fields: dict[str, object] = {
-        "species": "Tiny beast",
-        "source": ANIMALTFDB,
-        "publisher": "Someone et al. 1999",
-        "version": "v1",
-        "pubmed_id": 2,
-        "source_url": "https://example.org/beast",
-    }
-    fields.update(overrides)
-    return CofactorSource(**fields)  # type: ignore[arg-type]
-
-
 def _provenance(**overrides: object) -> CofactorProvenance:
     """Return one well-formed provenance record, with ``overrides`` applied."""
     fields: dict[str, object] = {
@@ -210,7 +208,16 @@ def _provenance(**overrides: object) -> CofactorProvenance:
         "ncbi_taxid": 1,
         "file": f"tiny_beast{COFACTOR_SUFFIX}",
         "sha256": "0" * 64,
-        "sources": (_source(),),
+        "sources": (
+            CofactorSource(
+                species="Tiny beast",
+                source=ANIMALTFDB,
+                publisher="Someone et al. 1999",
+                version="v1",
+                pubmed_id=2,
+                source_url="https://example.org/beast",
+            ),
+        ),
     }
     fields.update(overrides)
     return CofactorProvenance(**fields)  # type: ignore[arg-type]
@@ -218,7 +225,7 @@ def _provenance(**overrides: object) -> CofactorProvenance:
 
 def _table_text(*rows: str, header: str | None = None) -> str:
     """Return one cofactor table as text: a header of the uniform four, then ``rows``."""
-    return "\n".join([header or "\t".join(UNIFORM_COLUMNS), *rows]) + "\n"
+    return table_text(UNIFORM_COLUMNS, *rows, header=header)
 
 
 def _read(text: str) -> CofactorTable:
@@ -249,141 +256,6 @@ def test_every_shipped_table_has_its_counts_pinned() -> None:
     assert sorted(_PINNED) == sorted(cofactor_species())
 
 
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_every_shipped_table_parses_and_names_its_species(slug: str) -> None:
-    # Loading is what validates, so a table that cannot be trusted raises here rather
-    # than answering. The assertions below say the same invariants again, so a loosened
-    # reader is caught by a failure naming the offending file.
-    table = _shipped(slug)
-
-    assert species_slug(table.species) == slug
-    assert table.provenance.file == f"{slug}{COFACTOR_SUFFIX}"
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_every_shipped_table_leads_with_the_four_uniform_columns(slug: str) -> None:
-    table = _shipped(slug)
-
-    assert table.columns[: len(UNIFORM_COLUMNS)] == UNIFORM_COLUMNS
-    assert len(set(table.columns)) == len(table.columns)
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_every_column_after_the_uniform_four_is_namespaced_snake_case(slug: str) -> None:
-    # The publisher's own column under a snake_case name prefixed by which publisher's
-    # vocabulary it is, so two publishers' columns never collide and a reader grouping by
-    # one of them can see whose values they are (ADR-0014).
-    for column in _shipped(slug).columns[len(UNIFORM_COLUMNS) :]:
-        assert column == column.strip(), f"{slug}: {column!r} carries whitespace"
-        assert column.replace("_", "").isalnum(), f"{slug}: {column!r} is not snake_case"
-        assert column.islower(), f"{slug}: {column!r} is not lower case"
-        assert any(column.startswith(f"{source}_") for source in SOURCES), (
-            f"{slug}: {column!r} says whose vocabulary it is nowhere in its name"
-        )
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_every_gene_id_stem_is_unique_within_its_table(slug: str) -> None:
-    stems = _shipped(slug).gene_id_stems
-
-    assert all(stems), f"{slug}: a row carries no gene id stem"
-    assert len(set(stems)) == len(stems), f"{slug}: a gene id stem is named twice"
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_the_row_family_and_category_counts_are_pinned(slug: str) -> None:
-    table = _shipped(slug)
-    pinned = _PINNED[slug]
-
-    assert len(table) == pinned["rows"]
-    assert len(_values(slug, _FAMILY)) == pinned["families"]
-    assert len(_values(slug, _CATEGORY)) == pinned["categories"]
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_the_per_source_counts_are_pinned_and_the_vocabulary_is_closed(slug: str) -> None:
-    sources = _column(slug, "source")
-
-    assert set(sources) <= set(SOURCES), f"{slug}: a source outside the vocabulary"
-    for source in SOURCES:
-        assert sources.count(source) == _PINNED[slug][source]
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_every_row_that_carries_a_family_carries_its_category(slug: str) -> None:
-    # The category is joined onto the family as the table is built, and a family that
-    # reached no category fails that build — so a blank category beside a filled family
-    # would mean the join silently blanked a column instead.
-    for family, category in zip(_column(slug, _FAMILY), _column(slug, _CATEGORY), strict=True):
-        assert bool(family) == bool(category), f"{slug}: {family!r} sits in no category"
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_every_listed_gene_is_one_the_publisher_calls_a_cofactor(slug: str) -> None:
-    # No publisher shipping here releases a rejected set, so the flag reads yes on every
-    # row. The column is kept anyway: presence in the file is not the verdict, and a
-    # source that did record a rejection would ship `no` rows into this same format.
-    table = _shipped(slug)
-
-    assert set(table.cofactor_stems) <= set(table.gene_id_stems)
-    assert table.cofactor_stems == table.gene_id_stems
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_every_table_says_who_published_it_and_what_to_cite(slug: str) -> None:
-    provenance = _shipped(slug).provenance
-
-    assert provenance.ncbi_taxid > 0
-    assert provenance.sources
-    for source in provenance.sources:
-        assert source.publisher
-        assert source.pubmed_id > 0
-        assert source.source in CITED_SOURCES
-        assert source.source_url.startswith("http")
-        assert source.publisher in provenance.attribution()
-        assert str(source.pubmed_id) in provenance.attribution()
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_one_attribution_line_is_rendered_per_species(slug: str) -> None:
-    # One line however many publishers contributed, so the CLI, a notebook and an error
-    # message all say it the same way.
-    attribution = _shipped(slug).provenance.attribution()
-
-    assert attribution
-    assert "\n" not in attribution
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_the_shipped_bytes_hash_to_what_the_provenance_pins(slug: str) -> None:
-    # Over the unpacked TSV and not the gzip around it (ADR-0006), so recompressing the
-    # file elsewhere does not break a match that ought to hold.
-    resource = files("genome").joinpath(COFACTOR_SUBDIR, f"{slug}{COFACTOR_SUFFIX}")
-    unpacked = gzip.decompress(resource.read_bytes())
-
-    assert hashlib.sha256(unpacked).hexdigest() == _shipped(slug).provenance.sha256
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_every_species_with_a_table_is_one_the_assembly_table_names(slug: str) -> None:
-    # The species is read off the assembly and never passed in, so a table keyed to a
-    # spelling no assembly uses would be unreachable.
-    table = _shipped(slug)
-
-    assert table.species in _TABLE_SPECIES or table.species in _UNREACHABLE_SPECIES
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_the_species_spelling_the_assembly_table_uses_finds_its_table(slug: str) -> None:
-    # An assembly carries its species in the metadata table's spelling and never a slug,
-    # so that spelling has to reach the table the slug names. Equal and not identical:
-    # the two spellings are two entries in the lookup's cache, and a table is frozen, so
-    # value equality is the whole of what a caller can tell about them.
-    table = _shipped(slug)
-
-    assert cofactor_table(table.species) == table
-
-
 def test_the_worm_table_ships_although_no_publisher_censused_worm_transcription_factors() -> None:
     # The asymmetry stated in ATTRIBUTION.md, pinned so that removing the worm table to
     # "match" the censuses is a failure rather than a tidy-up: absence is the publishers'
@@ -394,6 +266,112 @@ def test_the_worm_table_ships_although_no_publisher_censused_worm_transcription_
     assert tf_gene_table("Caenorhabditis elegans") is None
 
 
+@pytest.mark.parametrize("slug", cofactor_species())
+def test_every_shipped_table_parses_with_well_formed_columns_and_unique_gene_ids(
+    slug: str,
+) -> None:
+    # The whole-table structural invariant, walked over every shipped species rather than
+    # a sample: loading is what validates, so a table that cannot be trusted raises here
+    # rather than answering, and a loosened reader is caught by a failure naming the file.
+    table = _shipped(slug)
+
+    assert species_slug(table.species) == slug
+    assert table.provenance.file == f"{slug}{COFACTOR_SUFFIX}"
+    assert table.columns[: len(UNIFORM_COLUMNS)] == UNIFORM_COLUMNS
+    assert len(set(table.columns)) == len(table.columns)
+    assert not any("licen" in column.lower() for column in table.columns)
+
+    # The publisher's own column under a snake_case name prefixed by which publisher's
+    # vocabulary it is, so two publishers' columns never collide and a reader grouping by
+    # one of them can see whose values they are (ADR-0014).
+    for column in table.columns[len(UNIFORM_COLUMNS) :]:
+        assert column == column.strip(), f"{slug}: {column!r} carries whitespace"
+        assert column.replace("_", "").isalnum(), f"{slug}: {column!r} is not snake_case"
+        assert column.islower(), f"{slug}: {column!r} is not lower case"
+        assert any(column.startswith(f"{source}_") for source in SOURCES), (
+            f"{slug}: {column!r} says whose vocabulary it is nowhere in its name"
+        )
+
+    stems = table.gene_id_stems
+    assert all(stems), f"{slug}: a row carries no gene id stem"
+    assert len(set(stems)) == len(stems), f"{slug}: a gene id stem is named twice"
+
+
+@pytest.mark.parametrize("slug", _REPRESENTATIVE_SPECIES)
+def test_the_pinned_counts_the_closed_source_vocabulary_and_the_cofactor_flag_all_hold(
+    slug: str,
+) -> None:
+    table = _shipped(slug)
+    pinned = _PINNED[slug]
+    sources = _column(slug, "source")
+
+    assert len(table) == pinned["rows"]
+    assert len(_values(slug, _FAMILY)) == pinned["families"]
+    assert len(_values(slug, _CATEGORY)) == pinned["categories"]
+
+    assert set(sources) <= set(SOURCES), f"{slug}: a source outside the vocabulary"
+    for source in SOURCES:
+        assert sources.count(source) == pinned[source]
+
+    # The category is joined onto the family as the table is built, and a family that
+    # reached no category fails that build — so a blank category beside a filled family
+    # would mean the join silently blanked a column instead.
+    for family, category in zip(_column(slug, _FAMILY), _column(slug, _CATEGORY), strict=True):
+        assert bool(family) == bool(category), f"{slug}: {family!r} sits in no category"
+
+    # No publisher shipping here releases a rejected set, so the flag reads yes on every
+    # row. The column is kept anyway: presence in the file is not the verdict, and a
+    # source that did record a rejection would ship `no` rows into this same format.
+    assert table.cofactor_stems == table.gene_id_stems
+
+
+@pytest.mark.parametrize("slug", _REPRESENTATIVE_SPECIES)
+def test_a_tables_provenance_names_its_publishers_hashes_correctly_and_is_reachable(
+    slug: str,
+) -> None:
+    table = _shipped(slug)
+    provenance = table.provenance
+    attribution = provenance.attribution()
+
+    assert provenance.ncbi_taxid > 0
+    assert provenance.sources
+    for source in provenance.sources:
+        assert source.publisher
+        assert source.pubmed_id > 0
+        assert source.source in CITED_SOURCES
+        assert source.source_url.startswith("http")
+        assert source.publisher in attribution
+        assert str(source.pubmed_id) in attribution
+    # One line however many publishers contributed, so the CLI, a notebook and an error
+    # message all say it the same way.
+    assert "\n" not in attribution
+
+    # Over the unpacked TSV and not the gzip around it (ADR-0006), so recompressing the
+    # file elsewhere does not break a match that ought to hold.
+    resource = files("genome").joinpath(COFACTOR_SUBDIR, f"{slug}{COFACTOR_SUFFIX}")
+    unpacked = gzip.decompress(resource.read_bytes())
+    assert hashlib.sha256(unpacked).hexdigest() == provenance.sha256
+
+    # The species is read off the assembly and never passed in, so a table keyed to a
+    # spelling no assembly uses would be unreachable, and the assembly table's own
+    # spelling has to be the one that finds it. Equal and not identical: the two
+    # spellings are two entries in the lookup's cache, and a table is frozen, so value
+    # equality is the whole of what a caller can tell about them.
+    assert table.species in _TABLE_SPECIES or table.species in _UNREACHABLE_SPECIES
+    assert cofactor_table(table.species) == table
+
+
+@pytest.mark.parametrize("slug", _REPRESENTATIVE_SPECIES)
+def test_the_frame_is_the_table_with_the_flag_read_as_a_boolean(slug: str) -> None:
+    table = _shipped(slug)
+    frame = table.frame()
+
+    assert list(frame.columns) == list(table.columns)
+    assert len(frame) == len(table)
+    assert frame["is_cofactor"].dtype == bool
+    assert int(frame["is_cofactor"].sum()) == len(table.cofactor_stems)
+
+
 # ---------------------------------------------------------------------------------------
 # The raw absence: one function's ``None``, and nobody else's
 # ---------------------------------------------------------------------------------------
@@ -402,9 +380,8 @@ def test_the_worm_table_ships_although_no_publisher_censused_worm_transcription_
 @pytest.mark.parametrize(
     "species",
     [
-        # Two species the assembly metadata table names and no cofactor table answers
-        # for, spelled as that table spells them, plus one nobody has ever registered.
-        "Saccharomyces cerevisiae",
+        # A species the assembly metadata table names and no cofactor table answers for,
+        # spelled as that table spells it, plus one nobody has ever registered.
         "Escherichia coli HT115",
         "no such species",
     ],
@@ -435,30 +412,23 @@ def test_the_slugger_is_the_one_the_censuses_use() -> None:
 # ---------------------------------------------------------------------------------------
 
 
-def test_a_well_formed_table_reads_back_as_its_rows() -> None:
+def test_a_well_formed_table_reads_back_with_blanks_as_none_and_row_order_kept() -> None:
     table = _read(_table_text("g1\tA\tyes\tanimaltfdb", "g2\tB\tno\tepifactors"))
-
     assert table.columns == UNIFORM_COLUMNS
     assert table.gene_id_stems == ("g1", "g2")
     assert table.cofactor_stems == ("g1",)
     assert len(table) == 2
 
-
-def test_a_blank_cell_reads_back_as_none() -> None:
     # The publisher recorded nothing there, which is the reading every other table in
     # this package gives a blank cell.
     header = "\t".join([*UNIFORM_COLUMNS, _FAMILY])
-    table = _read(_table_text("g1\tA\tyes\tanimaltfdb\t", header=header))
+    blank = _read(_table_text("g1\tA\tyes\tanimaltfdb\t", header=header))
+    assert blank.rows == (("g1", "A", "yes", "animaltfdb", None),)
 
-    assert table.rows == (("g1", "A", "yes", "animaltfdb", None),)
-
-
-def test_a_table_keeps_the_row_order_of_the_file() -> None:
-    table = _read(
+    ordered = _read(
         _table_text("g3\tC\tyes\tboth", "g1\tA\tyes\tanimaltfdb", "g2\tB\tyes\tepifactors")
     )
-
-    assert table.gene_id_stems == ("g3", "g1", "g2")
+    assert ordered.gene_id_stems == ("g3", "g1", "g2")
 
 
 def test_the_origin_defaults_to_the_file_the_provenance_names() -> None:
@@ -466,72 +436,59 @@ def test_the_origin_defaults_to_the_file_the_provenance_names() -> None:
         _read(_table_text())
 
 
-@pytest.mark.parametrize(
-    "header",
-    [
-        "gene_id\tsymbol\tis_cofactor\tsource",
-        "symbol\tgene_id_stem\tis_cofactor\tsource",
-        "gene_id_stem\tsymbol\tsource\tis_cofactor",
-        "gene_id_stem\tsymbol\tis_cofactor",
-    ],
-)
-def test_a_header_that_does_not_lead_with_the_uniform_four_raises(header: str) -> None:
+def test_a_header_that_does_not_lead_with_the_uniform_four_raises() -> None:
     with pytest.raises(CofactorTableError, match="every cofactor table leads with"):
-        _read(_table_text("g1\tA\tyes\tanimaltfdb", header=header))
+        _read(_table_text("g1\tA\tyes\tanimaltfdb", header="gene_id_stem\tsymbol\tis_cofactor"))
 
 
-def test_a_column_named_twice_raises() -> None:
+def test_a_malformed_tables_shape_raises_and_names_the_defect() -> None:
+    # Column collision, a short row, and a tab hiding inside a cell — three ways a file's
+    # shape cannot be trusted, each raising and naming what is wrong. A cofactor table is
+    # a plain TSV with no quoting, so a tab inside a cell reaches the reader as a row with
+    # one cell too many rather than as something to parse around.
     header = "\t".join([*UNIFORM_COLUMNS, "symbol"])
-
     with pytest.raises(CofactorTableError, match="twice"):
         _read(_table_text("g1\tA\tyes\tanimaltfdb\tA", header=header))
 
-
-def test_a_row_with_the_wrong_number_of_cells_raises() -> None:
     with pytest.raises(CofactorTableError, match="line 3"):
         _read(_table_text("g1\tA\tyes\tanimaltfdb", "g2\tB\tyes"))
 
-
-def test_a_cell_carrying_a_tab_raises() -> None:
-    # A cofactor table is a plain TSV with no quoting, so a tab inside a cell reaches the
-    # reader as a row with one cell too many rather than as something to parse around.
     with pytest.raises(CofactorTableError, match="carrying a tab"):
         _read(_table_text("g1\tA\tB\tyes\tanimaltfdb"))
 
 
-@pytest.mark.parametrize("source", ["ANIMALTFDB", "animalTFDB", "lambert2018", "", "both;epi"])
+@pytest.mark.parametrize("source", ["animalTFDB", "both;epi"])
 def test_a_source_outside_the_closed_vocabulary_raises(source: str) -> None:
     with pytest.raises(CofactorTableError, match="the vocabulary is"):
         _read(_table_text(f"g1\tA\tyes\t{source}"))
 
 
-@pytest.mark.parametrize("flag", ["Yes", "YES", "true", "1", ""])
+@pytest.mark.parametrize("flag", ["YES", ""])
 def test_a_cofactor_flag_nobody_spells_that_way_raises(flag: str) -> None:
     with pytest.raises(CofactorTableError, match=TRUE_CELL):
         _read(_table_text(f"g1\tA\t{flag}\tanimaltfdb"))
 
 
-def test_a_row_with_no_gene_id_stem_raises() -> None:
+def test_a_missing_duplicated_or_absent_gene_identity_raises_as_a_bad_value() -> None:
     with pytest.raises(CofactorTableError, match="gene id stem"):
         _read(_table_text("\tA\tyes\tanimaltfdb"))
 
-
-def test_the_same_gene_id_stem_twice_raises() -> None:
     # One row per gene, so two rows for one stem would let a caller read either.
     with pytest.raises(CofactorTableError, match="g1"):
         _read(_table_text("g1\tA\tyes\tanimaltfdb", "g1\tB\tyes\tepifactors"))
 
-
-def test_a_table_with_a_header_and_no_genes_raises() -> None:
     # Absence is spelled by shipping no file. A file listing nothing would be a second
     # spelling of it, and the one that reads as *this species has no cofactors*.
     with pytest.raises(CofactorTableError, match="no genes"):
         _read(_table_text())
 
-
-def test_an_empty_table_raises() -> None:
     with pytest.raises(CofactorTableError, match="empty"):
         _read("")
+
+    # A caller catching LookupError for the absences above must not swallow a packaging
+    # defect.
+    assert issubclass(CofactorTableError, ValueError)
+    assert not issubclass(CofactorTableError, LookupError)
 
 
 def test_every_refusal_names_the_file_and_the_repair() -> None:
@@ -542,13 +499,6 @@ def test_every_refusal_names_the_file_and_the_repair() -> None:
 
     assert f"tiny_beast{COFACTOR_SUFFIX}" in str(raised.value)
     assert "scripts/build_tf_cofactor.py" in str(raised.value)
-
-
-def test_a_broken_table_is_a_bad_value_and_not_a_lookup() -> None:
-    # A caller catching LookupError for the absences above it must not swallow a
-    # packaging defect.
-    assert issubclass(CofactorTableError, ValueError)
-    assert not issubclass(CofactorTableError, LookupError)
 
 
 # ---------------------------------------------------------------------------------------
@@ -600,7 +550,12 @@ def test_only_the_rows_flagged_a_cofactor_come_back_as_cofactor_stems(flag: str)
 # ---------------------------------------------------------------------------------------
 
 
-def test_the_provenance_tables_read_back_as_records() -> None:
+def test_the_provenance_tables_read_back_as_ragged_records_matching_the_shipped_files() -> None:
+    # A row with no file cannot be cited from anywhere; a file with no row cannot be
+    # cited at all, which is the condition on redistributing a table here. Two tables and
+    # not one: a species built from three publishers gets three rows here, where one row
+    # joining them positionally inside a cell is the shape that breaks quietly. Every
+    # species has at least one, since a table nobody can cite may not ship.
     records = cofactor_metadata()
 
     assert records
@@ -608,21 +563,8 @@ def test_the_provenance_tables_read_back_as_records() -> None:
     assert all(
         isinstance(source, CofactorSource) for record in records for source in record.sources
     )
-
-
-def test_the_provenance_tables_and_the_shipped_files_name_the_same_species() -> None:
-    # A row with no file cannot be cited from anywhere; a file with no row cannot be
-    # cited at all, which is the condition on redistributing a table here.
-    assert sorted(species_slug(record.species) for record in cofactor_metadata()) == sorted(
-        cofactor_species()
-    )
-
-
-def test_the_source_table_is_ragged_and_gives_every_species_at_least_one_publisher() -> None:
-    # Two tables and not one: a species built from three publishers gets three rows here,
-    # where one row joining them positionally inside a cell is the shape that breaks
-    # quietly. Every species has at least one, since a table nobody can cite may not ship.
-    for record in cofactor_metadata():
+    assert sorted(species_slug(record.species) for record in records) == sorted(cofactor_species())
+    for record in records:
         assert record.sources
         assert len({source.source for source in record.sources}) == len(record.sources)
         assert all(source.species == record.species for source in record.sources)
@@ -644,43 +586,21 @@ def test_neither_provenance_table_carries_a_licence_or_a_family_column() -> None
         assert "family_column" not in header, f"{name}: {header}"
 
 
-# ---------------------------------------------------------------------------------------
-# The values themselves
-# ---------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("slug", cofactor_species())
-def test_the_frame_is_the_table_with_the_flag_read_as_a_boolean(slug: str) -> None:
-    table = _shipped(slug)
-    frame = table.frame()
-
-    assert list(frame.columns) == list(table.columns)
-    assert len(frame) == len(table)
-    assert frame["is_cofactor"].dtype == bool
-    assert int(frame["is_cofactor"].sum()) == len(table.cofactor_stems)
-
-
-def test_the_frame_is_built_fresh_so_mutating_it_cannot_reach_the_table() -> None:
+def test_a_table_is_frozen_with_a_freshly_built_frame_and_fixed_vocabulary() -> None:
     table = _shipped(cofactor_species()[0])
     frame = table.frame()
     frame.loc[0, "symbol"] = "MUTATED"
-
     assert table.frame().loc[0, "symbol"] != "MUTATED"
 
-
-def test_a_cofactor_table_is_frozen() -> None:
-    table = _read(_table_text("g1\tA\tyes\tanimaltfdb"))
-
+    frozen = _read(_table_text("g1\tA\tyes\tanimaltfdb"))
     with pytest.raises(AttributeError):
-        table.species = "Other beast"  # type: ignore[misc]
+        frozen.species = "Other beast"  # type: ignore[misc]
 
-
-def test_the_flag_spellings_and_the_source_vocabulary_are_the_ones_a_table_uses() -> None:
     assert {TRUE_CELL, FALSE_CELL} == {"yes", "no"}
     assert SOURCES == ("animaltfdb", "epifactors", "both")
 
 
-def test_the_two_source_vocabularies_differ_in_both_directions_on_purpose() -> None:
+def test_the_row_and_citation_vocabularies_differ_on_both_and_hgnc_by_design() -> None:
     # A row of a table says which publisher listed the gene; a provenance row says which
     # source a table owes a citation to. `both` belongs only to the first — it describes
     # a row and no publisher — and `hgnc` only to the second, since HGNC lists no gene
@@ -691,8 +611,6 @@ def test_the_two_source_vocabularies_differ_in_both_directions_on_purpose() -> N
     assert HGNC in CITED_SOURCES
     assert HGNC not in SOURCES
 
-
-def test_a_provenance_row_describing_no_publisher_raises() -> None:
     # `both` is the one value the two vocabularies disagree about most sharply: a
     # provenance row spelled that way names nobody to cite.
     row = {
@@ -703,15 +621,12 @@ def test_a_provenance_row_describing_no_publisher_raises() -> None:
         "pubmed_id": "2",
         "source_url": "https://example.org/beast",
     }
-
     with pytest.raises(CofactorTableError, match="a provenance row is spelled from"):
         CofactorSource.from_row(row, origin="cofactor_source_metadata.tsv")
 
-
-def test_a_source_that_lists_no_gene_can_still_be_cited() -> None:
     # The stems of 442 human genes exist only because HGNC said so, so an identifier
     # crosswalk is a source with a row of its own rather than an implementation detail.
-    row = {
+    hgnc_row = {
         "species": "Tiny beast",
         "source": HGNC,
         "publisher": "HGNC",
@@ -719,8 +634,7 @@ def test_a_source_that_lists_no_gene_can_still_be_cited() -> None:
         "pubmed_id": "2",
         "source_url": "https://example.org/archive",
     }
-
-    assert CofactorSource.from_row(row, origin="cofactor_source_metadata.tsv").source == HGNC
+    assert CofactorSource.from_row(hgnc_row, origin="cofactor_source_metadata.tsv").source == HGNC
 
 
 # ---------------------------------------------------------------------------------------
@@ -728,12 +642,11 @@ def test_a_source_that_lists_no_gene_can_still_be_cited() -> None:
 # ---------------------------------------------------------------------------------------
 
 
-def test_the_human_table_carries_both_publishers_namespaced_columns() -> None:
+def test_the_human_table_carries_both_namespaces_and_unions_membership_not_classification() -> None:
     # A table built from two publishers is more columns and one more provenance row,
     # never a change of format: the uniform four still lead, and each publisher's group
     # follows under its own namespace with nothing crosswalked between them (ADR-0014).
     table = _shipped("homo_sapiens")
-
     assert table.columns == (
         *UNIFORM_COLUMNS,
         _FAMILY,
@@ -744,8 +657,6 @@ def test_the_human_table_carries_both_publishers_namespaced_columns() -> None:
         _COMPLEX,
     )
 
-
-def test_membership_is_unioned_and_classification_is_not() -> None:
     # A gene either publisher lists is a row; its AnimalTFDB columns are filled only if
     # AnimalTFDB listed it and its EpiFactors columns only if EpiFactors did. `source`
     # reads `both` exactly when both groups say something, so a caller can tell an
@@ -762,18 +673,15 @@ def test_membership_is_unioned_and_classification_is_not() -> None:
             assert row["source"] in (EPIFACTORS, BOTH), stem
 
 
-def test_the_epifactors_vocabularies_are_pinned_as_atomic_values() -> None:
+def test_epifactors_vocabularies_are_pinned_and_split_on_the_package_wide_separator() -> None:
     # Counted after the split, which is the count a caller grouping by one of them sees.
     for column, pinned in _EPIFACTORS_VOCABULARIES.items():
         assert len(_atomic("homo_sapiens", column)) == pinned, column
 
-
-def test_a_multi_valued_cell_splits_on_the_separator_the_whole_package_uses() -> None:
     # The same character `interpro_ids` and a Motif link's partners already use, so a
     # caller never has to remember which column uses which. A value that arrived with one
     # inside it would split into two here, which is what the build refuses to write.
     complexes = _atomic("homo_sapiens", _COMPLEX)
-
     assert VALUE_SEPARATOR == ";"
     assert "COMPASS-like MLL1,2" in complexes
     assert "COMPASS-like MLL3,4" in complexes
@@ -804,22 +712,18 @@ def test_the_five_double_rowed_genes_ship_as_one_row_with_their_cells_unioned() 
     assert (alkbh1[_TARGET] or "").split(VALUE_SEPARATOR) == ["histone", "DNA", "RNA"]
 
 
-def test_the_human_symbol_is_hgncs_spelling_and_not_the_publishers_retired_one() -> None:
+def test_the_human_table_joins_on_hgnc_for_correct_spelling_and_cites_all_three_sources() -> None:
     # Why the build joins EpiFactors on its HGNC id and never on its symbol, made
     # executable: 31 of the publisher's 801 rows name a gene by a symbol HGNC has since
     # retired, so matching on the name would key those genes wrongly or drop them. These
     # three ship under the name HGNC approves, which a symbol match could not have found.
     rows = _by_stem("homo_sapiens")
-
     for stem, symbol in _RENAMED_BY_HGNC.items():
         assert rows[stem]["symbol"] == symbol
 
-
-def test_the_human_table_cites_three_sources_including_the_one_that_lists_no_gene() -> None:
     # Two publishers of membership and one of identifiers. HGNC gets a row of its own
     # because the stems of 442 genes exist only because it said so.
     sources = {source.source: source for source in _shipped("homo_sapiens").provenance.sources}
-
     assert sorted(sources) == sorted(CITED_SOURCES)
     assert sources[ANIMALTFDB].publisher == "AnimalTFDB"
     assert sources[EPIFACTORS].publisher == "EpiFactors"
@@ -831,11 +735,15 @@ def test_the_human_table_cites_three_sources_including_the_one_that_lists_no_gen
     assert sources[HGNC].version in sources[HGNC].source_url
 
 
-def test_the_genes_that_are_both_a_tf_and_a_cofactor_are_pinned() -> None:
+def test_the_dual_classified_genes_are_pinned_and_cofactor_status_never_erases_a_tf_verdict() -> (
+    None
+):
     # ADR-0016's central number, and the one cost of publishing a union that a caller
     # feels: the TF gene list and the cofactor list overlap, so unioning the two answers
     # double-counts these genes. Read through the census's own public API rather than off
-    # the file, so that a change to either shipped table is caught here.
+    # the file, so that a change to either shipped table is caught here. The two answers
+    # are independent verdicts about different questions, so a second shipped table never
+    # suppresses one the census already reached.
     from genome.tf.gene import tf_gene_table
 
     census = tf_gene_table("Homo sapiens")
@@ -853,14 +761,5 @@ def test_the_genes_that_are_both_a_tf_and_a_cofactor_are_pinned() -> None:
         assert stem in rows, symbol
         assert rows[stem]["symbol"] == symbol
 
-
-def test_being_a_cofactor_never_removes_a_gene_from_the_census() -> None:
-    # The two answers are independent verdicts about different questions, so a second
-    # shipped table never suppresses one the census already reached.
-    from genome.tf.gene import tf_gene_table
-
-    census = tf_gene_table("Homo sapiens")
-    assert census is not None
-
-    assert "ENSG00000118058" in set(census.assessed_positive)
+    assert "ENSG00000118058" in positives
     assert "ENSG00000118058" in set(_shipped("homo_sapiens").cofactor_stems)

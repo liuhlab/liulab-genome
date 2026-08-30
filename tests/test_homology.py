@@ -228,53 +228,37 @@ def _registry_declaring(tmp_path: Path, *gene_ids: str) -> AnnotationRegistry:
 
 
 class TestFixtureBytes:
-    @pytest.mark.parametrize("species", sorted(FIXTURES))
-    def test_each_fixture_leads_with_comparas_own_header(
-        self, data_dir: Path, species: str
-    ) -> None:
-        with gzip.open(data_dir / FIXTURES[species], "rt", encoding="utf-8") as handle:
-            assert tuple(handle.readline().rstrip("\n").split("\t")) == COMPARA_COLUMNS
-
-    @pytest.mark.parametrize("species", sorted(FIXTURES))
-    def test_each_fixture_holds_the_rows_the_readme_counts(
-        self, data_dir: Path, species: str
-    ) -> None:
-        total, pairs, paralogy = FIXTURE_SHAPE[species]
-        rows = _fixture_rows(data_dir, species)
-        assert len(rows) == total
-        for partner, count in pairs.items():
-            here = [row for row in rows if row[7] == partner and row[2] != row[7]]
-            assert len(here) == count, partner
-        assert len([row for row in rows if row[2] == row[7]]) == paralogy
-
-    def test_the_human_dump_holds_no_mouse_row_which_is_the_published_partition(
+    def test_the_readmes_claims_about_the_fixtures_hold_on_the_committed_bytes(
         self, data_dir: Path
     ) -> None:
+        for species in sorted(FIXTURES):
+            with gzip.open(data_dir / FIXTURES[species], "rt", encoding="utf-8") as handle:
+                assert tuple(handle.readline().rstrip("\n").split("\t")) == COMPARA_COLUMNS
+            total, pairs, paralogy = FIXTURE_SHAPE[species]
+            rows = _fixture_rows(data_dir, species)
+            assert len(rows) == total, species
+            for partner, count in pairs.items():
+                here = [row for row in rows if row[7] == partner and row[2] != row[7]]
+                assert len(here) == count, (species, partner)
+            assert len([row for row in rows if row[2] == row[7]]) == paralogy, species
+            # Release 116 publishes no `between_species_paralog` anywhere in the human
+            # dump — 4.0M rows over some 200 partner species — so a duplication label
+            # always means one species, for every fixture.
+            for row in rows:
+                if not row[4].startswith("ortholog_"):
+                    assert row[2] == row[7], row
+
         # Not a staged absence: the real release-116 human file holds 0 human/mouse rows
-        # and 23,982 human/worm rows, and the mouse file holds the human pair. The guard
-        # below is therefore exercised against the publisher's own partition.
-        rows = _fixture_rows(data_dir, "Homo sapiens")
-        assert [row for row in rows if row[7] == "mus_musculus"] == []
-        assert len([row for row in rows if row[7] == "caenorhabditis_elegans"]) == 11
+        # and 23,982 human/worm rows, and the mouse file holds the human pair — so the
+        # partition guard exercised in TestPartitionGuard is against the publisher's own
+        # partition.
+        human_rows = _fixture_rows(data_dir, "Homo sapiens")
+        assert [row for row in human_rows if row[7] == "mus_musculus"] == []
+        assert len([row for row in human_rows if row[7] == "caenorhabditis_elegans"]) == 11
 
-    @pytest.mark.parametrize("species", sorted(FIXTURES))
-    def test_every_paralogy_row_relates_two_genes_of_one_species(
-        self, data_dir: Path, species: str
-    ) -> None:
-        # Release 116 publishes no `between_species_paralog` anywhere in the human dump —
-        # 4.0M rows over some 200 partner species — so a duplication label always means
-        # one species, and these rows are here to hold that boundary.
-        for row in _fixture_rows(data_dir, species):
-            if not row[4].startswith("ortholog_"):
-                assert row[2] == row[7], row
-
-    def test_the_worm_dump_holds_no_row_of_either_pair(self, data_dir: Path) -> None:
         for row in _fixture_rows(data_dir, "Caenorhabditis elegans"):
             assert {row[2], row[7]} == {"caenorhabditis_elegans"}
 
-    def test_both_quality_scores_are_null_on_every_worm_row_and_set_on_the_mouse_pair(
-        self, data_dir: Path
-    ) -> None:
         worm = [
             row
             for species in ("Homo sapiens", "Mus musculus")
@@ -288,20 +272,15 @@ class TestFixtureBytes:
         ]
         assert all(row[11] != "NULL" and row[12] != "NULL" for row in scored)
 
-    @pytest.mark.parametrize(("species", "other", "_links"), PAIRS)
-    def test_every_pair_carries_all_three_speciation_homology_types(
-        self, data_dir: Path, species: str, other: str, _links: int
-    ) -> None:
-        assert {row[4] for row in _published(data_dir, species, other)} == {
-            "ortholog_one2one",
-            "ortholog_one2many",
-            "ortholog_many2many",
-        }
+        assert {row[13] for row in human_rows if row[2] == row[7]} == {"NULL"}
+        assert {row[13] for row in human_rows if row[7] == "caenorhabditis_elegans"} == {"0", "1"}
 
-    def test_the_high_confidence_flag_keeps_all_three_of_its_states(self, data_dir: Path) -> None:
-        rows = _fixture_rows(data_dir, "Homo sapiens")
-        assert {row[13] for row in rows if row[2] == row[7]} == {"NULL"}
-        assert {row[13] for row in rows if row[7] == "caenorhabditis_elegans"} == {"0", "1"}
+        for species, other, _links in PAIRS:
+            assert {row[4] for row in _published(data_dir, species, other)} == {
+                "ortholog_one2one",
+                "ortholog_one2many",
+                "ortholog_many2many",
+            }
 
 
 # ---------------------------------------------------------------------------
@@ -310,55 +289,43 @@ class TestFixtureBytes:
 
 
 class TestShippedTable:
-    def test_the_table_pins_one_release_and_the_labs_three_species(self) -> None:
+    def test_the_shipped_table_pins_releases_species_pairs_publisher_metadata_and_attribution(
+        self,
+    ) -> None:
         assert homology_releases() == (DEFAULT_RELEASE,)
         assert homology_species() == ("Caenorhabditis elegans", "Homo sapiens", "Mus musculus")
 
-    def test_every_row_pins_a_publisher_a_url_and_a_real_checksum(self) -> None:
         for row in homology_table():
             assert row.publisher == "Ensembl Compara"
             assert row.source_url.startswith("https://ftp.ensembl.org/pub/")
             assert len(row.md5) == 32
             assert set(row.md5) <= set("0123456789abcdef")
             assert row.pubmed_id > 0
-
-    def test_every_rows_url_is_its_holding_species_own_dump_for_that_release(self) -> None:
-        # The URL is written down rather than formatted — release 113 ships these dumps
-        # uncompressed, so no template covers every release — and this holds the written
-        # row and the message builder to one file for the release actually pinned.
-        for row in homology_table():
+            # The URL is written down rather than formatted — release 113 ships these
+            # dumps uncompressed, so no template covers every release.
             assert row.source_url == compara_url(row.holding_species, row.release)
 
-    def test_the_three_pairings_are_pinned_and_two_of_them_share_one_file(self) -> None:
         held = {row.pair: row.holding_species for row in homology_table()}
         assert held == {
             ("Caenorhabditis elegans", "Homo sapiens"): "Homo sapiens",
             ("Caenorhabditis elegans", "Mus musculus"): "Mus musculus",
             ("Homo sapiens", "Mus musculus"): "Mus musculus",
         }
-
-    def test_the_pair_is_unordered_so_either_spelling_finds_one_row(self) -> None:
         assert _row("Homo sapiens", "Mus musculus") is _row("Mus musculus", "Homo sapiens")
-
-    def test_a_pair_the_table_does_not_pin_answers_none_rather_than_guessing(self) -> None:
         assert homology_metadata("Homo sapiens", "Danio rerio", DEFAULT_RELEASE) is None
 
-    def test_a_blank_cell_raises_naming_the_column(self) -> None:
+        line = _row("Homo sapiens", "Mus musculus").attribution()
+        assert line.startswith("Ensembl Compara release 116 (PMID 26896847)")
+        assert line.endswith("Compara.116.protein_default.homologies.tsv.gz")
+
+    def test_a_malformed_metadata_row_or_header_raises_naming_what_is_wrong(self) -> None:
         header = "\t".join(METADATA_COLUMNS)
         cells = ["116", "Homo sapiens", "Mus musculus", "Mus musculus", "Ensembl", "1", "u", ""]
-
         with pytest.raises(HomologyMetadataError, match="'md5'"):
             read_metadata(f"{header}\n" + "\t".join(cells) + "\n", origin="shipped.tsv")
 
-    def test_a_header_that_is_not_the_tables_raises_naming_the_columns_it_should_be(self) -> None:
         with pytest.raises(HomologyMetadataError, match="holding_species"):
             read_metadata("release\tspecies\n", origin="shipped.tsv")
-
-    def test_an_attribution_line_names_the_publisher_the_release_and_the_file(self) -> None:
-        line = _row("Homo sapiens", "Mus musculus").attribution()
-
-        assert line.startswith("Ensembl Compara release 116 (PMID 26896847)")
-        assert line.endswith("Compara.116.protein_default.homologies.tsv.gz")
 
 
 # ---------------------------------------------------------------------------
@@ -367,120 +334,82 @@ class TestShippedTable:
 
 
 class TestPreparation:
-    def test_constructing_a_set_fetches_the_dump_the_shipped_row_pins(
-        self, fake_fetch: FakeFetch
+    def test_construction_fetches_verifies_and_records_and_every_later_ask_reuses_the_one_file(
+        self, fake_fetch: FakeFetch, liulab_data: Path, data_dir: Path, tmp_path: Path
     ) -> None:
         homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
-
         assert fake_fetch.last.url == homologs.source_url
         assert "mus_musculus/Compara.116.protein_default" in fake_fetch.last.url
-
-    def test_the_publishers_own_checksum_is_demanded_of_the_bytes_as_they_are_fetched(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        # Load-bearing, not a formality: a resumed download of one of these gzips has been
-        # seen to pass `gzip -t` with the wrong md5, so opening cleanly proves nothing.
-        _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
-
-        assert fake_fetch.last.known_hash == "md5:59857f48bbbdf6812999d58d7a24ccc4"
-
-    def test_a_set_is_filed_beside_the_assembly_tree_under_its_release_and_pair(
-        self, fake_fetch: FakeFetch, liulab_data: Path
-    ) -> None:
-        homologs = _built(fake_fetch, "Mus musculus", "Homo sapiens")
-
         assert homology_data_dir() == liulab_data / "homology"
         assert homologs.path.parent == (
             liulab_data / "homology" / "ensembl_compara" / "116" / "homo_sapiens-mus_musculus"
         )
 
-    def test_a_second_construction_re_reads_what_is_there_and_fetches_nothing(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        first = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
+        # Load-bearing, not a formality: a resumed download of one of these gzips has been
+        # seen to pass `gzip -t` with the wrong md5, so opening cleanly proves nothing.
+        worm_pair = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
+        assert fake_fetch.last.known_hash == "md5:59857f48bbbdf6812999d58d7a24ccc4"
+
         fetched = len(fake_fetch.calls)
-
         again = HomologySet("Homo sapiens", "Caenorhabditis elegans", progressbar=False)
-
         assert len(fake_fetch.calls) == fetched
-        assert again.path == first.path
-        assert len(again) == len(first)
+        assert again.path == worm_pair.path
+        assert len(again) == len(worm_pair)
 
-    def test_the_reverse_orientation_reads_the_same_prepared_file_and_fetches_nothing(
-        self, fake_fetch: FakeFetch
-    ) -> None:
         # A pair is one download and one file; which species a caller asks *about* is a
         # property of the question, so the reverse orientation is a re-read.
-        forward = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
-        fetched = len(fake_fetch.calls)
-
         backward = HomologySet("Caenorhabditis elegans", "Homo sapiens", progressbar=False)
-
         assert len(fake_fetch.calls) == fetched
-        assert backward.path == forward.path
-        assert len(backward) == len(forward)
+        assert backward.path == worm_pair.path
+        assert len(backward) == len(worm_pair)
 
-    def test_cache_dir_names_the_directory_itself_as_it_does_for_every_sibling_type(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
-        # One meaning of `cache_dir` across the package: an `XrefSet` and a
+        # `cache_dir` means the same thing across the package: an `XrefSet` and a
         # `JasparDatabase` both prepare *in* the directory they are handed, and a set that
         # re-applied a layout beneath it would be the one exception nobody expects.
         elsewhere = tmp_path / "elsewhere"
+        elsewhere_homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus", cache_dir=elsewhere)
+        assert elsewhere_homologs.path.parent == elsewhere
 
-        homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus", cache_dir=elsewhere)
-
-        assert homologs.path.parent == elsewhere
-
-    def test_the_stored_slice_is_a_plain_gzipped_tsv_of_the_publishers_own_rows(
-        self, fake_fetch: FakeFetch, data_dir: Path
-    ) -> None:
-        # A collaborator must be able to read it in R or a shell without this package, and
-        # every cell must still be the publisher's — nothing here re-derives one.
-        homologs = _built(fake_fetch, "Mus musculus", "Homo sapiens")
-
-        with gzip.open(homologs.path, "rt", encoding="utf-8") as handle:
+        # A collaborator must be able to read the slice in R or a shell without this
+        # package, and every cell must still be the publisher's — nothing here re-derives
+        # one.
+        mouse_first = _built(fake_fetch, "Mus musculus", "Homo sapiens")
+        with gzip.open(mouse_first.path, "rt", encoding="utf-8") as handle:
             lines = handle.read().splitlines()
         assert tuple(lines[0].split("\t")) == COMPARA_COLUMNS
         assert [line.split("\t") for line in lines[1:]] == _published(
             data_dir, "Mus musculus", "Homo sapiens"
         )
 
-    def test_a_completion_marker_carries_the_publishers_checksum_and_the_slices_own(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
-
-        record = read_record(homologs.path.parent)
+        record = read_record(worm_pair.path.parent)
         assert record is not None
         assert record.kind == "homology"
-        assert record.source_url == homologs.source_url
+        assert record.source_url == worm_pair.source_url
         assert record.details["source_md5"] == "59857f48bbbdf6812999d58d7a24ccc4"
         assert record.sha256 is not None
         assert record.sha256 != record.details["source_md5"]
-        assert record.details["links"] == len(homologs)
-        assert record.files == {homologs.path.name: homologs.path.stat().st_size}
+        assert record.details["links"] == len(worm_pair)
+        assert record.files == {worm_pair.path.name: worm_pair.path.stat().st_size}
 
-    def test_an_interrupted_preparation_reads_as_unfinished_rather_than_present(
+        # Either spelling of a species is accepted, and the answer names one.
+        spelled = HomologySet("homo_sapiens", "caenorhabditis_elegans", progressbar=False)
+        assert (spelled.species, spelled.other_species) == (
+            "Homo sapiens",
+            "Caenorhabditis elegans",
+        )
+        assert repr(spelled).startswith("HomologySet(species='Homo sapiens'")
+
+    def test_an_interrupted_preparation_reads_as_unfinished_and_the_repair_names_the_rebuild(
         self, fake_fetch: FakeFetch
     ) -> None:
         homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
         (homologs.path.parent / RECORD_NAME).unlink()
 
-        with pytest.raises(UnfinishedRegistrationError, match="rm -rf"):
+        with pytest.raises(UnfinishedRegistrationError, match="rm -rf") as raised:
             HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
 
-    def test_the_repair_for_an_unfinished_set_names_the_call_that_rebuilds_it(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        # Deleting the directory is half a repair: it leaves the caller with nothing and
-        # no way back. The xref half already quotes both, and so must this.
-        homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
-        (homologs.path.parent / RECORD_NAME).unlink()
-
-        with pytest.raises(UnfinishedRegistrationError) as raised:
-            HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
-
+        # Deleting the directory is half a repair: it leaves the caller with nothing and no
+        # way back, so the message must also name the call that rebuilds it.
         assert homology_prepare_command("Homo sapiens", "Mus musculus", DEFAULT_RELEASE) in str(
             raised.value
         )
@@ -555,39 +484,24 @@ class TestPreparation:
 
 
 class TestPartitionGuard:
-    def test_a_pair_taken_from_the_file_that_does_not_hold_it_raises_naming_the_other(
-        self, fake_fetch: FakeFetch
+    def test_a_pair_taken_from_the_wrong_file_is_refused_and_writes_no_slice(
+        self, fake_fetch: FakeFetch, liulab_data: Path
     ) -> None:
         # The published partition, not a staged one: the human dump really does hold zero
         # human/mouse rows. Serving it for that pair is what a release that had
         # re-partitioned would look like from here.
         fake_fetch.serve(FIXTURES["Homo sapiens"])
-
-        with pytest.raises(ComparaPartitionError) as raised:
-            HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
-
-        assert "homo_sapiens/Compara.116.protein_default.homologies.tsv.gz" in str(raised.value)
-        assert "homology_metadata.tsv" in str(raised.value)
-
-    def test_the_guard_names_the_publishers_own_statement_of_the_partition(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        fake_fetch.serve(FIXTURES["Homo sapiens"])
-
-        with pytest.raises(ComparaPartitionError, match="arbitrary subset"):
-            HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
-
-    def test_a_guarded_pair_writes_no_slice_so_an_empty_set_is_never_re_read(
-        self, fake_fetch: FakeFetch, liulab_data: Path
-    ) -> None:
-        fake_fetch.serve(FIXTURES["Homo sapiens"])
         directory = (
             liulab_data / "homology" / "ensembl_compara" / "116" / "homo_sapiens-mus_musculus"
         )
 
-        with pytest.raises(ComparaPartitionError):
+        with pytest.raises(ComparaPartitionError) as raised:
             HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
 
+        message = str(raised.value)
+        assert "homo_sapiens/Compara.116.protein_default.homologies.tsv.gz" in message
+        assert "homology_metadata.tsv" in message
+        assert "arbitrary subset" in message
         assert list(directory.glob("*.tsv.gz")) == []
         assert read_record(directory) is None
 
@@ -608,94 +522,61 @@ class TestPartitionGuard:
 
 class TestAnswers:
     @pytest.mark.parametrize(("species", "other", "links"), PAIRS)
-    def test_all_three_pairings_among_human_mouse_and_worm_answer(
+    def test_all_three_pairings_answer_and_agree_when_asked_the_other_way_round(
         self, fake_fetch: FakeFetch, data_dir: Path, species: str, other: str, links: int
     ) -> None:
-        homologs = _built(fake_fetch, species, other)
-
-        answer = homologs.homologs(_stems(data_dir, species, other))
-
-        assert len(homologs) == links
+        forward = _built(fake_fetch, species, other)
+        answer = forward.homologs(_stems(data_dir, species, other))
+        assert len(forward) == links
         assert (answer.species, answer.other_species) == (species, other)
         assert answer.release == DEFAULT_RELEASE
         assert len(answer.links) == links
         assert answer.unresolved == ()
 
-    @pytest.mark.parametrize(("species", "other", "links"), PAIRS)
-    def test_each_pairing_answers_the_same_links_asked_the_other_way_round(
-        self, fake_fetch: FakeFetch, data_dir: Path, species: str, other: str, links: int
-    ) -> None:
-        forward = _built(fake_fetch, species, other)
         backward = _built(fake_fetch, other, species)
-
         ahead = {
             (link.gene_id_stem, link.homolog_gene_id_stem, link.homology_type)
-            for link in forward.homologs(_stems(data_dir, species, other)).links
+            for link in answer.links
         }
         behind = {
             (link.homolog_gene_id_stem, link.gene_id_stem, link.homology_type)
             for link in backward.homologs(_stems(data_dir, other, species)).links
         }
         assert ahead == behind
-        assert len(ahead) == links
 
-    def test_a_stem_answers_with_every_homolog_and_never_a_chosen_one(
+    def test_the_answer_holds_every_homolog_in_order_deduped_and_flattened_without_loss(
         self, fake_fetch: FakeFetch
     ) -> None:
         homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
 
-        answer = homologs.homologs([ONE2MANY_HUMAN])
-
-        partners = tuple(link.homolog_gene_id_stem for link in answer.resolved[ONE2MANY_HUMAN])
+        every = homologs.homologs([ONE2MANY_HUMAN])
+        partners = tuple(link.homolog_gene_id_stem for link in every.resolved[ONE2MANY_HUMAN])
         assert partners == ONE2MANY_WORMS
 
-    def test_what_named_nothing_rides_back_and_no_resolved_value_is_ever_empty(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
+        missing = homologs.homologs([ONE2ONE_HUMAN, ABSENT])
+        assert missing.unresolved == (ABSENT,)
+        assert ABSENT not in missing.resolved
+        assert all(found for found in missing.resolved.values())
 
-        answer = homologs.homologs([ONE2ONE_HUMAN, ABSENT])
+        ordered = homologs.homologs([MANY2MANY_HUMAN[1], ABSENT, ONE2ONE_HUMAN, MANY2MANY_HUMAN[1]])
+        assert list(ordered.resolved) == [MANY2MANY_HUMAN[1], ONE2ONE_HUMAN]
+        assert ordered.unresolved == (ABSENT,)
 
-        assert answer.unresolved == (ABSENT,)
-        assert ABSENT not in answer.resolved
-        assert all(found for found in answer.resolved.values())
-
-    def test_the_answer_keeps_ask_order_and_asks_a_repeat_once(self, fake_fetch: FakeFetch) -> None:
-        homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
-
-        answer = homologs.homologs([MANY2MANY_HUMAN[1], ABSENT, ONE2ONE_HUMAN, MANY2MANY_HUMAN[1]])
-
-        assert list(answer.resolved) == [MANY2MANY_HUMAN[1], ONE2ONE_HUMAN]
-        assert answer.unresolved == (ABSENT,)
-
-    def test_flattening_keeps_a_partner_two_asked_stems_both_name(
-        self, fake_fetch: FakeFetch
-    ) -> None:
         # What flattening loses is which stem reached which partner, so the two worm genes
         # both human genes are many2many to appear twice rather than once.
-        homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
+        flattened = homologs.homologs(list(MANY2MANY_HUMAN))
+        assert flattened.homolog_gene_id_stems == list(MANY2MANY_WORMS) * 2
 
-        answer = homologs.homologs(list(MANY2MANY_HUMAN))
-
-        assert answer.homolog_gene_id_stems == list(MANY2MANY_WORMS) * 2
-
-    def test_asking_about_nothing_answers_emptily_rather_than_about_every_gene(
+    def test_an_empty_ask_answers_emptily_and_json_carries_the_type_nulls_and_partners(
         self, fake_fetch: FakeFetch
     ) -> None:
-        homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
+        empty_set = _built(fake_fetch, "Homo sapiens", "Mus musculus")
+        empty = empty_set.homologs([])
+        assert empty.resolved == {}
+        assert empty.unresolved == ()
 
-        answer = homologs.homologs([])
-
-        assert answer.resolved == {}
-        assert answer.unresolved == ()
-
-    def test_as_json_writes_the_publishers_type_the_nulls_and_the_flattened_partners(
-        self, fake_fetch: FakeFetch
-    ) -> None:
         homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
-
         payload = homologs.homologs([ONE2ONE_HUMAN, ABSENT]).as_json()
-
         assert json.loads(json.dumps(payload)) == payload
         assert payload["release"] == DEFAULT_RELEASE
         assert payload["unresolved"] == [ABSENT]
@@ -740,53 +621,53 @@ class TestAnswers:
 
 
 class TestHomologyType:
-    @pytest.mark.parametrize(("species", "other", "_links"), PAIRS)
-    def test_every_link_carries_the_publishers_own_type_verbatim(
-        self, fake_fetch: FakeFetch, data_dir: Path, species: str, other: str, _links: int
+    def test_the_publishers_type_is_read_verbatim_and_never_counted(
+        self, fake_fetch: FakeFetch, data_dir: Path
     ) -> None:
-        homologs = _built(fake_fetch, species, other)
-        at, then = (0, 5) if _row(species, other).holding_species == species else (5, 0)
+        # Every pairing, not just one: the type-vs-published-row check must hold for all
+        # three so a link built for the mouse/worm pair is never taken on faith from the
+        # human/mouse one.
+        for species, other, _links in PAIRS:
+            homologs = _built(fake_fetch, species, other)
+            at, then = (0, 5) if _row(species, other).holding_species == species else (5, 0)
+            answer = homologs.homologs(_stems(data_dir, species, other), paralogs=True)
+            assert {
+                (link.gene_id_stem, link.homolog_gene_id_stem, link.homology_type)
+                for link in answer.links
+            } == {(row[at], row[then], row[4]) for row in _published(data_dir, species, other)}, (
+                species,
+                other,
+            )
 
-        answer = homologs.homologs(_stems(data_dir, species, other), paralogs=True)
-
-        assert {
-            (link.gene_id_stem, link.homolog_gene_id_stem, link.homology_type)
-            for link in answer.links
-        } == {(row[at], row[then], row[4]) for row in _published(data_dir, species, other)}
-
-    def test_a_type_is_read_and_never_counted_so_two_partners_may_read_one_to_many(
-        self, fake_fetch: FakeFetch
-    ) -> None:
         # Counting would call both of these `one2many`: each has exactly two partners here.
         # The publisher's tree says otherwise about one of them, and the label is its say.
-        homologs = _built(fake_fetch, "Mus musculus", "Homo sapiens")
-
-        answer = homologs.homologs([ONE2MANY_MOUSE, MANY2MANY_MOUSE])
-
-        assert len(answer.resolved[ONE2MANY_MOUSE]) == len(answer.resolved[MANY2MANY_MOUSE]) == 2
-        assert {link.homology_type for link in answer.resolved[ONE2MANY_MOUSE]} == {
+        mouse_human = _built(fake_fetch, "Mus musculus", "Homo sapiens")
+        typed = mouse_human.homologs([ONE2MANY_MOUSE, MANY2MANY_MOUSE])
+        assert len(typed.resolved[ONE2MANY_MOUSE]) == len(typed.resolved[MANY2MANY_MOUSE]) == 2
+        assert {link.homology_type for link in typed.resolved[ONE2MANY_MOUSE]} == {
             "ortholog_one2many"
         }
-        assert {link.homology_type for link in answer.resolved[MANY2MANY_MOUSE]} == {
+        assert {link.homology_type for link in typed.resolved[MANY2MANY_MOUSE]} == {
             "ortholog_many2many"
         }
 
 
 class TestParalogy:
-    @pytest.mark.parametrize(("species", "other", "_links"), PAIRS)
-    def test_orthologs_are_the_default_and_every_type_returned_is_a_speciation_label(
-        self, fake_fetch: FakeFetch, data_dir: Path, species: str, other: str, _links: int
-    ) -> None:
-        homologs = _built(fake_fetch, species, other)
-
-        answer = homologs.homologs(_stems(data_dir, species, other))
-
-        assert answer.links
-        assert all(link.is_ortholog for link in answer.links)
-
-    def test_a_same_species_paralogy_row_is_not_in_a_pairs_set_because_a_link_needs_two(
+    def test_orthologs_default_paralogs_true_changes_nothing_here_and_the_slice_is_unfiltered(
         self, fake_fetch: FakeFetch, data_dir: Path
     ) -> None:
+        # Every pairing, not just one: orthologs are the default and every type any of the
+        # three pairs returns is a speciation label, unasked.
+        for species, other, _links in PAIRS:
+            paired = _built(fake_fetch, species, other)
+            answer = paired.homologs(_stems(data_dir, species, other))
+            assert answer.links, (species, other)
+            assert all(link.is_ortholog for link in answer.links), (species, other)
+
+        homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
+        asked = _stems(data_dir, "Homo sapiens", "Caenorhabditis elegans")
+        orthologs = homologs.homologs(asked)
+
         # The fixture's four human `other_paralog` rows are real published rows sitting in
         # the very file this pair was cut from. They relate two *human* genes, so they are
         # not this pair's, and `paralogs=True` does not reach them either.
@@ -794,38 +675,20 @@ class TestParalogy:
             {row[0] for row in _fixture_rows(data_dir, "Homo sapiens") if row[2] == row[7]}
         )
         assert paralogy
+        assert homologs.homologs(paralogy, paralogs=True).resolved == {}
 
-        homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
-
-        answer = homologs.homologs(paralogy, paralogs=True)
-        assert answer.resolved == {}
-        assert sorted(answer.unresolved) == paralogy
-
-    def test_release_116_publishes_no_cross_species_paralogy_so_the_switch_changes_nothing(
-        self, fake_fetch: FakeFetch, data_dir: Path
-    ) -> None:
         # The measurement, asserted rather than assumed: counted over the whole human dump
-        # there is not one `between_species_paralog` row, and every duplication label is
-        # same-species. The switch is kept because it is where such a row would land the
-        # release Compara publishes one, and because *not an ortholog* must have somewhere
-        # to be distinguishable from *absent* (ADR-0013). On this release it agrees.
-        homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
-        asked = _stems(data_dir, "Homo sapiens", "Caenorhabditis elegans")
-
-        orthologs = homologs.homologs(asked)
+        # there is not one `between_species_paralog` row, so `paralogs=True` changes
+        # nothing on this release, which is where such a row would land were there one
+        # (ADR-0013).
         everything = homologs.homologs(asked, paralogs=True)
-
         assert orthologs.as_json() == everything.as_json()
         assert orthologs.dropped_partners == ()
 
-    def test_the_set_keeps_every_row_the_publisher_wrote_for_the_pair_unfiltered(
-        self, fake_fetch: FakeFetch, data_dir: Path
-    ) -> None:
         # Kept and marked, never excluded: the stored slice is what the publisher wrote for
-        # the pair, of every type, and the filtering happens on the way out.
-        homologs = _built(fake_fetch, "Mus musculus", "Caenorhabditis elegans")
-
-        with gzip.open(homologs.path, "rt", encoding="utf-8") as handle:
+        # a pair, of every type, and the filtering happens on the way out.
+        other_pair = _built(fake_fetch, "Mus musculus", "Caenorhabditis elegans")
+        with gzip.open(other_pair.path, "rt", encoding="utf-8") as handle:
             stored = [line.split("\t") for line in handle.read().splitlines()[1:]]
         assert stored == _published(data_dir, "Mus musculus", "Caenorhabditis elegans")
 
@@ -836,48 +699,32 @@ class TestParalogy:
 
 
 class TestQualityScores:
-    @pytest.mark.parametrize("other", ["Homo sapiens", "Mus musculus"])
-    def test_a_worm_pairing_says_both_quality_scores_are_null_rather_than_emptying_a_filter(
-        self, fake_fetch: FakeFetch, data_dir: Path, other: str
-    ) -> None:
-        homologs = _built(fake_fetch, other, "Caenorhabditis elegans")
-
-        answer = homologs.homologs(_stems(data_dir, other, "Caenorhabditis elegans"))
-
-        assert homologs.null_quality_scores == QUALITY_SCORE_COLUMNS
-        assert answer.null_quality_scores == QUALITY_SCORE_COLUMNS
-        assert all(link.goc_score is None for link in answer.links)
-        assert all(link.wga_coverage is None for link in answer.links)
-        # And the filter a caller would have written really does empty, which is the whole
-        # reason the answer says so before they ever run it.
-        assert [link for link in answer.links if (link.goc_score or 0) > 50] == []
-
-    def test_the_mouse_human_pairing_carries_comparas_quality_scores_through(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        homologs = _built(fake_fetch, "Mus musculus", "Homo sapiens")
-
-        answer = homologs.homologs([ONE2MANY_MOUSE])
-
-        assert homologs.null_quality_scores == ()
-        assert answer.null_quality_scores == ()
-        assert {
-            link.homolog_gene_id_stem: (link.goc_score, link.wga_coverage, link.is_high_confidence)
-            for link in answer.resolved[ONE2MANY_MOUSE]
-        } == {
-            "ENSG00000101266": (100, 100.0, True),
-            "ENSG00000254598": (0, 0.0, False),
-        }
-
-    def test_a_null_score_is_a_fact_about_the_pair_and_not_about_the_file_it_came_from(
-        self, fake_fetch: FakeFetch
+    def test_a_null_score_is_a_fact_about_the_pair_and_real_scores_carry_through_unchanged(
+        self, fake_fetch: FakeFetch, data_dir: Path
     ) -> None:
         # Both sets below are cut from the *same* mouse dump, and one of them is scored.
         scored = _built(fake_fetch, "Mus musculus", "Homo sapiens")
         unscored = _built(fake_fetch, "Mus musculus", "Caenorhabditis elegans")
-
         assert scored.null_quality_scores == ()
         assert unscored.null_quality_scores == QUALITY_SCORE_COLUMNS
+
+        answer = unscored.homologs(_stems(data_dir, "Mus musculus", "Caenorhabditis elegans"))
+        assert answer.null_quality_scores == QUALITY_SCORE_COLUMNS
+        assert all(link.goc_score is None for link in answer.links)
+        assert all(link.wga_coverage is None for link in answer.links)
+        # The filter a caller would have written really does empty, which is the whole
+        # reason the answer says so before they ever run it.
+        assert [link for link in answer.links if (link.goc_score or 0) > 50] == []
+
+        scored_answer = scored.homologs([ONE2MANY_MOUSE])
+        assert scored_answer.null_quality_scores == ()
+        assert {
+            link.homolog_gene_id_stem: (link.goc_score, link.wga_coverage, link.is_high_confidence)
+            for link in scored_answer.resolved[ONE2MANY_MOUSE]
+        } == {
+            "ENSG00000101266": (100, 100.0, True),
+            "ENSG00000254598": (0, 0.0, False),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -918,37 +765,29 @@ class TestCrossingIntoAnAnnotation:
         assert crossed.unresolved == (MANY2MANY_HUMAN_OF_MOUSE, ABSENT)
         assert crossed.dropped_partners == MANY2MANY_MICE
 
-    def test_a_partner_the_annotation_spells_twice_answers_with_both_gene_ids(
+    def test_a_partner_spelled_twice_answers_with_both_ids_and_crossing_names_assembly_and_release(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
-        # The pseudoautosomal shape `resolve_gene_ids` already answers with both of, and
-        # nothing here picks one either.
         homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
         answer = homologs.homologs([MANY2MANY_HUMAN_OF_MOUSE])
-        registry = _registry_declaring(
-            tmp_path, f"{MANY2MANY_MICE[0]}.3", f"{MANY2MANY_MICE[0]}.3_PAR_Y"
+
+        # The pseudoautosomal shape `resolve_gene_ids` already answers with both of, and
+        # nothing here picks one either.
+        par_registry = _registry_declaring(
+            tmp_path / "par", f"{MANY2MANY_MICE[0]}.3", f"{MANY2MANY_MICE[0]}.3_PAR_Y"
         )
-
-        crossed = resolve_homologs(answer, registry, "mine")
-
-        assert crossed.gene_ids[MANY2MANY_MICE[0]] == (
+        par_crossed = resolve_homologs(answer, par_registry, "mine")
+        assert par_crossed.gene_ids[MANY2MANY_MICE[0]] == (
             f"{MANY2MANY_MICE[0]}.3",
             f"{MANY2MANY_MICE[0]}.3_PAR_Y",
         )
-        assert crossed.homolog_gene_ids == [
+        assert par_crossed.homolog_gene_ids == [
             f"{MANY2MANY_MICE[0]}.3",
             f"{MANY2MANY_MICE[0]}.3_PAR_Y",
         ]
 
-    def test_the_crossing_names_the_assembly_and_annotation_and_keeps_the_pair_and_release(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
-        homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
-        answer = homologs.homologs([MANY2MANY_HUMAN_OF_MOUSE])
-        registry = _registry_declaring(tmp_path, f"{MANY2MANY_MICE[0]}.3")
-
+        registry = _registry_declaring(tmp_path / "single", f"{MANY2MANY_MICE[0]}.3")
         crossed = resolve_homologs(answer, registry, "mine")
-
         assert (crossed.assembly, crossed.annotation) == ("tiny", "mine")
         assert (crossed.species, crossed.other_species) == ("Homo sapiens", "Mus musculus")
         assert crossed.release == DEFAULT_RELEASE
@@ -959,38 +798,33 @@ class TestCrossingIntoAnAnnotation:
             "ortholog_many2many"
         )
 
-    def test_a_crossing_adds_no_link_back_that_the_answer_had_already_filtered_out(
+    def test_a_crossing_never_adds_back_a_filtered_link_and_counts_what_was_dropped_before_it(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
-        # Whatever the answer was filtered to is what is crossed: the hop never re-reads
-        # the set, so it can neither add a partner nor recompute a label.
         homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
         answer = homologs.homologs([MANY2MANY_HUMAN_OF_MOUSE])
-        registry = _registry_declaring(
-            tmp_path, f"{MANY2MANY_MICE[0]}.3", f"{MANY2MANY_MICE[1]}.4", "ENSMUSG00000051306.1"
+
+        # Whatever the answer was filtered to is what is crossed: the hop never re-reads
+        # the set, so it can neither add a partner nor recompute a label.
+        wide_registry = _registry_declaring(
+            tmp_path / "wide",
+            f"{MANY2MANY_MICE[0]}.3",
+            f"{MANY2MANY_MICE[1]}.4",
+            "ENSMUSG00000051306.1",
         )
+        wide_crossed = resolve_homologs(answer, wide_registry, "mine")
+        assert list(wide_crossed.gene_ids) == list(MANY2MANY_MICE)
+        assert wide_crossed.dropped_partners == ()
 
-        crossed = resolve_homologs(answer, registry, "mine")
-
-        assert list(crossed.gene_ids) == list(MANY2MANY_MICE)
-        assert crossed.dropped_partners == ()
-
-    def test_a_partner_dropped_before_the_crossing_is_still_counted_after_it(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
         # A **Dropped partner** is one an answer no longer names, whichever step removed
         # it — a Homology type filter or the annotation — so the crossing adds to the
         # count rather than replacing it. Release 116 publishes no cross-species paralogy
         # for these pairs, so the already-filtered answer is written out here instead of
         # asked for from a set that could not produce one.
-        homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
-        answer = homologs.homologs([MANY2MANY_HUMAN_OF_MOUSE])
         filtered = replace(answer, dropped_partners=(ABSENT_PARTNER,))
-        registry = _registry_declaring(tmp_path, f"{MANY2MANY_MICE[0]}.3")
-
-        crossed = resolve_homologs(filtered, registry, "mine")
-
-        assert crossed.dropped_partners == (ABSENT_PARTNER, MANY2MANY_MICE[1])
+        narrow_registry = _registry_declaring(tmp_path / "narrow", f"{MANY2MANY_MICE[0]}.3")
+        narrow_crossed = resolve_homologs(filtered, narrow_registry, "mine")
+        assert narrow_crossed.dropped_partners == (ABSENT_PARTNER, MANY2MANY_MICE[1])
 
     def test_the_crossing_carries_the_null_quality_scores_it_was_handed(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -1052,19 +886,6 @@ class TestRefusals:
 
         with pytest.raises(VersionedGeneIdError, match=ONE2ONE_HUMAN):
             homologs.homologs([f"{ONE2ONE_HUMAN}.18"])
-
-    def test_either_spelling_of_a_species_is_accepted_and_the_answer_names_one(
-        self, fake_fetch: FakeFetch
-    ) -> None:
-        fake_fetch.serve(FIXTURES["Homo sapiens"])
-
-        homologs = HomologySet("homo_sapiens", "caenorhabditis_elegans", progressbar=False)
-
-        assert (homologs.species, homologs.other_species) == (
-            "Homo sapiens",
-            "Caenorhabditis elegans",
-        )
-        assert repr(homologs).startswith("HomologySet(species='Homo sapiens'")
 
 
 # ---------------------------------------------------------------------------

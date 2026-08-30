@@ -70,8 +70,22 @@ _SHIPPED_DOWNLOADS: tuple[str, ...] = tuple(
     assembly for assembly in _SHIPPED_ASSEMBLIES if not _is_chimera_row(assembly)
 )
 
+#: Every intron bound the shipped table registers, and the whole of it: a value edited or
+#: a row filled in goes red here rather than reaching a consumer's aligner unremarked.
+#: Each is a hand-set round number with a recorded reason, never a maximum computed from
+#: an annotation — whose longest intron is a floor on what the organism does rather than
+#: a ceiling on it (ADR-0010).
+_REGISTERED_INTRON_CAPS = {"ce11": 50_000, "ecHT115": 1, "hg38": 1_000_000, "mm39": 1_000_000}
 
-def test_lookup_returns_the_row_for_a_listed_assembly() -> None:
+
+#: A name a caller might ask for — mostly one nothing lists, sometimes one the shipped
+#: table does, so the total accessor is generated onto both of its answers.
+_ASSEMBLY_NAMES = st.sampled_from(_SHIPPED_ASSEMBLIES) | st.text(
+    alphabet=string.ascii_letters + string.digits + "._-", min_size=1
+)
+
+
+def test_lookup_and_total_accessor_answer_listed_and_unlisted_assemblies() -> None:
     assert lookup_assembly("hg38") == AssemblyMetadata(
         assembly_name="hg38",
         species="Homo sapiens",
@@ -84,24 +98,11 @@ def test_lookup_returns_the_row_for_a_listed_assembly() -> None:
         intron_length_cap=1_000_000,
         intron_length_cap_rationale="ENCODE's value, a convention rather than a measurement; it clips 8 annotated introns",
     )
-
-
-def test_lookup_returns_none_for_an_unlisted_assembly() -> None:
     # The table is a cross-reference, not an allow-list: no row is not an error.
     assert lookup_assembly("no_such_assembly") is None
 
-
-# --- two questions, two functions --------------------------------------------
-
-
-#: A name a caller might ask for — mostly one nothing lists, sometimes one the shipped
-#: table does, so the total accessor is generated onto both of its answers.
-_ASSEMBLY_NAMES = st.sampled_from(_SHIPPED_ASSEMBLIES) | st.text(
-    alphabet=string.ascii_letters + string.digits + "._-", min_size=1
-)
-
-
-def test_an_unknown_record_carries_the_name_and_nothing_else() -> None:
+    # *unknown* is a record whose fields are unknown, not the absence of one, so nothing
+    # downstream has to guard a missing row before reading a field.
     assert AssemblyMetadata.unknown("my_ref") == AssemblyMetadata(
         assembly_name="my_ref",
         species=None,
@@ -115,21 +116,14 @@ def test_an_unknown_record_carries_the_name_and_nothing_else() -> None:
         intron_length_cap_rationale=None,
     )
 
-
-def test_the_total_accessor_hands_back_the_row_when_the_table_lists_one() -> None:
+    # The total accessor hands back the shipped row when the table lists one...
     assert assembly_metadata("hg38") == lookup_assembly("hg38")
-
-
-def test_the_total_accessor_answers_an_unlisted_assembly_with_an_unknown_record() -> None:
-    # The whole point: *unknown* is a record whose fields are unknown, not the absence of
-    # one, so nothing downstream has to guard a missing row before reading a field.
+    # ...and an unknown record — never an absence — when it does not.
     record = assembly_metadata("no_such_assembly")
     assert record == AssemblyMetadata.unknown("no_such_assembly")
     assert record.assembly_name == "no_such_assembly"
     assert all(getattr(record, field) is None for field in METADATA_FIELDS[1:])
 
-
-def test_only_the_lookup_answers_whether_the_table_lists_a_name() -> None:
     # The two questions are different and stay in different functions. *Is this listed?*
     # is what separates a chimera's derived name from a free-form local key on a machine
     # holding neither (ADR-0003), so it keeps its ``None``; making it total would read
@@ -161,43 +155,36 @@ _TINY = AssemblyMetadata(
 )
 
 
-def test_a_lookup_reads_the_table_it_is_handed() -> None:
+def test_a_table_parameter_overrides_the_shipped_default_without_mutating_it() -> None:
     # The table is a cross-reference, not an allow-list (ADR-0003), so a caller curating
     # their own rows is the ordinary case rather than a test's trick.
     assert lookup_assembly("tiny", table=[_TINY]) == _TINY
     assert lookup_assembly("hg38", table=[_TINY]) is None
-
-
-def test_the_total_accessor_reads_the_table_it_is_handed() -> None:
     assert assembly_metadata("tiny", table=[_TINY]) == _TINY
     assert assembly_metadata("hg38", table=[_TINY]) == AssemblyMetadata.unknown("hg38")
 
-
-def test_an_empty_table_lists_nothing_and_is_not_an_error() -> None:
+    # An empty table lists nothing, and that is not an error either.
     assert lookup_assembly("hg38", table=[]) is None
     assert assembly_metadata("hg38", table=[]) == AssemblyMetadata.unknown("hg38")
 
-
-def test_the_shipped_tables_are_what_the_lookups_read_by_default() -> None:
+    # The shipped tables are what both lookups read when no table is handed...
     assert lookup_assembly("hg38") in assembly_table()
     assert lookup_annotation("sacCer3", "ensgene_v101") in annotation_table()
 
-
-def test_handing_one_lookup_a_table_leaves_the_shipped_one_alone() -> None:
-    # Nothing is installed and nothing is cached: the parameter is read for that call.
+    # ...and nothing is installed or cached: handing one call a table leaves it alone
+    # for the next.
     assert lookup_assembly("tiny", table=[_TINY]) is not None
     assert lookup_assembly("tiny") is None
     assert lookup_assembly("hg38") is not None
 
 
-def test_taxid_is_parsed_as_a_python_int() -> None:
-    record = lookup_assembly("sacCer3")
-    assert record is not None
-    assert type(record.ncbi_taxid) is int
-    assert record.ncbi_taxid == 559292
+def test_shipped_rows_parse_types_pin_provenance_and_bound_introns_where_backed() -> None:
+    sac_cer3 = lookup_assembly("sacCer3")
+    assert sac_cer3 is not None
+    assert type(sac_cer3.ncbi_taxid) is int
+    assert sac_cer3.ncbi_taxid == 559292
+    assert sac_cer3.sha256 == "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3"
 
-
-def test_every_declared_field_is_filled_from_the_table() -> None:
     record = lookup_assembly("mm39")
     assert record is not None
     assert METADATA_FIELDS == (
@@ -215,8 +202,18 @@ def test_every_declared_field_is_filled_from_the_table() -> None:
     identifiers = [f for f in METADATA_FIELDS if f not in _OPTIONAL_FIELDS]
     assert all(getattr(record, field) is not None for field in identifiers)
 
+    # E. coli HT115 is a real, officially supported reference with no UCSC name at all:
+    # the assembly id is a local key and UCSC is only the default source.
+    echt115 = lookup_assembly("ecHT115")
+    assert echt115 is not None
+    assert echt115.ucsc_name is None
+    assert echt115.species == "Escherichia coli HT115"
+    assert echt115.ncbi_assembly_id == "GCF_004354945.1"
 
-def test_every_shipped_downloaded_row_pins_a_source_and_a_checksum() -> None:
+    # The blank cell is absence, not a value — looking up "" or NaN finds nothing.
+    assert lookup_assembly("") is None
+    assert lookup_assembly("nan") is None
+
     # Every officially supported assembly whose bytes were fetched says where they come
     # from and what they hash to. The URL's file name is the source's business, not the
     # assembly's — ce11 is pinned to WormBase, whose names carry the bioproject and
@@ -230,8 +227,6 @@ def test_every_shipped_downloaded_row_pins_a_source_and_a_checksum() -> None:
         assert record.sha256 is not None
         assert len(record.sha256) == 64
 
-
-def test_a_shipped_chimera_pins_nothing() -> None:
     # The other meaning of a blank cell: not *nobody got round to it* but *pinning this
     # would be a mistake*. A chimera's bytes are derived by a pure function from
     # components that are themselves pinned, so it is proven transitively; a digest here
@@ -246,8 +241,6 @@ def test_a_shipped_chimera_pins_nothing() -> None:
         assert record.species is None
         assert record.ncbi_taxid is None
 
-
-def test_the_shipped_chimera_row_carries_a_name_and_nothing_else() -> None:
     # Readable at all only because a blank identifier cell reads back as unknown: a blank
     # ncbi_taxid used to raise, which is what made this row impossible to ship. It exists
     # so that a machine holding neither component can still tell this name from a
@@ -262,41 +255,6 @@ def test_the_shipped_chimera_row_carries_a_name_and_nothing_else() -> None:
     )
     assert split_name("ce11_ecHT115") == ("ce11", "ecHT115")
 
-
-def test_an_assembly_ucsc_never_carried_is_looked_up_by_its_own_name() -> None:
-    # E. coli HT115 is a real, officially supported reference with no UCSC name at
-    # all: the assembly id is a local key and UCSC is only the default source.
-    record = lookup_assembly("ecHT115")
-    assert record is not None
-    assert record.ucsc_name is None
-    assert record.species == "Escherichia coli HT115"
-    assert record.ncbi_assembly_id == "GCF_004354945.1"
-
-
-def test_a_blank_ucsc_name_never_matches_a_lookup() -> None:
-    # The blank cell is absence, not a value — looking up "" or NaN finds nothing.
-    assert lookup_assembly("") is None
-    assert lookup_assembly("nan") is None
-
-
-def test_a_pinned_checksum_is_read_back_as_text() -> None:
-    record = lookup_assembly("sacCer3")
-    assert record is not None
-    assert record.sha256 == "6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3"
-
-
-# --- a bound the table carries and nothing in this package reads ------------
-
-
-#: Every intron bound the shipped table registers, and the whole of it: a value edited or
-#: a row filled in goes red here rather than reaching a consumer's aligner unremarked.
-#: Each is a hand-set round number with a recorded reason, never a maximum computed from
-#: an annotation — whose longest intron is a floor on what the organism does rather than
-#: a ceiling on it (ADR-0010).
-_REGISTERED_INTRON_CAPS = {"ce11": 50_000, "ecHT115": 1, "hg38": 1_000_000, "mm39": 1_000_000}
-
-
-def test_the_shipped_table_bounds_an_intron_only_where_a_number_is_backed() -> None:
     # sacCer3 is the row to look at: nothing backs a number for yeast the way WormBase's
     # own pipeline backs the worm's, so its cell is blank deliberately rather than
     # pending. A chimera's is blank for a third reason again — its bound is the maximum
@@ -313,8 +271,6 @@ def test_the_shipped_table_bounds_an_intron_only_where_a_number_is_backed() -> N
     assert caps["sacCer3"] is None
     assert all(caps[assembly] is None for assembly in _SHIPPED_CHIMERAS)
 
-
-def test_every_bound_the_table_carries_says_why_it_is_that_number() -> None:
     # The reason rides in the row beside the value rather than in a commit message, so a
     # later reader can tell a convention — ENCODE's mammalian million, run for a decade
     # and below the longest annotated intron in both mammals it was written for — from a
@@ -327,7 +283,7 @@ def test_every_bound_the_table_carries_says_why_it_is_that_number() -> None:
         assert carries_reason is (record.intron_length_cap is not None), assembly
 
 
-def test_a_blank_optional_cell_reads_back_as_none() -> None:
+def test_from_row_reads_blank_and_missing_optional_cells_as_none() -> None:
     # An unpinned checksum is unverified, not wrong — and never the string "nan". Every
     # downloaded row pins both optional columns today, and the chimera row's blanks say
     # something else again, so this path is exercised against a row stood up for it.
@@ -343,53 +299,61 @@ def test_a_blank_optional_cell_reads_back_as_none() -> None:
             "sha256": None,
         }
     )
-
     assert record.source_url == "https://example.invalid/unpinned.fa.gz"
     assert record.sha256 is None
 
-
-def test_a_row_missing_an_optional_column_altogether_reads_it_as_unknown() -> None:
     # A hand-written row need not carry every column: what it does not say is unknown.
-    record = AssemblyMetadata.from_row({"assembly_name": "sparse"})
+    assert AssemblyMetadata.from_row({"assembly_name": "sparse"}) == AssemblyMetadata.unknown(
+        "sparse"
+    )
 
-    assert record == AssemblyMetadata.unknown("sparse")
+    # And the same defaults apply when a record is built by hand rather than parsed.
+    by_hand = AssemblyMetadata("tiny", "Testus minimus", "tiny", "TINY.1", "GCF_0.0", 1)
+    assert (by_hand.source_url, by_hand.sha256) == (None, None)
+    assert (by_hand.intron_length_cap, by_hand.intron_length_cap_rationale) == (None, None)
+
+    # What `genome table-row` emits for an assembly the table does not list yet: the
+    # name, the source and the digest, and blanks for everything only a person supplies.
+    # Pasted into the table, it used to give species the string "nan" and raise on taxid.
+    line = format_table_row(
+        {
+            "assembly_name": "newAsm",
+            "source_url": "https://example.invalid/newAsm.fa.gz",
+            "sha256": "0" * 64,
+        }
+    )
+    emitted = lookup_assembly("newAsm", table=[AssemblyMetadata.from_row(_pasted(line))])
+    assert emitted is not None
+    assert emitted.species is None
+    assert emitted.ucsc_name is None
+    assert emitted.ncbi_name is None
+    assert emitted.ncbi_assembly_id is None
+    assert emitted.ncbi_taxid is None
+    assert emitted.intron_length_cap is None
+    assert emitted.sha256 == "0" * 64
 
 
-def test_a_cell_its_column_cannot_read_names_the_column_and_what_it_expected() -> None:
+def test_from_row_raises_naming_the_offending_cell_without_partial_state() -> None:
     with pytest.raises(MetadataRowError, match="ncbi_taxid") as raised:
         AssemblyMetadata.from_row({"assembly_name": "tiny", "ncbi_taxid": "many"})
-
     assert "int" in str(raised.value)
     assert "many" in str(raised.value)
 
-
-def test_a_blank_required_cell_raises_rather_than_reading_as_the_text_nan() -> None:
     # The other half of what a blank cell means: an optional column reads back unknown,
     # and a column with no unknown is a malformed row rather than the string "nan".
-    with pytest.raises(MetadataRowError, match="assembly_name") as raised:
+    with pytest.raises(MetadataRowError, match="assembly_name") as blank:
         AssemblyMetadata.from_row({"assembly_name": None, "species": "Testus minimus"})
+    assert "blank" in str(blank.value)
 
-    assert "blank" in str(raised.value)
-
-
-def test_a_malformed_row_never_yields_a_half_built_record() -> None:
     # A row whose good columns come first still raises rather than handing back a record
     # carrying them: a caller gets a record or an error naming the cell, never both.
     row = {"assembly_name": "tiny", "species": "Testus minimus", "ncbi_taxid": "many"}
-
-    with pytest.raises(MetadataRowError, match="ncbi_taxid") as raised:
+    with pytest.raises(MetadataRowError, match="ncbi_taxid") as malformed:
         AssemblyMetadata.from_row(row)
-
-    assert "assembly_name" not in str(raised.value)
-
-
-def test_optional_fields_default_to_none_when_a_record_is_built_by_hand() -> None:
-    record = AssemblyMetadata("tiny", "Testus minimus", "tiny", "TINY.1", "GCF_0.0", 1)
-    assert (record.source_url, record.sha256) == (None, None)
-    assert (record.intron_length_cap, record.intron_length_cap_rationale) == (None, None)
+    assert "assembly_name" not in str(malformed.value)
 
 
-def test_format_table_row_renders_the_columns_in_table_order() -> None:
+def test_format_table_row_renders_columns_in_order_and_leaves_unknowns_blank() -> None:
     # sacCer3 pins a source and a digest and carries no intron bound, so the line it
     # renders to also says what an unfilled cell looks like in the middle of a full row.
     record = lookup_assembly("sacCer3")
@@ -407,8 +371,6 @@ def test_format_table_row_renders_the_columns_in_table_order() -> None:
         "",
     ]
 
-
-def test_format_table_row_leaves_unknown_values_blank() -> None:
     row = format_table_row({"assembly_name": "newAsm", "sha256": "abc123"})
     assert row.split("\t") == ["newAsm", "", "", "", "", "", "", "abc123", "", ""]
 
@@ -478,34 +440,10 @@ def test_an_unknown_record_survives_rendering_and_parsing_unchanged(name: str) -
     assert AssemblyMetadata.from_row(_pasted(format_table_row(asdict(record)))) == record
 
 
-def test_a_row_with_every_identifier_blank_reads_back_as_unknown() -> None:
-    # What `genome table-row` emits for an assembly the table does not list yet: the
-    # name, the source and the digest, and blanks for everything only a person supplies.
-    # Pasted into the table, it used to give species the string "nan" and raise on taxid.
-    line = format_table_row(
-        {
-            "assembly_name": "newAsm",
-            "source_url": "https://example.invalid/newAsm.fa.gz",
-            "sha256": "0" * 64,
-        }
-    )
-
-    record = lookup_assembly("newAsm", table=[AssemblyMetadata.from_row(_pasted(line))])
-
-    assert record is not None
-    assert record.species is None
-    assert record.ucsc_name is None
-    assert record.ncbi_name is None
-    assert record.ncbi_assembly_id is None
-    assert record.ncbi_taxid is None
-    assert record.intron_length_cap is None
-    assert record.sha256 == "0" * 64
-
-
 class TestAnnotationTable:
     """The shipped annotation table — keyed by assembly and registered name."""
 
-    def test_lookup_returns_the_row_for_a_listed_annotation(self) -> None:
+    def test_shipped_rows_fill_every_column_pin_provenance_and_flag_one_default(self) -> None:
         assert lookup_annotation("sacCer3", "ensgene_v101") == AnnotationMetadata(
             assembly="sacCer3",
             name="ensgene_v101",
@@ -515,17 +453,15 @@ class TestAnnotationTable:
             sha256="d3f33fbf97deef26e2495f709f1c5bb2e2e1bf1ce71fb80758c2c9de42ad7026",
             default=True,
         )
-
-    def test_lookup_returns_none_for_an_unlisted_annotation(self) -> None:
         # A cross-reference, not an allow-list: an unlisted GTF registers by path.
         assert lookup_annotation("sacCer3", "no_such_annotation") is None
         assert lookup_annotation("no_such_assembly", "gencode_v50") is None
-
-    def test_an_annotation_belongs_to_exactly_one_assembly(self) -> None:
         # The key is the pair: hg38's GENCODE row is not hg19's.
         assert lookup_annotation("hg19", "gencode_v50") is None
+        # And listing an assembly returns exactly what the table offers it.
+        assert [record.name for record in list_annotation_metadata("ce11")] == ["wormbase_ws298"]
+        assert list_annotation_metadata("no_such_assembly") == []
 
-    def test_the_table_carries_every_declared_column(self) -> None:
         assert ANNOTATION_FIELDS == (
             "assembly",
             "name",
@@ -539,37 +475,27 @@ class TestAnnotationTable:
         assert record is not None
         assert all(getattr(record, field) is not None for field in ANNOTATION_FIELDS)
 
-    def test_every_shipped_annotation_pins_a_url_and_a_checksum(self) -> None:
         for assembly in _SHIPPED_DOWNLOADS:
             listed = list_annotation_metadata(assembly)
             assert listed, f"{assembly} offers no annotation"
-            for record in listed:
-                assert record.url.startswith("https://")
-                assert record.sha256 is not None
-                assert len(record.sha256) == 64
-
-    def test_every_shipped_assembly_names_exactly_one_default(self) -> None:
-        for assembly in _SHIPPED_DOWNLOADS:
-            defaults = [r.name for r in list_annotation_metadata(assembly) if r.default]
+            for row in listed:
+                assert row.url.startswith("https://")
+                assert row.sha256 is not None
+                assert len(row.sha256) == 64
+            defaults = [r.name for r in listed if r.default]
             assert len(defaults) == 1
 
-    def test_a_shipped_chimera_offers_no_annotation_row(self) -> None:
         # A merged annotation is derived from its components' own and fetched from
         # nowhere, so it has nothing a row could pin: no source, no digest, and a name
         # that would be computed from the flags in the rows beside it.
         for assembly in _SHIPPED_CHIMERAS:
             assert list_annotation_metadata(assembly) == []
 
-    def test_listing_an_assembly_returns_what_the_table_offers_it(self) -> None:
-        assert [record.name for record in list_annotation_metadata("ce11")] == ["wormbase_ws298"]
-        assert list_annotation_metadata("no_such_assembly") == []
+        mm39_default = lookup_annotation("mm39", "gencode_vM39")
+        assert mm39_default is not None
+        assert mm39_default.default is True
 
-    def test_the_flag_column_is_parsed_as_a_bool(self) -> None:
-        record = lookup_annotation("mm39", "gencode_vM39")
-        assert record is not None
-        assert record.default is True
-
-    def test_a_blank_flag_reads_as_false_and_a_blank_digest_as_none(self) -> None:
+    def test_a_blank_flag_is_false_a_bad_flag_or_a_missing_url_raises(self) -> None:
         # Every shipped row pins a digest and is its assembly's default, so the blank
         # cells are exercised against a row stood up for them.
         record = AnnotationMetadata.from_row(
@@ -583,11 +509,9 @@ class TestAnnotationTable:
                 "default": None,
             }
         )
-
         assert record.sha256 is None
         assert record.default is False
 
-    def test_a_flag_nobody_spells_that_way_says_so(self) -> None:
         with pytest.raises(MetadataRowError, match="is not a flag"):
             AnnotationMetadata.from_row(
                 {
@@ -601,7 +525,6 @@ class TestAnnotationTable:
                 }
             )
 
-    def test_a_row_with_no_url_at_all_names_the_column_it_wanted(self) -> None:
         # An annotation row that says where nothing is fetched from is malformed, not an
         # annotation whose source is unknown: nothing could register from it.
         with pytest.raises(MetadataRowError, match="url"):
@@ -609,10 +532,19 @@ class TestAnnotationTable:
                 {"assembly": "tiny", "name": "sourceless", "provider": "Nobody", "version": "0"}
             )
 
-    def test_a_record_is_rebuilt_from_its_own_fields(self) -> None:
+    def test_a_record_is_rebuilt_from_its_own_fields_including_hand_built_defaults(self) -> None:
         record = lookup_annotation("sacCer3", "ensgene_v101")
         assert record is not None
         assert AnnotationMetadata.from_row(asdict(record)) == record
+
+        by_hand = AnnotationMetadata(
+            assembly="tiny",
+            name="by_hand",
+            provider="Nobody",
+            version="0",
+            url="https://example.invalid/by_hand.gtf.gz",
+        )
+        assert (by_hand.sha256, by_hand.default) == (None, False)
 
     def test_the_lookups_read_the_table_they_are_handed(self) -> None:
         offered = [
@@ -640,13 +572,3 @@ class TestAnnotationTable:
         # …and the shipped table is where it was.
         assert lookup_annotation("tiny", "mine") is None
         assert lookup_annotation("sacCer3", "ensgene_v101") is not None
-
-    def test_optional_fields_default_when_a_record_is_built_by_hand(self) -> None:
-        record = AnnotationMetadata(
-            assembly="tiny",
-            name="by_hand",
-            provider="Nobody",
-            version="0",
-            url="https://example.invalid/by_hand.gtf.gz",
-        )
-        assert (record.sha256, record.default) == (None, False)

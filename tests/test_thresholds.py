@@ -66,27 +66,28 @@ def entries() -> list[Path]:
 
 
 class TestWhereTheCacheLives:
-    def test_it_sits_in_the_motif_subtree_of_the_data_dir(self, liulab_data: Path) -> None:
+    def test_it_lives_under_the_motif_subtree_and_only_appears_on_first_use(
+        self, liulab_data: Path, matrices: list[list[list[float]]]
+    ) -> None:
         # A motif belongs to no assembly, so neither does anything derived from one.
         assert threshold_cache_dir() == liulab_data / "motif" / "thresholds"
-
-    def test_asking_where_it_is_creates_nothing(self) -> None:
-        assert not threshold_cache_dir().exists()
-
-    def test_the_first_call_creates_it(self, matrices: list[list[list[float]]]) -> None:
+        assert not threshold_cache_dir().exists()  # asking where it is creates nothing
         cutoffs_for(matrices, UNIFORM, 1e-4)
         assert len(entries()) == 1
 
 
 class TestTheCacheIsHitOnARepeat:
-    def test_a_repeat_of_the_same_triple_does_not_reach_the_engine(
+    def test_a_repeat_does_not_reach_the_engine_and_yields_one_cutoff_per_matrix(
         self, matrices: list[list[list[float]]], engine_calls: list[float]
     ) -> None:
         first = cutoffs_for(matrices, UNIFORM, 1e-4)
-        assert len(engine_calls) == len(matrices)
+        assert len(engine_calls) == len(matrices) == len(first)
         second = cutoffs_for(matrices, UNIFORM, 1e-4)
         assert len(engine_calls) == len(matrices)  # nothing was converted the second time
         assert second == first
+        # One cutoff per matrix, in the matrices' own order — the index split that
+        # recovers Strand depends on this alignment.
+        assert len(cutoffs_for(matrices[:1], UNIFORM, 1e-4)) == 1
 
     def test_the_answer_off_the_disk_is_the_answer_the_engine_gave(
         self, matrices: list[list[list[float]]]
@@ -96,37 +97,27 @@ class TestTheCacheIsHitOnARepeat:
             path.unlink()
         assert cutoffs_for(matrices, UNIFORM, 1e-4) == computed
 
-    def test_one_cutoff_per_matrix_in_the_matrices_own_order(
-        self, matrices: list[list[list[float]]]
-    ) -> None:
-        # The index split that recovers Strand depends on this alignment.
-        assert len(cutoffs_for(matrices, UNIFORM, 1e-4)) == len(matrices)
-        assert len(cutoffs_for(matrices[:1], UNIFORM, 1e-4)) == 1
-
 
 class TestWhatTheKeyIs:
-    def test_a_different_p_value_is_a_different_entry(
+    def test_each_part_of_the_key_makes_a_different_entry(
         self, matrices: list[list[list[float]]], engine_calls: list[float]
     ) -> None:
-        loose = cutoffs_for(matrices, UNIFORM, 1e-3)
-        strict = cutoffs_for(matrices, UNIFORM, 1e-6)
-        assert len(entries()) == 2
-        assert engine_calls == [1e-3, 1e-3, 1e-6, 1e-6]
-        assert all(a > b for a, b in zip(strict, loose, strict=True))
+        # Each call below changes exactly one axis away from this same baseline, so a key
+        # that silently dropped one axis (background, say) would collide with the
+        # baseline here rather than growing the entry count — which is what each assert
+        # below would catch.
+        baseline = cutoffs_for(matrices, UNIFORM, 1e-4)
+        assert len(entries()) == 1
 
-    def test_a_different_background_is_a_different_entry(
-        self, matrices: list[list[list[float]]]
-    ) -> None:
-        cutoffs_for(matrices, UNIFORM, 1e-4)
-        cutoffs_for(matrices, (0.3, 0.2, 0.2, 0.3), 1e-4)
+        strict = cutoffs_for(matrices, UNIFORM, 1e-6)  # p differs; background, matrices don't
         assert len(entries()) == 2
+        assert all(a > b for a, b in zip(strict, baseline, strict=True))
 
-    def test_different_matrices_are_a_different_entry(
-        self, matrices: list[list[list[float]]]
-    ) -> None:
-        cutoffs_for(matrices, UNIFORM, 1e-4)
-        cutoffs_for([word_matrix("GATTACAGTC")], UNIFORM, 1e-4)
-        assert len(entries()) == 2
+        cutoffs_for(matrices, (0.3, 0.2, 0.2, 0.3), 1e-4)  # background differs; p, matrices don't
+        assert len(entries()) == 3
+
+        cutoffs_for([word_matrix("GATTACAGTC")], UNIFORM, 1e-4)  # matrices differ; p, bg don't
+        assert len(entries()) == 4
 
     def test_two_backgrounds_the_grid_makes_equal_share_one_entry(
         self, matrices: list[list[list[float]]], engine_calls: list[float]
@@ -139,28 +130,20 @@ class TestWhatTheKeyIs:
 
 
 class TestACacheIsNeverADependency:
-    def test_a_corrupt_entry_is_a_miss_and_not_an_error(
+    def test_a_bad_entry_on_disk_is_a_miss_and_not_an_error(
         self, matrices: list[list[list[float]]]
     ) -> None:
         computed = cutoffs_for(matrices, UNIFORM, 1e-4)
         (entry,) = entries()
-        entry.write_text("{not json at all", encoding="utf-8")
-        assert cutoffs_for(matrices, UNIFORM, 1e-4) == computed
-
-    def test_a_truncated_entry_is_a_miss(self, matrices: list[list[list[float]]]) -> None:
-        # One cutoff where two matrices were asked about would silently mis-call a strand.
-        computed = cutoffs_for(matrices, UNIFORM, 1e-4)
-        (entry,) = entries()
-        entry.write_text('{"version": 1, "cutoffs": [0.0]}', encoding="utf-8")
-        assert cutoffs_for(matrices, UNIFORM, 1e-4) == computed
-
-    def test_an_entry_from_an_older_format_is_a_miss(
-        self, matrices: list[list[list[float]]]
-    ) -> None:
-        computed = cutoffs_for(matrices, UNIFORM, 1e-4)
-        (entry,) = entries()
-        entry.write_text('{"version": 0, "cutoffs": [1.0, 1.0]}', encoding="utf-8")
-        assert cutoffs_for(matrices, UNIFORM, 1e-4) == computed
+        # Garbage, a truncated (one cutoff where two matrices were asked about, which would
+        # silently mis-call a strand), and an older format all have to read as a miss.
+        for payload in (
+            "{not json at all",
+            '{"version": 1, "cutoffs": [0.0]}',
+            '{"version": 0, "cutoffs": [1.0, 1.0]}',
+        ):
+            entry.write_text(payload, encoding="utf-8")
+            assert cutoffs_for(matrices, UNIFORM, 1e-4) == computed
 
     def test_a_cache_that_cannot_be_written_makes_the_scan_slow_and_not_broken(
         self, liulab_data: Path, matrices: list[list[list[float]]], engine_calls: list[float]

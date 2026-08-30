@@ -209,12 +209,12 @@ class TestRegisterByPath:
     :class:`TestAnnotationRegistry`, where the assembly name that composes it lives.
     """
 
-    def test_a_plain_gtf_is_copied_built_and_recorded(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
+    def test_a_plain_or_gzipped_gtf_is_copied_built_and_recorded(self, tmp_path: Path) -> None:
+        plain = tmp_path / "ann.gtf"
+        plain.write_text(_GTF)
         assembly = tmp_path / "asm"
 
-        annotation = _register_by_path(assembly, src, "WS298")
+        annotation = _register_by_path(assembly, plain, "WS298")
 
         assert annotation.gtf == annotation_dir(assembly, "WS298") / "WS298.gtf"
         assert annotation.gtf.read_text() == _GTF
@@ -226,27 +226,25 @@ class TestRegisterByPath:
         assert record.kind == "annotation"
         assert record.name == "WS298"
         assert sorted(record.files) == ["WS298.db", "WS298.gtf"]
-        assert record.source_url == str(src)
+        assert record.source_url == str(plain)
 
-    def test_a_gzipped_gtf_is_decompressed(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf.gz"
-        with gzip.open(src, "wt") as handle:
+        # A gzipped source is decompressed on the way in — stored as a plain .gtf.
+        gzipped = tmp_path / "ann.gtf.gz"
+        with gzip.open(gzipped, "wt") as handle:
             handle.write(_GTF)
-        assembly = tmp_path / "asm"
+        gzip_assembly = tmp_path / "asm-gz"
 
-        annotation = _register_by_path(assembly, src, "WS298")
+        gzip_annotation = _register_by_path(gzip_assembly, gzipped, "WS298")
 
-        # Stored as a plain .gtf with decompressed contents, and the db builds.
-        assert annotation.gtf.suffix == ".gtf"
-        assert annotation.gtf.read_text() == _GTF
-        assert annotation.db.is_file()
-        assert list(list_annotations(assembly)) == ["WS298"]
+        assert gzip_annotation.gtf.suffix == ".gtf"
+        assert gzip_annotation.gtf.read_text() == _GTF
+        assert gzip_annotation.db.is_file()
+        assert list(list_annotations(gzip_assembly)) == ["WS298"]
 
-    def test_a_missing_source_says_what_to_pass(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError, match="GTF file not found"):
-            _register_by_path(tmp_path / "asm", tmp_path / "nope.gtf", "X")
+            _register_by_path(tmp_path / "asm-missing", tmp_path / "nope.gtf", "X")
 
-    def test_reregistering_a_valid_one_returns_it_without_rebuilding(self, tmp_path: Path) -> None:
+    def test_reregistering_is_a_no_op_unless_forced(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         assembly = tmp_path / "asm"
@@ -255,19 +253,11 @@ class TestRegisterByPath:
 
         # Silently: `filterwarnings = ["error"]` fails the test on any warning at all.
         second = _register_by_path(assembly, src, "WS298")
-
         assert second == first
-        assert second.db.stat().st_mtime_ns == built_at
+        assert second.db.stat().st_mtime_ns == built_at  # not rebuilt
 
-    def test_force_rebuilds(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        assembly = tmp_path / "asm"
-        _register_by_path(assembly, src, "WS298")
-
-        annotation = _register_by_path(assembly, src, "WS298", force=True)
-
-        assert annotation.db.is_file()
+        forced = _register_by_path(assembly, src, "WS298", force=True)
+        assert forced.db.is_file()
         assert list(list_annotations(assembly)) == ["WS298"]
 
 
@@ -304,8 +294,33 @@ class TestRegisterByName:
         assert sorted(record.files) == [f"{_NAME}.db", f"{_NAME}.gtf"]
         # The archive went with the working area once the record was written.
         assert not work_dir(annotation_dir(tmp_path, _NAME)).exists()
+        # gffutils is a Python library, not an External tool resolved on PATH, so its
+        # version is provenance in details and never a tool version.
+        assert record.tool_versions == {}
+        assert record.details["gffutils_version"] == gffutils.__version__
+        assert record.details["provider"] == "UCSC"
+        assert record.details["version"] == "ensGene.v101"
 
-    def test_the_database_it_builds_answers_queries(self, tmp_path: Path) -> None:
+        # ...and a row that pins no digest at all still records whatever arrived.
+        unpinned = _register_by_name(
+            tmp_path, "tiny", "unpinned", progressbar=False, metadata=_row(name="unpinned")
+        )
+        unpinned_record = read_record(annotation_dir(tmp_path, "unpinned"))
+        assert unpinned_record is not None
+        assert unpinned_record.sha256 == _TINY_GTF_SHA256
+        assert unpinned.db.is_file()
+
+        # Against the shipped table, which lists exactly one annotation for sacCer3.
+        with pytest.raises(ValueError, match="no annotation named 'nope'") as no_row:
+            _register_by_name(tmp_path / "sacCer3", "sacCer3", "nope", progressbar=False)
+        no_row_message = str(no_row.value)
+        assert "ensgene_v101" in no_row_message
+        assert "register-gtf" in no_row_message  # the way in for one no row lists
+        assert "register_path" in no_row_message  # ...and the same from Python
+
+    def test_the_database_it_builds_answers_queries_from_a_gzipped_or_plain_source(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
         annotation = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
 
         database = gffutils.FeatureDB(str(annotation.db))
@@ -316,7 +331,17 @@ class TestRegisterByName:
         finally:
             database.conn.close()
 
-    def test_a_wrong_checksum_raises_naming_both_digests(self, tmp_path: Path) -> None:
+        # An uncompressed URL is placed exactly as it arrives, not run through gunzip.
+        fake_fetch.serve("tiny.gtf")
+        url = "https://mirror.example.invalid/annotations/tiny.gtf"
+        plain = _register_by_name(
+            tmp_path, "tiny", "plain", progressbar=False, metadata=_row(name="plain", url=url)
+        )
+        assert plain.gtf.read_text().startswith("chrII\tensGene.v101\ttranscript")
+
+    def test_a_wrong_checksum_or_a_disk_disagreement_raises_naming_both_digests(
+        self, tmp_path: Path
+    ) -> None:
         wrong = "0" * 64
 
         with pytest.raises(ChecksumMismatchError) as excinfo:
@@ -331,35 +356,15 @@ class TestRegisterByName:
         assert not (directory / f"{_NAME}.gtf").exists()
         assert read_record(directory) is None
 
-    def test_a_row_that_pins_no_digest_records_whatever_arrived(self, tmp_path: Path) -> None:
-        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
+        # And once a good build has landed, a disk that no longer agrees with its own
+        # record is the same kind of disagreement, raised the same way.
+        row = _row(sha256=_TINY_GTF_SHA256)
+        annotation = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+        annotation.db.write_bytes(b"truncated")
+        with pytest.raises(RegistrationMismatchError, match="disagrees with its"):
+            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
 
-        record = read_record(annotation_dir(tmp_path, _NAME))
-        assert record is not None
-        assert record.sha256 == _TINY_GTF_SHA256
-
-    def test_an_uncompressed_url_is_placed_as_it_arrives(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
-        fake_fetch.serve("tiny.gtf")
-        url = "https://mirror.example.invalid/annotations/tiny.gtf"
-
-        annotation = _register_by_name(
-            tmp_path, "tiny", _NAME, progressbar=False, metadata=_row(url=url)
-        )
-
-        assert annotation.gtf.read_text().startswith("chrII\tensGene.v101\ttranscript")
-
-    def test_a_name_no_row_lists_says_what_is_offered(self, tmp_path: Path) -> None:
-        # Against the shipped table, which lists exactly one annotation for sacCer3.
-        with pytest.raises(ValueError, match="no annotation named 'nope'") as excinfo:
-            _register_by_name(tmp_path, "sacCer3", "nope", progressbar=False)
-
-        assert "ensgene_v101" in str(excinfo.value)
-        assert "register-gtf" in str(excinfo.value)  # the way in for one no row lists
-        assert "register_path" in str(excinfo.value)  # ...and the same from Python
-
-    def test_reregistering_a_valid_one_is_a_silent_no_op(
+    def test_reregistering_a_valid_one_is_a_silent_no_op_and_a_half_built_one_is_broken(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
         row = _row(sha256=_TINY_GTF_SHA256)
@@ -373,92 +378,61 @@ class TestRegisterByName:
         assert second.db.stat().st_mtime_ns == built_at  # not rebuilt
         assert len(fake_fetch.calls) == 1  # nothing fetched twice
 
-    def test_a_half_built_annotation_is_reported_as_broken(self, tmp_path: Path) -> None:
         # A gffutils build killed part-way: a database file, and no record.
-        directory = annotation_dir(tmp_path, _NAME)
+        directory = annotation_dir(tmp_path / "half", _NAME)
         directory.mkdir(parents=True)
         (directory / f"{_NAME}.db").write_bytes(b"half a database")
 
         with pytest.raises(UnfinishedRegistrationError) as excinfo:
-            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
-
+            _register_by_name(tmp_path / "half", "tiny", _NAME, progressbar=False, metadata=_row())
         assert f"genome register-annotation tiny {_NAME} --force" in str(excinfo.value)
 
-    def test_a_record_that_disagrees_with_disk_raises(self, tmp_path: Path) -> None:
-        row = _row(sha256=_TINY_GTF_SHA256)
-        annotation = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
-        annotation.db.write_bytes(b"truncated")
-
-        with pytest.raises(RegistrationMismatchError, match="disagrees with its"):
-            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
-
-    def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
-        directory = annotation_dir(tmp_path, _NAME)
-        directory.mkdir(parents=True)
-        (directory / f"{_NAME}.db").write_bytes(b"half a database")
-
-        annotation = _register_by_name(
-            tmp_path, "tiny", _NAME, progressbar=False, force=True, metadata=_row()
+        repaired = _register_by_name(
+            tmp_path / "half", "tiny", _NAME, progressbar=False, force=True, metadata=_row()
         )
-
         assert read_record(directory) is not None
-        assert annotation.db.stat().st_size > len(b"half a database")
+        assert repaired.db.stat().st_size > len(b"half a database")
 
-    def test_force_keeps_a_gtf_whose_digest_still_matches(
+    def test_force_keeps_a_matching_gtf_but_refetches_one_nothing_can_prove(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
-        row = _row(sha256=_TINY_GTF_SHA256)
-        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
-        record_path(annotation_dir(tmp_path, _NAME)).unlink()
+        pinned = _row(name="pinned", sha256=_TINY_GTF_SHA256)
+        _register_by_name(tmp_path, "tiny", "pinned", progressbar=False, metadata=pinned)
+        record_path(annotation_dir(tmp_path, "pinned")).unlink()
 
-        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, force=True, metadata=row)
-
+        _register_by_name(
+            tmp_path, "tiny", "pinned", progressbar=False, force=True, metadata=pinned
+        )
         assert len(fake_fetch.calls) == 1  # the GTF on disk proved itself; nothing refetched
 
-    def test_force_refetches_when_the_row_pins_nothing_to_prove_it_against(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
-        row = _row()
-        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
-
-        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, force=True, metadata=row)
-
-        assert len(fake_fetch.calls) == 2
-
-    def test_the_record_carries_gffutils_rather_than_a_tool_version(self, tmp_path: Path) -> None:
-        # gffutils is a Python library, not an External tool resolved on PATH, so its
-        # version is provenance in details and never a tool version.
-        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
-
-        record = read_record(annotation_dir(tmp_path, _NAME))
-        assert record is not None
-        assert record.tool_versions == {}
-        assert record.details["gffutils_version"] == gffutils.__version__
-        assert record.details["provider"] == "UCSC"
-        assert record.details["version"] == "ensGene.v101"
+        unpinned = _row(name="unpinned")
+        _register_by_name(tmp_path, "tiny", "unpinned", progressbar=False, metadata=unpinned)
+        _register_by_name(
+            tmp_path, "tiny", "unpinned", progressbar=False, force=True, metadata=unpinned
+        )
+        assert len(fake_fetch.calls) == 3  # nothing on disk could prove itself; refetched
 
 
 class TestListAnnotations:
     """Registered means a record that agrees with disk — never a database file."""
 
-    def test_a_database_without_a_record_is_not_registered(self, tmp_path: Path) -> None:
+    def test_registered_means_a_record_agreeing_with_disk_never_just_a_database_file(
+        self, tmp_path: Path
+    ) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        _register_by_path(tmp_path, src, "finished")
+        annotation = _register_by_path(tmp_path, src, "finished")
+        assert list(list_annotations(tmp_path)) == ["finished"]
+
+        # A database file with no record beside it (a build killed part-way) is not
+        # registered...
         halfway = annotation_dir(tmp_path, "halfway")
         halfway.mkdir(parents=True)
         (halfway / "halfway.db").write_bytes(b"half a database")
-
         assert list(list_annotations(tmp_path)) == ["finished"]
 
-    def test_a_record_that_disagrees_with_disk_is_not_registered(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        annotation = _register_by_path(tmp_path, src, "WS298")
-        assert list(list_annotations(tmp_path)) == ["WS298"]
-
+        # ...and neither is a record that no longer agrees with what is on disk.
         annotation.db.write_bytes(b"truncated")
-
         assert list_annotations(tmp_path) == {}
 
 
@@ -487,7 +461,7 @@ class TestDiscardMergedAnnotation:
         # annotation has just gone is in exactly that state.
         assert not (assembly / "gtf").exists()
 
-    def test_an_annotation_a_caller_registered_by_hand_is_never_removed(
+    def test_discarding_returns_false_for_a_hand_registered_or_an_unregistered_name(
         self, tmp_path: Path
     ) -> None:
         # The name comes from a previous build's record, and a name is not ownership: only
@@ -495,12 +469,11 @@ class TestDiscardMergedAnnotation:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
         _register_by_path(tmp_path, src, "a+b")
-
         assert discard_merged_annotation(tmp_path, "a+b") is False
         assert list(list_annotations(tmp_path)) == ["a+b"]
 
-    def test_a_name_nothing_is_registered_under_is_not_an_error(self, tmp_path: Path) -> None:
-        assert discard_merged_annotation(tmp_path, "a+b") is False
+        # A name nothing is registered under at all is not an error either.
+        assert discard_merged_annotation(tmp_path, "never-registered") is False
 
 
 class TestListBrokenAnnotations:
@@ -510,46 +483,37 @@ class TestListBrokenAnnotations:
     the middle one, which is otherwise invisible to anything that lists.
     """
 
-    def test_a_directory_holding_files_with_no_record_is_broken(self, tmp_path: Path) -> None:
+    def test_broken_means_untrusted_files_never_a_fresh_or_finished_directory(
+        self, tmp_path: Path
+    ) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        _register_by_path(tmp_path, src, "mine")
-        record_path(annotation_dir(tmp_path, "mine")).unlink()
 
+        _register_by_path(tmp_path, src, "no-record")
+        record_path(annotation_dir(tmp_path, "no-record")).unlink()
         broken = list_broken_annotations(tmp_path, "tiny")
+        assert list(broken) == ["no-record"]
+        assert broken["no-record"].directory == annotation_dir(tmp_path, "no-record")
+        assert "holds files but no .completion.json" in broken["no-record"].problem
 
-        assert list(broken) == ["mine"]
-        assert broken["mine"].directory == annotation_dir(tmp_path, "mine")
-        assert "holds files but no .completion.json" in broken["mine"].problem
-
-    def test_a_record_that_disagrees_with_disk_is_broken(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        annotation = _register_by_path(tmp_path, src, "mine")
-        annotation.db.write_bytes(b"truncated")
-
+        disagreeing = _register_by_path(tmp_path, src, "disagreeing")
+        disagreeing.db.write_bytes(b"truncated")
         broken = list_broken_annotations(tmp_path, "tiny")
+        assert "disagreeing.db" in broken["disagreeing"].problem
 
-        assert list(broken) == ["mine"]
-        assert "mine.db" in broken["mine"].problem
+        # A finished annotation is never reported broken...
+        _register_by_path(tmp_path / "finished", src, "mine")
+        assert list_broken_annotations(tmp_path / "finished", "tiny") == {}
 
-    def test_a_finished_annotation_is_not_broken(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        _register_by_path(tmp_path, src, "mine")
+        # ...and neither is a fresh or empty one: ADR-0007 says an absent or empty
+        # directory is a fresh registration, not a broken one. A run interrupted before
+        # it downloaded anything must not be reported.
+        annotation_dir(tmp_path, "fresh").mkdir(parents=True)
+        work_dir(annotation_dir(tmp_path, "fresh")).mkdir()
+        assert "fresh" not in list_broken_annotations(tmp_path, "tiny")
 
-        assert list_broken_annotations(tmp_path, "tiny") == {}
-
-    def test_an_empty_directory_is_not_broken(self, tmp_path: Path) -> None:
-        # ADR-0007: an absent or empty directory is a fresh registration, not a broken
-        # one. A run interrupted before it downloaded anything must not be reported.
-        annotation_dir(tmp_path, "mine").mkdir(parents=True)
-        work_dir(annotation_dir(tmp_path, "mine")).mkdir()
-
-        assert list_broken_annotations(tmp_path, "tiny") == {}
-
-    def test_an_assembly_with_no_annotations_at_all_answers_empty(self, tmp_path: Path) -> None:
-        assert list_broken_annotations(tmp_path, "sacCer3") == {}
+        # And an assembly with no annotations at all answers empty rather than raising.
+        assert list_broken_annotations(tmp_path / "no-such-directory", "sacCer3") == {}
 
     def test_a_broken_one_leaves_the_others_listed(self, tmp_path: Path) -> None:
         # The invariant: one broken annotation must not stop the rest being found, and
@@ -563,77 +527,58 @@ class TestListBrokenAnnotations:
         assert list(list_annotations(tmp_path)) == ["healthy"]
         assert list(list_broken_annotations(tmp_path, "tiny")) == ["damaged"]
 
-    def test_a_name_the_table_offers_is_repaired_by_name(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        _register_by_path(tmp_path, src, "ensgene_v101")
-        record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
-
-        broken = list_broken_annotations(tmp_path, "sacCer3")
-
-        assert broken["ensgene_v101"].repair == (
-            "genome register-annotation sacCer3 ensgene_v101 --force"
-        )
-        assert broken["ensgene_v101"].repair in broken["ensgene_v101"].problem
-
-    def test_an_unlisted_one_is_repaired_from_the_path_its_record_remembers(
+    def test_the_repair_it_names_depends_on_whether_the_table_or_a_path_can_be_shown(
         self, tmp_path: Path
     ) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        annotation = _register_by_path(tmp_path, src, "mine")
-        annotation.db.write_bytes(b"truncated")
 
+        # A name the table offers is repaired by name.
+        _register_by_path(tmp_path, src, "ensgene_v101")
+        record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
+        offered = list_broken_annotations(tmp_path, "sacCer3")
+        assert offered["ensgene_v101"].repair == (
+            "genome register-annotation sacCer3 ensgene_v101 --force"
+        )
+        assert offered["ensgene_v101"].repair in offered["ensgene_v101"].problem
+
+        # An unlisted one is repaired from the path its own record remembers.
+        unlisted = _register_by_path(tmp_path, src, "mine")
+        unlisted.db.write_bytes(b"truncated")
         broken = list_broken_annotations(tmp_path, "tiny")
-
         assert broken["mine"].repair == f"genome register-gtf tiny {src} mine --force"
 
-    def test_an_unlisted_one_whose_source_is_unknowable_says_so(self, tmp_path: Path) -> None:
         # No record survives to say which GTF it was built from, so there is no path to
         # print: the command is named with the one thing it still needs filled in,
         # rather than a path that would not run.
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        _register_by_path(tmp_path, src, "mine")
-        record_path(annotation_dir(tmp_path, "mine")).unlink()
-
+        _register_by_path(tmp_path, src, "unknowable")
+        record_path(annotation_dir(tmp_path, "unknowable")).unlink()
         broken = list_broken_annotations(tmp_path, "tiny")
+        assert broken["unknowable"].repair == "genome register-gtf tiny <path> unknowable --force"
 
-        assert broken["mine"].repair == "genome register-gtf tiny <path> mine --force"
-
-    def test_an_unlisted_one_whose_source_is_gone_is_not_named_as_a_command(
-        self, tmp_path: Path
-    ) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        annotation = _register_by_path(tmp_path, src, "mine")
-        annotation.db.write_bytes(b"truncated")
+        # A record survives, but the path it names is gone — same placeholder, for the
+        # same reason: the path it remembers would not run either.
+        gone = _register_by_path(tmp_path, src, "gone")
+        gone.db.write_bytes(b"truncated")
         src.unlink()
-
         broken = list_broken_annotations(tmp_path, "tiny")
-
-        assert str(src) not in broken["mine"].repair
-        assert broken["mine"].repair == "genome register-gtf tiny <path> mine --force"
+        assert str(src) not in broken["gone"].repair
+        assert broken["gone"].repair == "genome register-gtf tiny <path> gone --force"
 
 
 class TestDefaultAnnotation:
     """The one rule that decides a default, wherever the question is asked from."""
 
-    def test_the_flagged_row_decides_it(self) -> None:
+    def test_the_flag_the_sole_registration_or_an_explicit_choice_decides_it(self) -> None:
         assert default_annotation([_row()], []) == _NAME
-
-    def test_the_flag_wins_over_the_sole_registered_annotation(self) -> None:
         # Everyone in the lab reaches for the same one, whatever this machine happens
-        # to hold.
+        # to hold...
         assert default_annotation([_row()], ["something_else"]) == _NAME
-
-    def test_an_explicit_choice_wins_over_the_flag(self) -> None:
+        # ...unless a caller explicitly chooses another, which wins over the flag.
         assert default_annotation([_row()], [_NAME], explicit="something_else") == "something_else"
 
-    def test_nothing_flagged_falls_back_to_the_sole_registered_annotation(self) -> None:
+        # With nothing flagged, the sole registered annotation wins, or there is none.
         assert default_annotation([_row(default=False)], ["only_one"]) == "only_one"
-
-    def test_nothing_flagged_and_no_sole_annotation_leaves_no_default(self) -> None:
         assert default_annotation([], []) is None
         assert default_annotation([], ["one", "two"]) is None
 
@@ -641,7 +586,9 @@ class TestDefaultAnnotation:
 class TestAnnotationStatus:
     """What an assembly's table offers, set against what is registered on this machine."""
 
-    def test_it_reports_what_is_offered_with_nothing_registered(self, liulab_data: Path) -> None:
+    def test_a_fresh_machine_reports_the_shipped_table_serialized_and_untouched(
+        self, fake_fetch: FakeFetch, liulab_data: Path
+    ) -> None:
         # The case it most needs to serve: a fresh machine, where the answer is
         # entirely the shipped table's.
         payload = annotation_status("sacCer3")
@@ -654,13 +601,8 @@ class TestAnnotationStatus:
         assert rows[0].provider == "UCSC"
         assert rows[0].path is None
 
-    def test_the_payload_it_serializes_is_the_rows_under_their_own_names(
-        self, liulab_data: Path
-    ) -> None:
         # `--json` is this report rendered, so a row's fields and the payload's keys are
         # one spelling: a surface reads attributes and never names a key of its own.
-        payload = annotation_status("sacCer3")
-
         assert payload.as_json() == {
             "assembly": "sacCer3",
             "directory": str(liulab_data / "genome" / "sacCer3"),
@@ -668,93 +610,75 @@ class TestAnnotationStatus:
             "annotations": [asdict(row) for row in payload.annotations],
         }
 
-    def test_the_default_annotations_own_row_is_reachable_without_a_search(self) -> None:
         # What the closing line of `genome annotations` needs: the default's own state,
         # so "not registered here" and "broken here" are told apart by the report itself.
-        offered = annotation_status("sacCer3")
-        nothing = annotation_status("tiny")
-
-        default = offered.default_row
-        assert default is offered.annotations[0]
+        default = payload.default_row
+        assert default is payload.annotations[0]
         assert default is not None
         assert not default.registered
+
         # No default decided, so no row is about one — the state a fresh unlisted
         # assembly is in, and not an error.
+        nothing = annotation_status("tiny")
         assert nothing.default_annotation is None
         assert nothing.default_row is None
 
-    def test_it_creates_nothing_and_fetches_nothing(
-        self, fake_fetch: FakeFetch, liulab_data: Path
-    ) -> None:
+        # And asking creates nothing and fetches nothing.
         annotation_status("hg38")
-
         assert fake_fetch.calls == []
         assert not (liulab_data / "genome" / "hg38").exists()
 
-    def test_a_registered_annotation_the_table_offers_is_reported_as_both(
+    def test_a_registered_or_broken_annotation_is_reported_whether_offered_or_not(
         self, tmp_path: Path
     ) -> None:
         src = tmp_path / "ann.gtf"
         src.write_text(_GTF)
-        assembly_dir = tmp_path / "asm"
-        annotation = _register_by_path(assembly_dir, src, "ensgene_v101")
+        offered_dir, unlisted_dir = tmp_path / "offered", tmp_path / "unlisted"
+        annotation = _register_by_path(offered_dir, src, "ensgene_v101")
+        _register_by_path(unlisted_dir, src, "mine")
 
-        payload = annotation_status("sacCer3", cache_dir=assembly_dir)
+        offered = annotation_status("sacCer3", cache_dir=offered_dir)
+        unlisted = annotation_status("tiny", cache_dir=unlisted_dir)
 
-        rows = payload.annotations
-        assert [(r.name, r.offered, r.registered) for r in rows] == [("ensgene_v101", True, True)]
-        assert rows[0].path == str(annotation.gtf)
+        offered_rows = offered.annotations
+        assert [(r.name, r.offered, r.registered) for r in offered_rows] == [
+            ("ensgene_v101", True, True)
+        ]
+        assert offered_rows[0].path == str(annotation.gtf)
 
-    def test_a_registered_annotation_no_row_lists_is_reported_too(self, tmp_path: Path) -> None:
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        assembly_dir = tmp_path / "asm"
-        _register_by_path(assembly_dir, src, "mine")
+        unlisted_rows = unlisted.annotations
+        assert [(r.name, r.offered, r.registered) for r in unlisted_rows] == [("mine", False, True)]
+        assert unlisted_rows[0].provider is None
+        assert unlisted_rows[0].broken is False
+        assert unlisted_rows[0].problem is None
+        assert unlisted.default_annotation == "mine"  # nothing flagged, and it is alone
 
-        payload = annotation_status("tiny", cache_dir=assembly_dir)
-
-        rows = payload.annotations
-        assert [(r.name, r.offered, r.registered) for r in rows] == [("mine", False, True)]
-        assert rows[0].provider is None
-        assert rows[0].broken is False
-        assert rows[0].problem is None
-        assert payload.default_annotation == "mine"  # nothing flagged, and it is alone
-
-    def test_a_broken_offered_annotation_is_reported_as_broken_not_as_absent(
-        self, tmp_path: Path
-    ) -> None:
         # The bug this closes: half-registered and never-fetched looked identical here.
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        assembly_dir = tmp_path / "asm"
-        _register_by_path(assembly_dir, src, "ensgene_v101")
-        record_path(annotation_dir(assembly_dir, "ensgene_v101")).unlink()
+        # No row lists the second one and no record vouches for it either, so nothing
+        # used to mention it at all — a broken annotation is reported as broken, and
+        # never as simply absent, whether it is offered or not.
+        record_path(annotation_dir(offered_dir, "ensgene_v101")).unlink()
+        broken_unlisted = _register_by_path(unlisted_dir, src, "gone")
+        broken_unlisted.db.write_bytes(b"truncated")
 
-        payload = annotation_status("sacCer3", cache_dir=assembly_dir)
+        broken_offered = annotation_status("sacCer3", cache_dir=offered_dir)
+        broken_unlisted_payload = annotation_status("tiny", cache_dir=unlisted_dir)
 
-        rows = payload.annotations
-        assert [(r.name, r.offered, r.registered, r.broken) for r in rows] == [
+        broken_offered_rows = broken_offered.annotations
+        assert [(r.name, r.offered, r.registered, r.broken) for r in broken_offered_rows] == [
             ("ensgene_v101", True, False, True)
         ]
-        assert rows[0].repair == "genome register-annotation sacCer3 ensgene_v101 --force"
-        assert "holds files but no .completion.json" in str(rows[0].problem)
-        assert rows[0].path is None
+        assert broken_offered_rows[0].repair == (
+            "genome register-annotation sacCer3 ensgene_v101 --force"
+        )
+        assert "holds files but no .completion.json" in str(broken_offered_rows[0].problem)
+        assert broken_offered_rows[0].path is None
 
-    def test_a_broken_unlisted_annotation_is_reported_at_all(self, tmp_path: Path) -> None:
-        # No row lists it and no record vouches for it, so nothing used to mention it.
-        src = tmp_path / "ann.gtf"
-        src.write_text(_GTF)
-        assembly_dir = tmp_path / "asm"
-        annotation = _register_by_path(assembly_dir, src, "mine")
-        annotation.db.write_bytes(b"truncated")
-
-        payload = annotation_status("tiny", cache_dir=assembly_dir)
-
-        rows = payload.annotations
-        assert [(r.name, r.offered, r.registered, r.broken) for r in rows] == [
-            ("mine", False, False, True)
+        unlisted_rows = [row for row in broken_unlisted_payload.annotations if row.name == "gone"]
+        assert [(r.name, r.offered, r.registered, r.broken) for r in unlisted_rows] == [
+            ("gone", False, False, True)
         ]
-        assert rows[0].repair == f"genome register-gtf tiny {src} mine --force"
+        assert unlisted_rows[0].repair == f"genome register-gtf tiny {src} gone --force"
 
     def test_one_broken_annotation_does_not_hide_the_others(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
@@ -791,7 +715,9 @@ class TestAnnotationRegistry:
         _register_by_path(tmp_path, source, name)
         return source
 
-    def test_the_four_states_are_settled_in_one_construction(self, tmp_path: Path) -> None:
+    def test_the_four_states_are_settled_in_one_construction_bound_to_its_own_directory(
+        self, tmp_path: Path
+    ) -> None:
         self._registered(tmp_path, "ensgene_v101")
         self._registered(tmp_path, "damaged")
         record_path(annotation_dir(tmp_path, "damaged")).unlink()
@@ -803,7 +729,6 @@ class TestAnnotationRegistry:
         assert [record.name for record in registry.offered] == ["ensgene_v101"]
         assert registry.default == "ensgene_v101"
 
-    def test_it_reads_the_directory_it_was_pointed_at(self, tmp_path: Path) -> None:
         # The assembly dir travels with the registry rather than being re-derived from
         # the data root at each question.
         elsewhere = tmp_path / "elsewhere"
@@ -812,147 +737,109 @@ class TestAnnotationRegistry:
         _register_by_path(elsewhere, source, "mine")
 
         assert AnnotationRegistry.locate("tiny", elsewhere).registered == ["mine"]
-        assert AnnotationRegistry.locate("tiny", tmp_path).registered == []
+        assert AnnotationRegistry.locate("tiny", tmp_path / "unused").registered == []
 
-    def test_the_path_of_a_registered_annotation_is_its_gtf(self, tmp_path: Path) -> None:
-        self._registered(tmp_path, "mine")
+        # Its status is exactly what the status report answers, and nothing is
+        # created by asking.
+        assert registry.status() == annotation_status("sacCer3", cache_dir=tmp_path)
+        nothing = AnnotationRegistry.locate("sacCer3", tmp_path / "unused" / "genome" / "sacCer3")
+        assert nothing.registered == []
+        assert nothing.broken == []
+        assert nothing.default == "ensgene_v101"
+        assert not (tmp_path / "unused" / "genome").exists()
 
-        registry = AnnotationRegistry.locate("tiny", tmp_path)
-
-        assert registry.path("mine") == annotation_dir(tmp_path, "mine") / "mine.gtf"
-
-    def test_a_name_nothing_knows_says_what_is_registered_and_what_is_offered(
+    def test_path_resolves_registered_names_and_explains_unregistered_or_broken_ones(
         self, tmp_path: Path
     ) -> None:
-        registry = AnnotationRegistry.locate("sacCer3", tmp_path)
+        self._registered(tmp_path, "mine")
+        registry = AnnotationRegistry.locate("tiny", tmp_path)
+        assert registry.path("mine") == annotation_dir(tmp_path, "mine") / "mine.gtf"
 
-        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
-            registry.path("no_such_annotation")
-
-        message = str(excinfo.value)
+        offering = AnnotationRegistry.locate("sacCer3", tmp_path)
+        with pytest.raises(AnnotationNotRegisteredError) as unregistered:
+            offering.path("no_such_annotation")
+        message = str(unregistered.value)
         assert "no_such_annotation" in message
         assert "ensgene_v101" in message  # what the table does offer
 
-    def test_the_path_of_a_broken_one_names_its_repair_in_one_hop(self, tmp_path: Path) -> None:
         # Not the command that would itself raise and demand --force: the one that works.
         self._registered(tmp_path, "ensgene_v101")
         record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
+        with pytest.raises(AnnotationNotRegisteredError) as broken:
+            AnnotationRegistry.locate("sacCer3", tmp_path).path("ensgene_v101")
+        assert "genome register-annotation sacCer3 ensgene_v101 --force" in str(broken.value)
 
-        registry = AnnotationRegistry.locate("sacCer3", tmp_path)
-
-        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
-            registry.path("ensgene_v101")
-
-        assert "genome register-annotation sacCer3 ensgene_v101 --force" in str(excinfo.value)
-
-    def test_registering_by_path_adopts_it_without_reading_the_disk_again(
-        self, tmp_path: Path
-    ) -> None:
-        source = tmp_path / "ann.gtf"
-        source.write_text(_GTF)
-        registry = AnnotationRegistry.locate("tiny", tmp_path)
-        assert registry.registered == []
-
-        annotation = registry.register_path(source, "mine")
-
-        assert registry.registered == ["mine"]
-        assert registry.path("mine") == annotation.gtf
-        assert registry.default == "mine"  # nothing flagged, and it is alone
-
-    def test_registering_by_name_fetches_and_adopts(
+    def test_registering_adopts_the_result_and_the_default_is_the_flag_unless_overridden(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
-        fake_fetch.serve("tiny.gtf.gz")
-        registry = AnnotationRegistry.locate("tiny", tmp_path)
-
-        annotation = registry.register(_NAME, progressbar=False, metadata=_row())
-
-        assert registry.registered == [_NAME]
-        assert registry.path(_NAME) == annotation.gtf
-
-    def test_a_default_already_decided_is_never_displaced_by_a_registration(
-        self, tmp_path: Path
-    ) -> None:
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
-        registry = AnnotationRegistry.locate("sacCer3", tmp_path)
-        assert registry.default == "ensgene_v101"  # the table's flag
+        by_path = AnnotationRegistry.locate("tiny", tmp_path / "path")
+        assert by_path.registered == []
 
-        registry.register_path(source, "mine")
+        annotation = by_path.register_path(source, "mine")
 
-        assert registry.default == "ensgene_v101"
+        assert by_path.registered == ["mine"]
+        assert by_path.path("mine") == annotation.gtf
+        assert by_path.default == "mine"  # nothing flagged, and it is alone
 
-    def test_an_explicit_default_wins_and_need_not_be_registered(self, tmp_path: Path) -> None:
-        registry = AnnotationRegistry.locate("sacCer3", tmp_path, default="mine")
+        fake_fetch.serve("tiny.gtf.gz")
+        by_name = AnnotationRegistry.locate("tiny", tmp_path / "name")
 
-        assert registry.default == "mine"
-        assert registry.registered == []
+        fetched = by_name.register(_NAME, progressbar=False, metadata=_row())
 
-    def test_registering_over_a_broken_directory_stops_reporting_it(self, tmp_path: Path) -> None:
+        assert by_name.registered == [_NAME]
+        assert by_name.path(_NAME) == fetched.gtf
+
+        flagged = AnnotationRegistry.locate("sacCer3", tmp_path / "flagged")
+        assert flagged.default == "ensgene_v101"  # the table's flag
+
+        flagged.register_path(source, "mine")
+        assert flagged.default == "ensgene_v101"  # never displaced by a registration
+
+        explicit = AnnotationRegistry.locate("sacCer3", tmp_path / "explicit", default="mine")
+        assert explicit.default == "mine"
+        assert explicit.registered == []  # need not be registered to win
+
+    def test_a_broken_directory_either_names_a_repair_command_or_is_repaired_by_force(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
         source = self._registered(tmp_path, "mine")
         record_path(annotation_dir(tmp_path, "mine")).unlink()
         registry = AnnotationRegistry.locate("tiny", tmp_path)
         assert [entry.name for entry in registry.broken] == ["mine"]
 
         registry.register_path(source, "mine", force=True)
-
         assert registry.broken == []
         assert registry.registered == ["mine"]
 
-    def test_addressed_by_assembly_name_a_broken_directory_names_a_command(
-        self, tmp_path: Path
-    ) -> None:
-        # A registry always knows its assembly, so the repair it names is a command a
-        # shell can run rather than a Python call with the assembly left to guess at.
-        source = tmp_path / "ann.gtf"
-        source.write_text(_GTF)
+        # A registry always knows its assembly, so the repair a half-built directory
+        # names is a command a shell can run rather than a Python call with the
+        # assembly left to guess at.
         directory = annotation_dir(tmp_path, "WS298")
         directory.mkdir(parents=True)
         (directory / "WS298.db").write_bytes(b"half a database")
-
         with pytest.raises(UnfinishedRegistrationError) as excinfo:
-            AnnotationRegistry.locate("tiny", tmp_path).register_path(source, "WS298")
-
+            registry.register_path(source, "WS298")
         assert f"genome register-gtf tiny {source} WS298 --force" in str(excinfo.value)
 
-    def test_it_finds_the_assemblys_chrom_sizes_without_being_told(
-        self, tmp_path: Path, data_dir: Path
-    ) -> None:
-        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
-
+        # Chrom.sizes defaults to the assembly's own...
+        chrom_dir = tmp_path / "chrom"
+        _write_chrom_sizes(chrom_dir, "chrI", "chrII", "chrIII")
         with pytest.raises(ChromosomeMismatchError):
-            AnnotationRegistry.locate("tiny", tmp_path).register_path(
+            AnnotationRegistry.locate("tiny", chrom_dir).register_path(
                 data_dir / "ensembl_style.gtf", _NAME
             )
 
-    def test_a_chrom_sizes_it_is_handed_is_the_one_checked_against(
-        self, tmp_path: Path, data_dir: Path
-    ) -> None:
-        # What a Genome opened somewhere of its own passes: the chrom.sizes it actually
-        # prepared, rather than the one the layout would name for its assembly.
-        sizes = _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII", assembly="elsewhere")
-
+        # ...but what a Genome opened somewhere of its own passes — the chrom.sizes it
+        # actually prepared, rather than the one the layout would name for its
+        # assembly — is the one checked against.
+        elsewhere = tmp_path / "elsewhere"
+        sizes = _write_chrom_sizes(elsewhere, "chrI", "chrII", "chrIII", assembly="elsewhere")
         with pytest.raises(ChromosomeMismatchError):
             AnnotationRegistry(
-                AssemblyDir.locate("tiny", tmp_path), chrom_sizes=sizes
+                AssemblyDir.locate("tiny", elsewhere), chrom_sizes=sizes
             ).register_path(data_dir / "ensembl_style.gtf", _NAME)
-
-    def test_its_status_is_what_the_status_report_answers(self, tmp_path: Path) -> None:
-        self._registered(tmp_path, "healthy")
-        self._registered(tmp_path, "damaged")
-        record_path(annotation_dir(tmp_path, "damaged")).unlink()
-
-        assert AnnotationRegistry.locate("tiny", tmp_path).status() == annotation_status(
-            "tiny", cache_dir=tmp_path
-        )
-
-    def test_nothing_is_created_by_asking(self, liulab_data: Path) -> None:
-        registry = AnnotationRegistry.locate("sacCer3", liulab_data / "genome" / "sacCer3")
-
-        assert registry.registered == []
-        assert registry.broken == []
-        assert registry.default == "ensgene_v101"
-        assert not (liulab_data / "genome").exists()
 
 
 class TestChromosomeNames:
@@ -966,8 +853,8 @@ class TestChromosomeNames:
     #: How the fixture assembly spells its three sequences.
     _UCSC = ("chrI", "chrII", "chrIII")
 
-    def test_an_ensembl_spelled_gtf_is_refused_naming_every_offender(
-        self, tmp_path: Path, data_dir: Path
+    def test_a_mismatch_is_refused_naming_every_offender_and_costs_nothing_by_path_or_name(
+        self, fake_fetch: FakeFetch, tmp_path: Path, data_dir: Path
     ) -> None:
         sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
 
@@ -979,40 +866,31 @@ class TestChromosomeNames:
         assert "I, II, III" in message
         assert "chrI" in message  # what the assembly spells them as
         assert "check_chromosomes=False" in message
-
-    def test_a_refused_gtf_costs_neither_a_database_nor_a_directory(
-        self, tmp_path: Path, data_dir: Path
-    ) -> None:
-        # The check runs before the build, and before anything is placed: the annotation
-        # directory is left exactly as it was found.
-        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
-
-        with pytest.raises(ChromosomeMismatchError):
-            _register_by_path(tmp_path, data_dir / "ensembl_style.gtf", _NAME, chrom_sizes=sizes)
-
+        # The check runs before the build, and before anything is placed: the
+        # annotation directory is left exactly as it was found.
         assert not annotation_dir(tmp_path, _NAME).exists()
         assert list(tmp_path.rglob("*.db")) == []
 
-    def test_refused_by_name_it_stays_refused_rather_than_reading_as_interrupted(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
+        by_name_dir = tmp_path / "by-name"
         fake_fetch.serve("ensembl_style.gtf")
-        _write_chrom_sizes(tmp_path, *self._UCSC)
+        _write_chrom_sizes(by_name_dir, *self._UCSC)
         row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
 
         with pytest.raises(ChromosomeMismatchError):
-            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+            _register_by_name(by_name_dir, "tiny", _NAME, progressbar=False, metadata=row)
 
-        directory = annotation_dir(tmp_path, _NAME)
+        directory = annotation_dir(by_name_dir, _NAME)
         assert not (directory / f"{_NAME}.gtf").exists()  # never placed
-        assert list(tmp_path.rglob("*.db")) == []  # never paid for the build
+        assert list(by_name_dir.rglob("*.db")) == []  # never paid for the build
         assert read_record(directory) is None
 
         # Running it again reports the same problem, not an interrupted registration.
         with pytest.raises(ChromosomeMismatchError):
-            _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
+            _register_by_name(by_name_dir, "tiny", _NAME, progressbar=False, metadata=row)
 
-    def test_sequences_the_annotation_never_mentions_are_not_an_error(self, tmp_path: Path) -> None:
+    def test_extra_sequences_comments_and_a_gzipped_source_are_handled_and_mismatches_summarized(
+        self, tmp_path: Path, data_dir: Path
+    ) -> None:
         # Strict one way only: the GTF names chrI alone, the assembly carries five.
         sizes = _write_chrom_sizes(tmp_path, *self._UCSC, "chrM", "scaffold_17")
         source = tmp_path / "one-chromosome.gtf"
@@ -1025,42 +903,41 @@ class TestChromosomeNames:
         assert record is not None
         assert record.details["chromosomes_checked"] is True
 
-    def test_a_gzipped_source_is_checked_without_being_unpacked_first(
-        self, tmp_path: Path, data_dir: Path
-    ) -> None:
-        source = tmp_path / "ensembl_style.gtf.gz"
-        with gzip.open(source, "wt") as handle:
+        # A header comment is not a chromosome name either.
+        commented_dir = tmp_path / "commented"
+        commented_sizes = _write_chrom_sizes(commented_dir, *self._UCSC)
+        commented = commented_dir / "commented.gtf"
+        commented.write_text("##description: a header\n#!genome-build tiny\n" + _GTF)
+        assert _register_by_path(
+            commented_dir, commented, "WS298", chrom_sizes=commented_sizes
+        ).db.is_file()
+
+        # A gzipped source is checked without being unpacked first.
+        gzip_dir = tmp_path / "gzip"
+        gzipped = gzip_dir / "ensembl_style.gtf.gz"
+        gzip_dir.mkdir()
+        with gzip.open(gzipped, "wt") as handle:
             handle.write((data_dir / "ensembl_style.gtf").read_text())
-        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
-
+        gzip_sizes = _write_chrom_sizes(gzip_dir, *self._UCSC)
         with pytest.raises(ChromosomeMismatchError):
-            _register_by_path(tmp_path, source, _NAME, chrom_sizes=sizes)
+            _register_by_path(gzip_dir, gzipped, _NAME, chrom_sizes=gzip_sizes)
+        assert not annotation_dir(gzip_dir, _NAME).exists()
 
-        assert not annotation_dir(tmp_path, _NAME).exists()
-
-    def test_a_wholesale_mismatch_lists_ten_names_and_counts_the_rest(self, tmp_path: Path) -> None:
+        # A wholesale mismatch lists ten names in the message and counts the rest.
         offenders = [f"scaffold_{n}" for n in range(25)]
-        source = tmp_path / "many.gtf"
-        source.write_text(
+        many_dir = tmp_path / "many"
+        many_sizes = _write_chrom_sizes(many_dir, *self._UCSC)
+        many = many_dir / "many.gtf"
+        many.write_text(
             "".join(f'{name}\ttest\texon\t1\t100\t.\t+\t.\tgene_id "g1";\n' for name in offenders)
         )
-        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
-
         with pytest.raises(ChromosomeMismatchError) as excinfo:
-            _register_by_path(tmp_path, source, _NAME, chrom_sizes=sizes)
-
+            _register_by_path(many_dir, many, "WS299", chrom_sizes=many_sizes)
         assert len(excinfo.value.missing) == 25  # every one of them is on the exception
         assert "(and 15 more)" in str(excinfo.value)  # ten of them are in the message
 
-    def test_comment_lines_are_not_taken_for_chromosomes(self, tmp_path: Path) -> None:
-        sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
-        source = tmp_path / "commented.gtf"
-        source.write_text("##description: a header\n#!genome-build tiny\n" + _GTF)
-
-        assert _register_by_path(tmp_path, source, "WS298", chrom_sizes=sizes).db.is_file()
-
-    def test_the_override_registers_a_mismatched_gtf_anyway(
-        self, tmp_path: Path, data_dir: Path
+    def test_the_override_registers_a_mismatch_by_path_or_name_and_the_record_says_why(
+        self, fake_fetch: FakeFetch, tmp_path: Path, data_dir: Path
     ) -> None:
         sizes = _write_chrom_sizes(tmp_path, *self._UCSC)
 
@@ -1086,53 +963,45 @@ class TestChromosomeNames:
         assert record.details["chromosomes_checked"] is False
         assert record.details["chromosomes_unchecked_because"] == "caller-override"
 
-    def test_the_override_registers_by_name_too(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
+        by_name_dir = tmp_path / "by-name"
         fake_fetch.serve("ensembl_style.gtf")
-        _write_chrom_sizes(tmp_path, *self._UCSC)
+        _write_chrom_sizes(by_name_dir, *self._UCSC)
         row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
 
-        annotation = _register_by_name(
-            tmp_path, "tiny", _NAME, progressbar=False, metadata=row, check_chromosomes=False
+        by_name = _register_by_name(
+            by_name_dir, "tiny", _NAME, progressbar=False, metadata=row, check_chromosomes=False
         )
 
-        assert annotation.db.is_file()
-        record = read_record(annotation_dir(tmp_path, _NAME))
-        assert record is not None
-        assert record.details["chromosomes_checked"] is False
-        assert record.details["chromosomes_unchecked_because"] == "caller-override"
+        assert by_name.db.is_file()
+        by_name_record = read_record(annotation_dir(by_name_dir, _NAME))
+        assert by_name_record is not None
+        assert by_name_record.details["chromosomes_checked"] is False
+        assert by_name_record.details["chromosomes_unchecked_because"] == "caller-override"
 
-    def test_a_matching_gtf_registered_by_name_records_that_it_was_checked(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
+        matching_dir = tmp_path / "matching"
         fake_fetch.serve("tiny.gtf.gz")
-        _write_chrom_sizes(tmp_path, *self._UCSC)
-
-        _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=_row())
-
-        record = read_record(annotation_dir(tmp_path, _NAME))
-        assert record is not None
-        assert record.details["chromosomes_checked"] is True
+        _write_chrom_sizes(matching_dir, *self._UCSC)
+        _register_by_name(matching_dir, "tiny", _NAME, progressbar=False, metadata=_row())
+        matching_record = read_record(annotation_dir(matching_dir, _NAME))
+        assert matching_record is not None
+        assert matching_record.details["chromosomes_checked"] is True
         # A check that ran and did not raise passed, so there is no reason beside it.
-        assert record.details["chromosomes_unchecked_because"] is None
+        assert matching_record.details["chromosomes_unchecked_because"] is None
 
-    def test_without_a_chrom_sizes_there_is_nothing_to_check_and_the_record_says_so(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
         # An annotation registered before its assembly was prepared: no chrom.sizes
         # exists, so the names cannot be checked. The record says they were not, and
         # says it was for want of that file rather than because anyone asked to skip it.
+        unchecked_dir = tmp_path / "unchecked"
         fake_fetch.serve("ensembl_style.gtf")
         row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
-
-        annotation = _register_by_name(tmp_path, "tiny", _NAME, progressbar=False, metadata=row)
-
+        annotation = _register_by_name(
+            unchecked_dir, "tiny", _NAME, progressbar=False, metadata=row
+        )
         assert annotation.db.is_file()
-        record = read_record(annotation_dir(tmp_path, _NAME))
-        assert record is not None
-        assert record.details["chromosomes_checked"] is False
-        assert record.details["chromosomes_unchecked_because"] == "no-chrom-sizes"
+        unchecked_record = read_record(annotation_dir(unchecked_dir, _NAME))
+        assert unchecked_record is not None
+        assert unchecked_record.details["chromosomes_checked"] is False
+        assert unchecked_record.details["chromosomes_unchecked_because"] == "no-chrom-sizes"
 
 
 @pytest.fixture(scope="session")
@@ -1170,8 +1039,8 @@ def test_the_check_names_every_offender_never_a_subset(
 class TestRegisterAnnotation:
     """``register_annotation`` — the same by assembly name, answering with the record."""
 
-    def test_it_returns_the_record_plus_where_it_landed(
-        self, fake_fetch: FakeFetch, tmp_path: Path
+    def test_it_returns_and_serializes_the_record_plus_where_it_landed(
+        self, fake_fetch: FakeFetch, tmp_path: Path, liulab_data: Path
     ) -> None:
         fake_fetch.serve("tiny.gtf.gz")
 
@@ -1195,75 +1064,60 @@ class TestRegisterAnnotation:
         }
         assert payload.file_names == [f"{_NAME}.db", f"{_NAME}.gtf"]
 
-    def test_the_payload_it_serializes_is_the_record_plus_where_it_landed(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
-        # The `--json` payload is the completion record under its own on-disk key names,
-        # with the two facts a record does not hold about itself. A type wraps those
-        # names; it never renames them, because lab directories are read by both.
-        fake_fetch.serve("tiny.gtf.gz")
-
-        payload = register_annotation(
-            "tiny", _NAME, cache_dir=tmp_path, progressbar=False, metadata=_row()
-        )
-
+        # The `--json` payload is the completion record under its own on-disk key
+        # names, with the two facts a record does not hold about itself. A type wraps
+        # those names; it never renames them, because lab directories are read by both.
         assert payload.as_json() == {
             **asdict(payload.record),
             "assembly": "tiny",
-            "directory": str(annotation_dir(tmp_path, _NAME)),
+            "directory": str(directory),
         }
         assert list(payload.as_json())[-2:] == ["assembly", "directory"]
 
-    def test_what_the_chromosome_check_settled_is_read_off_the_record(
+        # With no cache_dir given, it files under the assembly's own Data dir.
+        default_payload = register_annotation(
+            "tiny", "elsewhere", progressbar=False, metadata=_row(name="elsewhere")
+        )
+        assert default_payload.directory == liulab_data / "genome" / "tiny" / "gtf" / "elsewhere"
+
+    def test_the_chromosome_check_is_read_off_the_record_from_both_ways_in(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
         # The sentence belongs to the record and to the API that reads it, so a surface
         # printing it names none of the record's fields. Nothing is registered as the
         # assembly here, so there was no chrom.sizes to check against.
         fake_fetch.serve("tiny.gtf.gz")
-
         payload = register_annotation(
             "tiny", _NAME, cache_dir=tmp_path, progressbar=False, metadata=_row()
         )
-
         assert payload.chromosome_check == chromosome_check_summary(payload.record.details)
         assert "nothing to check against" in payload.chromosome_check
 
-    def test_the_chromosome_check_reaches_this_way_in_too(
-        self, fake_fetch: FakeFetch, tmp_path: Path
-    ) -> None:
+        mismatch_dir = tmp_path / "mismatch"
         fake_fetch.serve("ensembl_style.gtf")
-        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
+        _write_chrom_sizes(mismatch_dir, "chrI", "chrII", "chrIII")
         row = _row(url="https://mirror.example.invalid/annotations/ensembl_style.gtf")
 
         with pytest.raises(ChromosomeMismatchError):
-            register_annotation("tiny", _NAME, cache_dir=tmp_path, progressbar=False, metadata=row)
+            register_annotation(
+                "tiny", _NAME, cache_dir=mismatch_dir, progressbar=False, metadata=row
+            )
 
-        payload = register_annotation(
+        override_payload = register_annotation(
             "tiny",
             _NAME,
-            cache_dir=tmp_path,
+            cache_dir=mismatch_dir,
             progressbar=False,
             metadata=row,
             check_chromosomes=False,
         )
-
-        assert payload.record.details == {
+        assert override_payload.record.details == {
             "provider": "UCSC",
             "version": "ensGene.v101",
             "gffutils_version": gffutils.__version__,
             "chromosomes_checked": False,
             "chromosomes_unchecked_because": "caller-override",
         }
-
-    def test_it_files_the_annotation_under_the_assembly_data_dir(
-        self, fake_fetch: FakeFetch, liulab_data: Path
-    ) -> None:
-        fake_fetch.serve("tiny.gtf.gz")
-
-        payload = register_annotation("tiny", _NAME, progressbar=False, metadata=_row())
-
-        assert payload.directory == liulab_data / "genome" / "tiny" / "gtf" / _NAME
 
     def test_the_inference_knobs_reach_the_database_build(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -1302,8 +1156,8 @@ class TestRegisterAnnotation:
 class TestRegisterGtf:
     """``register_gtf`` — a GTF no row lists, addressed by assembly name."""
 
-    def test_it_returns_the_record_plus_where_it_landed(
-        self, tmp_path: Path, liulab_data: Path
+    def test_it_returns_the_record_plus_where_it_landed_and_checks_chromosomes(
+        self, tmp_path: Path, liulab_data: Path, data_dir: Path
     ) -> None:
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
@@ -1320,41 +1174,26 @@ class TestRegisterGtf:
             name: (directory / name).stat().st_size for name in ("WS298.gtf", "WS298.db")
         }
 
-    def test_cache_dir_overrides_which_assembly_directory_it_is_filed_under(
-        self, tmp_path: Path
-    ) -> None:
-        source = tmp_path / "ann.gtf"
-        source.write_text(_GTF)
         elsewhere = tmp_path / "elsewhere"
+        overridden = register_gtf("tiny", source, "WS298", cache_dir=elsewhere)
+        assert overridden.directory == annotation_dir(elsewhere, "WS298")
 
-        payload = register_gtf("tiny", source, "WS298", cache_dir=elsewhere)
-
-        assert payload.directory == annotation_dir(elsewhere, "WS298")
-
-    def test_it_finds_the_assembly_chrom_sizes_without_being_told(
-        self, tmp_path: Path, data_dir: Path
-    ) -> None:
         # Naming the assembly is what says where its chrom.sizes is, so an
         # Ensembl-spelled GTF is refused rather than silently registered unchecked.
-        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
+        mismatch_dir = tmp_path / "mismatch"
+        _write_chrom_sizes(mismatch_dir, "chrI", "chrII", "chrIII")
 
         with pytest.raises(ChromosomeMismatchError):
-            register_gtf("tiny", data_dir / "ensembl_style.gtf", _NAME, cache_dir=tmp_path)
+            register_gtf("tiny", data_dir / "ensembl_style.gtf", _NAME, cache_dir=mismatch_dir)
 
-    def test_the_override_registers_the_mismatch_anyway_and_the_record_says_so(
-        self, tmp_path: Path, data_dir: Path
-    ) -> None:
-        _write_chrom_sizes(tmp_path, "chrI", "chrII", "chrIII")
-
-        payload = register_gtf(
+        override_payload = register_gtf(
             "tiny",
             data_dir / "ensembl_style.gtf",
             _NAME,
-            cache_dir=tmp_path,
+            cache_dir=mismatch_dir,
             check_chromosomes=False,
         )
-
-        assert payload.record.details == {
+        assert override_payload.record.details == {
             "gffutils_version": gffutils.__version__,
             "chromosomes_checked": False,
             "chromosomes_unchecked_because": "caller-override",
@@ -1381,11 +1220,10 @@ class TestRegisterGtf:
             "transcript",
         ]
 
-    def test_a_missing_source_says_what_to_pass(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError, match="GTF file not found"):
             register_gtf("tiny", tmp_path / "nope.gtf", "WS298", cache_dir=tmp_path)
 
-    def test_a_broken_directory_names_the_command_that_repairs_it(self, tmp_path: Path) -> None:
+    def test_a_broken_directory_names_its_repair_and_force_applies_it(self, tmp_path: Path) -> None:
         # Addressed by assembly name, the repair is a command a shell can run rather
         # than a Python call with the assembly left to guess at.
         source = tmp_path / "ann.gtf"
@@ -1396,18 +1234,9 @@ class TestRegisterGtf:
 
         with pytest.raises(UnfinishedRegistrationError) as excinfo:
             register_gtf("tiny", source, "WS298", cache_dir=tmp_path)
-
         assert f"genome register-gtf tiny {source} WS298 --force" in str(excinfo.value)
 
-    def test_force_repairs_what_the_error_named(self, tmp_path: Path) -> None:
-        source = tmp_path / "ann.gtf"
-        source.write_text(_GTF)
-        directory = annotation_dir(tmp_path, "WS298")
-        directory.mkdir(parents=True)
-        (directory / "WS298.db").write_bytes(b"half a database")
-
         payload = register_gtf("tiny", source, "WS298", cache_dir=tmp_path, force=True)
-
         assert payload.name == "WS298"
         assert list(list_annotations(tmp_path)) == ["WS298"]
 
@@ -1493,12 +1322,13 @@ class TestGeneList:
 
     def _registry(self, tmp_path: Path, *, assembly: str = _CURATED_ASSEMBLY) -> AnnotationRegistry:
         """Register the fixture GTF under a curated annotation's name and open the registry."""
+        tmp_path.mkdir(parents=True, exist_ok=True)
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
         _register_by_path(tmp_path, source, _CURATED, assembly=assembly)
         return AnnotationRegistry.locate(assembly, tmp_path)
 
-    def test_a_plain_annotation_answers_as_one_source_belonging_to_no_component(
+    def test_a_plain_annotation_answers_with_one_unattributed_source_and_the_curated_ids(
         self, tmp_path: Path
     ) -> None:
         registry = self._registry(tmp_path)
@@ -1515,129 +1345,86 @@ class TestGeneList:
         # attribution is what a merge needs, and there is nothing here to attribute.
         assert [source.component for source in answer.sources] == [None]
         assert [source.annotation for source in answer.sources] == [_CURATED]
-
-    def test_the_ids_are_the_curated_lists_own_in_the_order_it_lists_them(
-        self, tmp_path: Path
-    ) -> None:
-        registry = self._registry(tmp_path)
-        category = _declared(_CURATED)[0]
-
-        answer = registry.gene_list(category, _CURATED)
-
+        # The two sentences travel with the ids, because they are what says whether
+        # these ids mean what the caller's metric needs.
+        assert answer.sources[0].description.strip()
+        assert answer.sources[0].source.strip()
         assert answer.gene_ids == list(_curated_ids(_CURATED, category))
         assert answer.gene_ids  # never an empty answer: a declared category has genes
 
-    def test_a_source_carries_what_membership_means_and_where_it_came_from(
-        self, tmp_path: Path
-    ) -> None:
-        # The two sentences travel with the ids, because they are what says whether these
-        # ids mean what the caller's metric needs.
-        answer = self._registry(tmp_path).gene_list(_declared(_CURATED)[0], _CURATED)
-
-        assert answer.sources[0].description.strip()
-        assert answer.sources[0].source.strip()
-
-    def test_a_category_the_list_does_not_declare_raises_and_lists_the_ones_it_does(
+    def test_the_two_kinds_of_absence_are_told_apart_and_each_names_whats_available(
         self, tmp_path: Path
     ) -> None:
         registry = self._registry(tmp_path)
 
-        with pytest.raises(GeneCategoryNotDeclaredError) as excinfo:
+        with pytest.raises(GeneCategoryNotDeclaredError) as declared:
             registry.gene_list("no_such_category", _CURATED)
-
-        message = str(excinfo.value)
+        message = str(declared.value)
         assert "no_such_category" in message
         for category in _declared(_CURATED):
             assert category in message
 
-    def test_an_annotation_nothing_ships_a_list_for_raises_the_other_absence(
-        self, tmp_path: Path
-    ) -> None:
-        # The fact #111 exists for: *no categories are declared* and *this category is not
-        # declared* are different, and neither is an empty answer.
+        # The fact #111 exists for: *no categories are declared* and *this category is
+        # not declared* are different, and neither is an empty answer.
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
         _register_by_path(tmp_path, source, "mine")
-        registry = AnnotationRegistry.locate("tiny", tmp_path)
-
-        with pytest.raises(NoGeneCategoriesError) as excinfo:
-            registry.gene_list("rRNA", "mine")
-
-        message = str(excinfo.value)
-        assert "mine" in message
-        assert _CURATED in message  # …and which annotations do declare categories
-
-    def test_the_two_absences_are_told_apart_by_type_and_caught_together(
-        self, tmp_path: Path
-    ) -> None:
-        registry = self._registry(tmp_path)
-        source = tmp_path / "ann.gtf"
-        _register_by_path(tmp_path, source, "mine", assembly=_CURATED_ASSEMBLY)
-        both = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path)
-
-        with pytest.raises(LookupError) as declared:
-            registry.gene_list("no_such_category", _CURATED)
-        with pytest.raises(LookupError) as nothing:
-            both.gene_list("no_such_category", "mine")
+        nothing_declared_registry = AnnotationRegistry.locate("tiny", tmp_path)
+        with pytest.raises(NoGeneCategoriesError) as nothing_declared:
+            nothing_declared_registry.gene_list("rRNA", "mine")
+        nothing_message = str(nothing_declared.value)
+        assert "mine" in nothing_message
+        assert _CURATED in nothing_message  # …and which annotations do declare categories
 
         assert isinstance(declared.value, GeneCategoryNotDeclaredError)
-        assert isinstance(nothing.value, NoGeneCategoriesError)
+        assert isinstance(nothing_declared.value, NoGeneCategoriesError)
         assert not isinstance(declared.value, NoGeneCategoriesError)
-        assert not isinstance(nothing.value, GeneCategoryNotDeclaredError)
+        assert not isinstance(nothing_declared.value, GeneCategoryNotDeclaredError)
 
-    def test_an_unregistered_name_earns_the_error_it_already_had(self, tmp_path: Path) -> None:
-        # Callers pass names, never paths, and a name nothing registered is resolved by the
-        # same `path` every other question goes through — so the message is the same one.
-        registry = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path)
-
-        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
-            registry.gene_list("rRNA", _CURATED)
-
-        assert f"genome register-annotation {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
-
-    def test_naming_no_annotation_asks_the_default_one(self, tmp_path: Path) -> None:
-        registry = self._registry(tmp_path)
+    def test_naming_no_annotation_asks_the_default_and_an_unregistered_or_missing_one_names_it(
+        self, tmp_path: Path
+    ) -> None:
+        registry = self._registry(tmp_path / "default")
         category = _declared(_CURATED)[0]
 
         assert registry.default == _CURATED
         assert registry.gene_list(category).annotation == _CURATED
 
-    def test_no_default_and_no_name_says_which_argument_chooses_one(self, tmp_path: Path) -> None:
-        registry = AnnotationRegistry.locate("tiny", tmp_path)
+        # Callers pass names, never paths, and a name nothing registered is resolved by
+        # the same `path` every other question goes through — so the message is the
+        # same one.
+        unregistered = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path / "unregistered")
+        with pytest.raises(AnnotationNotRegisteredError) as excinfo:
+            unregistered.gene_list("rRNA", _CURATED)
+        assert f"genome register-annotation {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
 
-        with pytest.raises(ValueError, match="annotation") as excinfo:
-            registry.gene_list("rRNA")
+        no_default = AnnotationRegistry.locate("tiny", tmp_path / "no-default")
+        with pytest.raises(ValueError, match="annotation") as no_default_excinfo:
+            no_default.gene_list("rRNA")
+        assert "default_gtf" in str(no_default_excinfo.value)
 
-        assert "default_gtf" in str(excinfo.value)
-
-    def test_a_list_curated_against_another_assembly_refuses_to_answer(
-        self, tmp_path: Path
-    ) -> None:
         # A name is unique only within its assembly, so a list found by name alone is not
         # yet known to be about this reference — and answering would hand back another
         # species' genes under this one's name.
-        registry = self._registry(tmp_path, assembly="tiny")
+        wrong_assembly = self._registry(tmp_path / "wrong", assembly="tiny")
 
         with pytest.raises(GeneListAssemblyMismatchError) as excinfo:
-            registry.gene_list(_declared(_CURATED)[0], _CURATED)
+            wrong_assembly.gene_list(_declared(_CURATED)[0], _CURATED)
 
         message = str(excinfo.value)
         assert "tiny" in message
         assert _CURATED_ASSEMBLY in message
 
-    def test_gene_lists_returns_every_declared_category_in_file_order(self, tmp_path: Path) -> None:
+    def test_gene_lists_returns_every_declared_category_or_raises_if_none_are(
+        self, tmp_path: Path
+    ) -> None:
         answers = self._registry(tmp_path).gene_lists(_CURATED)
-
         assert [answer.category for answer in answers] == list(_declared(_CURATED))
         assert all(answer.gene_ids for answer in answers)
 
-    def test_gene_lists_raises_rather_than_answering_with_an_empty_tuple(
-        self, tmp_path: Path
-    ) -> None:
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
         _register_by_path(tmp_path, source, "mine")
-
         with pytest.raises(NoGeneCategoriesError):
             AnnotationRegistry.locate("tiny", tmp_path).gene_lists("mine")
 
@@ -1651,12 +1438,15 @@ class TestMergedGeneList:
 
     def _registry(self, tmp_path: Path, name: str = f"{_WORM}+{_FOOD}") -> AnnotationRegistry:
         """Register a merged annotation under ``name`` and open the chimera's registry."""
+        tmp_path.mkdir(parents=True, exist_ok=True)
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
         _register_merged(tmp_path, name, source)
         return AnnotationRegistry.locate(_CHIMERA, tmp_path)
 
-    def test_each_contributor_answers_for_its_own_component(self, tmp_path: Path) -> None:
+    def test_each_contributor_answers_for_its_own_component_and_ids_are_never_deduped(
+        self, tmp_path: Path
+    ) -> None:
         registry = self._registry(tmp_path)
         shared = next(category for category in _declared(_WORM) if category in _declared(_FOOD))
 
@@ -1668,15 +1458,6 @@ class TestMergedGeneList:
         ]
         assert answer.annotation == f"{_WORM}+{_FOOD}"
         assert answer.assembly == _CHIMERA
-
-    def test_the_ids_are_the_contributions_concatenated_and_never_de_duplicated(
-        self, tmp_path: Path
-    ) -> None:
-        registry = self._registry(tmp_path)
-        shared = next(category for category in _declared(_WORM) if category in _declared(_FOOD))
-
-        answer = registry.gene_list(shared, f"{_WORM}+{_FOOD}")
-
         assert answer.gene_ids == [
             *_curated_ids(_WORM, shared),
             *_curated_ids(_FOOD, shared),
@@ -1699,32 +1480,29 @@ class TestMergedGeneList:
         assert [contributed.component for contributed in answer.sources] == [_WORM_COMPONENT]
         assert answer.gene_ids == list(_curated_ids(_WORM, category))
 
-    def test_a_category_no_contributor_declares_raises(self, tmp_path: Path) -> None:
+    def test_a_category_no_contributor_declares_raises_and_gene_lists_is_their_union(
+        self, tmp_path: Path
+    ) -> None:
         registry = self._registry(tmp_path)
 
         with pytest.raises(GeneCategoryNotDeclaredError):
             registry.gene_list("no_such_category", f"{_WORM}+{_FOOD}")
 
-    def test_who_contributed_comes_from_the_record_and_not_from_splitting_the_name(
-        self, tmp_path: Path
-    ) -> None:
+        union = list(dict.fromkeys([*_declared(_WORM), *_declared(_FOOD)]))
+        assert [answer.category for answer in registry.gene_lists()] == union
+
         # The name of a merge is the +-join of what went in, but it cannot say which
-        # component each half came from — and that is exactly what attribution needs.
-        registry = self._registry(tmp_path, name="merged")
+        # component each half came from — and that is exactly what attribution needs, so
+        # who contributed comes from the record and not from splitting the name.
+        renamed = self._registry(tmp_path / "renamed", name="merged")
         shared = next(category for category in _declared(_WORM) if category in _declared(_FOOD))
 
-        answer = registry.gene_list(shared, "merged")
+        answer = renamed.gene_list(shared, "merged")
 
         assert [source.component for source in answer.sources] == [
             _WORM_COMPONENT,
             _FOOD_COMPONENT,
         ]
-
-    def test_gene_lists_is_the_union_of_what_the_contributors_declare(self, tmp_path: Path) -> None:
-        registry = self._registry(tmp_path)
-        union = list(dict.fromkeys([*_declared(_WORM), *_declared(_FOOD)]))
-
-        assert [answer.category for answer in registry.gene_lists()] == union
 
 
 # ---------------------------------------------------------------------------------------
@@ -1790,12 +1568,13 @@ class TestResolveGeneIds:
 
     def _registry(self, tmp_path: Path, gtf: str, name: str = "mine") -> AnnotationRegistry:
         """Register ``gtf`` under ``name`` for the ``tiny`` assembly and open the registry."""
+        tmp_path.mkdir(parents=True, exist_ok=True)
         source = tmp_path / f"{name}.gtf"
         source.write_text(gtf)
         _register_by_path(tmp_path, source, name)
         return AnnotationRegistry.locate("tiny", tmp_path)
 
-    def test_a_stem_resolves_to_the_versioned_id_the_annotation_spells_it_with(
+    def test_a_stem_resolves_to_the_versioned_id_or_to_itself_when_unversioned(
         self, tmp_path: Path
     ) -> None:
         registry = self._registry(tmp_path, _gtf_declaring(_ALONE))
@@ -1806,95 +1585,74 @@ class TestResolveGeneIds:
         assert answer.unresolved == ()
         assert (answer.assembly, answer.annotation) == ("tiny", "mine")
 
-    def test_a_stem_naming_two_gene_ids_answers_with_both_rather_than_choosing(
+        # WormBase and SGD never versioned a gene id, and an Ensembl-shaped assumption
+        # would leave both unresolvable. An id with no version is its own stem.
+        unversioned_dir = tmp_path / "unversioned"
+        unversioned_dir.mkdir()
+        unversioned = self._registry(unversioned_dir, _GTF)
+        unversioned_answer = unversioned.resolve_gene_ids(["g1", "g2"], "mine")
+        assert unversioned_answer.resolved == {"g1": ("g1",)}
+        assert unversioned_answer.unresolved == ("g2",)
+
+    def test_an_unresolvable_stem_rides_back_and_order_and_repeats_are_handled(
         self, tmp_path: Path
     ) -> None:
         # The `gencode_v50lift37` case: nine stems name two genes each, eight of them a
         # pseudoautosomal pair. Answering with the first would hand back the X copy of a Y
         # gene without ever saying a choice had been made.
-        registry = self._registry(tmp_path, _gtf_declaring(_PAR_Y, _PAR_X, _ALONE))
+        par_stem_registry = self._registry(
+            tmp_path / "par-stem", _gtf_declaring(_PAR_Y, _PAR_X, _ALONE)
+        )
+        par_stem_answer = par_stem_registry.resolve_gene_ids([_PAR_STEM], "mine")
+        assert par_stem_answer.resolved[_PAR_STEM] == (_PAR_X, _PAR_Y)
 
-        answer = registry.resolve_gene_ids([_PAR_STEM], "mine")
-
-        assert answer.resolved[_PAR_STEM] == (_PAR_X, _PAR_Y)
-
-    def test_a_stem_this_annotation_carries_no_gene_for_is_reported_and_not_dropped(
-        self, tmp_path: Path
-    ) -> None:
         registry = self._registry(tmp_path, _gtf_declaring(_ALONE))
 
         answer = registry.resolve_gene_ids([_ALONE_STEM, _ABSENT_STEM], "mine")
-
         assert answer.unresolved == (_ABSENT_STEM,)
         assert _ABSENT_STEM not in answer.resolved
         # …and what did resolve is still there, so an absence costs the caller nothing else.
         assert answer.gene_ids == [_ALONE]
 
-    def test_an_annotation_whose_ids_carry_no_version_resolves_each_stem_to_itself(
-        self, tmp_path: Path
-    ) -> None:
-        # WormBase and SGD never versioned a gene id, and an Ensembl-shaped assumption
-        # would leave both unresolvable. An id with no version is its own stem.
-        registry = self._registry(tmp_path, _GTF)
+        empty_answer = registry.resolve_gene_ids([], "mine")
+        assert (dict(empty_answer.resolved), empty_answer.unresolved) == ({}, ())
 
-        answer = registry.resolve_gene_ids(["g1", "g2"], "mine")
-
-        assert answer.resolved == {"g1": ("g1",)}
-        assert answer.unresolved == ("g2",)
-
-    def test_the_answer_keeps_the_order_the_stems_were_asked_about_and_asks_repeats_once(
-        self, tmp_path: Path
-    ) -> None:
         # A caller passing a few thousand at once reads its own list against the answer.
-        registry = self._registry(tmp_path, _gtf_declaring(_ALONE, _PAR_X))
-
-        answer = registry.resolve_gene_ids(
+        par_dir = tmp_path / "par"
+        par_dir.mkdir()
+        par_registry = self._registry(par_dir, _gtf_declaring(_ALONE, _PAR_X))
+        par_answer = par_registry.resolve_gene_ids(
             [_PAR_STEM, _ABSENT_STEM, _ALONE_STEM, _PAR_STEM], "mine"
         )
+        assert list(par_answer.resolved) == [_PAR_STEM, _ALONE_STEM]
+        assert par_answer.gene_ids == [_PAR_X, _ALONE]
+        assert par_answer.unresolved == (_ABSENT_STEM,)
 
-        assert list(answer.resolved) == [_PAR_STEM, _ALONE_STEM]
-        assert answer.gene_ids == [_PAR_X, _ALONE]
-        assert answer.unresolved == (_ABSENT_STEM,)
-
-    def test_asking_about_no_stems_answers_emptily_rather_than_about_every_gene(
-        self, tmp_path: Path
-    ) -> None:
-        registry = self._registry(tmp_path, _gtf_declaring(_ALONE))
-
-        answer = registry.resolve_gene_ids([], "mine")
-
-        assert (dict(answer.resolved), answer.unresolved) == ({}, ())
-
-    def test_an_annotation_declaring_no_genes_says_so_rather_than_failing_every_stem(
+    def test_an_unregistered_name_or_no_name_is_resolved_by_the_same_lookup(
         self, tmp_path: Path
     ) -> None:
         # An exon-level GTF registers as exons alone, since reconstructing the features
         # above them is off by default. Every stem would come back unresolved, which reads
         # as *this annotation has none of your genes* and is a different fact entirely.
-        registry = self._registry(tmp_path, _BARE_GTF)
+        bare_registry = self._registry(tmp_path / "bare", _BARE_GTF)
+        with pytest.raises(NoGeneFeaturesError) as no_genes:
+            bare_registry.resolve_gene_ids(["g1"], "mine")
+        no_genes_message = str(no_genes.value)
+        assert "mine" in no_genes_message
+        assert "--infer-genes" in no_genes_message  # the argument that rebuilds it with genes
 
-        with pytest.raises(NoGeneFeaturesError) as excinfo:
-            registry.resolve_gene_ids(["g1"], "mine")
-
-        message = str(excinfo.value)
-        assert "mine" in message
-        assert "--infer-genes" in message  # …and the argument that rebuilds it with genes
-
-    def test_an_unregistered_name_earns_the_error_it_already_had(self, tmp_path: Path) -> None:
         # Resolved through the same lookup every other question goes through, so the
         # message and its repair are the ones that surface already has.
         registry = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path)
-
         with pytest.raises(AnnotationNotRegisteredError) as excinfo:
             registry.resolve_gene_ids([_ALONE_STEM], _CURATED)
-
         assert f"genome register-annotation {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
 
-    def test_naming_no_annotation_asks_the_default_one(self, tmp_path: Path) -> None:
-        registry = self._registry(tmp_path, _gtf_declaring(_ALONE))
-
-        assert registry.default == "mine"
-        assert registry.resolve_gene_ids([_ALONE_STEM]).annotation == "mine"
+        default_dir = tmp_path / "default"
+        default_dir.mkdir()
+        default_registry = self._registry(default_dir, _gtf_declaring(_ALONE))
+        assert default_registry.default == "mine"
+        assert default_registry.resolve_gene_ids([_ALONE_STEM]).annotation == "mine"
 
     def test_a_merged_annotation_answers_from_its_own_database_for_either_component(
         self, tmp_path: Path
@@ -2010,12 +1768,14 @@ class TestTFGeneList:
         """Register a GTF declaring ``gene_ids`` under ``name`` and open the registry."""
         return _registry_declaring(tmp_path, *gene_ids, assembly=assembly, name=name)
 
-    def test_the_census_arrives_in_this_annotations_own_gene_ids(self, tmp_path: Path) -> None:
+    def test_the_census_arrives_filtered_widened_or_tightened_with_judgement_and_provenance(
+        self, tmp_path: Path
+    ) -> None:
         # The whole point of the surface: the answer joins to a counts matrix keyed by this
         # annotation's ids, with no normalisation left for the caller.
         stems = _census().assessed_positive[:2]
         gene_ids = [_versioned(stem) for stem in stems]
-        registry = self._registry(tmp_path, *gene_ids)
+        registry = self._registry(tmp_path / "two", *gene_ids)
 
         answer = registry.tf_gene_list("mine")
 
@@ -2023,43 +1783,19 @@ class TestTFGeneList:
         assert [gene.gene_id_stem for gene in answer.genes] == list(stems)
         assert answer.gene_ids == gene_ids
 
-    def test_only_the_genes_the_census_judged_transcription_factors_are_carried(
-        self, tmp_path: Path
-    ) -> None:
-        # The common case is not 2,765 rows to filter down to 1,639.
+        # The common case is not 2,765 rows to filter down to 1,639: only the genes the
+        # census judged transcription factors are carried.
         positive, rejected = _census().assessed_positive[0], _rejected_stem()
-        registry = self._registry(tmp_path, _versioned(positive), _versioned(rejected))
+        filtered = self._registry(tmp_path / "filtered", _versioned(positive), _versioned(rejected))
+        filtered_answer = filtered.tf_gene_list("mine")
+        assert [gene.gene_id_stem for gene in filtered_answer.genes] == [positive]
+        assert [gene.is_tf for gene in filtered_answer.genes] == [True]
 
-        answer = registry.tf_gene_list("mine")
-
-        assert [gene.gene_id_stem for gene in answer.genes] == [positive]
-        assert [gene.is_tf for gene in answer.genes] == [True]
-
-    def test_a_caller_can_widen_to_the_genes_the_census_assessed_and_rejected(
-        self, tmp_path: Path
-    ) -> None:
-        # …and widening carries the verdict rather than dropping it: a gene the census
-        # assessed and turned down arrives saying so, which is not the same fact as a gene
-        # it never looked at, and that one is absent from both answers.
-        positive, rejected = _census().assessed_positive[0], _rejected_stem()
-        registry = self._registry(tmp_path, _versioned(positive), _versioned(rejected))
-
-        answer = registry.tf_gene_list("mine", include_rejected=True)
-
-        assert {gene.gene_id_stem: gene.is_tf for gene in answer.genes} == {
-            positive: True,
-            rejected: False,
-        }
-
-    def test_a_gene_carries_the_censuss_family_and_every_judgement_it_recorded(
-        self, tmp_path: Path
-    ) -> None:
         census = _census()
         stem = census.assessed_positive[0]
-        registry = self._registry(tmp_path, _versioned(stem))
-
-        gene = registry.tf_gene_list("mine").genes[0]
-
+        single = self._registry(tmp_path / "single", _versioned(stem))
+        single_answer = single.tf_gene_list("mine")
+        gene = single_answer.genes[0]
         cells = _census_row(stem)
         assert gene.symbol == cells["symbol"]
         assert gene.dbd_family == cells["dbd_family"]
@@ -2068,17 +1804,32 @@ class TestTFGeneList:
         assert dict(gene.judgements) == {
             name: cells[name] for name in census.columns[len(UNIFORM_COLUMNS) :]
         }
+        # The verdict travels with the census that reached it.
+        assert single_answer.provenance == census.provenance
+        assert single_answer.provenance.publisher
+        assert single_answer.provenance.version
+        assert single_answer.provenance.pubmed_id
+        assert single_answer.species == assembly_metadata(_CENSUSED_ASSEMBLY).species
 
-    def test_a_caller_can_tighten_on_the_assessment_the_census_recorded(
-        self, tmp_path: Path
-    ) -> None:
+        # Widening carries the verdict rather than dropping it: a gene the census
+        # assessed and turned down arrives saying so, which is not the same fact as a gene
+        # it never looked at, and that one is absent from both answers.
+        registry = self._registry(tmp_path / "widen", _versioned(positive), _versioned(rejected))
+
+        widened = registry.tf_gene_list("mine", include_rejected=True)
+
+        assert {gene.gene_id_stem: gene.is_tf for gene in widened.genes} == {
+            positive: True,
+            rejected: False,
+        }
+
         # The **TF assessment** is graded, and tightening to `Known motif` or loosening to
         # include `Inferred motif` is a re-filter on what the answer already carries rather
         # than a second flag this package invents.
         known, inferred = _stem_assessed("Known motif"), _stem_assessed("Inferred motif")
-        registry = self._registry(tmp_path, _versioned(known), _versioned(inferred))
+        graded = self._registry(tmp_path / "graded", _versioned(known), _versioned(inferred))
 
-        answer = registry.tf_gene_list("mine")
+        answer = graded.tf_gene_list("mine")
 
         assert {gene.gene_id_stem for gene in answer.genes} == {known, inferred}
         assert [
@@ -2087,23 +1838,12 @@ class TestTFGeneList:
             if gene.judgements["tf_assessment"] == "Known motif"
         ] == [known]
 
-    def test_the_verdict_travels_with_the_census_that_reached_it(self, tmp_path: Path) -> None:
-        registry = self._registry(tmp_path, _versioned(_census().assessed_positive[0]))
-
-        answer = registry.tf_gene_list("mine")
-
-        assert answer.provenance == _census().provenance
-        assert answer.provenance.publisher
-        assert answer.provenance.version
-        assert answer.provenance.pubmed_id
-        assert answer.species == assembly_metadata(_CENSUSED_ASSEMBLY).species
-
-    def test_stems_this_annotation_carries_no_gene_for_ride_back_on_the_answer(
+    def test_unresolved_stems_ride_back_and_a_par_stem_answers_with_both_ids(
         self, tmp_path: Path
     ) -> None:
         census = _census()
         carried, absent = census.assessed_positive[0], census.assessed_positive[1]
-        registry = self._registry(tmp_path, _versioned(carried))
+        registry = self._registry(tmp_path / "unresolved", _versioned(carried))
 
         answer = registry.tf_gene_list("mine")
 
@@ -2113,77 +1853,57 @@ class TestTFGeneList:
         # it holds and this annotation does not is visible rather than dropped.
         assert len(answer.genes) + len(answer.unresolved) == len(census.assessed_positive)
 
-    def test_a_stem_naming_two_gene_ids_answers_with_both(self, tmp_path: Path) -> None:
-        assert _TF_PAR_STEM in _census().assessed_positive
-        registry = self._registry(tmp_path, _TF_PAR_Y, _TF_PAR_X)
+        assert _TF_PAR_STEM in census.assessed_positive
+        par_registry = self._registry(tmp_path / "par", _TF_PAR_Y, _TF_PAR_X)
+        par_answer = par_registry.tf_gene_list("mine")
+        assert [gene.gene_ids for gene in par_answer.genes] == [(_TF_PAR_X, _TF_PAR_Y)]
+        assert par_answer.gene_ids == [_TF_PAR_X, _TF_PAR_Y]
 
-        answer = registry.tf_gene_list("mine")
-
-        assert [gene.gene_ids for gene in answer.genes] == [(_TF_PAR_X, _TF_PAR_Y)]
-        assert answer.gene_ids == [_TF_PAR_X, _TF_PAR_Y]
-
-    def test_the_species_follows_the_assembly_and_never_the_ids_the_gtf_holds(
+    def test_the_species_follows_the_assembly_never_the_gtf_and_the_two_absences_differ(
         self, tmp_path: Path
     ) -> None:
         # Human gene ids registered for a worm assembly. Asking for one species'
         # transcription factors while holding another's assembly is not expressible, so this
         # is answered about the assembly's own species and never about what is in the GTF.
-        registry = self._registry(tmp_path, _TF_PAR_X, assembly=_UNCENSUSED_ASSEMBLY)
-
-        with pytest.raises(NoTFCensusError) as excinfo:
-            registry.tf_gene_list("mine")
-
-        message = str(excinfo.value)
+        uncensused = self._registry(tmp_path / "worm", _TF_PAR_X, assembly=_UNCENSUSED_ASSEMBLY)
+        with pytest.raises(NoTFCensusError) as no_census:
+            uncensused.tf_gene_list("mine")
+        message = str(no_census.value)
         assert str(assembly_metadata(_UNCENSUSED_ASSEMBLY).species) in message
         assert str(assembly_metadata(_CENSUSED_ASSEMBLY).species) in message
 
-    @pytest.mark.parametrize("assembly", [_CHIMERA, "tiny"])
-    def test_an_assembly_nothing_names_a_species_for_says_so_rather_than_guessing(
-        self, tmp_path: Path, assembly: str
-    ) -> None:
-        registry = self._registry(tmp_path, _TF_PAR_X, assembly=assembly)
+        # And an assembly nothing names a species for — the chimera, or a plain local
+        # key — says so rather than guessing, one representative of that whole class.
+        unnamed = self._registry(tmp_path / "chimera", _TF_PAR_X, assembly=_CHIMERA)
+        with pytest.raises(UnknownSpeciesError) as no_species:
+            unnamed.tf_gene_list("mine")
+        unnamed_message = str(no_species.value)
+        assert _CHIMERA in unnamed_message
+        assert str(assembly_metadata(_CENSUSED_ASSEMBLY).species) in unnamed_message
 
-        with pytest.raises(UnknownSpeciesError) as excinfo:
-            registry.tf_gene_list("mine")
-
-        message = str(excinfo.value)
-        assert assembly in message
-        assert str(assembly_metadata(_CENSUSED_ASSEMBLY).species) in message
-
-    def test_the_two_absences_are_told_apart_by_type_and_caught_together(
-        self, tmp_path: Path
-    ) -> None:
         # As the curated gene lists' pair already are: *no census ships for this species*
         # and *nothing says what species this is* are different answers, both lookups, and
         # neither is an empty collection.
-        uncensused = self._registry(tmp_path / "worm", _TF_PAR_X, assembly=_UNCENSUSED_ASSEMBLY)
-        unnamed = self._registry(tmp_path / "chimera", _TF_PAR_X, assembly=_CHIMERA)
-
-        with pytest.raises(LookupError) as no_census:
-            uncensused.tf_gene_list("mine")
-        with pytest.raises(LookupError) as no_species:
-            unnamed.tf_gene_list("mine")
-
         assert isinstance(no_census.value, NoTFCensusError)
         assert isinstance(no_species.value, UnknownSpeciesError)
         assert not isinstance(no_census.value, UnknownSpeciesError)
         assert not isinstance(no_species.value, NoTFCensusError)
 
-    def test_an_unregistered_name_earns_the_error_it_already_had(self, tmp_path: Path) -> None:
-        registry = AnnotationRegistry.locate(_CENSUSED_ASSEMBLY, tmp_path)
+    def test_an_unregistered_name_earns_its_error_and_naming_none_asks_the_default(
+        self, tmp_path: Path
+    ) -> None:
+        registry = AnnotationRegistry.locate(_CENSUSED_ASSEMBLY, tmp_path / "unregistered")
 
         with pytest.raises(AnnotationNotRegisteredError) as excinfo:
             registry.tf_gene_list(_CURATED)
 
         assert f"genome register-annotation {_CENSUSED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
 
-    def test_naming_no_annotation_asks_the_default_one(self, tmp_path: Path) -> None:
-        registry = self._registry(tmp_path, _TF_PAR_X, name=_CURATED)
+        default_registry = self._registry(tmp_path / "default", _TF_PAR_X, name=_CURATED)
+        assert default_registry.default == _CURATED
+        assert default_registry.tf_gene_list().annotation == _CURATED
 
-        assert registry.default == _CURATED
-        assert registry.tf_gene_list().annotation == _CURATED
-
-    def test_the_json_record_carries_the_genes_the_provenance_and_the_unresolved_stems(
+    def test_the_json_record_carries_the_genes_and_provenance_and_it_answers_by_assembly_name(
         self, tmp_path: Path
     ) -> None:
         # What ``--json`` has to be able to emit: the genes with their **TF assessment** and
@@ -2203,12 +1923,7 @@ class TestTFGeneList:
         assert gene["judgements"]["tf_assessment"] == _census_row(stem)["tf_assessment"]
         assert json.loads(json.dumps(payload)) == payload  # serializes as it stands
 
-    def test_it_answers_for_an_assembly_named_rather_than_opened(self, tmp_path: Path) -> None:
-        stem = _census().assessed_positive[0]
-        self._registry(tmp_path, _versioned(stem))
-
         answer = tf_gene_list(_CENSUSED_ASSEMBLY, annotation="mine", cache_dir=tmp_path)
-
         assert [gene.gene_id_stem for gene in answer.genes] == [stem]
         assert answer.provenance == _census().provenance
 
@@ -2273,12 +1988,14 @@ class TestTFCofactorList:
         """Register a GTF declaring ``gene_ids`` under ``name`` and open the registry."""
         return _registry_declaring(tmp_path, *gene_ids, assembly=assembly, name=name)
 
-    def test_the_table_arrives_in_this_annotations_own_gene_ids(self, tmp_path: Path) -> None:
+    def test_the_table_arrives_carrying_uniform_and_publisher_columns_and_provenance(
+        self, tmp_path: Path
+    ) -> None:
         # The whole point of the surface: the answer joins to a counts matrix keyed by this
         # annotation's ids, with no normalisation left for the caller.
         stems = _cofactors().cofactor_stems[:2]
         gene_ids = [_versioned(stem) for stem in stems]
-        registry = self._registry(tmp_path, *gene_ids)
+        registry = self._registry(tmp_path / "two", *gene_ids)
 
         answer = registry.tf_cofactor_list("mine")
 
@@ -2286,15 +2003,11 @@ class TestTFCofactorList:
         assert [entry.gene_id_stem for entry in answer.cofactors] == list(stems)
         assert answer.gene_ids == gene_ids
 
-    def test_an_entry_carries_the_uniform_columns_and_the_publishers_own_beside_them(
-        self, tmp_path: Path
-    ) -> None:
         table = _cofactors()
         stem = table.cofactor_stems[0]
-        registry = self._registry(tmp_path, _versioned(stem))
-
-        entry = registry.tf_cofactor_list("mine").cofactors[0]
-
+        single = self._registry(tmp_path / "single", _versioned(stem))
+        single_answer = single.tf_cofactor_list("mine")
+        entry = single_answer.cofactors[0]
         cells = _cofactor_row(stem)
         assert (entry.symbol, entry.source) == (cells["symbol"], cells["source"])
         assert entry.is_cofactor is True
@@ -2305,24 +2018,20 @@ class TestTFCofactorList:
         }
         assert "animaltfdb_family" in entry.classifications
 
-    def test_membership_travels_with_the_publishers_that_listed_the_gene(
-        self, tmp_path: Path
-    ) -> None:
-        registry = self._registry(tmp_path, _versioned(_cofactors().cofactor_stems[0]))
+        # Membership travels with the publishers that listed the gene.
+        assert single_answer.provenance == table.provenance
+        assert single_answer.provenance.sources
+        assert all(
+            source.publisher and source.pubmed_id for source in single_answer.provenance.sources
+        )
+        assert single_answer.species == assembly_metadata(_TABLED_ASSEMBLY).species
 
-        answer = registry.tf_cofactor_list("mine")
-
-        assert answer.provenance == _cofactors().provenance
-        assert answer.provenance.sources
-        assert all(source.publisher and source.pubmed_id for source in answer.provenance.sources)
-        assert answer.species == assembly_metadata(_TABLED_ASSEMBLY).species
-
-    def test_stems_this_annotation_carries_no_gene_for_ride_back_on_the_answer(
+    def test_unresolved_stems_ride_back_and_a_par_stem_answers_with_both_ids(
         self, tmp_path: Path
     ) -> None:
         table = _cofactors()
         carried, absent = table.cofactor_stems[0], table.cofactor_stems[1]
-        registry = self._registry(tmp_path, _versioned(carried))
+        registry = self._registry(tmp_path / "unresolved", _versioned(carried))
 
         answer = registry.tf_cofactor_list("mine")
 
@@ -2332,102 +2041,81 @@ class TestTFCofactorList:
         # publisher holds and this annotation does not is visible rather than dropped.
         assert len(answer.cofactors) + len(answer.unresolved) == len(table.cofactor_stems)
 
-    def test_a_stem_naming_two_gene_ids_answers_with_both(self, tmp_path: Path) -> None:
         # The collision is what is under test rather than the biology: two gene ids that
         # reduce to one stem, in the shape GENCODE's pseudoautosomal copies have, so a
         # resolver taking the first would hand back one of them without saying it chose.
-        stem = _cofactors().cofactor_stems[0]
+        stem = table.cofactor_stems[0]
         first, second = _versioned(stem), f"{_versioned(stem)}_PAR_Y"
-        registry = self._registry(tmp_path, second, first)
+        par_registry = self._registry(tmp_path / "par", second, first)
+        par_answer = par_registry.tf_cofactor_list("mine")
+        assert [entry.gene_ids for entry in par_answer.cofactors] == [(first, second)]
+        assert par_answer.gene_ids == [first, second]
 
-        answer = registry.tf_cofactor_list("mine")
-
-        assert [entry.gene_ids for entry in answer.cofactors] == [(first, second)]
-        assert answer.gene_ids == [first, second]
-
-    def test_the_species_follows_the_assembly_and_never_the_ids_the_gtf_holds(
+    def test_the_species_follows_the_assembly_never_the_gtf_and_the_two_absences_differ(
         self, tmp_path: Path
     ) -> None:
         # Mouse gene ids registered for a yeast assembly. Asking for one species' cofactors
         # while holding another's assembly is not expressible, so this is answered about the
         # assembly's own species and never about what is in the GTF.
         stem = _cofactors().cofactor_stems[0]
-        registry = self._registry(tmp_path, _versioned(stem), assembly=_UNTABLED_ASSEMBLY)
+        untabled = self._registry(
+            tmp_path / "untabled", _versioned(stem), assembly=_UNTABLED_ASSEMBLY
+        )
 
-        with pytest.raises(NoCofactorTableError) as excinfo:
-            registry.tf_cofactor_list("mine")
+        with pytest.raises(NoCofactorTableError) as no_table:
+            untabled.tf_cofactor_list("mine")
 
-        message = str(excinfo.value)
+        message = str(no_table.value)
         assert str(assembly_metadata(_UNTABLED_ASSEMBLY).species) in message
         assert str(assembly_metadata(_TABLED_ASSEMBLY).species) in message
 
-    @pytest.mark.parametrize("assembly", [_CHIMERA, "tiny"])
-    def test_an_assembly_nothing_names_a_species_for_says_so_rather_than_guessing(
-        self, tmp_path: Path, assembly: str
-    ) -> None:
-        stem = _cofactors().cofactor_stems[0]
-        registry = self._registry(tmp_path, _versioned(stem), assembly=assembly)
+        # And an assembly nothing names a species for — the chimera, or a plain local
+        # key — says so rather than guessing, one representative of that whole class.
+        unnamed = self._registry(tmp_path / "chimera", _versioned(stem), assembly=_CHIMERA)
+        with pytest.raises(UnknownSpeciesError) as no_species:
+            unnamed.tf_cofactor_list("mine")
+        unnamed_message = str(no_species.value)
+        assert _CHIMERA in unnamed_message
+        assert "cofactor table" in unnamed_message
+        assert str(assembly_metadata(_TABLED_ASSEMBLY).species) in unnamed_message
 
-        with pytest.raises(UnknownSpeciesError) as excinfo:
-            registry.tf_cofactor_list("mine")
-
-        message = str(excinfo.value)
-        assert assembly in message
-        assert "cofactor table" in message
-        assert str(assembly_metadata(_TABLED_ASSEMBLY).species) in message
-
-    def test_the_two_absences_are_told_apart_by_type_and_caught_together(
-        self, tmp_path: Path
-    ) -> None:
         # As the census half's pair is: *nobody has published a table for this species* and
         # *nothing says what species this is* are different answers, both lookups, and
         # neither is an empty collection.
-        stem = _cofactors().cofactor_stems[0]
-        untabled = self._registry(tmp_path / "yeast", _versioned(stem), assembly=_UNTABLED_ASSEMBLY)
-        unnamed = self._registry(tmp_path / "chimera", _versioned(stem), assembly=_CHIMERA)
-
-        with pytest.raises(LookupError) as no_table:
-            untabled.tf_cofactor_list("mine")
-        with pytest.raises(LookupError) as no_species:
-            unnamed.tf_cofactor_list("mine")
-
         assert isinstance(no_table.value, NoCofactorTableError)
         assert isinstance(no_species.value, UnknownSpeciesError)
         assert not isinstance(no_table.value, UnknownSpeciesError)
         assert not isinstance(no_species.value, NoCofactorTableError)
 
-    def test_the_worm_answers_here_although_the_census_half_raises_for_it(
-        self, tmp_path: Path
-    ) -> None:
         # The asymmetry, pinned: AnimalTFDB assessed worm cofactors and nobody has released
         # a worm TF census, so one assembly gets two different answers. That is the
         # publishers' shape and not a defect, and a test says so where it would otherwise
         # be filed as one.
-        stem = _cofactors(_WORM_ASSEMBLY).cofactor_stems[0]
-        registry = self._registry(tmp_path, _versioned(stem), assembly=_WORM_ASSEMBLY)
-
-        answer = registry.tf_cofactor_list("mine")
-
-        assert [entry.gene_id_stem for entry in answer.cofactors] == [stem]
+        worm_stem = _cofactors(_WORM_ASSEMBLY).cofactor_stems[0]
+        worm = self._registry(tmp_path / "worm", _versioned(worm_stem), assembly=_WORM_ASSEMBLY)
+        worm_answer = worm.tf_cofactor_list("mine")
+        assert [entry.gene_id_stem for entry in worm_answer.cofactors] == [worm_stem]
         with pytest.raises(NoTFCensusError):
-            registry.tf_gene_list("mine")
+            worm.tf_gene_list("mine")
 
-    def test_an_unregistered_name_earns_the_error_it_already_had(self, tmp_path: Path) -> None:
-        registry = AnnotationRegistry.locate(_TABLED_ASSEMBLY, tmp_path)
+    def test_an_unregistered_name_earns_its_error_and_naming_none_asks_the_default(
+        self, tmp_path: Path
+    ) -> None:
+        registry = AnnotationRegistry.locate(_TABLED_ASSEMBLY, tmp_path / "unregistered")
 
         with pytest.raises(AnnotationNotRegisteredError) as excinfo:
             registry.tf_cofactor_list("gencode_vM39")
 
         assert f"genome register-annotation {_TABLED_ASSEMBLY} gencode_vM39" in str(excinfo.value)
 
-    def test_naming_no_annotation_asks_the_default_one(self, tmp_path: Path) -> None:
         stem = _cofactors().cofactor_stems[0]
-        registry = self._registry(tmp_path, _versioned(stem), name="gencode_vM39")
+        default_registry = self._registry(
+            tmp_path / "default", _versioned(stem), name="gencode_vM39"
+        )
+        assert default_registry.default == "gencode_vM39"
+        assert default_registry.tf_cofactor_list().annotation == "gencode_vM39"
 
-        assert registry.default == "gencode_vM39"
-        assert registry.tf_cofactor_list().annotation == "gencode_vM39"
-
-    def test_the_json_record_carries_the_cofactors_the_provenance_and_the_unresolved_stems(
+    def test_the_json_record_carries_provenance_and_it_answers_by_assembly_name_too(
         self, tmp_path: Path
     ) -> None:
         # What ``--json`` has to be able to emit, in the shape the TF gene list's answer
@@ -2453,14 +2141,10 @@ class TestTFCofactorList:
         )
         assert json.loads(json.dumps(payload)) == payload  # serializes as it stands
 
-    def test_it_answers_for_an_assembly_named_rather_than_opened(self, tmp_path: Path) -> None:
-        # One code path, asserted whole rather than sampled: the module-level function and
-        # the method reach the same answer, so a shell surface over either says one thing.
-        stem = _cofactors().cofactor_stems[0]
-        registry = self._registry(tmp_path, _versioned(stem))
-
+        # One code path, asserted whole rather than sampled: the module-level function
+        # and the method reach the same answer, so a shell surface over either says one
+        # thing.
         answer = tf_cofactor_list(_TABLED_ASSEMBLY, annotation="mine", cache_dir=tmp_path)
-
         assert [entry.gene_id_stem for entry in answer.cofactors] == [stem]
         assert answer == registry.tf_cofactor_list("mine")
 
@@ -2472,7 +2156,9 @@ class TestAddressedByAssembly:
     is no second code path to keep in step.
     """
 
-    def test_it_answers_for_an_assembly_named_rather_than_opened(self, tmp_path: Path) -> None:
+    def test_it_answers_for_an_assembly_named_rather_than_opened_or_raises_if_nothing_is(
+        self, tmp_path: Path
+    ) -> None:
         source = tmp_path / "ann.gtf"
         source.write_text(_GTF)
         _register_by_path(tmp_path, source, _CURATED, assembly=_CURATED_ASSEMBLY)
@@ -2485,11 +2171,8 @@ class TestAddressedByAssembly:
             list(_declared(_CURATED))
         )
 
-    def test_an_assembly_with_nothing_registered_raises_rather_than_answering(
-        self, tmp_path: Path
-    ) -> None:
         with pytest.raises(AnnotationNotRegisteredError):
-            gene_list(_CURATED_ASSEMBLY, "rRNA", annotation=_CURATED, cache_dir=tmp_path)
+            gene_list(_CURATED_ASSEMBLY, "rRNA", annotation=_CURATED, cache_dir=tmp_path / "empty")
 
 
 # ---------------------------------------------------------------------------------------

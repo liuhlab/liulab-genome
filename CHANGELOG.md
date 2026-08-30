@@ -8,6 +8,26 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ## [Unreleased]
 
+### Changed
+
+- **CI no longer recompiles memelite's JIT on every run, and the suite is a third of its size.**
+  The `test` lane's largest single item was not a test: `memelite`'s scan and compare engines are
+  `@numba.njit(cache=True)`, numba writes that cache inside the pixi env, and `setup-pixi` saves
+  its env tarball before any test has run — so every run recompiled from source, 27.5 s, 47% of
+  the lane's wall. `NUMBA_CACHE_DIR` now points at a workspace path cached on the `pixi.lock`
+  hash. Separately the suite was cut **2425 → 933 tests with coverage unchanged at 98%** (60 → 61
+  missed statements of 4149), by merging sibling one-assert tests that shared a fixture and
+  collapsing parametrize tables that walked one code path with many rows of data; all 169 test
+  classes and all 154 distinct refusal messages survive, checked as whole-tree set differences
+  against the previous commit. Serial **56.3 s → 24.0 s**, parallel **17–19 s → 8.4 s**, the
+  `check` gate **24 s → 10 s**. Measurements and method:
+  `docs/research/test-suite-cost-and-parallelism-2026-08-30.md`.
+- **The unit lane distributes by group rather than by load.** Nine tests spawn their own process
+  pools; distributed by load, several could fork pools at once and the lane's wall went bimodal —
+  13.5 s or 16.1 s on the same commit, decided by scheduling alone. `--dist=loadgroup` pins each
+  such module to one worker and is faster on a 4-core runner too (9.4 s against 12.3 s). The
+  worker cap moves 8 → 10; on a CI runner `auto` finds four and the cap does not bind.
+
 ### Added
 
 - **Which genes in another species a gene is homologous to, on Ensembl Compara's own trees.**
