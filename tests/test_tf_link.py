@@ -246,12 +246,12 @@ def test_the_alias_table_ships_plain_beside_the_gzipped_tables() -> None:
 
 @pytest.mark.parametrize(("slug", "release"), _REPRESENTATIVE_TABLES)
 def test_a_tables_packaging_and_pinned_counts_hold(slug: str, release: str) -> None:
-    # Two keys name one table, so both are in the file name. The gzip header carries
-    # `mtime=0`, which is what lets two runs of the generator agree byte for byte —
-    # without it every rebuild would diff whether or not the links changed. The four
-    # pinned numbers are the only guard a regenerated table gets, since regenerating one
-    # needs a download, and the published range on total information content is what a
-    # matrix read wrong would fall outside of.
+    # Two keys name one table, so both are in the file name. The gzip header carries a
+    # zeroed timestamp — `genome.shipped_writer`'s promise, asserted here over what
+    # actually shipped rather than over what the writer would do now. The four pinned
+    # numbers are the only guard a regenerated table gets, since regenerating one needs
+    # a download, and the published range on total information content is what a matrix
+    # read wrong would fall outside of.
     assert slug in census_species()
     assert release in JASPAR_RELEASES
     assert species_slug(slug) == slug

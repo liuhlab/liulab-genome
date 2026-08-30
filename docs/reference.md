@@ -41,6 +41,10 @@
 
 ::: genome.shipped
 
+## `genome.shipped_writer`
+
+::: genome.shipped_writer
+
 ## `genome.metadata`
 
 ::: genome.metadata

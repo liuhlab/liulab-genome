@@ -73,7 +73,17 @@ from types import MappingProxyType
 
 import pandas as pd
 
-from genome.shipped import TRUE_CELL, ShippedTable, ShippedTableError, species_slug
+# ``VALUE_SEPARATOR`` is re-exported rather than defined here: how a cell spells two values
+# is a convention every **Shipped table** in this package shares and none of them owns, so it
+# lives with the reader that holds every such table to it. Kept importable from here, and
+# from :mod:`genome.tf`, because this is where it used to be.
+from genome.shipped import (
+    TRUE_CELL,
+    VALUE_SEPARATOR,
+    ShippedTable,
+    ShippedTableError,
+    species_slug,
+)
 from genome.tf.cofactor import BOTH, SOURCES, UNIFORM_COLUMNS, CofactorTable, cofactor_table
 from genome.tf.gene import TFGeneTable, tf_gene_table
 from genome.tf.motif.jaspar import DEFAULT_RELEASE, DEFAULT_TAX_GROUP
@@ -121,10 +131,6 @@ LINK_COLUMNS: tuple[str, ...] = (
 #: The two **Role**s, and the only two. ``monomer`` where the profile names one gene,
 #: ``complex`` otherwise, so a heterodimer matrix is never read as a monomer's.
 MONOMER, COMPLEX = "monomer", "complex"
-
-#: What separates one value from the next inside a cell — a complex's partners, and a
-#: profile's tax ids. A semicolon and never a tab: the file carries no quoting.
-VALUE_SEPARATOR = ";"
 
 #: The shape of a versioned gene id, tried only after a **Gene id stem** and a symbol
 #: have both been looked for. Lambert's census carries clone-style symbols — ``AC023509.3``
@@ -626,7 +632,9 @@ class MotifLinkTable:
 #: as JASPAR has profiles for it, so the duplicate-key refusal every other table wants would
 #: reject every table that ships. The six columns that name the gene, the profile and where
 #: the row came from are required; the rest are checked below, where their meaning is.
-_LINK = ShippedTable(
+#: ``scripts/build_tf_links.py`` writes a table through this same declaration, so the file it
+#: produces is held to what this module will hold it to before it reaches disk.
+LINK_FORMAT = ShippedTable(
     resource=f"{LINK_SUBDIR}/{{slug}}.{RELEASE_PREFIX}{{release}}{LINK_SUFFIX}",
     columns=LINK_COLUMNS,
     noun="link table",
@@ -727,8 +735,8 @@ def motif_link_table(
     slug = species_slug(species)
     if tax_group != LINK_TAX_GROUP or (slug, release) not in shipped_link_tables():
         return None
-    origin = _LINK.origin(slug=slug, release=release)
-    table = parse_motif_link_table(_LINK.text(slug=slug, release=release), source=origin)
+    origin = LINK_FORMAT.origin(slug=slug, release=release)
+    table = parse_motif_link_table(LINK_FORMAT.text(slug=slug, release=release), source=origin)
     if species_slug(table.species) != slug or table.release != release:
         raise MotifLinkTableError(
             f"{origin} is named for {slug!r} and release {release!r} and its rows say "
@@ -788,7 +796,7 @@ def parse_motif_link_table(text: str, *, source: str) -> MotifLinkTable:
     """
     links = tuple(
         _read_link(row, number, source=source)
-        for number, row in enumerate(_LINK.parse(text, origin=source).mappings(), start=2)
+        for number, row in enumerate(LINK_FORMAT.parse(text, origin=source).mappings(), start=2)
     )
     return MotifLinkTable(
         species=_one_value(links, "species", source=source),

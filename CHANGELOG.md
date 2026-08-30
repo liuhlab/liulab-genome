@@ -10,6 +10,24 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **One module writes every shipped table, where three build scripts each declared the writer
+  again.** `genome.shipped_writer` owns the unquoted TSV rendering with its header, the
+  deterministic gzip and the provenance merge that replaces a row by its key and re-sorts the
+  file; `scripts/build_tf_census.py`, `scripts/build_tf_cofactor.py` and
+  `scripts/build_tf_links.py` keep only their publisher's recipe. **The writer is handed the
+  reader's own table declaration**, so a file is held to the header, the required columns, the
+  flag spellings and the key it will be read under *before it reaches disk* — the column tuples,
+  the file names and the value separator are declared once and imported by both halves, and no
+  build script restates a reader's constant or spells a file suffix of its own. Each generator
+  supplies its own error class and repair, so a refused build names the recipe to fix rather than
+  telling whoever ran it to run it again. The byte-stability promise the gzip call carries is
+  stated in that one module, where three write functions and three module docstrings used to
+  carry it between them. `tests/test_shipped_writer.py` holds it
+  to all of that with no download, and re-renders every shipped table's own rows back to the bytes
+  that ship. `VALUE_SEPARATOR` moves to `genome.shipped` beside the flag spellings and is
+  re-exported from `genome.tf`; each format's declaration is public as `CENSUS_FORMAT`,
+  `COFACTOR_FORMAT`, `LINK_FORMAT` and their provenance peers, and the two species-keyed
+  provenance tables now declare that key. **No shipped `.tsv` or `.tsv.gz` byte changed.**
 - **`io/gtf.py` split four ways, and gene id stem resolution became findable.** The largest
   module in the package held four clusters that barely touched each other, and is now
   `genome.io.annotation`, a package of four: `registration.py` puts an annotation on disk — the
