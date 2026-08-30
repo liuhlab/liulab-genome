@@ -892,6 +892,26 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Fixed
 
+- **CI's numba cache is reused on every run, not only when the runner's CPU model happens to
+  match.** numba keys each compiled overload on a tuple whose middle element is
+  `(target_triple, cpu_name, cpu_features)`, so the host CPU **model** was part of the key. GitHub's
+  runners are heterogeneous and a job does not choose the one it lands on, which made reuse luck:
+  the same commit took the test lane to 32 s on one run and 72 s on another, the slow one having
+  logged `Cache restored from key: …` and then recompiled four tests at 38.96 s, 26.06 s, 23.63 s
+  and 23.60 s. Nothing reported it, because the two caches disagree about what a hit means —
+  `actions/cache` succeeds on the *files*, numba then rejects the *contents* per overload — so the
+  log said hit and only `--durations` said otherwise. The `test` job now pins
+  `NUMBA_CPU_NAME=generic`, collapsing that element to `('…', 'generic', '')`, which is stable
+  across machines of one architecture. Giving up CPU-specific vectorisation was measured rather
+  than assumed, and on the architecture that matters: on a Sapphire Rapids Xeon with the full
+  AVX-512 set — the widest vectors x86-64 offers, so the largest gap the pin can cost — memelite's
+  scan engine was a dead heat with host codegen and stayed one as the scanned sequence grew 333×,
+  and its compare engine landed within ±4% on either side of host. A genuinely genome-scale scan
+  is still unmeasured and deserves its own dated measurement, but nothing found so far makes host
+  codegen worth the cache bug. The pin is on the CI job and not in the pixi task, so a developer's
+  build keeps host codegen. A new `numba cache key` step prints the target description and the
+  source stamps numba also keys on, so a recurrence of either is readable in the log instead of
+  inferred from wall-clock.
 - **A release named without a source is honoured instead of quietly ignored.** `lookup_xref` — and
   so `XrefSet` — returned the default source's newest release as soon as no source was named, never
   consulting the release asked for. Harmless while every species listed exactly one release, and
