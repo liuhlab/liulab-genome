@@ -10,7 +10,7 @@ builds them (ADR-0022); neither reads a file.
 
 **Preparing it is not this module's**, and none of the steps that fetch are here: a
 **Homology set** is a **Prepared set**, so what is declared here is the URL, the checksum
-and the reader that slices the pair out, and :mod:`genome.io.prepared` owns the working
+and the reader that slices the pair out, and :mod:`genome.store.prepared` owns the working
 area, the fetch, the digest and the **Completion marker**.
 
 The slice is stored as a plain gzipped TSV carrying the publisher's own header and the
@@ -72,24 +72,23 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+# The file-naming convention every shipped-data directory here uses, read from the module
+# that owns the curated tables a species is spelled in. For the three species this prepares
+# it is also Ensembl's own genome name.
+from genome.assembly.metadata import species_slug
 from genome.homology import metadata as metadata_mod
 from genome.homology.metadata import HomologyMetadata
-from genome.io.completion import CompletionRecord
-from genome.io.prepared import (
+from genome.store.completion import CompletionRecord
+from genome.store.data_dir import prepared_data_dir
+from genome.store.prepared import (
     ARCHIVE,
     Checksum,
     PreparedSetNotDownloadedError,
     PreparedSource,
     SourceReader,
-    homology_data_dir,
     prepare,
     unpacked_lines,
 )
-
-# The file-naming convention every shipped-data directory here uses, read from the module
-# that owns the curated tables a species is spelled in. For the three species this prepares
-# it is also Ensembl's own genome name.
-from genome.metadata import species_slug
 
 #: Where Ensembl publishes its releases. The FTP tree is used and no REST or BioMart API
 #: is: everything here is a bulk file fetched once and read locally, so a run is
@@ -100,6 +99,34 @@ ENSEMBL_BASE_URL = "https://ftp.ensembl.org/pub"
 #: collection. The ncRNA dumps and the whole-clade collection dumps are deliberately not
 #: read — they are different objects with different membership, not more rows of this one.
 COMPARA_DUMP = "protein_default"
+
+#: Subdirectory of the **Data dir** holding **Homology set**s, beside ``motif/`` and
+#: ``xref/`` and for the same reason: a homology set is anchored to a species pair and a
+#: **Release**, never to an **Assembly**.
+HOMOLOGY_SUBDIR = "homology"
+
+
+def homology_data_dir() -> Path:
+    """Return the directory holding **Homology set**s, which belong to no **Assembly**.
+
+    The Orthology context's own root under the **Data dir**, declared here because this is
+    where its **Prepared set** is fetched into and read from.
+
+    Returns
+    -------
+    pathlib.Path
+        ``<liulab_data>/homology``. Nothing is created by asking.
+
+    Examples
+    --------
+    >>> import os
+    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
+    >>> homology_data_dir()
+    PosixPath('/scratch/liulab/homology')
+    >>> del os.environ["LIULAB_DATA"]
+    """
+    return prepared_data_dir(HOMOLOGY_SUBDIR)
+
 
 #: Subdirectory of the homology tree holding Ensembl Compara's sets. One publisher, one
 #: directory: a second homology source would get its own beside this.
@@ -690,7 +717,7 @@ class HomologyAnswer:
     """The homologous genes one **Homology set** names for the stems it was asked about.
 
     :meth:`HomologySet.homologs`'s answer, in the shape
-    :class:`~genome.io.annotation.stems.ResolvedGeneIds` establishes: every stem that named at least one
+    :class:`~genome.annotation.stems.ResolvedGeneIds` establishes: every stem that named at least one
     **Homology link** maps to all of them, in ask order, and no value is ever empty — a
     stem that named none is in :attr:`unresolved` instead. Nothing here picks a "best"
     homolog, and this package computes no ranking or quality score of its own.
@@ -803,7 +830,7 @@ class HomologyAnswer:
 class HomologySet:
     """One Ensembl Compara **Release**, sliced to one species pair and read into an index.
 
-    **Constructing one prepares it**, as opening a :class:`~genome.genome.Genome` does: the
+    **Constructing one prepares it**, as opening a :class:`~genome.assembly.genome.Genome` does: the
     per-species dump that holds the pair is fetched into :func:`homology_data_dir` on the
     first construction — verified against the publisher's own md5 as it arrives — sliced to
     the pair, and recorded with a **Completion marker**; every construction after re-reads
@@ -1000,7 +1027,7 @@ def _source(row: HomologyMetadata, *, directory: Path) -> PreparedSource:
     """Return what this **Homology set** declares: a URL, a checksum and how to slice it.
 
     Everything else — the working area, the fetch, the staged rename and the **Completion
-    marker** — is :mod:`genome.io.prepared`'s. The checksum covers the **archive** rather
+    marker** — is :mod:`genome.store.prepared`'s. The checksum covers the **archive** rather
     than the unpacked bytes, which is the one thing this set declares differently from an
     **Xref set**: Compara's own ``MD5SUM`` is over the ``.gz`` it serves, so it is pooch's
     ``known_hash`` and is checked as the bytes arrive. That check is load-bearing and not a

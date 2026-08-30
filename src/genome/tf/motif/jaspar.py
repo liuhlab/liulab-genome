@@ -19,7 +19,7 @@ finished* and missed the other half of what a record is for: it is the only answ
 was this made* — which URL, which package version, when, and what the bytes hashed to —
 and a count proves the file holds the right number of records rather than that it is the
 file that was fetched. So a **Motif set** is prepared exactly as an **Xref set** and a
-**Homology set** are, by :mod:`genome.io.prepared`, and a directory that answers *is this
+**Homology set** are, by :mod:`genome.store.prepared`, and a directory that answers *is this
 finished* one way is the whole of the answer.
 
 **What is verified, and what cannot be.** JASPAR publishes no checksum, so nothing here
@@ -56,15 +56,45 @@ from types import MappingProxyType
 
 import numpy as np
 
-from genome.io.prepared import (
+from genome.store.data_dir import prepared_data_dir
+from genome.store.prepared import (
     PreparedSetNotDownloadedError,
     PreparedSource,
-    motif_data_dir,
     prepare,
     unpacked_lines,
     write_through,
 )
 from genome.tf.motif.motif import BASES, Motif, MotifSet, base_id
+
+#: Subdirectory of the **Data dir** holding motif data, and the first thing filed as a
+#: *sibling* of the assembly tree rather than inside it: a **Motif** belongs to no
+#: **Assembly**, so there is no assembly directory it could go under.
+MOTIF_SUBDIR = "motif"
+
+
+def motif_data_dir() -> Path:
+    """Return the directory holding motif data, which belongs to no **Assembly**.
+
+    The Motif context's own root under the **Data dir**, declared here because this is
+    where its **Prepared set** is fetched into and read from. The per-motif cutoff cache
+    is filed under it too (:func:`~genome.tf.motif.thresholds.threshold_cache_dir`), which
+    is the whole of what lives there.
+
+    Returns
+    -------
+    pathlib.Path
+        ``<liulab_data>/motif``. Nothing is created by asking.
+
+    Examples
+    --------
+    >>> import os
+    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
+    >>> motif_data_dir()
+    PosixPath('/scratch/liulab/motif')
+    >>> del os.environ["LIULAB_DATA"]
+    """
+    return prepared_data_dir(MOTIF_SUBDIR)
+
 
 #: Where JASPAR publishes its versioned flat files. The REST API is not used: it silently
 #: ignores its release parameter and answers a historical query with current-release data,
@@ -556,7 +586,7 @@ class JasparDatabase(MotifSet):
     back a plain motif set rather than another database, because a filtered release is no
     longer that release.
 
-    **Constructing one prepares it**, as opening a :class:`~genome.genome.Genome` does:
+    **Constructing one prepares it**, as opening a :class:`~genome.assembly.genome.Genome` does:
     the file is fetched into :func:`jaspar_set_dir` on the first construction and recorded
     with a **Completion marker**, and every construction after re-reads what is there and
     fetches nothing. The lab's CPU cluster compute nodes have no internet, so the first
@@ -601,7 +631,7 @@ class JasparDatabase(MotifSet):
     JasparReleaseError
         If the file holds the wrong number of motifs, two versions of one matrix, or bytes
         that are not the ones its **Completion marker** recorded.
-    genome.io.completion.RegistrationError
+    genome.store.completion.RegistrationError
         If the directory holds a file with no marker, or a marker that disagrees with what
         is on disk — an interrupted run, which reads as unfinished rather than as present.
 
@@ -655,8 +685,8 @@ def _source(release: str, tax_group: str, *, directory: Path) -> PreparedSource:
     """Return what this **Release** declares: a URL, no checksum, and bytes stored as sent.
 
     Everything else — the working area, the fetch, the digest, the staged rename and the
-    **Completion marker** — is :mod:`genome.io.prepared`'s. The reader is
-    :func:`~genome.io.prepared.write_through` because JASPAR's transfac file *is* the
+    **Completion marker** — is :mod:`genome.store.prepared`'s. The reader is
+    :func:`~genome.store.prepared.write_through` because JASPAR's transfac file *is* the
     stored form: nothing is sliced out of it, and a set that stores what it fetched is one
     path through the pipeline rather than a second one beside it.
 

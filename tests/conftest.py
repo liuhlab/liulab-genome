@@ -15,10 +15,11 @@ import pytest
 import requests
 
 from genome import Genome
+from genome.assembly.fasta import PREPARATION_TOOLS
+from genome.assembly.registration import assembly_data_dir
 from genome.external import ExternalTool, clear_version_cache
-from genome.io import fetch as fetch_mod
-from genome.io.fasta import PREPARATION_TOOLS
-from genome.io.registration import LIULAB_DATA_ENV, assembly_data_dir
+from genome.store import fetch as fetch_mod
+from genome.store.data_dir import LIULAB_DATA_ENV
 
 
 class NetworkAccessError(RuntimeError):
@@ -34,9 +35,9 @@ _NETWORK_FAMILIES = frozenset({socket.AF_INET, socket.AF_INET6})
 _OFFLINE_HELP = (
     "No test may reach the network. Serve a download offline with the `fake_fetch` "
     "fixture, which replaces the package's one fetch step "
-    "(genome.io.fetch.fetch_url) with a copy from tests/data. A code path that "
+    "(genome.store.fetch.fetch_url) with a copy from tests/data. A code path that "
     "also validates an assembly name at UCSC needs `requests.head` stubbed as well — "
-    "see `head_recorder` in tests/test_download.py."
+    "see `head_recorder` in tests/assembly/test_download.py."
 )
 
 
@@ -190,7 +191,7 @@ class FetchCall:
 
 
 class FakeFetch:
-    """Offline stand-in for ``genome.io.fetch.fetch_url``.
+    """Offline stand-in for ``genome.store.fetch.fetch_url``.
 
     Copies a file out of ``tests/data`` instead of downloading it, then applies whatever
     pooch processor the caller passed, so a caller sees the same path shape a real fetch
@@ -258,7 +259,7 @@ class FakeFetch:
 def fake_fetch(monkeypatch: pytest.MonkeyPatch) -> FakeFetch:
     """Replace the package's one fetch step with an offline copy from ``tests/data``.
 
-    Every download in the package goes through ``genome.io.fetch.fetch_url``, so
+    Every download in the package goes through ``genome.store.fetch.fetch_url``, so
     patching that one name takes the whole package offline. Use this fixture for any
     test whose code path would otherwise download something::
 

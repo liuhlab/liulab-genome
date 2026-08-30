@@ -42,7 +42,7 @@ gene AnimalTFDB lists is one it accepts, so mouse's 1,611 rows are all positive 
 the genes it left out get no verdict at all rather than a fabricated ``no``.
 :func:`tf_gene_table` answers ``None`` for a species no census ships for — the raw
 absence, and the one place ``None`` is how it is said, exactly as
-:func:`genome.gene_list.curated_gene_list` says it, because this is the layer below
+:func:`genome.annotation.curated.curated_gene_list` says it, because this is the layer below
 the one a caller touches. Everything above turns it into an error naming the
 species that do have a census.
 
@@ -180,7 +180,7 @@ class CensusProvenance:
 
     The single declaration of what a census's provenance consists of: the table is
     parsed through these fields, column by column, exactly as
-    :class:`~genome.metadata.AssemblyMetadata` parses its own. Every column is
+    :class:`~genome.assembly.metadata.AssemblyMetadata` parses its own. Every column is
     required — a census with nothing said about its origin is one nobody can cite,
     and citing it is the condition on redistributing it here.
 

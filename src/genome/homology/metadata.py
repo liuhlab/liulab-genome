@@ -102,7 +102,7 @@ class HomologyMetadata:
 
     The single declaration of what a **Homology set**'s provenance consists of: the table
     is parsed through these fields, column by column, exactly as
-    :class:`~genome.metadata.AssemblyMetadata` parses its own. Every column is required —
+    :class:`~genome.assembly.metadata.AssemblyMetadata` parses its own. Every column is required —
     a set nobody can cite is one this package may not point anyone at, and a set with no
     checksum is one a truncated fetch would answer from.
 

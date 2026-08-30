@@ -327,7 +327,7 @@ class ExternalTool(ABC):
         rather than around it to :meth:`_execute`, so a single
         ``monkeypatch.setattr(ExternalTool, "run", ...)`` catches every invocation this
         package makes, by either adapter — the property
-        :func:`genome.io.fetch.fetch_url` is spelled for, and for the same reason.
+        :func:`genome.store.fetch.fetch_url` is spelled for, and for the same reason.
 
         Parameters
         ----------

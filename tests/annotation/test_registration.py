@@ -1,4 +1,4 @@
-"""Tests for genome.io.annotation.registration — placing a GTF, and the record that ends it.
+"""Tests for genome.annotation.registration — placing a GTF, and the record that ends it.
 
 Both ways in, the chromosome check that guards them, the merged annotation a chimera build
 derives, and what registering answers with. The **Annotation database** has no test module
@@ -23,11 +23,13 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import genome
-from genome.io.annotation import database as database_module
-from genome.io.annotation import registration as registration_module
-from genome.io.annotation import registry as registry_module
-from genome.io.annotation import stems as stems_module
-from genome.io.annotation.registration import (
+from genome.annotation import curated as curated_module
+from genome.annotation import database as database_module
+from genome.annotation import metadata as metadata_module
+from genome.annotation import registration as registration_module
+from genome.annotation import registry as registry_module
+from genome.annotation import stems as stems_module
+from genome.annotation.registration import (
     UNCHECKED_CALLER_OVERRIDE,
     UNCHECKED_NO_CHROM_SIZES,
     ChromosomeMismatchError,
@@ -41,8 +43,9 @@ from genome.io.annotation.registration import (
     register_gtf,
     register_merged_gtf,
 )
-from genome.io.annotation.registry import list_annotations
-from genome.io.completion import (
+from genome.annotation.registry import list_annotations
+from genome.store.checksum import ChecksumMismatchError
+from genome.store.completion import (
     CompletionRecord,
     RegistrationMismatchError,
     UnfinishedRegistrationError,
@@ -50,10 +53,9 @@ from genome.io.completion import (
     record_path,
     work_dir,
 )
-from genome.io.utils import ChecksumMismatchError
 
+from ..assembly.test_source import _module_level_imports
 from ..conftest import FakeFetch
-from ..test_source import _module_level_imports
 from .conftest import (
     _BARE_GTF,
     _GTF,
@@ -912,13 +914,15 @@ class TestARecordIsCarriedWholeRatherThanCopiedOut:
 # ---------------------------------------------------------------------------------------
 
 #: Every module of the annotation package. Each guard below is a claim about the package
-#: rather than about one file, and checking one module would leave the other three as the
-#: place an edge could arrive unnoticed.
+#: rather than about one file, and checking one module would leave the others as the place
+#: an edge could arrive unnoticed.
 _ANNOTATION_MODULES = (
     registration_module,
     registry_module,
     stems_module,
     database_module,
+    curated_module,
+    metadata_module,
 )
 
 
@@ -944,19 +948,43 @@ def _files_importing(package_root: Path, library: str) -> list[str]:
 
 
 def test_registering_an_annotation_imports_nothing_that_downloads_an_assembly() -> None:
-    # The cycle, asserted closed. `io.download` imports `io.source` at the top of the
-    # file, `io.chimera` imports this package's placement half, and that half used to
-    # import `io.download` back — once for the annotations subdirectory name, which
-    # `io.registration` defines and the downloader merely re-exports, and once for the
-    # package's one fetch step, which `io.fetch` now holds. Each was a single line, and
+    # The cycle, asserted closed. `assembly.download` imports `assembly.source` at the top
+    # of the file, `assembly.chimera_build` imports this package's placement half, and that
+    # half used to import the downloader back — once for the annotations subdirectory name,
+    # which `assembly.registration` defines and the downloader merely re-exports, and once
+    # for the package's one fetch step, which `store.fetch` now holds. Each was a line, and
     # each grows back the moment somebody reaches for a name that happens to be importable
     # from the downloader. Were the edge to return, asking what a chimera is made of would
     # drag the whole annotation build stack in behind it, and the downloader's
     # module-level import of the resolution would go back behind a deferred one.
-    forbidden = {"genome.io.download", "genome.io.chimera", "genome.genome"}
+    forbidden = {
+        "genome.assembly.download",
+        "genome.assembly.chimera_build",
+        "genome.assembly.genome",
+    }
 
     for module in _ANNOTATION_MODULES:
         assert _module_level_imports(module) & forbidden == set()
+
+
+def test_entering_this_package_first_does_not_run_the_open_a_genome_stack() -> None:
+    # The half of the cycle above that lives in the other package's `__init__`, and it
+    # fails loudly rather than subtly: placement imports `genome.assembly.registration` for
+    # the **Assembly dir**, which runs `genome/assembly/__init__.py` first. Were that file
+    # to re-export `Genome` or the chimera build — the two assembly modules that import
+    # *this* package — then `import genome.annotation` would come back round to a package
+    # it is halfway through importing, and raise. `Genome` is exported from `genome`
+    # itself, which is where a caller holds it anyway.
+    package_root = Path(genome.__file__).parent
+    init = package_root / "assembly" / "__init__.py"
+    reached = {
+        node.module
+        for node in ast.parse(init.read_text()).body
+        if isinstance(node, ast.ImportFrom) and node.module is not None
+    }
+
+    assert "genome.assembly.genome" not in reached
+    assert "genome.assembly.chimera_build" not in reached
 
 
 def test_the_annotation_fetch_is_the_packages_one_fetch_step() -> None:
@@ -964,9 +992,10 @@ def test_the_annotation_fetch_is_the_packages_one_fetch_step() -> None:
     # module of its own, not because this package started spelling a download itself.
     # Placement is where it lands, since placement is the only half of this package that
     # fetches anything at all.
-    assert "genome.io.fetch" in _module_level_imports(registration_module)
-    for module in (registry_module, stems_module, database_module):
-        assert "genome.io.fetch" not in _module_level_imports(module)
+    assert "genome.store.fetch" in _module_level_imports(registration_module)
+    for module in _ANNOTATION_MODULES:
+        if module is not registration_module:
+            assert "genome.store.fetch" not in _module_level_imports(module)
 
 
 def test_registering_an_annotation_imports_nothing_from_the_tf_context() -> None:
@@ -996,4 +1025,4 @@ def test_the_gffutils_dependency_has_exactly_one_entrance() -> None:
     # database stops being one file's business.
     package_root = Path(genome.__file__).parent
 
-    assert _files_importing(package_root, "gffutils") == ["genome/io/annotation/database.py"]
+    assert _files_importing(package_root, "gffutils") == ["genome/annotation/database.py"]

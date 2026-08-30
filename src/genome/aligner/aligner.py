@@ -1,7 +1,7 @@
 """General aligner abstraction for building genome indexes.
 
 An :class:`Aligner` binds one **External tool** (STAR, chromap, …) to a
-:class:`~genome.genome.Genome` and knows how to build that aligner's index for it.
+:class:`~genome.assembly.genome.Genome` and knows how to build that aligner's index for it.
 The base class owns the cross-aligner plumbing — the on-disk layout at
 ``<assembly dir>/index/<name>/`` and the completion record that says a build
 finished — while each concrete subclass supplies the aligner-specific command and
@@ -10,7 +10,7 @@ version, running it and saying what installs it are none of this module's busine
 they belong to :mod:`genome.external`, which every tool in the package goes through.
 
 An index writes the same record as every other build in this package (see
-:mod:`genome.io.completion`), carrying the exact command, every tuning knob that
+:mod:`genome.store.completion`), carrying the exact command, every tuning knob that
 determined the build, the aligner version and the FASTA consumed, so a directory
 can be explained months later. Reading that record is the only thing that ever
 answers "is this index finished?"; no caller consults an index file's mere
@@ -20,7 +20,7 @@ That record also pins the **digest of the assembly it was built from**, copied
 from the assembly's own record one directory up, so an assembly re-registered
 underneath an index stops reading as a finished index. The comparison is record
 against record and reads no sequence bytes. Both the layout and that record are
-asked of the bound genome's :attr:`~genome.genome.Genome.assembly_dir`, never
+asked of the bound genome's :attr:`~genome.assembly.genome.Genome.assembly_dir`, never
 re-derived from the **Data dir**: an index belongs inside the assembly it
 indexes, and only the genome knows where it was opened.
 
@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from genome.external import ExternalTool, InstalledTool
-from genome.io.completion import (
+from genome.store.completion import (
     RECORD_NAME,
     WORK_DIR_NAME,
     CompletionRecord,
@@ -48,7 +48,7 @@ from genome.io.completion import (
 )
 
 if TYPE_CHECKING:
-    from genome.genome import Genome
+    from genome.assembly.genome import Genome
 
 #: ``details`` key under which an index pins the digest of the assembly it was built
 #: from. Named for what it covers — the assembly's bytes, not this directory's, which
@@ -60,7 +60,7 @@ _ASSEMBLY_DIGEST_KEY = "assembly_sha256"
 class IndexNotBuiltError(RuntimeError):
     """No index has ever been built where one was asked for.
 
-    Distinct from the two states :mod:`genome.io.completion` calls broken: nothing
+    Distinct from the two states :mod:`genome.store.completion` calls broken: nothing
     on disk is damaged or half-written, there is simply no index there yet. The
     message names the call that builds one, so the gap is self-explaining.
     """
@@ -84,7 +84,7 @@ class Aligner(ABC):
 
     Parameters
     ----------
-    genome : genome.genome.Genome
+    genome : genome.assembly.genome.Genome
         The genome whose reference FASTA will be indexed.
     tool : genome.external.ExternalTool, optional
         The tool to drive. Defaults to :attr:`binary` as installed on this machine; pass
@@ -171,10 +171,10 @@ class Aligner(ABC):
         ------
         IndexNotBuiltError
             If nothing has been built here yet.
-        genome.io.completion.UnfinishedRegistrationError
+        genome.store.completion.UnfinishedRegistrationError
             If the directory holds index files but no record — a build that was
             interrupted before it finished.
-        genome.io.completion.RegistrationMismatchError
+        genome.store.completion.RegistrationMismatchError
             If the record disagrees with what is on disk, naming every file that
             differs and how, or if the assembly was re-registered after this index
             was built, naming both digests.
@@ -263,7 +263,7 @@ class Aligner(ABC):
 
         Raises
         ------
-        genome.io.completion.RegistrationError
+        genome.store.completion.RegistrationError
             If the index directory cannot be trusted and ``overwrite`` is false.
         genome.external.ToolNotFoundError
             If the binary is not installed; the message names what installs it.
@@ -303,7 +303,7 @@ class Aligner(ABC):
         return flags
 
     def _build_command(self, *, overwrite: bool = False) -> str:
-        """Return the :class:`~genome.genome.Genome` call that builds this index.
+        """Return the :class:`~genome.assembly.genome.Genome` call that builds this index.
 
         Quoted verbatim in every error message this class raises: an error a
         caller cannot act on is a bug, not an error message. ``overwrite`` asks
@@ -329,7 +329,7 @@ class Aligner(ABC):
 
         Raises
         ------
-        genome.io.completion.RegistrationError
+        genome.store.completion.RegistrationError
             If the directory holds files without a record, a record that
             disagrees with what is on disk, or a record built from a different
             reference than the one registered now.
@@ -366,12 +366,12 @@ class Aligner(ABC):
 
         Parameters
         ----------
-        record : genome.io.completion.CompletionRecord
+        record : genome.store.completion.CompletionRecord
             This index's record, already held to the files it claims.
 
         Raises
         ------
-        genome.io.completion.RegistrationMismatchError
+        genome.store.completion.RegistrationMismatchError
             If both sides pin a digest and the two disagree. The message names
             both digests and the call that rebuilds the index.
         """

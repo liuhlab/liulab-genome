@@ -1,4 +1,4 @@
-"""Aligner abstractions and the :class:`AlignerMixin` for :class:`~genome.genome.Genome`."""
+"""Aligner abstractions and the :class:`AlignerMixin` for :class:`~genome.assembly.genome.Genome`."""
 
 from genome.aligner.aligner import Aligner, IndexNotBuiltError
 from genome.aligner.chromap import Chromap

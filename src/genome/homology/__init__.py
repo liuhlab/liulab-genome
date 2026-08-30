@@ -40,6 +40,7 @@ from genome.homology.compara import (
     COMPARA_SUBDIR,
     DEFAULT_RELEASE,
     ENSEMBL_BASE_URL,
+    HOMOLOGY_SUBDIR,
     NULL_CELL,
     QUALITY_SCORE_COLUMNS,
     RECORD_KIND,
@@ -55,6 +56,7 @@ from genome.homology.compara import (
     check_species,
     check_stem,
     compara_url,
+    homology_data_dir,
     homology_prepare_command,
     pair_name,
     set_dir,
@@ -72,7 +74,6 @@ from genome.homology.metadata import (
     homology_table,
     read_metadata,
 )
-from genome.io.prepared import HOMOLOGY_SUBDIR, homology_data_dir
 
 __all__ = [
     "COMPARA_COLUMNS",

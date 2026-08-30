@@ -10,6 +10,26 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **`io/` retired: every context owns its own I/O, and what is left is a store.** The one
+  directory grouped by *kind of work* is gone, and its modules moved to whatever they are about.
+  `genome.assembly` is the whole Assembly context — `genome.py`, `chimera.py` and the seven
+  `io/` modules its glossary already claimed (`source`, `components`, `download`, `chimera` as
+  `chimera_build`, `registration`, `fasta`, `twobit`). `genome.annotation` is the annotation
+  package plus the shipped **Curated gene list**, which takes the glossary's own name as
+  `annotation/curated.py` so that a module and the registry's `gene_list()` function no longer
+  share one namespace. `genome.store` keeps what belongs to no context and is reached by all of
+  them: the **Data dir** root (`data_dir.py`), the one fetch step, the **Completion marker**,
+  checksumming (`io/utils.py` → `store/checksum.py`) and the **Prepared set** pipeline — and a
+  test reads every file under it to hold that none imports a context back. **`metadata.py`
+  split**: the assembly table is `genome.assembly.metadata` and the annotation table is
+  `genome.annotation.metadata`, the two having shared their shape and nothing else. **Every
+  root under the **Data dir** now sits with the code that reads what lives under it** — `motif/` in
+  `tf.motif.jaspar`, `xref/` in `xref.xref`, `homology/` in `homology.compara` — and the pipeline
+  they share declares none of the three. No deferred import was added; the three that existed
+  are carried over with their reasoning. `tests/` mirrors the new tree, one package per package,
+  and every import-edge guard moved with the module it defends. **Nothing the package exports
+  changed**: `genome.__all__`, the CLI's commands and its `--json` are untouched, and the
+  shipped `data/` tree did not move.
 - **One module writes every shipped table, where three build scripts each declared the writer
   again.** `genome.shipped_writer` owns the unquoted TSV rendering with its header, the
   deterministic gzip and the provenance merge that replaces a row by its key and re-sorts the

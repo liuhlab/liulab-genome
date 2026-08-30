@@ -1,4 +1,4 @@
-"""Mixin adding aligner-index construction to :class:`~genome.genome.Genome`."""
+"""Mixin adding aligner-index construction to :class:`~genome.assembly.genome.Genome`."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from genome.aligner.aligner import Aligner
+    from genome.assembly.genome import Genome
     from genome.external import ExternalTool
-    from genome.genome import Genome
 
 
 class AlignerMixin:
-    """Build aligner genome indexes for a :class:`~genome.genome.Genome`.
+    """Build aligner genome indexes for a :class:`~genome.assembly.genome.Genome`.
 
     Each ``build_<aligner>_index`` method instantiates the corresponding
     :class:`~genome.aligner.aligner.Aligner`. Constructing one runs nothing: the
@@ -35,18 +35,18 @@ class AlignerMixin:
         ----------
         gtf : str, optional
             Name of a GTF annotation registered on this genome (see
-            :meth:`~genome.io.annotation.registry.AnnotationRegistry.register_path`). Its path is
-            resolved via :meth:`~genome.io.annotation.registry.AnnotationRegistry.path` and passed to
+            :meth:`~genome.annotation.registry.AnnotationRegistry.register_path`). Its path is
+            resolved via :meth:`~genome.annotation.registry.AnnotationRegistry.path` and passed to
             STAR; the index is written to a per-annotation directory
             ``index/star_<gtf>/``, so different annotations build independent indexes.
             Omitted, this genome's **Default annotation**
-            (:attr:`~genome.genome.Genome.default_gtf`) is what the index is built
+            (:attr:`~genome.assembly.genome.Genome.default_gtf`) is what the index is built
             against and what names its directory — which is the everyday call, since a
             chimera and any assembly the table flags one for already carry a default.
         tool : genome.external.ExternalTool, optional
             The tool to drive, forwarded to the aligner — the same seam
             :class:`~genome.aligner.aligner.Aligner` offers, reachable from here so
-            that arriving through a :class:`~genome.genome.Genome` does not close it.
+            that arriving through a :class:`~genome.assembly.genome.Genome` does not close it.
         **kwargs : Any
             Forwarded to :meth:`genome.aligner.star.STAR.index`.
 
@@ -151,7 +151,7 @@ class AlignerMixin:
         genome.aligner.aligner.IndexNotBuiltError
             If no index has been built yet — build it first with the
             corresponding ``build_<aligner>_index`` method.
-        genome.io.completion.RegistrationError
+        genome.store.completion.RegistrationError
             If the index directory holds files without a completion record, or a
             record that disagrees with them; rebuild it with ``overwrite=True``.
         """
@@ -180,7 +180,7 @@ class AlignerMixin:
         genome.aligner.aligner.IndexNotBuiltError
             If no STAR index has been built yet for ``gtf`` — build it first with
             :meth:`build_star_index`.
-        genome.io.completion.RegistrationError
+        genome.store.completion.RegistrationError
             If that index directory cannot be trusted; see :meth:`get_index`.
         """
         return self.get_index("star", gtf=gtf)
@@ -202,7 +202,7 @@ class AlignerMixin:
         genome.aligner.aligner.IndexNotBuiltError
             If no chromap index has been built yet for this assembly — build it
             first with :meth:`build_chromap_index`.
-        genome.io.completion.RegistrationError
+        genome.store.completion.RegistrationError
             If that index directory cannot be trusted; see :meth:`get_index`.
         """
         return self.get_index("chromap")

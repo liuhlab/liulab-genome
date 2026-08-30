@@ -2,10 +2,15 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
-from genome.gene_list import GeneCategoryNotDeclaredError, NoGeneCategoriesError
-from genome.genome import Genome
-from genome.io.annotation import AnnotationRegistry, GeneList
-from genome.metadata import AnnotationMetadata, AssemblyMetadata
+from genome.annotation import (
+    AnnotationMetadata,
+    AnnotationRegistry,
+    GeneCategoryNotDeclaredError,
+    GeneList,
+    NoGeneCategoriesError,
+)
+from genome.assembly.genome import Genome
+from genome.assembly.metadata import AssemblyMetadata
 from genome.region import Region
 from genome.seq import DNA, RNA, Protein
 from genome.tf.cofactor import NoCofactorTableError, TFCofactorList

@@ -15,6 +15,24 @@ from typing import Any as _Any
 import typer
 
 from genome import __version__ as _package_version
+from genome.annotation import GeneList as _GeneList
+from genome.annotation import GeneListSource as _GeneListSource
+from genome.annotation import RegisteredAnnotation as _RegisteredAnnotation
+from genome.annotation import annotation_status as _annotation_status
+from genome.annotation import gene_list as _gene_list
+from genome.annotation import gene_lists as _gene_lists
+from genome.annotation import register_annotation as _register_annotation
+from genome.annotation import register_gtf as _register_gtf
+from genome.assembly import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
+from genome.assembly import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
+from genome.assembly import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
+from genome.assembly import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
+from genome.assembly import ChimeraDetails as _ChimeraDetails
+from genome.assembly import VerifiedAssembly as _VerifiedAssembly
+from genome.assembly import assembly_table_row as _assembly_table_row
+from genome.assembly import format_table_row as _format_table_row
+from genome.assembly import register_assembly as _register_assembly
+from genome.assembly import verify_assembly as _verify_assembly
 from genome.external import ToolNotFoundError
 from genome.external import doctor as _doctor
 from genome.homology import DEFAULT_RELEASE as _HOMOLOGY_RELEASE
@@ -22,24 +40,6 @@ from genome.homology import NULL_CELL as _NULL_CELL
 from genome.homology import HomologyMetadata as _HomologyMetadata
 from genome.homology import HomologySet as _HomologySet
 from genome.homology.compara import HomologyAnswer as _HomologyAnswer
-from genome.io.annotation import GeneList as _GeneList
-from genome.io.annotation import GeneListSource as _GeneListSource
-from genome.io.annotation import RegisteredAnnotation as _RegisteredAnnotation
-from genome.io.annotation import annotation_status as _annotation_status
-from genome.io.annotation import gene_list as _gene_list
-from genome.io.annotation import gene_lists as _gene_lists
-from genome.io.annotation import register_annotation as _register_annotation
-from genome.io.annotation import register_gtf as _register_gtf
-from genome.io.components import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
-from genome.io.components import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
-from genome.io.components import ChimeraDetails as _ChimeraDetails
-from genome.io.download import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
-from genome.io.download import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
-from genome.io.download import VerifiedAssembly as _VerifiedAssembly
-from genome.io.download import assembly_table_row as _assembly_table_row
-from genome.io.download import register_assembly as _register_assembly
-from genome.io.download import verify_assembly as _verify_assembly
-from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
 from genome.tf.cofactor import tf_cofactor_list as _tf_cofactor_list
 from genome.tf.gene import tf_gene_list as _tf_gene_list

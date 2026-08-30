@@ -181,7 +181,7 @@ class XrefMetadata:
 
         Raises
         ------
-        genome.metadata.MetadataRowError
+        genome.assembly.metadata.MetadataRowError
             If a cell cannot be read as its column's type, or a column that has no unknown
             is blank. The message names the column.
 
@@ -260,7 +260,7 @@ def xref_table() -> tuple[XrefMetadata, ...]:
 
     Raises
     ------
-    genome.metadata.MetadataRowError
+    genome.assembly.metadata.MetadataRowError
         If the shipped file is empty, its header is not :data:`XREF_FIELDS`, a row holds the
         wrong number of cells, or a cell cannot be read as its column's type.
 
