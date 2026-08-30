@@ -10,6 +10,7 @@ theme:
   features:
     - navigation.sections
     - navigation.expand
+    - navigation.indexes
     - content.code.copy
     - content.code.annotate
     - content.action.edit
@@ -34,6 +35,11 @@ theme:
 
 plugins:
   - search
+  # Renders each Typer sub-app's own --help into the CLI pages, so a synopsis
+  # cannot drift from src/genome/*/cli.py. `pretty` picks the native renderer
+  # (options as a table) over shelling out to the `typer` command.
+  - mkdocs-typer2:
+      pretty: true
   - mkdocstrings:
       handlers:
         python:
@@ -50,11 +56,33 @@ plugins:
             heading_level: 2
 
 nav:
-  - Home: index.md
-  - Genome: genome.md
-  - Sequences: sequences.md
-  - CLI: cli.md
-  - API reference: reference.md
+  - Get started: index.md
+  - Working with a genome:
+      - Overview: genome/index.md
+      - Assembly: genome/assembly.md
+      - Sequences and regions: genome/sequences.md
+      - Annotations: genome/annotations.md
+      - Aligner indexes: genome/aligner.md
+  - Topics:
+      - Overview: topics/index.md
+      - Transcription factors: topics/transcription-factors.md
+      - Motifs: topics/motifs.md
+      - Gene identifiers: topics/gene-identifiers.md
+      - Homology: topics/homology.md
+  - Interfaces:
+      - CLI overview: cli/index.md
+      - "CLI: genome commands": cli/genome.md
+      - "CLI: lookup commands": cli/lookups.md
+      - API reference: reference.md
+
+# --strict promotes warnings to errors, and these four default to `info`, which
+# --strict ignores. Raising them is what makes a broken anchor, a stray page or a
+# link into nowhere fail the build instead of scrolling past in the log.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
 
 # Agent-facing trees live in the repo and stay OUT of the site; this site is the human
 # layer on top of them. A dated measurement is not a docs page, and CI builds --strict,
