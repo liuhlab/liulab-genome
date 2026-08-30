@@ -18,6 +18,7 @@ words, which is the one place a base here was chosen rather than found. Nothing 
 | `tiny_jaspar_transfac.txt` | Ten whole records of the JASPAR 2024 `all` union file, in its own order — see below |
 | `planted_motifs.fa` | Two 600-base windows of `tiny.fa` with three motif consensus words written into them at known positions and strands — see below |
 | `xref/alliance_genecrossreference_tiny.tsv.gz` | Fourteen whole genes of the Alliance of Genome Resources release 9.0.0 cross-reference file, copied verbatim — see below |
+| `homology/compara116.*.homologies.tsv.gz` | Whole rows of three Ensembl Compara 116 per-species homology dumps, in each file's own order — see below |
 
 Sources:
 
@@ -25,6 +26,7 @@ Sources:
 - `https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz`
 - `https://jaspar.elixir.no/download/data/2024/CORE/JASPAR2024_CORE_non-redundant_pfms_transfac.txt`
 - `https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz`
+- `https://ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/<species>/Compara.116.protein_default.homologies.tsv.gz`
 
 `tiny.gtf` coordinates are 1-based inclusive, as every GTF is; they convert at the I/O boundary and
 are never seen in that form inside the package.
@@ -185,3 +187,41 @@ Two things the fixture deliberately does **not** show, because the publisher's f
 None of this is prose to be trusted: `TestFixtureBytes` in `tests/test_xref.py` asserts the header,
 the three taxa, the duplication's shape, the hub-less gene and the worm symbol row against the
 committed bytes, and `FIXTURE_SLICES` pins what each species' slice comes to.
+## `homology/` — the Compara homology dumps
+
+Three subsamples of Ensembl Compara release 116's per-species `protein_default` homology dumps, one
+per species the package prepares a **Homology set** for. Every line is a whole published row copied
+verbatim, in the source file's own order, under the publisher's own header — nothing is edited, and
+no row is synthesised. Each source file is 85–110 MB gzipped and holds millions of rows; these hold
+tens.
+
+| File | Rows | What it is here for |
+|---|---|---|
+| `compara116.homo_sapiens.homologies.tsv.gz` | 17 | The human dump: 11 human↔worm rows, 4 human↔human paralogy rows and 2 human↔zebrafish rows — and, as the real file has, **zero human↔mouse rows** |
+| `compara116.mus_musculus.homologies.tsv.gz` | 27 | The mouse dump: 10 mouse↔human rows, 11 mouse↔worm rows, 4 mouse↔mouse paralogy rows and 2 mouse↔zebrafish rows — one file holding **two** of the three pairs |
+| `compara116.caenorhabditis_elegans.homologies.tsv.gz` | 4 | The worm dump: four worm↔worm paralogy rows and **no row of either pair**, which is the real file's shape too |
+
+What each is in the set *for*:
+
+- **The partition, for real.** The human file holds no human↔mouse row, so preparing that pair from
+  it is the published partition trap rather than a staged one, and the worm file holds no pair at
+  all. Which file holds which pair is what `homology_metadata.tsv` records, measured.
+- **All three cardinalities.** Both cross-species pairs carry `ortholog_one2one`,
+  `ortholog_one2many` and `ortholog_many2many` rows, and every gene taken was taken with **all** of
+  its rows against that species — so a cardinality here is the publisher's own and not an artefact
+  of the sampling. Two human genes, `ENSG00000163331` and `ENSG00000112977`, are `many2many` to the
+  *same* two worm genes, which is what a partner named by two asked stems looks like.
+- **Both null quality scores.** Every human↔worm and mouse↔worm row carries `NULL` in `goc_score`
+  and `wga_coverage`, as 100% of the real rows of both pairings do; the mouse↔human rows carry real
+  values in both, and the zebrafish rows carry them in the human file too — so a set that holds
+  nothing in a column is a fact about the pair and not about the file it was cut from.
+- **Paralogy rows that are not a pair's.** The paralogy rows are `other_paralog` (human, mouse) and
+  `within_species_paralog` (worm), and every one of them relates two genes of *one* species, as
+  every duplication row in release 116 does — there is no `between_species_paralog` row anywhere in
+  the published human dump. They are here to hold the boundary: a **Homology link** relates two
+  species, so these are in the file and never in a pair's set.
+- **Compara's own null spelling**, `NULL`, and its flag spellings `1`, `0` and `NULL` — the
+  high-confidence flag is set on the ortholog rows and null on every paralogy row.
+
+None of this is prose to be trusted: `tests/test_homology.py` asserts every row of the table above
+against the committed bytes.

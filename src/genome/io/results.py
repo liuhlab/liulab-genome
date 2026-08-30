@@ -62,6 +62,13 @@ from genome.tf.gene import CensusProvenance
 EXPECTED_FROM_TABLE = "table"
 EXPECTED_FROM_RECORD = "record"
 
+#: What every one of Compara's speciation labels begins with, and nothing else does:
+#: ``ortholog_one2one``, ``ortholog_one2many``, ``ortholog_many2many``. It is how a
+#: **Homology link** tells an ortholog from a **Paralogy link** without this package
+#: keeping a list of the publisher's labels that would go stale the release it added one
+#: — the prefix is Compara's own naming and a duplication label never carries it.
+ORTHOLOG_TYPE_PREFIX = "ortholog_"
+
 #: What ``details["chromosomes_unchecked_because"]`` says when the caller stood the check
 #: down — ``check_chromosomes=False``, or ``--no-check-chromosomes`` from a shell. There is
 #: no advice to give about it: the assembly may be registered and the names deliberately
@@ -837,6 +844,323 @@ class ResolvedXrefIds:
             "resolved": {stem: list(ids) for stem, ids in self.resolved.items()},
             "unresolved": list(self.unresolved),
             "xref_ids": self.xref_ids,
+        }
+
+
+@dataclass(frozen=True)
+class HomologyLink:
+    """One row of a **Homology set**: two genes in two species, and what relates them.
+
+    The publisher's assertion, carried unchanged. :attr:`homology_type` is Compara's own
+    tree-derived label and is **never recomputed** — not after a filter, not after
+    resolution into an **Annotation**, not after a caller slices the answer (ADR-0020) —
+    so a link can read one-to-one in a view and still be labelled ``ortholog_one2many``.
+    What a view removed is counted separately, as a **Dropped partner**, rather than the
+    label being quietly corrected.
+
+    The three confidence fields ride through exactly as the publisher wrote them, so a
+    caller can filter on them. **Two of them are null for a whole species pair rather
+    than for a row**: Compara records no ``goc_score`` and no ``wga_coverage`` on any link
+    of either worm pairing, and a filter written against one would silently empty. Which
+    fields a set holds nothing in is measured when it is prepared and said out loud on the
+    answer — see :attr:`HomologyAnswer.null_quality_scores`.
+
+    Attributes
+    ----------
+    gene_id_stem : str
+        The **Gene id stem** asked about, in the set's first species.
+    homolog_gene_id_stem : str
+        The **Gene id stem** of the homologous gene, in the other species.
+    homology_type : str
+        Compara's own ``homology_type``, verbatim: ``ortholog_one2one``,
+        ``ortholog_one2many``, ``ortholog_many2many`` for speciation, and its duplication
+        labels for a **Paralogy link**.
+    is_high_confidence : bool or None
+        Compara's high-confidence flag, or ``None`` where it recorded none.
+    goc_score : int or None
+        Gene order conservation score, or ``None`` where Compara recorded none.
+    wga_coverage : float or None
+        Whole-genome-alignment coverage, or ``None`` where Compara recorded none.
+
+    Examples
+    --------
+    >>> link = HomologyLink(
+    ...     gene_id_stem="ENSG00000141510",
+    ...     homolog_gene_id_stem="ENSMUSG00000059552",
+    ...     homology_type="ortholog_one2one",
+    ...     is_high_confidence=True,
+    ...     goc_score=100,
+    ...     wga_coverage=96.79,
+    ... )
+    >>> link.is_ortholog
+    True
+    >>> link.as_json()["homology_type"]
+    'ortholog_one2one'
+    """
+
+    gene_id_stem: str
+    homolog_gene_id_stem: str
+    homology_type: str
+    is_high_confidence: bool | None
+    goc_score: int | None
+    wga_coverage: float | None
+
+    @property
+    def is_ortholog(self) -> bool:
+        """Whether the publisher's label is a speciation one rather than a duplication one.
+
+        Read off :attr:`homology_type` and never off a count of rows: this is what the
+        publisher said about the gene tree, which is why it survives every filter
+        (ADR-0020). A link this is ``False`` for is a **Paralogy link**, kept and marked
+        rather than dropped, so *not an ortholog* stays distinguishable from *absent*.
+        """
+        return self.homology_type.startswith(ORTHOLOG_TYPE_PREFIX)
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this link as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            The six fields above under their own names, plus ``is_ortholog``. A null
+            confidence field stays ``None`` rather than being filled in.
+        """
+        return {
+            "gene_id_stem": self.gene_id_stem,
+            "homolog_gene_id_stem": self.homolog_gene_id_stem,
+            "homology_type": self.homology_type,
+            "is_ortholog": self.is_ortholog,
+            "is_high_confidence": self.is_high_confidence,
+            "goc_score": self.goc_score,
+            "wga_coverage": self.wga_coverage,
+        }
+
+
+@dataclass(frozen=True)
+class HomologyAnswer:
+    """The homologous genes one **Homology set** names for the stems it was asked about.
+
+    :meth:`~genome.homology.compara.HomologySet.homologs`'s answer, in the shape
+    :class:`ResolvedGeneIds` establishes: every stem that named at least one **Homology
+    link** maps to all of them, in ask order, and no value is ever empty — a stem that
+    named none is in :attr:`unresolved` instead. Nothing here picks a "best" homolog, and
+    this package computes no ranking or quality score of its own.
+
+    **What a filter removed is counted rather than dropped.** Asking for orthologs — the
+    default — removes every **Paralogy link**, and the partner genes the answer therefore
+    no longer names at all are counted in :attr:`dropped_partners`. Ask again with
+    ``paralogs=True`` to see them.
+
+    **A quality score that is null for the whole set says so here.** Compara records
+    neither ``goc_score`` nor ``wga_coverage`` on any link of either worm pairing, so a
+    caller filtering on one would get an empty result and no reason for it.
+    :attr:`null_quality_scores` names the fields the set holds no value in anywhere,
+    measured over the prepared slice rather than listed against a pair.
+
+    Attributes
+    ----------
+    species : str
+        The species the stems asked about belong to.
+    other_species : str
+        The species the homologous genes belong to.
+    release : str
+        The Ensembl Compara **Release** that asserted these links.
+    resolved : mapping of str to tuple of HomologyLink
+        Every stem that named at least one link, in the order the stems were asked about,
+        to its links, ordered by the partner's stem. No value is ever an empty tuple.
+    unresolved : tuple of str
+        The stems this set names no homolog for, in the order they were asked about.
+    dropped_partners : tuple of str
+        The **Dropped partner**s: every partner **Gene id stem** this answer would have
+        named had nothing been filtered out, and now names nowhere, in ascending order.
+    null_quality_scores : tuple of str
+        The names of the confidence fields the whole set holds no value in —
+        ``("goc_score", "wga_coverage")`` for either worm pairing, empty for a pair
+        Compara scored.
+
+    Examples
+    --------
+    >>> link = HomologyLink(
+    ...     "ENSG00000141510", "ENSMUSG00000059552", "ortholog_one2one", True, 100, 96.79
+    ... )
+    >>> answer = HomologyAnswer(
+    ...     species="Homo sapiens",
+    ...     other_species="Mus musculus",
+    ...     release="116",
+    ...     resolved={"ENSG00000141510": (link,)},
+    ...     unresolved=("ENSG00000288541",),
+    ...     dropped_partners=(),
+    ...     null_quality_scores=(),
+    ... )
+    >>> answer.homolog_gene_id_stems
+    ['ENSMUSG00000059552']
+    >>> answer.as_json()["unresolved"]
+    ['ENSG00000288541']
+    """
+
+    species: str
+    other_species: str
+    release: str
+    resolved: Mapping[str, tuple[HomologyLink, ...]]
+    unresolved: tuple[str, ...]
+    dropped_partners: tuple[str, ...]
+    null_quality_scores: tuple[str, ...]
+
+    @property
+    def links(self) -> list[HomologyLink]:
+        """Every link, stem order and then partner order — a fresh list each call."""
+        return [link for links in self.resolved.values() for link in links]
+
+    @property
+    def homolog_gene_id_stems(self) -> list[str]:
+        """Every homologous **Gene id stem** named, stem order then partner order.
+
+        **Flattening loses the two things the answer exists to carry.** It drops the
+        **Homology type** and the confidence fields, so a one-to-one and a many-to-many
+        partner become the same string; and it drops which asked stem each partner came
+        from, so a partner two asked stems both name appears twice rather than once. Read
+        :attr:`resolved` for either. This is here because a caller assembling the list
+        themselves is a caller who might take one partner per stem and lose the rest,
+        which is the ``ortholog_one2many`` case this shape exists to keep.
+        """
+        return [link.homolog_gene_id_stem for links in self.resolved.values() for link in links]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``species``, ``other_species``, ``release``, ``resolved`` as a mapping of stem
+            to a list of :meth:`HomologyLink.as_json` links, ``unresolved``,
+            ``dropped_partners`` and ``null_quality_scores`` as lists, and the flattened
+            ``homolog_gene_id_stems``. The last is written out beside the mapping it is
+            read from for the reason :attr:`homolog_gene_id_stems` gives.
+        """
+        return {
+            "species": self.species,
+            "other_species": self.other_species,
+            "release": self.release,
+            "resolved": {
+                stem: [link.as_json() for link in links] for stem, links in self.resolved.items()
+            },
+            "unresolved": list(self.unresolved),
+            "dropped_partners": list(self.dropped_partners),
+            "null_quality_scores": list(self.null_quality_scores),
+            "homolog_gene_id_stems": self.homolog_gene_id_stems,
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedHomologs:
+    """A :class:`HomologyAnswer` put into one registered **Annotation**'s own gene ids.
+
+    :func:`~genome.homology.annotation.resolve_homologs`'s answer, and the crossing a
+    caller makes once they have homologs and want to join them to their own counts
+    matrix. The hop itself is
+    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, used unchanged.
+
+    **The Homology type is the publisher's and stands** (ADR-0020). An annotation that
+    spells one gene of an ``ortholog_one2many`` link and not the other leaves a view that
+    looks one-to-one, and the label still reads ``ortholog_one2many``; what the crossing
+    removed is in :attr:`dropped_partners` rather than folded into the label.
+
+    Attributes
+    ----------
+    species : str
+        The species the stems asked about belong to.
+    other_species : str
+        The species the homologous genes belong to, and the one the annotation annotates.
+    release : str
+        The Ensembl Compara **Release** that asserted these links.
+    assembly : str
+        The **Assembly** whose annotation these gene ids belong to.
+    annotation : str
+        The **Registered name** whose own gene ids these are.
+    resolved : mapping of str to tuple of HomologyLink
+        Every asked stem that still names at least one link, in ask order, to the links
+        whose partner this annotation carries a gene for. No value is ever empty.
+    gene_ids : mapping of str to tuple of str
+        Every partner **Gene id stem** that survived, to the gene ids this annotation
+        spells it with, ascending. Keyed by partner and not by asked stem, because two
+        asked stems may name one partner and its ids are the same ids.
+    unresolved : tuple of str
+        The asked stems left naming nothing here: first those the crossing emptied — every
+        partner missing from this annotation — in ask order, then those the set already
+        named no homolog for, in ask order. Two groups rather than one interleaved list,
+        because *this annotation is missing every partner* and *this release knows no
+        homolog* are different facts about a gene.
+    dropped_partners : tuple of str
+        The **Dropped partner**s: every partner **Gene id stem** this annotation carries
+        no gene for, ascending. What the crossing cost, counted rather than hidden.
+
+    Examples
+    --------
+    >>> link = HomologyLink(
+    ...     "ENSG00000141510", "ENSMUSG00000059552", "ortholog_one2many", True, 100, 96.79
+    ... )
+    >>> crossed = ResolvedHomologs(
+    ...     species="Homo sapiens",
+    ...     other_species="Mus musculus",
+    ...     release="116",
+    ...     assembly="mm39",
+    ...     annotation="gencode_vM39",
+    ...     resolved={"ENSG00000141510": (link,)},
+    ...     gene_ids={"ENSMUSG00000059552": ("ENSMUSG00000059552.5",)},
+    ...     unresolved=(),
+    ...     dropped_partners=("ENSMUSG00000000001",),
+    ... )
+    >>> crossed.homolog_gene_ids
+    ['ENSMUSG00000059552.5']
+    >>> crossed.resolved["ENSG00000141510"][0].homology_type
+    'ortholog_one2many'
+    """
+
+    species: str
+    other_species: str
+    release: str
+    assembly: str
+    annotation: str
+    resolved: Mapping[str, tuple[HomologyLink, ...]]
+    gene_ids: Mapping[str, tuple[str, ...]]
+    unresolved: tuple[str, ...]
+    dropped_partners: tuple[str, ...]
+
+    @property
+    def homolog_gene_ids(self) -> list[str]:
+        """Every homologous gene id named, partner order then id order — a fresh list.
+
+        **Flattening loses what the mapping carries**: which asked stem reached the gene,
+        and under what **Homology type**. It keeps every id rather than one per partner,
+        since one stem may be spelled by two gene ids — the pseudoautosomal case
+        :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids` answers with both of.
+        """
+        return [gene_id for ids in self.gene_ids.values() for gene_id in ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this crossing as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            The species pair, the ``release``, the ``assembly`` and ``annotation``,
+            ``resolved`` as a mapping of stem to a list of :meth:`HomologyLink.as_json`
+            links, ``gene_ids`` as a plain mapping, ``unresolved`` and
+            ``dropped_partners`` as lists, and the flattened ``homolog_gene_ids``.
+        """
+        return {
+            "species": self.species,
+            "other_species": self.other_species,
+            "release": self.release,
+            "assembly": self.assembly,
+            "annotation": self.annotation,
+            "resolved": {
+                stem: [link.as_json() for link in links] for stem, links in self.resolved.items()
+            },
+            "gene_ids": {stem: list(ids) for stem, ids in self.gene_ids.items()},
+            "unresolved": list(self.unresolved),
+            "dropped_partners": list(self.dropped_partners),
+            "homolog_gene_ids": self.homolog_gene_ids,
         }
 
 
