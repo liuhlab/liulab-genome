@@ -129,7 +129,7 @@ typecheck = "pyright"
 # process pools: distributed by load, eight of them could fork pools at once and the lane's
 # wall went bimodal — 13.5 s or 16.1 s on the same commit, decided by scheduling alone.
 # Grouping pins each such module to one worker, which is faster on BOTH box sizes (4 workers:
-# 9.4 s against 12.3 s). docs/research/test-suite-parallelism-2026-08-30.md
+# 9.4 s against 12.3 s). docs/research/test-suite-cost-and-parallelism-2026-08-30.md
 test        = { cmd = "pytest -m 'not aligner' -n auto --maxprocesses 10 --dist=loadgroup", depends-on = ["require-tools"] }
 # Serial: eight tests. `depends-on` because pixi runs it first, proving the binaries answer.
 test-aligner = { cmd = "pytest -m aligner", depends-on = ["require-aligners"] }

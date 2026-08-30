@@ -68,15 +68,26 @@ jobs:
         with:
           environments: test
           locked: true
-      # Keyed on the lockfile: a compiled artifact is only valid for the numba and memelite
-      # that produced it, and the lock is what pins both. `restore-keys` is deliberately
-      # ABSENT — a stale-keyed cache would be restored and then rejected by numba's own
-      # magic-tuple check, paying the download for nothing and recompiling anyway.
+      # Keyed on the lockfile, because a compiled artifact is only valid for the numba and
+      # memelite that produced it, and the lock pins both — but with the run id APPENDED and
+      # the lock-only prefix as a restore key, so the cache is rewritten every run.
+      #
+      # That rotation is the whole point, and a fixed key is a trap here. numba caches per
+      # type signature, so one run compiles only the specialisations it happened to reach;
+      # `actions/cache` refuses to overwrite an existing key, so a first run that saved a
+      # PARTIAL cache freezes it permanently and every later run pays the missing compiles
+      # forever. Measured: two runs on the same commit, one restoring a 437 KB cache and
+      # paying nothing, the other restoring a 474 KB cache and still recompiling four tests
+      # at 24-39 s each. Rotating the key lets each run save what it learned, so the cache
+      # converges on the full set of signatures the suite needs instead of freezing at
+      # whichever subset went first.
       - name: numba JIT cache
         uses: actions/cache@v4
         with:
           path: .numba-cache
-          key: numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}
+          key: numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-
       - name: pytest -m 'not aligner'
         run: pixi run -e test test -- --durations=10
 
