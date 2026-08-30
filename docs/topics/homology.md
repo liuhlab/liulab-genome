@@ -123,15 +123,24 @@ them. `is_high_confidence` is its own flag, true on 2,979 of this set's 23,982 l
 coverage.
 
 **Compara records neither `goc_score` nor `wga_coverage` on any link of this set**, so a
-filter on either empties the answer rather than narrowing it. The set names the fields it
-holds no value in anywhere, and so does every answer it gives, so you can check before
-writing the filter:
+filter on either empties the answer rather than narrowing it. Both the set and every answer
+it gives name the fields they hold no value in, so you can check before writing the filter:
 
 ```python
 worm_human.null_quality_scores    # ('goc_score', 'wga_coverage')
 answer.null_quality_scores        # ('goc_score', 'wga_coverage')
 link.goc_score                    # None
 link.is_high_confidence           # True
+```
+
+Which fields carry values is a property of the pair. Compara scored human against mouse, so
+that set lists nothing as null and both columns are there to filter on:
+
+```python
+human_mouse = HomologySet("Homo sapiens", "Mus musculus")
+human_mouse.null_quality_scores    # ()
+human_mouse.homologs(["ENSG00000141510"]).resolved["ENSG00000141510"][0].goc_score
+# 100
 ```
 
 ## Gene ids in your own annotation
@@ -180,7 +189,6 @@ header and rows.
 
 ## Nothing is mapped for you
 
-Homology is answered when you ask for it and applied nowhere else. No table this package
-publishes is derived through homology, and no answer is silently species-mapped. A species
-with no data of its own does not borrow another's. Nothing crosses species unless you call
-`homologs()` yourself.
+Nothing crosses species unless you call `homologs()` yourself. No table this package
+publishes is derived through homology, no answer is silently species-mapped, and a species
+with no data of its own never borrows another's.
