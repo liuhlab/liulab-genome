@@ -35,6 +35,8 @@ from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
 from genome.io.results import GeneList as _GeneList
 from genome.io.results import GeneListSource as _GeneListSource
 from genome.io.results import RegisteredAnnotation as _RegisteredAnnotation
+from genome.io.results import ResolvedStems as _ResolvedStems
+from genome.io.results import ResolvedXrefIds as _ResolvedXrefIds
 from genome.io.results import VerifiedAssembly as _VerifiedAssembly
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
@@ -51,6 +53,8 @@ from genome.tf.motif.parquet import provenance_of as _provenance_of
 from genome.tf.motif.scan import read_fasta as _read_fasta
 from genome.tf.motif.scan import scan_stream as _scan_stream
 from genome.tf.motif.workers import resolve_workers as _resolve_workers
+from genome.xref import NAMESPACES as _NAMESPACES
+from genome.xref import XrefSet as _XrefSet
 
 #: What a failed assembly command raises, in one place. Every one of them is already
 #: actionable — a checksum mismatch, a registration that cannot be trusted, a missing
@@ -77,6 +81,26 @@ _GENE_LIST_ERRORS = (*_ASSEMBLY_ERRORS, LookupError)
 #: Its own name rather than :data:`_ASSEMBLY_ERRORS` reused, because a motif belongs to no
 #: assembly and the two lists are alike by coincidence rather than by construction.
 _MOTIF_SCAN_ERRORS = (ValueError, OSError, RuntimeError)
+
+#: What a failed xref hop raises, and every one of them already names its next action: a
+#: species, a source or a **Namespace** that resolves to nothing is a ``LookupError``; a set
+#: that could not be fetched, and a directory an interrupted download left unfinished, are
+#: ``RuntimeError``s; a publisher's file that does not match its pin and a stored slice this
+#: package did not write are ``ValueError``s; and a file that went away under the read is an
+#: ``OSError``. Its own name rather than :data:`_GENE_LIST_ERRORS` reused, because an **Xref
+#: set** belongs to no assembly and no annotation — the two lists are alike by coincidence
+#: rather than by construction.
+_XREF_ERRORS = (ValueError, OSError, RuntimeError, LookupError)
+
+#: What to do when neither direction is named, or both are. Spelled once because the two
+#: mistakes are one mistake, and it names both flags because which one is wanted is exactly
+#: what the caller has not said.
+_XREF_DIRECTION_HELP = (
+    "error: name exactly one direction. `--to-stems NAMESPACE` reads the ids as that "
+    "namespace and answers in gene id stems; `--from-stems NAMESPACE` reads them as stems "
+    "and answers in that namespace. An identifier does not say which system it belongs to, "
+    "so nothing here infers the direction from the strings you passed."
+)
 
 #: Help for the ``--annotation`` option every command asking one annotation a question takes.
 _ANNOTATION_HELP = (
@@ -796,6 +820,142 @@ def table_row(
     # since the JSON object and the line to paste carry the same fields.
     row = _asdict(computed)
     typer.echo(_json.dumps(row) if json else _format_table_row(row))
+
+
+# --- xref commands -----------------------------------------------------------
+
+
+@app.command("xref")
+def xref(
+    species: str = typer.Argument(
+        ...,
+        help="Species an xref set exists for, e.g. 'Homo sapiens' — the slug "
+        "'homo_sapiens' names the same one. A species none exists for names the ones "
+        "that do rather than answering nothing.",
+    ),
+    ids: list[str] = typer.Argument(
+        ...,
+        help="The identifiers to convert. Each comes back in the order you passed it, "
+        "with its version suffix and its namespace's CURIE prefix accepted either way.",
+    ),
+    to_stems: str | None = typer.Option(
+        None,
+        "--to-stems",
+        metavar="NAMESPACE",
+        help=f"Read the ids as this namespace and answer in gene id stems: "
+        f"{', '.join(_NAMESPACES)}, whichever of them this set carries. Exactly one of "
+        f"this and --from-stems is named.",
+    ),
+    from_stems: str | None = typer.Option(
+        None,
+        "--from-stems",
+        metavar="NAMESPACE",
+        help="Read the ids as gene id stems and answer in this namespace. A versioned "
+        "gene id is accepted and reduced to its stem, so an annotation's own ids go "
+        "straight in.",
+    ),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Answer from this xref source rather than the species' default one. Which "
+        "publisher answers is a scientific choice and not a detail: NCBI and Ensembl "
+        "agree on 57.5% of human gene-level (GeneID, ENSG) pairs.",
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Convert identifiers to and from gene id stems against one published xref set.
+
+    The way a column of Entrez GeneIDs from a GEO series, UniProt accessions from a
+    mass-spec run or HGNC ids from a curated resource reaches this package's answers,
+    without writing Python and without the hand-built join everyone in the lab writes
+    slightly differently. No assembly is named and no genome is opened: an identifier is a
+    name and not a place.
+
+    **The direction is named, never inferred.** `--to-stems NAMESPACE` reads the ids as
+    that namespace and answers in gene id stems; `--from-stems NAMESPACE` reads them as
+    stems and answers in that namespace. A string does not say which system it belongs to,
+    so `HGNC:11998` asked the wrong way answers *nothing found* rather than quietly turning
+    around. There is no third direction: Entrez to HGNC is two calls and the join is yours,
+    which keeps the hop visible in your pipeline rather than invisible in ours.
+
+    **The pairs go to stdout, tab-separated, so the output pipes** — `cut -f2` is the
+    answer, `cut -f1` says what asked for it — and the heading, the publisher's URL and the
+    counts go to stderr. An id naming two genes prints two rows rather than whichever came
+    first, and **an id that resolved to nothing gets a row too, with an empty second
+    column**: what your list holds and this release does not is the one thing a hand-rolled
+    join drops silently. `--json` carries the same answer, keyed by what was asked about,
+    with those ids under `unresolved`.
+
+    Omitting `--source` answers from the species' default xref source, so everyone in the
+    lab reaches for the same one without discussing it. It is a default and not a
+    recommendation: naming a source is how the scientific choice gets made deliberately,
+    and every answer names the source and the release that produced it either way.
+
+    Naming a species prepares its set, which the first time is a download. **The lab's CPU
+    cluster compute nodes have no internet**, so a set must be constructed once from a login
+    node — by running this there, or from Python — before a job that needs it is submitted;
+    after that it is read from the **Data dir** and shared by every project on the machine.
+
+    Exits with code 2 when no direction is named or both are, and with code 1 when no set
+    exists for the species — the message names the ones that do — when the source is not one
+    this package prepares, when the set is not here and cannot be fetched, when the
+    namespace is not one the set carries, and when a directory holds a set left unfinished.
+    """
+    # Which way the hop goes and which namespace it is in arrive on one flag, so neither can
+    # be given without the other. Naming both, or neither, is the one thing left to check.
+    if to_stems is not None and from_stems is None:
+        to_hub, namespace = True, to_stems
+    elif from_stems is not None and to_stems is None:
+        to_hub, namespace = False, from_stems
+    else:
+        typer.echo(_XREF_DIRECTION_HELP, err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        xrefs = _XrefSet(species, source, progressbar=not json)
+        answer = xrefs.to_stems(ids, namespace) if to_hub else xrefs.from_stems(ids, namespace)
+    except _XREF_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(answer.as_json()))
+        return
+    _report_xref(answer, source_url=xrefs.source_url, to_hub=to_hub)
+
+
+def _report_xref(
+    answer: _ResolvedStems | _ResolvedXrefIds, *, source_url: str, to_hub: bool
+) -> None:
+    """Print one hop as the pairs it found, with what answered and what it missed beside them.
+
+    The pairs to stdout and everything else to stderr, for the reason `gene-list` splits
+    them: two tab-separated columns are what a shell pipeline wants, and which publisher
+    asserted them is what a reader wants. **Every id asked about gets at least one row**,
+    the ones that resolved to nothing getting one with an empty second column, so nothing
+    leaves this command shorter than it arrived.
+
+    Which noun each column holds is the surface's to say and not the answer's: the answer
+    carries the namespace and the direction is what the caller named, so it is passed in
+    rather than guessed back out of which type came through.
+    """
+    asked_as = f"{answer.namespace} ids" if to_hub else "gene id stems"
+    answered_as = "gene id stems" if to_hub else f"{answer.namespace} ids"
+    rows = [(asked, found) for asked, values in answer.resolved.items() for found in values]
+    typer.echo(
+        f"{asked_as} -> {answered_as} for {answer.species} ({answer.source} {answer.release})",
+        err=True,
+    )
+    typer.echo(f"  source  {source_url}", err=True)
+    typer.echo(
+        f"  {len(answer.resolved)} resolved, {len(rows)} {answered_as}, "
+        f"{len(answer.unresolved)} this release names none for",
+        err=True,
+    )
+    for asked, found in rows:
+        typer.echo(f"{asked}\t{found}")
+    for asked in answer.unresolved:
+        typer.echo(f"{asked}\t")
 
 
 # --- motif commands ----------------------------------------------------------

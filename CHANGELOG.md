@@ -277,6 +277,25 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   unsupported species names the three that have a set, a **Namespace** the source does not carry
   names the ones it does, and a file that does not match its pin refuses rather than answering with
   silently fewer genes.
+- **`genome xref` — a species, a set of ids and a direction, and the answer comes back with the
+  misses still on it.** The shell surface over an **Xref set**, and a thin one: it parses arguments,
+  makes one API call and renders, so `import genome` and the shell hit one code path and `--json`
+  is `as_json()` verbatim. **The direction is named and never inferred** — `--to-stems NAMESPACE`
+  reads the ids as that namespace and answers in **Gene id stem**s, `--from-stems NAMESPACE` reads
+  them as stems and answers in that namespace — and each flag carries the namespace, so a direction
+  without one is not expressible and naming neither or both exits `2`. Inferring it from the id
+  strings would be a judgement the API does not make: `HGNC:11998` asked the wrong way answers
+  *nothing found* rather than quietly turning around. **The pairs go to stdout, tab-separated, so
+  the output pipes** — `cut -f2` is the answer and `cut -f1` says what asked for it — with the
+  heading, the publisher's URL and the counts on stderr; an id naming two genes prints two rows
+  rather than whichever came first, and **an id that resolved to nothing gets a row of its own with
+  an empty second column**, which is exactly what a hand-rolled join drops without saying so. Every
+  id passed therefore leaves with at least one row, in both renderings. `--source` names an **Xref
+  source** and omitting it answers from the species' **Default xref source**; either way the answer
+  names the source and release that produced it. **Every failure exits non-zero naming the next
+  action**: a species no set exists for names the three that do, a set that is not here and cannot
+  be fetched names the call to make on a login node, a **Namespace** the source does not carry names
+  the ones it does, and a directory an interrupted download left unfinished names the repair.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;
