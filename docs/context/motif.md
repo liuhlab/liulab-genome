@@ -84,10 +84,12 @@ JASPAR's word for CORE against the redundant sets this package does not read; li
 motif list
 
 **Release**:
-One dated, versioned publication of JASPAR's non-redundant CORE data — 2024 and 2026 are the two
-this package prepares. A release and a **Tax group** together name exactly one file, fetched once
-into the `motif/` subtree of the **Data dir** and shared by every project on the machine; both are
-recorded on every **Hit table**, so a table saved months ago still says what it was scanned with.
+One dated, versioned publication of the source a downloaded set is pinned to — here JASPAR's
+non-redundant CORE data, 2024 and 2026 being the two this package prepares, and the same word for
+an **Xref source**'s and for Ensembl Compara's. A release and a **Tax group** together name exactly
+one JASPAR file, fetched once into the `motif/` subtree of the **Data dir** and shared by every
+project on the machine; both are recorded on every **Hit table**, so a table saved months ago still
+says what it was scanned with.
 _Avoid_: version — the package has one and a **Motif id** has one, and neither is this; JASPAR
 version, database version, edition, snapshot
 

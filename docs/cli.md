@@ -276,6 +276,250 @@ assembly's species — the message names the species that have one — and when 
 what species the assembly is. Three different facts, each with its own message. None of them
 prints an empty list of genes.
 
+## `genome xref <species> <ids>...`
+
+Convert identifiers to and from gene id stems against one published xref set — the way a
+column of Entrez GeneIDs from a GEO series, UniProt accessions from a mass-spec run or HGNC
+ids from a curated resource reaches this package's answers without writing Python, and
+without the hand-built join everyone in the lab writes slightly differently. No assembly is
+named and no genome is opened: an identifier is a name and not a place.
+
+**The direction is named, never inferred.** `--to-stems NAMESPACE` reads the ids as that
+namespace and answers in gene id stems; `--from-stems NAMESPACE` reads them as stems and
+answers in that namespace. Exactly one is given — they carry the namespace, so neither can
+be half-specified — and naming neither or both exits `2`. A string does not say which system
+it belongs to, so `HGNC:11998` asked the wrong way answers *nothing found* rather than
+quietly turning around.
+
+```console
+$ genome xref "Homo sapiens" --to-stems hgnc HGNC:11998 HGNC:13666 HGNC:10041 > stems.tsv
+hgnc ids -> gene id stems for Homo sapiens (alliance 9.0.0)
+  source  https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz
+  2 resolved, 3 gene id stems, 1 this release names none for
+
+$ cat stems.tsv
+HGNC:11998	ENSG00000141510
+HGNC:13666	ENSG00000094914
+HGNC:13666	ENSG00000291836
+HGNC:10041
+```
+
+The pairs go to stdout, tab-separated, so the output pipes — `cut -f2` is the answer and
+`cut -f1` says what asked for it — and the heading, the publisher's URL and the counts go to
+stderr. **Every id you passed gets at least one row.** One naming two genes prints both
+rather than whichever came first (6.2% of human HGNC ids name two stems in this release),
+and one that resolved to nothing gets a row with an empty second column: what your list
+holds and this release does not is the one thing a hand-rolled join drops silently.
+
+`--source NAME` picks the xref source; omitting it answers from the species' default one, so
+everyone in the lab reaches for the same one without discussing it. It is a default and not
+a recommendation — naming a source is how the scientific choice gets made deliberately, and
+NCBI and Ensembl agree on only 57.6% of human gene-level (GeneID, ENSG) pairs. Every answer
+names the source and release that produced it either way, so a result is reproducible a year
+later.
+
+`--json` carries the same answer the API renders, keyed by what was asked about, with the
+ids that named nothing under `unresolved`.
+
+```console
+$ genome xref "Homo sapiens" --from-stems uniprot ENSG00000141510.18 ENSG00000288541 --json
+{"species": "Homo sapiens", "source": "alliance", "release": "9.0.0", "namespace": "uniprot",
+ "resolved": {"ENSG00000141510.18": ["P04637"]}, "unresolved": ["ENSG00000288541"],
+ "xref_ids": ["P04637"]}
+```
+
+There is no third direction: Entrez to HGNC is two calls and the join is yours, which keeps
+the hop visible in your pipeline rather than invisible in ours. `genome.xref.XrefSet` in the
+[API reference](reference.md) is the same two verbs from Python, on one code path with this.
+
+**`--from-stems symbol` labels; the other way round is a command of its own.** Against a
+source that carries symbols — `hgnc` for human, `alliance_bgi` for mouse and worm —
+`--from-stems symbol` gives the authority's single current approved spelling for each stem,
+which is what a figure axis wants. Toward stems is not its mirror: a symbol also matches
+spellings the authority has retired, answers with every gene any of them names, and carries
+which kind matched — so it is [`genome match-symbols`](#genome-match-symbols-species-symbols)
+that answers it, and `--to-stems symbol` exits `2` naming that command. The `--to-stems` help
+lists the namespaces it does convert and no longer offers the one it refuses.
+
+Naming a species prepares its set, which the first time is a download — so run it once on a
+login node before submitting a job that needs it, as the lab's compute nodes have no
+internet. Exits `1` when no set exists for the species (the message names the ones that do),
+when the source is not one this package prepares, when the set is not here and cannot be
+fetched (the message names the call to make on a login node), when the namespace is not one
+the set carries (the message names the ones it does), and when a directory holds a set an
+interrupted download left unfinished.
+
+## `genome match-symbols <species> <symbols>...`
+
+Print the genes each gene symbol names, and which kind of spelling matched — the way a gene
+list copied out of a paper becomes usable without first finding its ids, and without the join
+that silently drops every row spelling its gene the way the authority used to. No assembly is
+named and no genome is opened: a symbol is a name and not a place.
+
+```console
+$ genome match-symbols "Homo sapiens" --source hgnc ARNTL ADCY3 Brca1 > genes.tsv
+gene symbols -> gene id stems for Homo sapiens (hgnc 2026-07-07)
+  source   https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt
+  columns  asked, symbol, gene_id_stem, kind
+  matching exact, on approved, previous, alias spellings
+  2 resolved, 3 matches, 1 this release matched nothing for
+
+$ cat genes.tsv
+ARNTL	ARNTL	ENSG00000133794	previous
+ADCY3	ADCY3	ENSG00000138031	approved
+ADCY3	ADCY3	ENSG00000155897	previous
+Brca1
+```
+
+**A symbol is matched, never converted**, which is why this is a command rather than a third
+direction of `genome xref`. Approved, previous *and* alias spellings are matched, every gene
+id stem any of them names comes back, and each match says which kind of spelling it was.
+`ARNTL` is a spelling HGNC retired and reaches `BMAL1` anyway: of EpiFactors v2.0's 801 human
+rows, **31 spell their gene that way**, and an approved-only match drops exactly those.
+`ADCY3` is HGNC's approved symbol for one gene and a symbol it retired from another, so it
+answers with both — ambiguity is what you are handed rather than something resolved on your
+behalf.
+
+The matches go to stdout, tab-separated, so the output pipes — `cut -f3` is the answer,
+`cut -f1` says what asked for it and `cut -f4` says which kind of spelling matched — and the
+heading, the URL, the counts and what this source could not have matched go to stderr. The
+last three columns are the keys `SymbolMatch.as_json()` writes, in its order, so the text and
+`--json` cannot drift apart. **Every symbol you passed gets at least one row**, the ones that
+matched nothing getting one with the other columns empty. Column 2 is the authority's own
+spelling and column 1 is yours, which differ whenever the answer is worth reading twice.
+
+**Matching is exact by default**, because the species is fixed by the set: `Brca1` asked of a
+human set is a mouse spelling asked of the wrong authority, and matching nothing beats half
+working. `--case-insensitive` folds both sides and still answers with **every** gene matched
+rather than picking one.
+
+```console
+$ genome match-symbols "Homo sapiens" --source hgnc brca1 --case-insensitive --json
+{"species": "Homo sapiens", "source": "hgnc", "release": "2026-07-07",
+ "case_insensitive": true, "kinds": ["approved", "previous", "alias"], "limits": null,
+ "resolved": {"brca1": [{"symbol": "BRCA1", "gene_id_stem": "ENSG00000012048",
+                         "kind": "approved"}]},
+ "unresolved": [], "gene_id_stems": ["ENSG00000012048"]}
+```
+
+**What this source could not have matched is printed too.** Only `hgnc` publishes previous
+and alias spellings typed; `alliance_bgi` matches current approved symbols alone, because
+each of its records files retired names and sequence names in one undifferentiated synonyms
+list and typing them would put a kind on a claim no publisher made (ADR-0018). So a mouse
+answer says which kinds it could match and, on a `limits` line, why the rest are missing —
+without which *this gene is not in the release* and *this source does not publish the
+spelling you used* would both be silence.
+
+```console
+$ genome match-symbols "Mus musculus" --source alliance_bgi Arntl
+gene symbols -> gene id stems for Mus musculus (alliance_bgi 9.0.0)
+  source   https://download.alliancegenome.org/9.0.0/BGI/MGI/1.0.2.5_BGI_MGI_0.json.gz
+  columns  asked, symbol, gene_id_stem, kind
+  matching exact, on approved spellings
+  0 resolved, 0 matches, 1 this release matched nothing for
+  limits   this source publishes one current approved symbol per gene beside an undifferentiated synonyms list, …
+Arntl
+```
+
+`--source` names the xref source, as it does on `genome xref`. The species' default source is
+not always one that carries symbols — human's is `alliance`, whose cross-reference file
+carries no human symbol at all — and one that carries none exits `1` naming the ones that do
+rather than matching nothing. `genome.xref.XrefSet.match_symbols` in the
+[API reference](reference.md) is the same one verb, on one code path with this.
+
+Naming a species prepares its set, which the first time is a download — so run it once on a
+login node before submitting a job that needs it, as the lab's compute nodes have no
+internet. Exits `1` when no set exists for the species (the message names the ones that do),
+when the source is not one this package prepares, when the source carries no symbols (the
+message names the ones that do), when the set is not here and cannot be fetched (the message
+names the call to make on a login node), and when a directory holds a set an interrupted
+download left unfinished.
+
+## `genome homologs <species> <other-species> <stems>...`
+
+Print the genes of another species a gene id stem's gene is homologous to, on Ensembl
+Compara's own gene trees — the way a hit carries across species without leaving the package
+and without the BioMart web API, whose intermittent failures make a pipeline built on it
+fail irreproducibly. Everything here is a bulk file fetched once and read locally. No
+assembly is named and no genome is opened: a homology set is anchored to a species pair and
+a release, not to a build. Any pairing among human, mouse and worm answers, either way
+round, off one prepared file per pair.
+
+```console
+$ genome homologs "Homo sapiens" "Caenorhabditis elegans" \
+      ENSG00000152670 ENSG00000177479 ENSG00000000000 > homologs.tsv
+Homo sapiens -> Caenorhabditis elegans orthologs (Ensembl Compara 116)
+  source   Ensembl Compara release 116 (PMID 26896847) — https://ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/homo_sapiens/Compara.116.protein_default.homologies.tsv.gz
+  columns  gene_id_stem, homolog_gene_id_stem, homology_type, is_ortholog, is_high_confidence, goc_score, wga_coverage
+  2 resolved, 4 links, 1 this release names no homolog for, 0 dropped partners
+  quality  goc_score and wga_coverage null on every link of this set, so a filter on either empties rather than narrowing
+
+$ cat homologs.tsv
+ENSG00000152670	WBGene00001598	ortholog_one2many	True	False	NULL	NULL
+ENSG00000152670	WBGene00001599	ortholog_one2many	True	False	NULL	NULL
+ENSG00000152670	WBGene00001600	ortholog_one2many	True	False	NULL	NULL
+ENSG00000177479	WBGene00020462	ortholog_one2one	True	True	NULL	NULL
+ENSG00000000000
+```
+
+The links go to stdout, tab-separated, so the output pipes — `cut -f2` is the answer and
+`cut -f1` says what asked for it — and the heading, the attribution, the counts and the two
+qualifications go to stderr. **Every stem you passed gets at least one row.** One with three
+homologs prints three rather than whichever came first, and one this release names no
+homolog for gets a row with every other column empty: what your list holds and this release
+does not is visible rather than dropped. An empty cell there is not `NULL`, which is
+Compara's own word for a cell it recorded nothing in on a link that does exist.
+
+**Every cell is the publisher's.** `homology_type` is Compara's tree-derived label printed
+verbatim, and it is never recomputed from what came back — an answer can show one partner
+and still read `ortholog_one2many`, which is why the label is carried instead of counted
+(ADR-0020). The high-confidence flag and both quality scores come through the same way. This
+package publishes no score, ranking or "best ortholog" of its own.
+
+Two qualifications ride on every answer. **Dropped partners** — homologous genes a filter
+removed — are counted *and* named, so a link that merely looks one-to-one in your view stays
+distinguishable from one the publisher called one-to-one. And whichever quality columns the
+set holds no value in *anywhere* are named up front: Compara records neither `goc_score` nor
+`wga_coverage` on any link of **either** worm pairing, so `awk -F'\t' '$6 > 50'` would empty
+itself rather than narrow, and you are told before you write it.
+
+`--paralogs` returns every link the publisher wrote rather than only the ones its label calls
+a speciation event. A paralogy link is **marked** by that label in the `homology_type` column
+and never excluded, so *not an ortholog* stays distinguishable from *absent* — the stance
+ADR-0013 already takes. Measured: release 116 publishes no cross-species paralogy for these
+three species at all, so on it the flag changes nothing and the heading says which question
+was asked either way.
+
+`--release` names the Compara release, and `--json` carries the same answer the API renders,
+keyed by the stems asked about, with the ones that named nothing under `unresolved`.
+
+```console
+$ genome homologs "Mus musculus" "Homo sapiens" ENSMUSG00000074698 --json
+{"species": "Mus musculus", "other_species": "Homo sapiens", "release": "116",
+ "resolved": {"ENSMUSG00000074698": [
+   {"gene_id_stem": "ENSMUSG00000074698", "homolog_gene_id_stem": "ENSG00000101266",
+    "homology_type": "ortholog_one2many", "is_ortholog": true, "is_high_confidence": true,
+    "goc_score": 100, "wga_coverage": 100.0}, …]},
+ "unresolved": [], "dropped_partners": [], "null_quality_scores": [],
+ "homolog_gene_id_stems": ["ENSG00000101266", "ENSG00000254598"]}
+```
+
+Putting an answer into a registered annotation's own gene ids is
+`genome.homology.resolve_homologs` from Python, and it is deliberately not a flag here: it
+names an assembly, and this command names none. `genome.homology.HomologySet` in the
+[API reference](reference.md) is the same one verb, on one code path with this.
+
+Naming a pair prepares its set, which the first time is a download — so run it once on a
+login node before submitting a job that needs it, as the lab's compute nodes have no
+internet. Exits `1` when no set is pinned for a species (the message names the ones that
+are), when the release is not pinned, when both species are the same one, when a stem carries
+a version (the message names the stem to pass), when the set is not here and cannot be
+fetched (the message names the call to make on a login node), when a directory holds a set an
+interrupted download left unfinished, and when the file recorded as holding this pair holds
+none of its rows — Compara's per-species dumps are a de-duplicated partition at the pair
+level and the assignment moves between releases, so that is an error naming the other file
+rather than an empty answer that would read as *these species share no homologs*.
+
 ## `genome verify <assembly>`
 
 Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is

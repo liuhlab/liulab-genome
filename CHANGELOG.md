@@ -10,6 +10,128 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **Which genes in another species a gene is homologous to, on Ensembl Compara's own trees.**
+  `genome.homology` is the Orthology context and a peer of `genome.tf`. `HomologySet(species,
+  other_species)` pins **Compara release 116**, fetches the per-species dump that holds that pair
+  once into `$LIULAB_DATA/homology/` — a sibling of the assembly tree, beside `motif/` — checks the
+  publisher's own md5 against the bytes as they arrive, slices the pair out a row at a time, and
+  records a **Completion marker** carrying both checksums: the publisher's as provenance and the
+  derived slice's own sha256 as the integrity check, re-verified on every read. All three pairings
+  among human, mouse and worm answer, in either direction, off one prepared file per pair. The slice
+  is a plain gzipped TSV with Compara's own header and Compara's own rows, so a collaborator reads it
+  in R without this package. **Nothing here is computed**: every field of every link is a cell of
+  that file, and this package publishes no quality score, no ranking and no "best ortholog" of its
+  own.
+- **The Compara partition guard, which is the trap this exists for.** The per-species dumps are a
+  de-duplicated partition *at the pair level* — Compara's own README calls each file "an arbitrary
+  subset of orthologies involving the given genome" — and which file holds a pair is **not stable
+  across releases**: counted on 116, the human file holds **0** human↔mouse rows and 23,982
+  human↔worm; the mouse file holds 23,764 human and 25,006 worm; the worm file holds neither. (On
+  110 the human file held 16,242 mouse rows, so the assignment really does move.) Which file holds
+  which pair is therefore a **measurement** in the shipped `homology_metadata.tsv`, re-taken on every
+  prepare: a slice that comes back empty **raises naming the other file** and writes nothing, rather
+  than answering empty. A pair is never partially present, which is what makes zero trustworthy.
+- **A Homology type is the publisher's and is never recomputed** (ADR-0020). `HomologyLink` carries
+  Compara's `homology_type` verbatim, its high-confidence flag and both quality scores; resolving an
+  answer into a registered **Annotation** through `resolve_gene_ids` — used unchanged, with no
+  `Genome` mixin and no `Genome`-level convenience — leaves the label alone and reports the
+  **Dropped partner**s separately, so a view that *looks* one-to-one is never mistaken for one.
+  Orthologs are the default and paralogs come back only on request. **Measured, and worth stating:
+  release 116 publishes no cross-species paralogy at all** — zero `between_species_paralog` in the
+  whole 4.0 M-row human dump, and every `other_paralog` (128,020), `within_species_paralog` (13,144)
+  and `gene_split` (9) row relates two genes of *one* species — so on this release the switch
+  changes nothing for these three pairs. It is kept because it is where such a row would land and
+  because *not an ortholog* must stay distinguishable from *absent* (ADR-0013).
+- **A quality score that is null for a whole species pair says so before a filter empties.**
+  `goc_score` and `wga_coverage` are `NULL` on **100%** of the rows of *either* worm pairing — all
+  23,982 human↔worm and all 25,006 mouse↔worm — where the human↔mouse pair carries real values.
+  Which columns a set holds nothing in is measured over the prepared slice, not listed against a
+  pair, and rides on the set and on every answer. Compara 116 is the release pinned because it is the
+  newest that publishes both an `MD5SUM` and the compressed naming: only releases 90 and 116 publish
+  an md5 at all, and 113 ships these dumps uncompressed — so each row carries a URL read off the
+  release's own listing rather than one built from a template, and a row with no checksum is refused.
+  **Orthology is served and never consumed** (ADR-0019): no table this package publishes is derived
+  through homology, held structurally — nothing outside `genome.homology` may import it, which a test
+  asserts by reading every module's source.
+
+- **A gene symbol reaches the package's answers, and a retired spelling no longer drops silently.**
+  `XrefSet.match_symbols(symbols)` matches **approved, previous and alias** spellings, answers with
+  every **Gene id stem** any of them names, and says on each hit which kind it matched — ambiguity is
+  the return type and not an edge case, so `ADCY3`, HGNC's approved symbol for one gene and a symbol
+  it retired from another, answers with both. **The measured failure it prevents:** of EpiFactors
+  v2.0's 801 human rows all 801 carry an HGNC id and all 801 resolve, but **31 still spell the gene
+  by a symbol HGNC has retired** — `ARNTL` for `BMAL1`, `C11orf30` for `EMSY` — and an approved-only
+  join mis-keys or drops exactly those. Matching is **exact by default**, so `Brca1` asked of a human
+  set matches nothing rather than half-working; `case_insensitive=True` is opt-in and still returns
+  **every** gene matched rather than picking one. **From a shell it is `genome match-symbols
+  <species> <symbols>...`** — a command of its own, because a symbol is a verb of its own and not a
+  third direction of `genome xref`: it parses arguments, makes that one call and renders, so
+  `import genome` and the shell hit one code path and `--json` is `as_json()` verbatim. The matches
+  go to stdout tab-separated in the four columns `asked, symbol, gene_id_stem, kind` — the last three
+  being the keys `SymbolMatch.as_json()` writes, in its order, so the two renderings cannot drift —
+  with the heading, the URL, the counts and what this source could not have matched on stderr.
+  **Every symbol passed leaves with at least one row**, the ones that matched nothing getting one
+  with the other columns empty. `--case-insensitive` is the opt-in fold and still prints every match;
+  `--source` names an **Xref source**, and one that carries no symbols exits `1` naming the ones that
+  do.
+- **The two directions are deliberately not mirror images.** Away from the hub,
+  `from_stems(stems, "symbol")` gives the authority's **single current approved symbol** — this is
+  labelling a figure axis, and it is one-to-one by the authority's own construction. Toward it,
+  `to_stems(ids, "symbol")` **raises** naming `match_symbols` rather than answering on approved
+  spellings alone, which is the failure above. The shell says the same thing in its own words:
+  `genome xref --from-stems symbol` labels, `genome xref --to-stems symbol` exits `2` naming
+  `genome match-symbols` — a shell user cannot act on the name of a Python call — and the
+  `--to-stems` help no longer lists the namespace the command refuses, so help and behaviour agree.
+  The kind of each spelling is stored in the set's own plain gzipped TSV — `symbol`,
+  `previous_symbol`, `alias_symbol` in the namespace column — so a collaborator reads it in a shell
+  with `awk`.
+- **Two further Xref sources, and both pin.** `hgnc` is human's, from HGNC's **quarterly archive file
+  of 2026-07-07**, and is the only one that publishes previous and alias spellings *typed*. Its
+  reader **parses by header name and never by position**, because the schema has drifted from **52**
+  columns in 2020 to **54** now, and a named test reverses the whole header to prove the answer does
+  not move. Its pin **names a file read out of the bucket listing** rather than one built from a
+  date: the archive's dates are irregular — `2024-07-02`, `2025-01-06`, and both `2026-07-03` and
+  `2026-07-07` in one quarter. HGNC's remembered EBI FTP path is a live 404; the live one is a Google
+  Cloud Storage bucket with a **doubled path segment**, `…/hgnc/archive/archive/quarterly/tsv/…`.
+- **Mouse and worm get current symbols, and are told why they get no others.** `alliance_bgi` is the
+  Alliance's per-species gene submission — MGI's for mouse, WormBase's own **WS298** for worm — read
+  a record at a time out of 72 MB and 74 MB of JSON. It publishes the current approved symbol alone,
+  because each record's `synonyms` list is **undifferentiated**: WormBase files the genuine former
+  name `daf-17` beside the sequence names `R13H8.1` and `CELE_R13H8.1`, and typing them would put a
+  kind on a claim no publisher made. So every answer carries `kinds` and `limits` saying which kinds
+  that source could match and why the rest are missing — *this gene is absent* and *this source
+  cannot match that spelling* must not both be silence. It is the Alliance's copy because neither
+  authority can be reached directly: MGI keeps no dated archive (ADR-0018), and
+  `downloads.wormbase.org` answers **403 to an automated client**, measured from two networks.
+- **Ensembl is a second Xref source, selectable and pinned to a release of its own — and it is not
+  the equal of the first.** `XrefSet("Homo sapiens", "ensembl", "116")` answers off Ensembl's
+  per-species TSV dumps for human and mouse, pinned to release **116** — the release the lab's
+  registered `gencode_v50` corresponds to — independently of Alliance's `9.0.0`, which stays the
+  **Default xref source**. Adding it was what the design promised: a reader module, one entry in the
+  reader table and two rows in the shipped metadata table. **Two publishers are two answers and
+  nothing merges them** (ADR-0017): Entrez GeneID `79166` names **two** stems in Alliance 9.0.0 and
+  **seventy-two** in Ensembl 116, each answer carrying the source and release that produced it, and
+  the narrower one is never widened nor the wider one voted down. **The fan-out is stated where the
+  source is chosen** rather than in a note — in the constructor's `source` parameter, in the
+  reader's own module and in the shipped attribution — because it is the reason to choose
+  deliberately: the two publishers agree on only **57.6%** of human gene-level (GeneID, ENSG) pairs,
+  NCBI's mapping being a sequence match at a published overlap threshold and near-one-to-one where
+  Ensembl's reaches 72 stems for one GeneID and **208 GeneIDs for one stem**. **The intuitive
+  quality filter raises rather than answering nothing**: every human `EntrezGene` row release 116
+  publishes carries `info_type=DEPENDENT` and **not one** carries `DIRECT` — 552,633 rows, zero
+  direct, and mouse the same at 358,853 — so `evidence="DIRECT"` empties the set rather than
+  narrowing it, and is met with an error naming what the release actually carries. The filter is a
+  real capability and not only a guard: it selects which of the publisher's rows are read, a
+  filtered set is prepared beside the unfiltered one rather than over it, and a source whose file
+  grades nothing refuses a filter instead of ignoring it. Two conventions that cannot be assumed
+  from one another are now recorded side by side: Alliance publishes an md5 of the **unpacked** TSV,
+  Ensembl a BSD `sum` of the **served** `.gz` — 16 bits, and no integrity check for a 6 MB file — so
+  the rows pin a digest of the unpacked bytes and the attribution records Ensembl's own value and
+  what it covers. No worm row, and not by oversight: Ensembl files *C. elegans* under Ensembl
+  Genomes' numbering, so release-116's worm directory holds a file stamped **63**, and worm is
+  answered by the Alliance where the hop is the identity.
+- **An `XrefSet` carries the curated row it actually resolved to**, as `provenance`, so what is
+  cited is what answered rather than what a second lookup would resolve the defaults to today.
 - **Which genes are transcription factors, answered by a published census that ships in the
   wheel.** `genome.tf.gene` is the gene half of the TF context, keyed by gene where the motif half
   is keyed by motif. Name an assembly and `Genome.tf_gene_list()` answers with the genes one census
@@ -211,6 +333,112 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   with both costs stated rather than smoothed over — 151 human genes are both a **TF gene** and a
   cofactor, and the two classification vocabularies are deliberately not crosswalked (ADR-0014).
   Vocabulary and records only; no behaviour changes.
+- **The words for cross-database gene identifiers and for cross-species homology, settled before the
+  code that will use them.** Two new bounded contexts get glossaries — `docs/context/xref.md` and
+  `docs/context/orthology.md` — so that an **Xref set** is never called a crosswalk, an id map or a
+  mapping table in an issue, a test name or an error message, and so that a **Homology link**'s
+  **Homology type** is read as its publisher's claim about evolution rather than as a count of rows
+  in whatever file came back. Xref coins **Xref set**, **Xref source**, **Default xref source**,
+  **Namespace** and **Symbol match**; orthology coins **Homology set**, **Homology link**,
+  **Homology type**, **Dropped partner** and **Paralogy link**. The context map lists both and draws
+  the seven edges joining them to Annotation, TF and Motif — two of which are **prohibitions rather
+  than calls**: nothing shipped here is keyed by a foreign **Namespace**, and no list this package
+  publishes is derived through homology. **Four records settle what the design decided.** ADR-0017:
+  the hub is the **Gene id stem**, a query reads exactly one **Xref set**, and nothing composes two
+  hops or merges two publishers — NCBI and Ensembl agree on only 57.6% of human gene-level (GeneID,
+  ENSG) pairs, so a merged table would decide nearly half its rows by a rule nobody published.
+  ADR-0018: only a publisher keeping dated releases at stable URLs is eligible, and its bytes are
+  downloaded rather than shipped, at two costs stated rather than smoothed over — neither set
+  answers offline on a fresh install, and mouse gets current symbols only, previous and alias
+  spellings being MGI's and MGI publishing no dated archive. ADR-0019: **orthology is served and
+  never consumed**, so worm still has no TF census and mouse still has no assessed-negative genes
+  even with a homology table on disk. ADR-0020: a **Homology type** is the publisher's tree-derived
+  label and is never recomputed after filtering. ADR-0014 gains a `**Status.**` line, its cost line
+  having said this package builds no ortholog or homology support at all, and the rule against
+  assuming an assembly, a coordinate system or a strand is extended in place — a gene id never
+  crosses species implicitly. **The shared kernel gains an eleventh word**: **Gene id stem** moves
+  out of the TF glossary, four contexts now keying on the identifier every **Xref set** hangs off,
+  and its definition is unchanged. Vocabulary and records only; no behaviour changes.
+- **A column of Entrez, UniProt, HGNC, MGI or WormBase ids reaches this package's answers, with no
+  assembly and no genome open.** `genome.xref` is a peer of `genome.tf`, and an **Xref set** is one
+  species, one **Xref source** and one pinned **Release**: `XrefSet("Homo sapiens")` fetches the
+  publisher's file once into `$LIULAB_DATA/xref/`, a sibling of the assembly tree beside `motif/`,
+  slices it to that species and re-reads it thereafter — the shape `JasparDatabase` established,
+  with a `cache_dir` override naming the directory itself. **Two verbs and only two** (ADR-0017):
+  `to_stems` toward the hub and `from_stems` away from it, so a caller wanting Entrez → HGNC makes
+  both calls and owns the join, and a query reads exactly one set, which makes merging two
+  publishers inexpressible rather than merely discouraged. Both answer in the shape
+  `resolve_gene_ids` already established — ask order kept, **every** id a key names and never a
+  chosen one, no resolved value ever empty, what named nothing riding back in `unresolved`, a
+  flattener that documents what flattening loses, and `as_json()` — and every answer names the
+  species, source and release that produced it, because an answer that did not would be
+  unreproducible a year later. **Alliance of Genome Resources 9.0.0 is the first source and the
+  default for all three species**, gene level only, across Ensembl, Entrez, UniProt and each
+  species' own authority; naming a release is enough to fetch it, the curated row in
+  `data/xref/xref_metadata.tsv` knowing the publisher, the version, the URL and the checksum. **The
+  three species' hops turn out to have three different shapes**, which is the argument for this
+  being an object a caller opens: for worm it is the identity — all 46,926 `WB:WBGene…` genes carry
+  `ENSEMBL:WBGene…`, the same string, with zero differing — for mouse a real join onto `ENSMUSG…`,
+  and for human a join through HGNC in which **2,535 of 40,665 genes carry two or more Ensembl
+  cross-references**, so 6.2% of HGNC ids name two stems and nothing picks one. **Every incoming id
+  is reduced to its Gene id stem on ingest**, a publisher's and a caller's alike, because joining a
+  versioned id to a bare one returns zero matches and says nothing — the most error-prone detail in
+  this landscape — and each **Namespace**'s CURIE prefix is accepted whether or not it is written,
+  so `HGNC:11998` and `11998` are one identifier. Alliance's duplication is deduplicated **on the
+  key and never on the row**: 2,659,704 rows reduce to 1,811,267 distinct
+  `(GeneID, GlobalCrossReferenceID, TaxonID)`, 31.9% redundant, and a whole-row `uniq` removes none
+  of it. **The stored form is a plain gzipped TSV** of `namespace`, `xref_id`, `gene_id_stem`,
+  sorted, unique and written with no gzip timestamp, so two machines slicing one release produce
+  identical bytes and a collaborator who does not use Python reads it in R. The **Completion
+  marker** beside it carries **both** checksums — the publisher's own md5 as provenance and the
+  slice's own sha256 as the integrity check, since what is stored is a derived slice rather than the
+  publisher's bytes — and either one disagreeing with what is on disk means unfinished rather than
+  present. The publisher's md5 is over its **unpacked** bytes (ADR-0006), which is Alliance's own
+  convention and a trap: hashing the `.tsv.gz` as it arrives mismatches every time. Four errors name
+  their next action: a set that is not downloaded names the call to make on a login node, an
+  unsupported species names the three that have a set, a **Namespace** the source does not carry
+  names the ones it does, and a file that does not match its pin refuses rather than answering with
+  silently fewer genes.
+- **`genome xref` — a species, a set of ids and a direction, and the answer comes back with the
+  misses still on it.** The shell surface over an **Xref set**, and a thin one: it parses arguments,
+  makes one API call and renders, so `import genome` and the shell hit one code path and `--json`
+  is `as_json()` verbatim. **The direction is named and never inferred** — `--to-stems NAMESPACE`
+  reads the ids as that namespace and answers in **Gene id stem**s, `--from-stems NAMESPACE` reads
+  them as stems and answers in that namespace — and each flag carries the namespace, so a direction
+  without one is not expressible and naming neither or both exits `2`. Inferring it from the id
+  strings would be a judgement the API does not make: `HGNC:11998` asked the wrong way answers
+  *nothing found* rather than quietly turning around. **The pairs go to stdout, tab-separated, so
+  the output pipes** — `cut -f2` is the answer and `cut -f1` says what asked for it — with the
+  heading, the publisher's URL and the counts on stderr; an id naming two genes prints two rows
+  rather than whichever came first, and **an id that resolved to nothing gets a row of its own with
+  an empty second column**, which is exactly what a hand-rolled join drops without saying so. Every
+  id passed therefore leaves with at least one row, in both renderings. `--source` names an **Xref
+  source** and omitting it answers from the species' **Default xref source**; either way the answer
+  names the source and release that produced it. **Every failure exits non-zero naming the next
+  action**: a species no set exists for names the three that do, a set that is not here and cannot
+  be fetched names the call to make on a login node, a **Namespace** the source does not carry names
+  the ones it does, and a directory an interrupted download left unfinished names the repair.
+- **`genome homologs` — a species pair, a set of stems, and the publisher's own label on every
+  row.** The shell surface over a **Homology set**, and as thin as its sibling: it parses
+  arguments, makes one API call and renders, so `import genome` and the shell hit one code path.
+  Any pairing among human, mouse and worm answers, either way round. **The links go to stdout,
+  tab-separated, so the output pipes** — the seven columns are the keys `as_json()` writes, in its
+  order, so the text rendering and `--json` cannot drift and every cell printed is a value the API
+  put in the answer. **Every stem passed leaves with at least one row**: one with three homologs
+  prints three, and one this release names no homolog for gets a row with the other columns empty
+   — which is not `NULL`, Compara's own word for a cell it recorded nothing in on a link that does
+  exist. The heading, the attribution and two qualifications go to stderr: the **Dropped
+  partner**s, counted *and* named so a link that merely looks one-to-one stays distinguishable
+  from one the publisher called one-to-one, and whichever quality columns the set holds no value
+  in anywhere — `goc_score` and `wga_coverage` are null on every link of *either* worm pairing, so
+  a shell user is told before `awk` empties their filter rather than after. `--paralogs` returns
+  every link the publisher wrote and a **Paralogy link** is marked by its own `homology_type`
+  rather than excluded (ADR-0013); release 116 publishes none cross-species, so on it the flag
+  changes nothing and the heading says which question was asked either way. **Every failure exits
+  non-zero naming the next action**, the wrong-file case most of all: a pair fetched from the
+  Compara dump that no longer holds it raises naming the other file rather than answering empty.
+  A set that cannot be fetched now names the call to make on a login node, as an **Xref set**
+  already did.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
   batch case, and the one motif operation that belongs in a shell script and a scheduler job;
@@ -457,6 +685,49 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   exception is documented rather than papered over: TOMTOM's p-value rewards a short dense
   alignment, so a long motif that embeds a shorter one can rank the shorter one above itself, which
   both of the 31- and 33-column CTCF matrices do with the 15-column `MA0139.2` inside them.
+
+### Fixed
+
+- **A release named without a source is honoured instead of quietly ignored.** `lookup_xref` — and
+  so `XrefSet` — returned the default source's newest release as soon as no source was named, never
+  consulting the release asked for. Harmless while every species listed exactly one release, and
+  wrong the moment a second source arrives with a numbering of its own: a caller pinning a release
+  would have been handed another one, under a release string saying they had not been, which is the
+  whole of what pinning is for. It now answers with that release or raises naming the ones the
+  default source actually has.
+- **`normalise_id` is idempotent, including where whitespace hides behind a version separator.**
+  Stripping ran before the version was dropped, so `"7157\r."` stemmed to `"7157\r"` on the first
+  pass and only reached `"7157"` on the second — two spellings of one id settling on different
+  strings, which joins to nothing and says nothing about it. The suite's own hypothesis property
+  found it, and it was a flaky-CI landmine besides: it passed until a machine's example database
+  happened to find the case. Whitespace now goes on both sides of the version drop.
+- **Neither cross-species subpackage imports the TF half any more, and a test holds it there.**
+  `genome.homology` and `genome.xref` both reached into `genome.tf.gene.census` for `species_slug`,
+  which the context map forbids in both directions — *Orthology → TF gene* is "a prohibition rather
+  than a call" and "the xref half reads no census". The helper names files after a species and is no
+  TF concept, so it now lives in `genome.metadata`, the module that owns the curated tables a species
+  is spelled in and that every context may read. Every previous import path still answers, and a new
+  guard reads both subpackages' source — deferred and `TYPE_CHECKING` imports included — for anything
+  naming `genome.tf`.
+- **A `cache_dir` handed to a `HomologySet` names the directory it prepares in**, as it already did
+  for an `XrefSet` and a `JasparDatabase`. It was being treated as a homology *root* with
+  `ensembl_compara/<release>/<pair>/` re-applied beneath it, which is the one exception a caller
+  reading the other two would not expect.
+- **A malformed quality cell raises instead of reading as "the publisher recorded nothing."**
+  `goc_score` and `wga_coverage` fell back to `None` for anything `int()` or `float()` refused,
+  putting *Compara scored nothing here* and *this package could not read the score* under one value —
+  in the very columns a whole species pair is measured null in. A cell that is neither a number nor
+  Compara's own `NULL` now raises `ComparaFileError` naming the file, the column and the value.
+- **A crossing into an annotation stops dropping two things it was handed.** `resolve_homologs`
+  built its answer with no `null_quality_scores`, though the measurement rides on every other answer,
+  and it *replaced* the answer's `dropped_partners` with what the annotation had dropped — losing
+  every partner a **Homology type** filter removed before the crossing. A **Dropped partner** is one
+  the answer no longer names whichever step removed it, so both causes are now counted together.
+- **The repair for an unfinished homology set names the call that rebuilds it**, not only the `rm
+  -rf` that empties the directory — the shape the xref half already had.
+- **The Orthology glossary no longer says the code does not exist.** `docs/context/orthology.md` and
+  the context map's Orthology row both carried the *(decided, not built)* marker this branch made
+  false.
 
 ## [2026.8.0] - 2026-08-17
 

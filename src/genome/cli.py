@@ -17,6 +17,10 @@ import typer
 from genome import __version__ as _package_version
 from genome.external import ToolNotFoundError
 from genome.external import doctor as _doctor
+from genome.homology import DEFAULT_RELEASE as _HOMOLOGY_RELEASE
+from genome.homology import NULL_CELL as _NULL_CELL
+from genome.homology import HomologyMetadata as _HomologyMetadata
+from genome.homology import HomologySet as _HomologySet
 from genome.io.components import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
 from genome.io.components import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
 from genome.io.components import ChimeraDetails as _ChimeraDetails
@@ -34,7 +38,11 @@ from genome.io.results import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
 from genome.io.results import GeneList as _GeneList
 from genome.io.results import GeneListSource as _GeneListSource
+from genome.io.results import HomologyAnswer as _HomologyAnswer
 from genome.io.results import RegisteredAnnotation as _RegisteredAnnotation
+from genome.io.results import ResolvedStems as _ResolvedStems
+from genome.io.results import ResolvedSymbols as _ResolvedSymbols
+from genome.io.results import ResolvedXrefIds as _ResolvedXrefIds
 from genome.io.results import VerifiedAssembly as _VerifiedAssembly
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
@@ -51,6 +59,9 @@ from genome.tf.motif.parquet import provenance_of as _provenance_of
 from genome.tf.motif.scan import read_fasta as _read_fasta
 from genome.tf.motif.scan import scan_stream as _scan_stream
 from genome.tf.motif.workers import resolve_workers as _resolve_workers
+from genome.xref import NAMESPACES as _NAMESPACES
+from genome.xref import SYMBOL as _SYMBOL
+from genome.xref import XrefSet as _XrefSet
 
 #: What a failed assembly command raises, in one place. Every one of them is already
 #: actionable — a checksum mismatch, a registration that cannot be trusted, a missing
@@ -77,6 +88,87 @@ _GENE_LIST_ERRORS = (*_ASSEMBLY_ERRORS, LookupError)
 #: Its own name rather than :data:`_ASSEMBLY_ERRORS` reused, because a motif belongs to no
 #: assembly and the two lists are alike by coincidence rather than by construction.
 _MOTIF_SCAN_ERRORS = (ValueError, OSError, RuntimeError)
+
+#: What a failed xref hop raises, and every one of them already names its next action: a
+#: species, a source or a **Namespace** that resolves to nothing is a ``LookupError``; a set
+#: that could not be fetched, and a directory an interrupted download left unfinished, are
+#: ``RuntimeError``s; a publisher's file that does not match its pin and a stored slice this
+#: package did not write are ``ValueError``s; and a file that went away under the read is an
+#: ``OSError``. Its own name rather than :data:`_GENE_LIST_ERRORS` reused, because an **Xref
+#: set** belongs to no assembly and no annotation — the two lists are alike by coincidence
+#: rather than by construction.
+_XREF_ERRORS = (ValueError, OSError, RuntimeError, LookupError)
+
+#: What to do when neither direction is named, or both are. Spelled once because the two
+#: mistakes are one mistake, and it names both flags because which one is wanted is exactly
+#: what the caller has not said.
+_XREF_DIRECTION_HELP = (
+    "error: name exactly one direction. `--to-stems NAMESPACE` reads the ids as that "
+    "namespace and answers in gene id stems; `--from-stems NAMESPACE` reads them as stems "
+    "and answers in that namespace. An identifier does not say which system it belongs to, "
+    "so nothing here infers the direction from the strings you passed."
+)
+
+#: The **Namespace**s ``--to-stems`` offers: every one this package knows except the symbol
+#: one, which is not a conversion this command makes at all. Derived rather than written out
+#: again, so a namespace added to the package reaches the help without being spelled twice —
+#: and so the help cannot go on advertising a conversion the command refuses.
+_TO_STEMS_NAMESPACES: tuple[str, ...] = tuple(name for name in _NAMESPACES if name != _SYMBOL)
+
+#: What to do when the symbol namespace is asked *toward* the hub. The reason is the API's
+#: own — answering here would match this release's approved spellings and nothing else — but
+#: the next action is this surface's to give: the exception names ``match_symbols(symbols)``,
+#: which is a Python call and no next step for someone in a shell, so the command that
+#: answers it is named instead. Checked before the set is prepared, so the refusal costs no
+#: download; the same reason ``_XREF_DIRECTION_HELP`` is checked where the flags are read.
+_XREF_SYMBOL_HELP = (
+    "error: a gene symbol is not read toward gene id stems with --to-stems. It would match "
+    "this release's approved spellings and nothing else, so a table spelling a gene the way "
+    "the authority used to would come back unresolved rather than matched — which is what "
+    "happens to 31 of EpiFactors' 801 rows. Run `genome match-symbols SPECIES SYMBOL...` "
+    "instead, which matches approved, previous and alias spellings and says on each match "
+    "which kind it was. `--from-stems symbol` is the labelling direction and is answered "
+    "here."
+)
+
+#: The columns one **Symbol match** is printed as, which are the keys
+#: :meth:`~genome.io.results.SymbolMatch.as_json` writes and in its order — so the text
+#: rendering and ``--json`` cannot drift apart, and every cell printed is a value the API put
+#: in the answer rather than one assembled here. ``kind`` is what makes a spelling the
+#: authority retired distinguishable from its current one, which is the whole point of
+#: matching a symbol rather than converting it, so it is a column and never a footnote.
+_SYMBOL_MATCH_COLUMNS: tuple[str, ...] = ("symbol", "gene_id_stem", "kind")
+
+#: Those three behind the spelling that was asked about, which is the mapping key and so
+#: belongs to no match. It earns a column of its own rather than being assumed equal to the
+#: match's: folded, ``brca1`` is what was asked and ``BRCA1`` is what the authority spells.
+_SYMBOL_COLUMNS: tuple[str, ...] = ("asked", *_SYMBOL_MATCH_COLUMNS)
+
+#: What a failed homology lookup raises, and every one of them already names its next
+#: action: a species and a species pair nothing is pinned for are ``LookupError``s; a release
+#: that is not pinned, both species being the same one, a fetched file that is not Compara's
+#: and a stored slice that changed after it was prepared are ``ValueError``s; the partition
+#: guard, an unfinished directory and a set that could not be fetched are ``RuntimeError``s;
+#: and a file that went away under the read is an ``OSError``. Its own name rather than
+#: :data:`_XREF_ERRORS` reused, because a **Homology set** and an **Xref set** are two
+#: contexts and the two lists are alike by coincidence rather than by construction.
+_HOMOLOGY_ERRORS = (ValueError, OSError, RuntimeError, LookupError)
+
+#: The columns a **Homology link** is printed as, which are the keys
+#: :meth:`~genome.io.results.HomologyLink.as_json` writes and in its order — so the text
+#: rendering and ``--json`` cannot drift apart, and every cell printed is a value the API
+#: put in the answer rather than one assembled here. ``homology_type`` and ``is_ortholog``
+#: are what **mark** a **Paralogy link**: a duplication label prints where a speciation one
+#: would, which is what keeps *not an ortholog* distinguishable from *absent*.
+_HOMOLOG_COLUMNS: tuple[str, ...] = (
+    "gene_id_stem",
+    "homolog_gene_id_stem",
+    "homology_type",
+    "is_ortholog",
+    "is_high_confidence",
+    "goc_score",
+    "wga_coverage",
+)
 
 #: Help for the ``--annotation`` option every command asking one annotation a question takes.
 _ANNOTATION_HELP = (
@@ -796,6 +888,441 @@ def table_row(
     # since the JSON object and the line to paste carry the same fields.
     row = _asdict(computed)
     typer.echo(_json.dumps(row) if json else _format_table_row(row))
+
+
+# --- xref commands -----------------------------------------------------------
+
+
+@app.command("xref")
+def xref(
+    species: str = typer.Argument(
+        ...,
+        help="Species an xref set exists for, e.g. 'Homo sapiens' — the slug "
+        "'homo_sapiens' names the same one. A species none exists for names the ones "
+        "that do rather than answering nothing.",
+    ),
+    ids: list[str] = typer.Argument(
+        ...,
+        help="The identifiers to convert. Each comes back in the order you passed it, "
+        "with its version suffix and its namespace's CURIE prefix accepted either way.",
+    ),
+    to_stems: str | None = typer.Option(
+        None,
+        "--to-stems",
+        metavar="NAMESPACE",
+        help=f"Read the ids as this namespace and answer in gene id stems: "
+        f"{', '.join(_TO_STEMS_NAMESPACES)}, whichever of them this set carries. A gene "
+        f"symbol is not among them — it matches spellings the authority has retired and "
+        f"each match carries which kind it was, so `genome match-symbols` answers it. "
+        f"Exactly one of this and --from-stems is named.",
+    ),
+    from_stems: str | None = typer.Option(
+        None,
+        "--from-stems",
+        metavar="NAMESPACE",
+        help="Read the ids as gene id stems and answer in this namespace, `symbol` "
+        "included — which gives the authority's one current approved spelling, the one a "
+        "figure axis wants. A versioned gene id is accepted and reduced to its stem, so an "
+        "annotation's own ids go straight in.",
+    ),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Answer from this xref source rather than the species' default one. Which "
+        "publisher answers is a scientific choice and not a detail: NCBI and Ensembl "
+        "agree on 57.6% of human gene-level (GeneID, ENSG) pairs.",
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Convert identifiers to and from gene id stems against one published xref set.
+
+    The way a column of Entrez GeneIDs from a GEO series, UniProt accessions from a
+    mass-spec run or HGNC ids from a curated resource reaches this package's answers,
+    without writing Python and without the hand-built join everyone in the lab writes
+    slightly differently. No assembly is named and no genome is opened: an identifier is a
+    name and not a place.
+
+    **The direction is named, never inferred.** `--to-stems NAMESPACE` reads the ids as
+    that namespace and answers in gene id stems; `--from-stems NAMESPACE` reads them as
+    stems and answers in that namespace. A string does not say which system it belongs to,
+    so `HGNC:11998` asked the wrong way answers *nothing found* rather than quietly turning
+    around. There is no third direction: Entrez to HGNC is two calls and the join is yours,
+    which keeps the hop visible in your pipeline rather than invisible in ours.
+
+    **A gene symbol is the one namespace these two directions do not mirror.**
+    `--from-stems symbol` is answered here and gives the authority's single current approved
+    spelling. The other way round is `genome match-symbols`, because a symbol also matches
+    spellings the authority has retired and each match carries which kind it was — so
+    `--to-stems symbol` exits 2 naming that command rather than matching approved spellings
+    alone, which is what drops 31 of EpiFactors' 801 rows.
+
+    **The pairs go to stdout, tab-separated, so the output pipes** — `cut -f2` is the
+    answer, `cut -f1` says what asked for it — and the heading, the publisher's URL and the
+    counts go to stderr. An id naming two genes prints two rows rather than whichever came
+    first, and **an id that resolved to nothing gets a row too, with an empty second
+    column**: what your list holds and this release does not is the one thing a hand-rolled
+    join drops silently. `--json` carries the same answer, keyed by what was asked about,
+    with those ids under `unresolved`.
+
+    Omitting `--source` answers from the species' default xref source, so everyone in the
+    lab reaches for the same one without discussing it. It is a default and not a
+    recommendation: naming a source is how the scientific choice gets made deliberately,
+    and every answer names the source and the release that produced it either way.
+
+    Naming a species prepares its set, which the first time is a download. **The lab's CPU
+    cluster compute nodes have no internet**, so a set must be constructed once from a login
+    node — by running this there, or from Python — before a job that needs it is submitted;
+    after that it is read from the **Data dir** and shared by every project on the machine.
+
+    Exits with code 2 when no direction is named or both are, and when the symbol namespace
+    is asked toward the hub; and with code 1 when no set exists for the species — the message
+    names the ones that do — when the source is not one this package prepares, when the set
+    is not here and cannot be fetched, when the namespace is not one the set carries, and
+    when a directory holds a set left unfinished.
+    """
+    # Which way the hop goes and which namespace it is in arrive on one flag, so neither can
+    # be given without the other. Naming both, or neither, is the one thing left to check.
+    if to_stems is not None and from_stems is None:
+        to_hub, namespace = True, to_stems
+    elif from_stems is not None and to_stems is None:
+        to_hub, namespace = False, from_stems
+    else:
+        typer.echo(_XREF_DIRECTION_HELP, err=True)
+        raise typer.Exit(code=2)
+
+    # The one direction-and-namespace pair this command does not answer, refused where the
+    # flags are read rather than where the set is prepared: it is another command's question
+    # however the set turns out, so nothing is downloaded to find that out.
+    if to_hub and namespace.strip().lower() == _SYMBOL:
+        typer.echo(_XREF_SYMBOL_HELP, err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        xrefs = _XrefSet(species, source, progressbar=not json)
+        answer = xrefs.to_stems(ids, namespace) if to_hub else xrefs.from_stems(ids, namespace)
+    except _XREF_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(answer.as_json()))
+        return
+    _report_xref(answer, source_url=xrefs.source_url, to_hub=to_hub)
+
+
+def _report_xref(
+    answer: _ResolvedStems | _ResolvedXrefIds, *, source_url: str, to_hub: bool
+) -> None:
+    """Print one hop as the pairs it found, with what answered and what it missed beside them.
+
+    The pairs to stdout and everything else to stderr, for the reason `gene-list` splits
+    them: two tab-separated columns are what a shell pipeline wants, and which publisher
+    asserted them is what a reader wants. **Every id asked about gets at least one row**,
+    the ones that resolved to nothing getting one with an empty second column, so nothing
+    leaves this command shorter than it arrived.
+
+    Which noun each column holds is the surface's to say and not the answer's: the answer
+    carries the namespace and the direction is what the caller named, so it is passed in
+    rather than guessed back out of which type came through.
+    """
+    asked_as = f"{answer.namespace} ids" if to_hub else "gene id stems"
+    answered_as = "gene id stems" if to_hub else f"{answer.namespace} ids"
+    rows = [(asked, found) for asked, values in answer.resolved.items() for found in values]
+    typer.echo(
+        f"{asked_as} -> {answered_as} for {answer.species} ({answer.source} {answer.release})",
+        err=True,
+    )
+    typer.echo(f"  source  {source_url}", err=True)
+    typer.echo(
+        f"  {len(answer.resolved)} resolved, {len(rows)} {answered_as}, "
+        f"{len(answer.unresolved)} this release names none for",
+        err=True,
+    )
+    for asked, found in rows:
+        typer.echo(f"{asked}\t{found}")
+    for asked in answer.unresolved:
+        typer.echo(f"{asked}\t")
+
+
+@app.command("match-symbols")
+def match_symbols(
+    species: str = typer.Argument(
+        ...,
+        help="Species an xref set exists for, e.g. 'Homo sapiens' — the slug "
+        "'homo_sapiens' names the same one. The species fixes the authority, so a symbol "
+        "is matched against that authority's spellings and no other's.",
+    ),
+    symbols: list[str] = typer.Argument(
+        ...,
+        help="The gene symbols to match, answered in the order you passed them. "
+        "Surrounding whitespace goes; case does not, unless --case-insensitive is named.",
+    ),
+    source: str | None = typer.Option(
+        None,
+        "--source",
+        help="Answer from this xref source rather than the species' default one. Symbols "
+        "are carried by `hgnc` for human and `alliance_bgi` for mouse and worm; a source "
+        "that carries none says so and names those, rather than matching nothing.",
+    ),
+    case_insensitive: bool = typer.Option(
+        False,
+        "--case-insensitive",
+        help="Fold case on both sides — your spelling and the authority's — and still "
+        "answer with every gene matched. Off by default: the species is fixed by the set, "
+        "so 'Brca1' asked of a human set is a mouse spelling asked of the wrong authority.",
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Print the genes each gene symbol names, and which kind of spelling matched.
+
+    The way a gene list copied out of a paper becomes usable without first finding its ids —
+    and without the join that silently drops every row spelling its gene the way the
+    authority used to. No assembly is named and no genome is opened: a symbol is a name and
+    not a place.
+
+    **A symbol is matched, never converted.** Approved, previous *and* alias spellings are
+    matched, every **Gene id stem** any of them names comes back, and each match says which
+    kind of spelling it was — so ambiguity is what you are handed rather than something
+    resolved on your behalf. `ADCY3` is HGNC's approved symbol for one gene and a symbol it
+    retired from another, and both are printed. This is why it is a command of its own and
+    not a third direction of `genome xref`: matching approved spellings alone would drop
+    exactly the rows this exists for — 31 of EpiFactors' 801 human rows spell their gene the
+    way HGNC spelled it years ago. The opposite hop, a stem to the authority's one current
+    approved spelling, is `genome xref --from-stems symbol`.
+
+    **The matches go to stdout, tab-separated, so the output pipes** — `cut -f3` is the
+    answer, `cut -f1` says what asked for it and `cut -f4` says which kind of spelling
+    matched — and the heading, the publisher's URL, the counts and what this source could
+    not have matched go to stderr. A symbol naming two genes prints two rows rather than
+    whichever came first, and **a symbol this release matched nothing for gets a row too,
+    with every other column empty**. Column 2 is the authority's own spelling, which is not
+    always the one asked about: folded, `brca1` asked comes back as `BRCA1` matched.
+
+    **Matching is exact by default**, because the species is fixed by the set:
+    `--case-insensitive` folds both sides and still answers with every gene matched rather
+    than picking one.
+
+    **What this source could not have matched is printed too.** Only HGNC publishes previous
+    and alias spellings typed; mouse and worm match current approved symbols alone, their
+    authorities' typed spellings belonging to publishers that cannot be pinned or cannot be
+    fetched (ADR-0018). So the answer says which kinds it could match and why the others are
+    missing — without which *this gene is not in the release* and *this source does not
+    publish the spelling you used* would both be silence.
+
+    Naming a species prepares its set, which the first time is a download. **The lab's CPU
+    cluster compute nodes have no internet**, so a set must be constructed once from a login
+    node — by running this there, or from Python — before a job that needs it is submitted.
+
+    Exits with code 1 when no set exists for the species — the message names the ones that
+    do — when the source is not one this package prepares, when the source carries no
+    symbols at all — the message names the ones that do — when the set is not here and cannot
+    be fetched, and when a directory holds a set left unfinished.
+    """
+    try:
+        xrefs = _XrefSet(species, source, progressbar=not json)
+        answer = xrefs.match_symbols(symbols, case_insensitive=case_insensitive)
+    except _XREF_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(answer.as_json()))
+        return
+    _report_symbols(answer, source_url=xrefs.source_url)
+
+
+def _report_symbols(answer: _ResolvedSymbols, *, source_url: str) -> None:
+    """Print one set's symbol matches, with what asserted them and what limits them beside.
+
+    The matches to stdout and everything else to stderr, for the reason `xref` splits them:
+    tab-separated columns are what a shell pipeline wants, and which authority asserted them
+    is what a reader wants. **Every symbol asked about gets at least one row**, the ones that
+    matched nothing getting one with every other column empty, so nothing leaves this command
+    shorter than it arrived.
+
+    The limits line prints only when there is one: the line above it already names the kinds
+    that *were* matched on, so a set that carries all three has nothing left to explain.
+    """
+    matching = "case-insensitive" if answer.case_insensitive else "exact"
+    rows = [(asked, match) for asked, matches in answer.resolved.items() for match in matches]
+    typer.echo(
+        f"gene symbols -> gene id stems for {answer.species} ({answer.source} {answer.release})",
+        err=True,
+    )
+    typer.echo(f"  source   {source_url}", err=True)
+    typer.echo(f"  columns  {', '.join(_SYMBOL_COLUMNS)}", err=True)
+    typer.echo(f"  matching {matching}, on {', '.join(answer.kinds)} spellings", err=True)
+    typer.echo(
+        f"  {len(answer.resolved)} resolved, {len(rows)} matches, "
+        f"{len(answer.unresolved)} this release matched nothing for",
+        err=True,
+    )
+    if answer.limits is not None:
+        typer.echo(f"  limits   {answer.limits}", err=True)
+    for asked, match in rows:
+        written = match.as_json()
+        typer.echo("\t".join([asked, *(str(written[column]) for column in _SYMBOL_MATCH_COLUMNS)]))
+    for asked in answer.unresolved:
+        typer.echo(asked + "\t" * len(_SYMBOL_MATCH_COLUMNS))
+
+
+# --- homology commands -------------------------------------------------------
+
+
+@app.command("homologs")
+def homologs(
+    species: str = typer.Argument(
+        ...,
+        help="Species the gene id stems belong to, e.g. 'Homo sapiens' — the slug "
+        "'homo_sapiens' names the same one. A species no set is pinned for names the ones "
+        "that are rather than answering nothing.",
+    ),
+    other_species: str = typer.Argument(
+        ...,
+        help="Species the homologous genes come back in. Any pairing among human, mouse "
+        "and worm; the same species twice is refused, since a gene's paralogs within one "
+        "species is a different question this does not answer.",
+    ),
+    stems: list[str] = typer.Argument(
+        ...,
+        help="The gene id stems to ask about, answered in the order you passed them. "
+        "Compara writes its gene ids bare, so a versioned id is refused by name rather "
+        "than answered emptily.",
+    ),
+    release: str = typer.Option(
+        _HOMOLOGY_RELEASE,
+        "--release",
+        help="Ensembl Compara release to answer from. Recorded on the answer, so a result "
+        "is reproducible a year later.",
+    ),
+    paralogs: bool = typer.Option(
+        False,
+        "--paralogs",
+        help="Return every link the publisher wrote for these genes rather than only the "
+        "ones its own label calls a speciation event. A paralogy link is marked by that "
+        "label in the `homology_type` column, never excluded.",
+    ),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Print the genes of another species a gene id stem's gene is homologous to.
+
+    The way a hit carries across species without leaving the package and without the
+    Ensembl BioMart web API, whose intermittent failures make a pipeline built on it fail
+    irreproducibly. Everything here is a bulk file fetched once and read locally. No
+    assembly is named and no genome is opened: a **Homology set** is anchored to a species
+    pair and a release, not to a build.
+
+    **Every cell is Ensembl Compara's.** The `homology_type` — `ortholog_one2one`,
+    `ortholog_one2many`, `ortholog_many2many` — is the publisher's own tree-derived label
+    printed verbatim, and it is never recomputed from what came back: an answer can show
+    one partner and still read `ortholog_one2many`, which is the point of carrying the
+    label rather than counting rows. The high-confidence flag and both quality scores come
+    through the same way, and this package publishes no score, ranking or "best ortholog"
+    of its own.
+
+    **The links go to stdout, tab-separated, so the output pipes** — `cut -f2` is the
+    answer, `cut -f1` says what asked for it — and the heading, the attribution, the counts
+    and the two qualifications below go to stderr. A gene with three homologs prints three
+    rows rather than whichever came first, and **a stem this release names no homolog for
+    gets a row too, with every other column empty**: what your list holds and this release
+    does not is visible rather than dropped. An empty cell there is not `NULL`, which is
+    the publisher's own word for a cell it recorded nothing in on a link that does exist.
+
+    **Two qualifications ride on every answer.** The **Dropped partner**s — the homologous
+    genes a filter removed — are counted and named, so a link that merely *looks*
+    one-to-one in your view stays distinguishable from one the publisher called one-to-one.
+    And whichever quality columns this set holds no value in *anywhere* are named up front:
+    Compara records neither `goc_score` nor `wga_coverage` on any link of either worm
+    pairing, so a filter written against one would empty itself in silence.
+
+    Orthologs are the answer by default and `--paralogs` returns every link the publisher
+    wrote; a **Paralogy link** is marked by its own `homology_type` rather than excluded,
+    so *not an ortholog* stays distinguishable from *absent*. Release 116 publishes no
+    cross-species paralogy for these three species, so on it the flag changes nothing.
+
+    Naming a pair prepares its set, which the first time is a download. **The lab's CPU
+    cluster compute nodes have no internet**, so a set must be constructed once from a
+    login node — by running this there, or from Python — before a job that needs it is
+    submitted; after that it is read from the **Data dir** and shared by every project on
+    the machine.
+
+    Exits with code 1 when no set is pinned for the species — the message names the ones
+    that are — when the release is not pinned, when both species are the same one, when a
+    stem carries a version, when the set is not here and cannot be fetched, when a
+    directory holds a set left unfinished, and when the file that was recorded as holding
+    this pair holds none of its rows, which means Compara re-partitioned and the message
+    names the other file.
+    """
+    try:
+        homology = _HomologySet(species, other_species, release, progressbar=not json)
+        answer = homology.homologs(stems, paralogs=paralogs)
+    except _HOMOLOGY_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(answer.as_json()))
+        return
+    _report_homologs(answer, provenance=homology.provenance, paralogs=paralogs)
+
+
+def _report_homologs(
+    answer: _HomologyAnswer, *, provenance: _HomologyMetadata, paralogs: bool
+) -> None:
+    """Print one pair's links, with what asserted them and what qualifies them beside.
+
+    The links to stdout and everything else to stderr, for the reason `xref` splits them:
+    tab-separated columns are what a shell pipeline wants, and which publisher asserted
+    them is what a reader wants. **Every stem asked about gets at least one row**, the ones
+    naming no homolog getting one with every other column empty, so nothing leaves this
+    command shorter than it arrived.
+
+    Which question was asked is the surface's to say and not the answer's — the answer
+    holds what came back, not which switch the caller set — so it is passed in rather than
+    guessed back out of the labels that survived.
+    """
+    kind = "homologs, paralogy included" if paralogs else "orthologs"
+    typer.echo(
+        f"{answer.species} -> {answer.other_species} {kind} "
+        f"({provenance.publisher} {answer.release})",
+        err=True,
+    )
+    typer.echo(f"  source   {provenance.attribution()}", err=True)
+    typer.echo(f"  columns  {', '.join(_HOMOLOG_COLUMNS)}", err=True)
+    typer.echo(
+        f"  {len(answer.resolved)} resolved, {len(answer.links)} links, "
+        f"{len(answer.unresolved)} this release names no homolog for, "
+        f"{_dropped_summary(answer.dropped_partners)}",
+        err=True,
+    )
+    typer.echo(f"  quality  {_quality_summary(answer.null_quality_scores)}", err=True)
+    for link in answer.links:
+        written = link.as_json()
+        typer.echo("\t".join(_cell(written[column]) for column in _HOMOLOG_COLUMNS))
+    for stem in answer.unresolved:
+        typer.echo(stem + "\t" * (len(_HOMOLOG_COLUMNS) - 1))
+
+
+def _cell(value: object) -> str:
+    """Render one cell of a **Homology link**, in the publisher's word for *nothing here*."""
+    return _NULL_CELL if value is None else str(value)
+
+
+def _dropped_summary(dropped: tuple[str, ...]) -> str:
+    """Say which partners a filter removed — counted *and* named, `0` being an answer."""
+    if not dropped:
+        return "0 dropped partners"
+    return f"{len(dropped)} dropped partners: {', '.join(dropped)}"
+
+
+def _quality_summary(null_columns: tuple[str, ...]) -> str:
+    """Say which quality columns this set holds nothing in, before a filter empties itself."""
+    if not null_columns:
+        return "the publisher scored this pair; both quality columns carry values"
+    return (
+        f"{' and '.join(null_columns)} null on every link of this set, so a filter on "
+        f"{'either' if len(null_columns) > 1 else 'it'} empties rather than narrowing"
+    )
 
 
 # --- motif commands ----------------------------------------------------------

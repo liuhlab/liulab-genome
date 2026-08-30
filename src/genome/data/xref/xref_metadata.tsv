@@ -1,0 +1,9 @@
+species	ncbi_taxid	source	release	publisher	version	pubmed_id	url	source_checksum	default
+Homo sapiens	9606	alliance	9.0.0	Alliance of Genome Resources	9.0.0	38552170	https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz	md5:2575a9b53d3de2346267c7cb34476585	yes
+Mus musculus	10090	alliance	9.0.0	Alliance of Genome Resources	9.0.0	38552170	https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz	md5:2575a9b53d3de2346267c7cb34476585	yes
+Caenorhabditis elegans	6239	alliance	9.0.0	Alliance of Genome Resources	9.0.0	38552170	https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz	md5:2575a9b53d3de2346267c7cb34476585	yes
+Homo sapiens	9606	ensembl	116	Ensembl	116	39656687	https://ftp.ensembl.org/pub/release-116/tsv/homo_sapiens/Homo_sapiens.GRCh38.116.entrez.tsv.gz	md5:147e6c80a84b1895e79feb6d2134645b	no
+Mus musculus	10090	ensembl	116	Ensembl	116	39656687	https://ftp.ensembl.org/pub/release-116/tsv/mus_musculus/Mus_musculus.GRCm39.116.entrez.tsv.gz	md5:1b19db52b8f0f54ddf3c9580d69d8b09	no
+Homo sapiens	9606	hgnc	2026-07-07	HGNC	2026-07-07	41287213	https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt	md5:cd41d33955722de9ac0e14a2557ef5fc	no
+Mus musculus	10090	alliance_bgi	9.0.0	Mouse Genome Informatics, via the Alliance of Genome Resources	MGI 6.27 2026-04-21	38552170	https://download.alliancegenome.org/9.0.0/BGI/MGI/1.0.2.5_BGI_MGI_0.json.gz	md5:a834098c9505ec7fb4a0151480a90734	no
+Caenorhabditis elegans	6239	alliance_bgi	9.0.0	WormBase, via the Alliance of Genome Resources	WS298	38552170	https://download.alliancegenome.org/8.3.0/BGI/WB/1.0.2.5_BGI_WB_4.json.gz	md5:4a45ce6beb26dd0dc8c053e5b2e1a835	no

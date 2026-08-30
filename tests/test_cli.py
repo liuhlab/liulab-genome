@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json as _json
+import re
 import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 import gffutils
 import pytest
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from genome import __version__ as genome_version
 from genome import metadata
@@ -18,8 +22,19 @@ from genome.cli import app
 from genome.external import REQUIRED_TOOLS
 from genome.external import doctor as doctor_api
 from genome.gene_list import curated_gene_list
+from genome.homology import (
+    DEFAULT_RELEASE as HOMOLOGY_RELEASE,
+)
+from genome.homology import (
+    QUALITY_SCORE_COLUMNS,
+    HomologySet,
+    homology_metadata,
+    homology_prepare_command,
+    homology_species,
+)
 from genome.io import download as download_mod
-from genome.io.completion import read_record, record_path, write_record
+from genome.io import fetch as fetch_mod
+from genome.io.completion import RECORD_NAME, read_record, record_path, write_record
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.io.gtf import (
     AnnotationRegistry,
@@ -35,12 +50,58 @@ from genome.tf.gene import TFGeneTable, tf_gene_table
 from genome.tf.motif import MIN_MOTIF_LENGTH, hit_count, provenance_of, read_hits
 from genome.tf.motif import jaspar as jaspar_mod
 from genome.tf.motif.jaspar import MOTIF_COUNTS
+from genome.xref import (
+    ALIAS,
+    ALLIANCE,
+    ALLIANCE_BGI,
+    APPROVED,
+    ENSEMBL,
+    ENSEMBL_TSV,
+    ENTREZ,
+    HGNC,
+    HGNC_ARCHIVE,
+    MGI,
+    NAMESPACES,
+    PREVIOUS,
+    SYMBOL,
+    UNIPROT,
+    XrefSet,
+    lookup_xref,
+    xref_prepare_command,
+    xref_set_dir,
+    xref_slice_name,
+    xref_species,
+    xref_table,
+)
+from genome.xref import metadata as xref_metadata_mod
 
 from .conftest import CHIMERA_COMPONENTS, COMPONENT_ANNOTATION, FakeFetch
+from .test_homology import ABSENT as _NO_HOMOLOG
+from .test_homology import FIXTURES as _COMPARA_FIXTURES
+from .test_homology import ONE2MANY_HUMAN as _THREE_WORM_HOMOLOGS
+from .test_homology import ONE2MANY_WORMS as _THE_THREE_WORMS
+from .test_homology import ONE2ONE_HUMAN as _ONE_WORM_HOMOLOG
+from .test_homology import ONE2ONE_WORM as _THE_ONE_WORM
+from .test_homology import PAIRS as _HOMOLOGY_PAIRS
+from .test_homology import _stems as _homology_stems
 from .test_jaspar import FIXTURE as _MOTIF_FIXTURE
 from .test_jaspar import FIXTURE_COUNT as _MOTIF_COUNT
 from .test_jaspar import FIXTURE_MOTIFS as _MOTIF_RECORDS
 from .test_scan import FIXTURE as _PLANTED_FASTA
+from .test_xref import FIXTURE as _XREF_FIXTURE
+from .test_xref import HUMAN_GENE_WITHOUT_A_HUB as _XREF_NO_HUB
+from .test_xref import RELEASE as _XREF_RELEASE
+from .test_xref_symbols import ADCY3_STEM as _ADCY3_STEM
+from .test_xref_symbols import ADCY8_STEM as _ADCY8_STEM
+from .test_xref_symbols import AMBIGUOUS_SYMBOL as _AMBIGUOUS_SYMBOL
+from .test_xref_symbols import BGI_MOUSE as _BGI_MOUSE_FIXTURE
+from .test_xref_symbols import BMAL1 as _BMAL1_STEM
+from .test_xref_symbols import HGNC_FIXTURE as _HGNC_FIXTURE
+from .test_xref_symbols import HGNC_RELEASE as _HGNC_RELEASE
+from .test_xref_symbols import MOUSE_CASED_SYMBOL as _MOUSE_CASED_SYMBOL
+from .test_xref_symbols import RETIRED_EPIFACTORS_SYMBOL as _RETIRED_SYMBOL
+from .test_xref_symbols import RETIRED_EPIFACTORS_SYMBOL_TOO as _RETIRED_SYMBOL_TOO
+from .test_xref_symbols import _digest as _fixture_digest
 
 runner = CliRunner()
 _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
@@ -74,6 +135,31 @@ _TINY_ANNOTATION = AnnotationMetadata(
 #: uniform four — and a command that only ever met Lambert's would not know that.
 _TF_ASSEMBLY, _TF_ANNOTATION = "hg38", "gencode_v50"
 _MOUSE_ASSEMBLY, _MOUSE_ANNOTATION = "mm39", "gencode_vM39"
+
+#: The species ``genome xref`` is exercised against. Human, because the committed Alliance
+#: fixture carries the two things the command's shape exists for: a foreign id naming two
+#: **Gene id stem**s, and a real gene with no Ensembl cross-reference to reach at all.
+_XREF_SPECIES = "Homo sapiens"
+
+#: The one gene the HGNC fixture spells all three ways, so that a single invocation of
+#: ``genome match-symbols`` can be asked for an approved, a previous and an alias match at
+#: once. The previous spelling is imported rather than written here: it is one of the 31
+#: measured EpiFactors rows and ``tests/test_xref_symbols.py`` is where that is recorded.
+_APPROVED_SYMBOL, _ALIAS_SYMBOL = "BMAL1", "MOP3"
+
+#: The stem the second measured EpiFactors spelling reaches — EMSY's, as the shipped human
+#: **Cofactor table** records it, which is the table the 801-row measurement was made on.
+_EMSY_STEM = "ENSG00000158636"
+
+#: A symbol MGI has retired, asked of the mouse set to show what *cannot* be matched there:
+#: that source publishes one current approved spelling per gene, so this comes back
+#: unresolved and the answer must say why rather than letting it read as an absent gene.
+_MOUSE_RETIRED_SYMBOL = "Arntl"
+
+#: The three species ``genome homologs`` is exercised against, spelled as the shipped
+#: provenance table spells them. All three pairings among them must answer, which is an
+#: acceptance criterion of its own rather than a sample.
+_HUMAN, _MOUSE, _WORM = "Homo sapiens", "Mus musculus", "Caenorhabditis elegans"
 
 #: Which of the committed motifs a scan leaves out, and how many are left to scan with.
 #: Read off the fixture table rather than written down again, so a changed fixture moves the
@@ -183,6 +269,106 @@ def motif_release(fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> Fak
 def planted_fasta(data_dir: Path) -> Path:
     """The committed FASTA with motifs planted at positions ``tests/data/README.md`` lists."""
     return data_dir / _PLANTED_FASTA
+
+
+def _serve_compara(fake_fetch: FakeFetch, species: str, other: str) -> FakeFetch:
+    """Serve the subsample of whichever published dump the shipped table names for a pair.
+
+    Which of the two per-species files holds a pair is exactly what that table records, so
+    a test serves what the package asked for rather than deciding for itself — the test
+    that serves the *wrong* file does so on purpose and says why.
+    """
+    row = homology_metadata(species, other, HOMOLOGY_RELEASE)
+    assert row is not None
+    fake_fetch.serve(_COMPARA_FIXTURES[row.holding_species])
+    return fake_fetch
+
+
+@pytest.fixture
+def xref_pinned(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> None:
+    """Pin the curated **Xref source** rows to the committed Alliance fixture's digest.
+
+    The arrangement ``tests/test_xref.py`` uses: the checksum check that holds a truncated
+    download to be an error rather than a quietly short answer is never switched off, only
+    pointed at what the fake fetch actually serves. Every other cell survives, the real URL
+    among them, so what the command prints as provenance is the shipped row's own.
+    """
+    with gzip.open(data_dir / _XREF_FIXTURE, "rb") as handle:
+        # md5 because that is the algorithm Alliance publishes, not a choice made here.
+        digest = f"md5:{hashlib.md5(handle.read()).hexdigest()}"
+    rows = tuple(replace(row, source_checksum=digest) for row in xref_table())
+    monkeypatch.setattr(xref_metadata_mod, "xref_table", lambda: rows)
+
+
+@pytest.fixture
+def xref_release(fake_fetch: FakeFetch, xref_pinned: None) -> FakeFetch:
+    """Serve the committed Alliance slice as the publisher's file, pinned to it."""
+    fake_fetch.serve(_XREF_FIXTURE)
+    return fake_fetch
+
+
+@pytest.fixture
+def symbol_pinned(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> dict[str, Path]:
+    """Pin the symbol-carrying **Xref source** rows to the fixtures cut out of their files.
+
+    ``tests/test_xref_symbols.py``'s arrangement: the checksum check is never switched off,
+    only pointed at the bytes that actually arrive. The mapping it returns is what each
+    URL should serve, so a fetch can be routed by URL and the human and the mouse set can
+    be held at once — which one test below needs, the two sources matching different kinds.
+    """
+    by_url = {
+        lookup_xref(_XREF_SPECIES, HGNC_ARCHIVE).url: data_dir / _HGNC_FIXTURE,
+        lookup_xref(_MOUSE, ALLIANCE_BGI).url: data_dir / _BGI_MOUSE_FIXTURE,
+    }
+    rows = tuple(
+        replace(row, source_checksum=f"md5:{_fixture_digest(by_url[row.url])}")
+        if row.url in by_url
+        else row
+        for row in xref_table()
+    )
+    monkeypatch.setattr(xref_metadata_mod, "xref_table", lambda: rows)
+    return by_url
+
+
+@pytest.fixture
+def symbol_sources(
+    fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch, symbol_pinned: dict[str, Path]
+) -> FakeFetch:
+    """Serve each symbol source's publisher file, routed by the URL the package built."""
+
+    def route(url: str, dest_dir: Path, **kwargs: Any) -> Path:
+        fake_fetch.serve(symbol_pinned[url])
+        return fake_fetch(url, dest_dir, **kwargs)
+
+    monkeypatch.setattr(fetch_mod, "fetch_url", route)
+    return fake_fetch
+
+
+#: Every ANSI escape sequence rich writes — the colour, the bolding and the resets it
+#: emits at each line boundary. Stripped before a help string is asserted against, because
+#: whether the runner is drawing colour is a property of the terminal that happens to be
+#: attached and never of what the help says: CI colours its output and a local run may not,
+#: which is a test that passes on one machine and fails on the other.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _help_text(*command: str) -> str:
+    """One command's ``--help``, with the drawing taken out of the words.
+
+    Rich draws the options in a bordered table, so a sentence too long for one line arrives
+    with a ``│`` and a newline through the middle of it, and a colour reset wherever it
+    broke. What a test asserts is what the help *says*, so the escapes and the rules go and
+    the whitespace collapses.
+    """
+    rendered = _output(runner.invoke(app, [*command, "--help"]))
+    return " ".join(_ANSI.sub("", rendered).replace("│", " ").split())
+
+
+def _match_symbols(*arguments: str) -> Result:
+    """Ask the human HGNC set, the one shipped source that carries all three kinds."""
+    return runner.invoke(
+        app, ["match-symbols", _XREF_SPECIES, "--source", HGNC_ARCHIVE, *arguments]
+    )
 
 
 class TestVersion:
@@ -1611,6 +1797,936 @@ class TestTFCofactorListCommand:
         assert result.stdout == ""
         assert "nothing says what species 'tiny' is, so no cofactor table" in _output(result)
         assert "Mus musculus" in _output(result)
+
+
+class TestXrefCommand:
+    """``genome xref`` — the shell surface over an **Xref set**, driven off the fixture.
+
+    Offline throughout, the way ``tests/test_xref.py`` is: the fake fetch serves the
+    committed Alliance slice and the curated rows are pinned to it, so the command prepares
+    and reads a real set under the test's own data root. What is asserted here is the
+    command and not the hop — ``tests/test_xref.py`` owns that — so: the direction being
+    named rather than sniffed out of the id strings, the stdout/stderr split that makes the
+    output pipe, the ids that resolved to nothing staying visible in *both* renderings, and
+    a non-zero exit naming the next action for each way it can fail.
+
+    The strongest claim here is that the command holds no logic the API does not, and it is
+    checked the only way that can be: ``--json`` is asserted equal to what the same two
+    calls answer in Python, whole, in both directions.
+    """
+
+    def test_it_converts_foreign_ids_to_gene_id_stems(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "672"])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "7157\tENSG00000141510",
+            "672\tENSG00000012048",
+        ]
+
+    def test_it_converts_gene_id_stems_to_foreign_ids(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--from-stems", HGNC, "ENSG00000141510"]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == ["ENSG00000141510\tHGNC:11998"]
+
+    def test_the_direction_is_named_and_never_inferred_from_the_ids(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # One string, one namespace, two directions, two different answers. `HGNC:11998` is
+        # an HGNC id and is not a **Gene id stem**, and nothing here works that out from the
+        # characters: the flag says which way the hop goes, and asking the wrong way answers
+        # *nothing found* rather than quietly turning around.
+        toward = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998"])
+        away = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", HGNC, "HGNC:11998"])
+
+        assert toward.exit_code == away.exit_code == 0
+        assert toward.stdout.splitlines() == ["HGNC:11998\tENSG00000141510"]
+        assert away.stdout.splitlines() == ["HGNC:11998\t"]
+
+    def test_naming_no_direction_exits_two_naming_both_flags(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "7157"])
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        assert "--to-stems" in _output(result)
+        assert "--from-stems" in _output(result)
+
+    def test_naming_both_directions_exits_two(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "--from-stems", HGNC, "7157"]
+        )
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        assert "exactly one" in _output(result)
+
+    def test_json_is_the_answer_the_api_renders_toward_the_hub(
+        self, xref_release: FakeFetch
+    ) -> None:
+        asked = ["7157", "8086", "999999999"]
+
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, *asked, "--json"])
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout) == XrefSet(_XREF_SPECIES).to_stems(asked, ENTREZ).as_json()
+        )
+
+    def test_json_is_the_answer_the_api_renders_away_from_the_hub(
+        self, xref_release: FakeFetch
+    ) -> None:
+        asked = ["ENSG00000141510", "ENSG00000012048", "ENSG00000288541"]
+
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--from-stems", UNIPROT, *asked, "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet(_XREF_SPECIES).from_stems(asked, UNIPROT).as_json()
+        )
+
+    def test_the_pairs_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+
+        assert result.exit_code == 0
+        assert result.stdout == "7157\tENSG00000141510\n"
+        # Which publisher said so, and when, is what a reader needs and what a pipeline must
+        # not be handed: it goes beside the pairs rather than among them.
+        assert f"{ALLIANCE} {_XREF_RELEASE}" in result.stderr
+        assert _XREF_SPECIES in result.stderr
+        assert lookup_xref(_XREF_SPECIES).url in result.stderr
+        assert f"{ENTREZ} ids -> gene id stems" in result.stderr
+
+    def test_ids_that_resolved_to_nothing_stay_in_the_human_output(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # The one thing a hand-rolled join drops. `HGNC:10041` is a real human gene the
+        # Alliance lists with no Ensembl cross-reference at all, so it has no hub to reach.
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998", _XREF_NO_HUB]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "HGNC:11998\tENSG00000141510",
+            f"{_XREF_NO_HUB}\t",
+        ]
+        assert "1 this release names none for" in result.stderr
+
+    def test_ids_that_resolved_to_nothing_stay_in_the_json(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(
+            app,
+            ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998", _XREF_NO_HUB, "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["unresolved"] == [_XREF_NO_HUB]
+        assert _XREF_NO_HUB not in payload["resolved"]
+
+    def test_an_id_naming_two_stems_prints_both_and_nothing_picks_one(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # 6.2% of human HGNC ids name two stems in this release, so this is the ordinary
+        # case rather than an edge one.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "8086"])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "8086\tENSG00000094914",
+            "8086\tENSG00000291836",
+        ]
+
+    def test_the_answer_names_the_source_and_release_that_produced_it(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
+
+        payload = _json.loads(result.stdout)
+        assert (payload["source"], payload["release"]) == (ALLIANCE, _XREF_RELEASE)
+        assert (payload["species"], payload["namespace"]) == (_XREF_SPECIES, ENTREZ)
+
+    def test_a_source_may_be_named(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--source", ALLIANCE, "--to-stems", ENTREZ, "7157"]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout == "7157\tENSG00000141510\n"
+        assert f"{ALLIANCE} {_XREF_RELEASE}" in result.stderr
+
+    def test_omitting_the_source_uses_the_default_xref_source(
+        self, xref_release: FakeFetch
+    ) -> None:
+        named = runner.invoke(
+            app,
+            ["xref", _XREF_SPECIES, "--source", ALLIANCE, "--to-stems", ENTREZ, "7157", "--json"],
+        )
+        defaulted = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"]
+        )
+
+        assert named.exit_code == defaulted.exit_code == 0
+        assert _json.loads(defaulted.stdout) == _json.loads(named.stdout)
+        assert lookup_xref(_XREF_SPECIES).default is True
+
+    def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # "ncbi" rather than a source that merely happens to be unlisted today: NCBI Gene
+        # is excluded on purpose, being rebuilt in place with no retrievable old release
+        # (ADR-0018), so this stays a miss however many sources the table grows.
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--source", "ncbi", "--to-stems", ENTREZ, "7157"]
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert ALLIANCE in _output(result)
+        assert ENSEMBL_TSV in _output(result)
+
+    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["xref", "Danio rerio", "--to-stems", ENTREZ, "7157"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        for species in xref_species():
+            assert species in _output(result)
+        # Refused before anything was fetched: a species with no Ensembl presence has no hub
+        # to hang a namespace off and is unanswerable by design, not pending a download.
+        assert xref_release.calls == []
+
+    def test_a_namespace_the_source_does_not_carry_exits_one_naming_the_ones_it_does(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # The three species have three different authorities, so a human set asked for MGI
+        # ids fails loudly rather than answering nothing — the failure that would otherwise
+        # look like a gene list with no matches.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", MGI, "MGI:88276"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        for namespace in (ENSEMBL, ENTREZ, UNIPROT, HGNC):
+            assert namespace in _output(result)
+
+    def test_the_reverse_direction_refuses_the_same_namespace(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", MGI, "ENSG00000141510"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert HGNC in _output(result)
+
+    def test_the_symbol_namespace_toward_the_hub_names_the_command_that_answers_it(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # The API refuses this call naming `match_symbols(symbols)`, which is a Python call
+        # and no next action at all for someone in a shell. The surface owns which of *its*
+        # spellings to reach for, so the refusal happens here and names the command.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", SYMBOL, _RETIRED_SYMBOL])
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        assert "genome match-symbols" in _output(result)
+        # Refused before anything was fetched: no set has to be prepared to know that this
+        # direction is answered by another command.
+        assert xref_release.calls == []
+
+    def test_the_to_stems_help_no_longer_offers_the_namespace_it_refuses(self) -> None:
+        # Help and behaviour agree or the command advertises a conversion it will not make.
+        offered = _help_text("xref")
+
+        assert ", ".join(name for name in NAMESPACES if name != SYMBOL) in offered
+        assert ", ".join(NAMESPACES) not in offered
+        assert "genome match-symbols" in offered
+
+    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
+        self, monkeypatch: pytest.MonkeyPatch, xref_pinned: None
+    ) -> None:
+        def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
+            raise ConnectionError("the compute node has no internet")
+
+        monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE) in _output(result)
+        assert "login node" in _output(result)
+
+    def test_a_set_left_unfinished_exits_one_naming_the_repair(
+        self, xref_release: FakeFetch
+    ) -> None:
+        directory = xref_set_dir(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE)
+        directory.mkdir(parents=True)
+        (directory / xref_slice_name(_XREF_SPECIES)).write_bytes(b"half a file")
+
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE) in _output(result)
+
+    def test_the_progress_display_is_suppressed_under_json(self, xref_release: FakeFetch) -> None:
+        runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
+
+        assert xref_release.last.progressbar is False
+
+    def test_the_progress_display_is_drawn_without_it(self, xref_release: FakeFetch) -> None:
+        runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+
+        assert xref_release.last.progressbar is True
+
+
+class TestMatchSymbolsCommand:
+    """``genome match-symbols`` — the shell surface over ``XrefSet.match_symbols``.
+
+    Offline throughout, the way ``tests/test_xref_symbols.py`` is: the fake fetch serves the
+    committed HGNC archive cut and the Alliance's MGI submission, routed by the URL the
+    package built, and the curated rows are pinned to them. What is asserted here is the
+    command and not the match — ``tests/test_xref_symbols.py`` owns the three kinds, the
+    folding and the asymmetry — so: a symbol reaching its genes from a shell at all, the
+    kind of every match surviving the render, exact matching being what happens unless case
+    is folded on purpose, the symbols that matched nothing staying visible in *both*
+    renderings, and a non-zero exit naming the next action for each way it can fail.
+
+    It is a command of its own rather than a third direction of ``genome xref`` for the
+    reason ``match_symbols`` is a verb of its own: a symbol matches spellings the authority
+    has retired, answers with every gene any of them names, and carries a kind on each
+    match, so it is neither of that command's two hops and does not render as one.
+
+    The strongest claim here is that the command holds no logic the API does not, and it is
+    checked the only way that can be: ``--json`` is asserted equal to what the same call
+    answers in Python, whole, both exactly and folded.
+    """
+
+    def test_a_symbol_reaches_the_gene_it_names(self, symbol_sources: FakeFetch) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\t{APPROVED}"
+        ]
+
+    def test_a_retired_spelling_from_the_measured_epifactors_set_resolves(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The failure the whole symbol feature exists to prevent, reached from a shell: of
+        # EpiFactors v2.0's 801 human rows, 31 spell the gene by a symbol HGNC has since
+        # retired, and a join that knows approved spellings only drops exactly those.
+        result = _match_symbols(_RETIRED_SYMBOL, _RETIRED_SYMBOL_TOO)
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_RETIRED_SYMBOL}\t{_RETIRED_SYMBOL}\t{_BMAL1_STEM}\t{PREVIOUS}",
+            f"{_RETIRED_SYMBOL_TOO}\t{_RETIRED_SYMBOL_TOO}\t{_EMSY_STEM}\t{PREVIOUS}",
+        ]
+
+    def test_every_match_says_which_kind_of_spelling_it_was(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # One gene, spelled three ways, in one call. Which kind matched is the answer's and
+        # not a detail: without it a retired spelling and a current one read alike.
+        result = _match_symbols(_APPROVED_SYMBOL, _RETIRED_SYMBOL, _ALIAS_SYMBOL)
+
+        assert result.exit_code == 0
+        assert [line.split("\t") for line in result.stdout.splitlines()] == [
+            [_APPROVED_SYMBOL, _APPROVED_SYMBOL, _BMAL1_STEM, APPROVED],
+            [_RETIRED_SYMBOL, _RETIRED_SYMBOL, _BMAL1_STEM, PREVIOUS],
+            [_ALIAS_SYMBOL, _ALIAS_SYMBOL, _BMAL1_STEM, ALIAS],
+        ]
+
+    def test_a_symbol_naming_two_genes_prints_both_and_nothing_picks_one(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # `ADCY3` is HGNC's approved symbol for one gene and a symbol it retired from
+        # another, so ambiguity is the ordinary case rather than an edge one, and the shell
+        # is handed both with the kind that distinguishes them.
+        result = _match_symbols(_AMBIGUOUS_SYMBOL)
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_AMBIGUOUS_SYMBOL}\t{_AMBIGUOUS_SYMBOL}\t{_ADCY3_STEM}\t{APPROVED}",
+            f"{_AMBIGUOUS_SYMBOL}\t{_AMBIGUOUS_SYMBOL}\t{_ADCY8_STEM}\t{PREVIOUS}",
+        ]
+
+    def test_matching_is_exact_unless_case_is_folded_on_purpose(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The species is fixed by the set, so a mouse-cased spelling asked of a human set is
+        # the wrong authority's rather than a typo to absorb — and saying so beats half
+        # working.
+        result = _match_symbols(_MOUSE_CASED_SYMBOL)
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [f"{_MOUSE_CASED_SYMBOL}\t\t\t"]
+        assert "exact" in result.stderr
+
+    def test_case_insensitive_matching_is_opt_in_and_still_returns_every_match(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # Convenience never costs correctness: folding widens what matches and narrows
+        # nothing, so the ambiguity that was there exactly is still there folded — and the
+        # authority's own spelling comes back beside the one that was asked about.
+        result = _match_symbols("adcy3", "--case-insensitive")
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"adcy3\t{_AMBIGUOUS_SYMBOL}\t{_ADCY3_STEM}\t{APPROVED}",
+            f"adcy3\t{_AMBIGUOUS_SYMBOL}\t{_ADCY8_STEM}\t{PREVIOUS}",
+        ]
+        assert "case-insensitive" in result.stderr
+
+    def test_symbols_that_matched_nothing_stay_in_the_human_output(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # What your list holds and this release does not is the one thing a hand-rolled
+        # join drops silently, so it gets a row here like everything else.
+        result = _match_symbols(_APPROVED_SYMBOL, "nosuchgene")
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\t{APPROVED}",
+            "nosuchgene\t\t\t",
+        ]
+        assert "1 this release matched nothing for" in result.stderr
+
+    def test_symbols_that_matched_nothing_stay_in_the_json(self, symbol_sources: FakeFetch) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL, "nosuchgene", "--json")
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["unresolved"] == ["nosuchgene"]
+        assert "nosuchgene" not in payload["resolved"]
+
+    def test_json_is_the_answer_the_api_renders(self, symbol_sources: FakeFetch) -> None:
+        asked = [_AMBIGUOUS_SYMBOL, _RETIRED_SYMBOL, "nosuchgene"]
+
+        result = _match_symbols(*asked, "--json")
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet(_XREF_SPECIES, HGNC_ARCHIVE).match_symbols(asked).as_json()
+        )
+
+    def test_json_is_the_answer_the_api_renders_folded_too(self, symbol_sources: FakeFetch) -> None:
+        asked = [_MOUSE_CASED_SYMBOL, "adcy3"]
+
+        result = _match_symbols(*asked, "--case-insensitive", "--json")
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet(_XREF_SPECIES, HGNC_ARCHIVE)
+            .match_symbols(asked, case_insensitive=True)
+            .as_json()
+        )
+
+    def test_the_matches_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert result.exit_code == 0
+        assert result.stdout == f"{_APPROVED_SYMBOL}\t{_APPROVED_SYMBOL}\t{_BMAL1_STEM}\tapproved\n"
+        # Which authority said so, and when, is what a reader needs and what a pipeline
+        # must not be handed: it goes beside the matches rather than among them.
+        assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in result.stderr
+        assert _XREF_SPECIES in result.stderr
+        assert lookup_xref(_XREF_SPECIES, HGNC_ARCHIVE).url in result.stderr
+        assert "gene symbols -> gene id stems" in result.stderr
+
+    def test_the_text_columns_are_the_json_matches_own_values_so_the_two_cannot_drift(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        text = _match_symbols(_AMBIGUOUS_SYMBOL)
+        payload = _match_symbols(_AMBIGUOUS_SYMBOL, "--json")
+
+        matches = _json.loads(payload.stdout)["resolved"][_AMBIGUOUS_SYMBOL]
+        assert text.stdout.splitlines() == [
+            "\t".join([_AMBIGUOUS_SYMBOL, match["symbol"], match["gene_id_stem"], match["kind"]])
+            for match in matches
+        ]
+
+    def test_the_answer_names_the_source_and_release_that_produced_it(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL, "--json")
+
+        payload = _json.loads(result.stdout)
+        assert (payload["source"], payload["release"]) == (HGNC_ARCHIVE, _HGNC_RELEASE)
+        assert (payload["species"], payload["case_insensitive"]) == (_XREF_SPECIES, False)
+
+    def test_a_source_matching_current_symbols_only_says_so_before_it_reads_as_absent(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # MGI's submission publishes one current approved symbol per gene, so a spelling it
+        # retired matches nothing — and an answer that did not say why would look exactly
+        # like a gene that is not in the release.
+        result = runner.invoke(
+            app, ["match-symbols", _MOUSE, "--source", ALLIANCE_BGI, _MOUSE_RETIRED_SYMBOL]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [f"{_MOUSE_RETIRED_SYMBOL}\t\t\t"]
+        assert f"on {APPROVED} spellings" in result.stderr
+        for missing in (PREVIOUS, ALIAS):
+            assert missing in result.stderr
+
+    def test_a_set_that_matches_every_kind_carries_no_such_note(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert f"on {APPROVED}, {PREVIOUS}, {ALIAS} spellings" in result.stderr
+        assert "limits" not in result.stderr
+
+    def test_a_source_that_carries_no_symbols_exits_one_naming_the_ones_that_do(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # The Alliance's cross-reference file carries no human symbol at all, measured on
+        # the whole 25 MB file — so asking it is a different failure from a gene that is
+        # absent, and the message names the sources that would answer.
+        result = runner.invoke(app, ["match-symbols", _XREF_SPECIES, _APPROVED_SYMBOL])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert HGNC_ARCHIVE in _output(result)
+        assert ALLIANCE_BGI in _output(result)
+
+    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["match-symbols", "Danio rerio", _APPROVED_SYMBOL])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        for species in xref_species():
+            assert species in _output(result)
+        assert symbol_sources.calls == []
+
+    def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        result = runner.invoke(
+            app, ["match-symbols", _XREF_SPECIES, "--source", "ncbi", _APPROVED_SYMBOL]
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert HGNC_ARCHIVE in _output(result)
+
+    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
+        self, monkeypatch: pytest.MonkeyPatch, symbol_pinned: dict[str, Path]
+    ) -> None:
+        def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
+            raise ConnectionError("the compute node has no internet")
+
+        monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE) in _output(result)
+        assert "login node" in _output(result)
+
+    def test_a_set_left_unfinished_exits_one_naming_the_repair(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        directory = xref_set_dir(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE)
+        directory.mkdir(parents=True)
+        (directory / xref_slice_name(_XREF_SPECIES)).write_bytes(b"half a file")
+
+        result = _match_symbols(_APPROVED_SYMBOL)
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, HGNC_ARCHIVE, _HGNC_RELEASE) in _output(result)
+
+    def test_the_other_direction_is_still_the_xref_commands_to_answer(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The pair reads coherently or neither does: away from the hub a stem takes the
+        # authority's one current approved spelling, which is a two-column hop like every
+        # other and stays on `genome xref`.
+        result = runner.invoke(
+            app,
+            ["xref", _XREF_SPECIES, "--source", HGNC_ARCHIVE, "--from-stems", SYMBOL, _BMAL1_STEM],
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
+
+    def test_the_progress_display_is_suppressed_under_json(self, symbol_sources: FakeFetch) -> None:
+        _match_symbols(_APPROVED_SYMBOL, "--json")
+
+        assert symbol_sources.last.progressbar is False
+
+    def test_the_progress_display_is_drawn_without_it(self, symbol_sources: FakeFetch) -> None:
+        _match_symbols(_APPROVED_SYMBOL)
+
+        assert symbol_sources.last.progressbar is True
+
+
+class TestHomologsCommand:
+    """``genome homologs`` — the shell surface over a **Homology set**, on the fixtures.
+
+    Offline throughout, the way ``tests/test_homology.py`` is: the fake fetch serves the
+    committed Compara subsamples and the command prepares and reads a real set under the
+    test's own data root. What is asserted here is the command and not the set —
+    ``tests/test_homology.py`` owns the slice, the partition and the answer — so: all three
+    pairings reaching a shell, the publisher's **Homology type** surviving the render, the
+    stdout/stderr split that makes the output pipe, the **Dropped partner**s and the null
+    quality scores being said out loud, and a non-zero exit naming the next action for each
+    way it can fail.
+
+    The strongest claim here is that the command holds no logic the API does not, and it is
+    checked the two ways that can be: ``--json`` is asserted equal to what the same call
+    answers in Python, whole, and the text rows are asserted to be that JSON's own values
+    in its own key order — so nothing the shell sees was assembled here.
+    """
+
+    @pytest.mark.parametrize(("species", "other", "links"), _HOMOLOGY_PAIRS)
+    def test_it_answers_for_every_pairing_among_human_mouse_and_worm(
+        self, fake_fetch: FakeFetch, data_dir: Path, species: str, other: str, links: int
+    ) -> None:
+        _serve_compara(fake_fetch, species, other)
+        asked = _homology_stems(data_dir, species, other)
+
+        result = runner.invoke(app, ["homologs", species, other, *asked])
+
+        assert result.exit_code == 0
+        assert len(result.stdout.splitlines()) == links
+
+    def test_a_stem_prints_every_homolog_with_the_publishers_own_type_and_picks_none(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _THREE_WORM_HOMOLOGS])
+
+        assert result.exit_code == 0
+        rows = [line.split("\t") for line in result.stdout.splitlines()]
+        assert [row[1] for row in rows] == list(_THE_THREE_WORMS)
+        # Verbatim, and the label the publisher's tree assigned rather than a count of the
+        # rows in front of you: three partners here and the type still reads one2many.
+        assert {row[2] for row in rows} == {"ortholog_one2many"}
+
+    def test_orthologs_are_the_default_answer(self, fake_fetch: FakeFetch, data_dir: Path) -> None:
+        _serve_compara(fake_fetch, _MOUSE, _WORM)
+        asked = _homology_stems(data_dir, _MOUSE, _WORM)
+
+        result = runner.invoke(app, ["homologs", _MOUSE, _WORM, *asked])
+
+        assert result.exit_code == 0
+        types = {line.split("\t")[2] for line in result.stdout.splitlines()}
+        assert types
+        assert all(kind.startswith("ortholog_") for kind in types)
+        assert "orthologs" in result.stderr
+
+    def test_paralogs_come_back_only_on_request_and_the_heading_says_which_was_asked(
+        self, fake_fetch: FakeFetch, data_dir: Path
+    ) -> None:
+        # Release 116 publishes no cross-species paralogy for these pairs — counted over
+        # the whole human dump — so what is asserted is that the flag reaches the API and
+        # that the render says which question was asked, not that a paralogy row appeared.
+        # Claiming one would claim something about the publisher that is not true.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        asked = _homology_stems(data_dir, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs", "--json"])
+        heading = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs"])
+
+        assert result.exit_code == heading.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == HomologySet(_HUMAN, _WORM, progressbar=False)
+            .homologs(asked, paralogs=True)
+            .as_json()
+        )
+        assert "paralogy included" in heading.stderr
+
+    def test_a_paralogy_link_would_be_marked_by_the_type_column_it_already_carries(
+        self, fake_fetch: FakeFetch, data_dir: Path
+    ) -> None:
+        # *Not an ortholog* stays distinguishable from *absent* because the publisher's own
+        # label is a column of every row rather than a filter applied before printing: a
+        # duplication label would print in the same place `ortholog_one2one` does now.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        asked = _homology_stems(data_dir, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--paralogs"])
+
+        assert result.exit_code == 0
+        assert {line.split("\t")[2] for line in result.stdout.splitlines()} == {
+            "ortholog_one2one",
+            "ortholog_one2many",
+            "ortholog_many2many",
+        }
+
+    def test_json_is_the_answer_the_api_renders(
+        self, fake_fetch: FakeFetch, data_dir: Path
+    ) -> None:
+        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
+        asked = [*_homology_stems(data_dir, _MOUSE, _HUMAN), _NO_HOMOLOG]
+
+        result = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, *asked, "--json"])
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == HomologySet(_MOUSE, _HUMAN, progressbar=False).homologs(asked).as_json()
+        )
+
+    def test_the_links_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        row = homology_metadata(_HUMAN, _WORM, HOMOLOGY_RELEASE)
+        assert row is not None
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+
+        assert result.exit_code == 0
+        assert result.stdout.startswith(f"{_ONE_WORM_HOMOLOG}\t{_THE_ONE_WORM}\tortholog_one2one\t")
+        assert len(result.stdout.splitlines()) == 1
+        # Who asserted it, and from which release and file, is what a reader needs and what
+        # a pipeline must not be handed: it goes beside the links rather than among them.
+        assert row.attribution() in result.stderr
+        assert f"{_HUMAN} -> {_WORM}" in result.stderr
+
+    def test_the_text_columns_are_the_json_links_own_values_so_the_two_cannot_drift(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # The whole claim that the command holds no logic: every cell printed is a value
+        # the API put in the answer, in the order the API writes it, with the publisher's
+        # own `NULL` where it recorded nothing.
+        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
+        asked = "ENSMUSG00000074698"
+
+        text = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, asked])
+        rendered = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, asked, "--json"])
+
+        links = _json.loads(rendered.stdout)["resolved"][asked]
+        assert text.stdout.splitlines() == [
+            "\t".join("NULL" if value is None else str(value) for value in link.values())
+            for link in links
+        ]
+
+    def test_a_stem_this_release_names_no_homolog_for_stays_in_the_human_output(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # The one thing a hand-rolled join drops. A stem with no link gets a row of its
+        # own with every other column empty, so nothing leaves shorter than it arrived —
+        # and empty is not `NULL`, which would claim a link the publisher scored nothing on.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, _NO_HOMOLOG])
+
+        assert result.exit_code == 0
+        rows = result.stdout.splitlines()
+        assert len(rows) == 2
+        assert rows[1].split("\t")[0] == _NO_HOMOLOG
+        assert set(rows[1].split("\t")[1:]) == {""}
+        assert "1 this release names no homolog for" in result.stderr
+
+    def test_a_stem_that_named_nothing_stays_in_the_json(self, fake_fetch: FakeFetch) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(
+            app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, _NO_HOMOLOG, "--json"]
+        )
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["unresolved"] == [_NO_HOMOLOG]
+        assert _NO_HOMOLOG not in payload["resolved"]
+
+    def test_a_worm_pairing_names_the_null_quality_scores_before_a_filter_empties(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # Compara records neither score on any link of *either* worm pairing, so a shell
+        # user about to write `awk -F'\t' '$6 > 50'` is told the column is null throughout
+        # rather than discovering it when the filter comes back empty.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+        payload = _json.loads(
+            runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--json"]).stdout
+        )
+
+        assert result.exit_code == 0
+        # The line that says it, not merely the word appearing somewhere: the column list
+        # above it names every column, so a warning nobody wrote would pass a looser check.
+        (quality,) = [
+            line for line in result.stderr.splitlines() if line.strip().startswith("quality")
+        ]
+        for column in QUALITY_SCORE_COLUMNS:
+            assert column in quality
+        assert "empties" in quality
+        assert payload["null_quality_scores"] == list(QUALITY_SCORE_COLUMNS)
+
+    def test_the_scored_pairing_says_so_rather_than_staying_silent(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # A pair Compara did score says that too: silence would read the same as a warning
+        # nobody printed.
+        _serve_compara(fake_fetch, _MOUSE, _HUMAN)
+
+        result = runner.invoke(app, ["homologs", _MOUSE, _HUMAN, "ENSMUSG00000074698"])
+
+        assert result.exit_code == 0
+        (quality,) = [
+            line for line in result.stderr.splitlines() if line.strip().startswith("quality")
+        ]
+        assert "carry values" in quality
+        assert "empties" not in quality
+
+    def test_the_dropped_partners_are_reported_where_an_answer_was_narrowed(
+        self, fake_fetch: FakeFetch, data_dir: Path
+    ) -> None:
+        # Counted *and* named, both off the answer. None are dropped on release 116 — it
+        # publishes no cross-species paralogy for the ortholog filter to remove — and zero
+        # is printed as an answer rather than left as a silence.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        asked = _homology_stems(data_dir, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked])
+        payload = _json.loads(
+            runner.invoke(app, ["homologs", _HUMAN, _WORM, *asked, "--json"]).stdout
+        )
+
+        assert result.exit_code == 0
+        assert "dropped partners" in result.stderr
+        assert payload["dropped_partners"] == []
+
+    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["homologs", "Danio rerio", _HUMAN, _ONE_WORM_HOMOLOG])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        for species in homology_species():
+            assert species in _output(result)
+        # Refused before anything was fetched: nobody pinned this species, which must never
+        # read as this species having no homologs.
+        assert fake_fetch.calls == []
+
+    def test_a_pair_of_one_species_exits_one_because_a_set_relates_two(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["homologs", _HUMAN, "homo_sapiens", _ONE_WORM_HOMOLOG])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "two different species" in _output(result)
+        assert fake_fetch.calls == []
+
+    def test_a_release_that_is_not_pinned_exits_one_naming_the_ones_that_are(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        result = runner.invoke(
+            app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--release", "115"]
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert HOMOLOGY_RELEASE in _output(result)
+        assert fake_fetch.calls == []
+
+    def test_a_versioned_gene_id_exits_one_naming_the_stem_to_pass(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # Compara writes its ids bare, so the versioned spelling would match nothing and
+        # come back unresolved looking exactly like a gene it never placed in a tree.
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, f"{_ONE_WORM_HOMOLOG}.18"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert _ONE_WORM_HOMOLOG in _output(result)
+
+    def test_a_pair_taken_from_the_wrong_compara_file_exits_one_naming_the_other_file(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # The published partition, not a staged one: the real release-116 human dump holds
+        # zero human/mouse rows. Serving it for that pair is what a release that had
+        # re-partitioned looks like from a shell, and it must be an error naming the other
+        # file rather than an empty answer that reads as *these species share no homologs*.
+        fake_fetch.serve(_COMPARA_FIXTURES[_HUMAN])
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "homo_sapiens/Compara.116.protein_default.homologies.tsv.gz" in _output(result)
+        assert "homology_metadata.tsv" in _output(result)
+
+    def test_a_dump_that_is_not_comparas_exits_one_naming_the_columns_it_should_have(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        fake_fetch.serve("tiny.gtf.gz")
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "gene_stable_id" in _output(result)
+
+    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
+            raise ConnectionError("the compute node has no internet")
+
+        monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _MOUSE, "ENSG00000172150"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert homology_prepare_command(_HUMAN, _MOUSE, HOMOLOGY_RELEASE) in _output(result)
+        assert "login node" in _output(result)
+
+    def test_a_set_left_unfinished_exits_one_naming_the_repair(self, fake_fetch: FakeFetch) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+        prepared = HomologySet(_HUMAN, _WORM, progressbar=False)
+        (prepared.path.parent / RECORD_NAME).unlink()
+
+        result = runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "rm -rf" in _output(result)
+
+    def test_the_progress_display_is_suppressed_under_json(self, fake_fetch: FakeFetch) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG, "--json"])
+
+        assert fake_fetch.last.progressbar is False
+
+    def test_the_progress_display_is_drawn_without_it(self, fake_fetch: FakeFetch) -> None:
+        _serve_compara(fake_fetch, _HUMAN, _WORM)
+
+        runner.invoke(app, ["homologs", _HUMAN, _WORM, _ONE_WORM_HOMOLOG])
+
+        assert fake_fetch.last.progressbar is True
 
 
 class TestTheSurfacesThatDidNotChange:

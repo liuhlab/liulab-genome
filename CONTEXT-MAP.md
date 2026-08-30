@@ -4,10 +4,10 @@
 query — a locus into bases, a GTF into a registered annotation, a FASTA into an aligner index. Its
 vocabulary splits by bounded context: each file below is the glossary for one part of the source
 tree, and the shared kernel at the bottom holds the words every context uses. The glossaries live
-under `docs/context/`, not beside the code — only two of the six map cleanly onto a directory, and
-TF straddles `tf/gene/`, `tf/cofactor/` and a module beside them, so co-locating them would put four
-in arbitrary places. Rules live in `CLAUDE.md`; this map and the six files it lists are a glossary
-and nothing else.
+under `docs/context/`, not beside the code — only four of the eight map cleanly onto a directory,
+and TF straddles `tf/gene/`, `tf/cofactor/` and a module beside them, so co-locating them would put
+four in arbitrary places. Rules live in `CLAUDE.md`; this map and the eight files it lists are a
+glossary and nothing else.
 
 **Use these words.** When your output names a domain concept — an issue title, a refactor proposal,
 a hypothesis, a test name — use the term as defined, not a synonym an entry lists under *Avoid*. A
@@ -40,6 +40,11 @@ substitute for *module*.
 - [TF](./docs/context/tf.md) — covers `tf/gene/*`, `tf/cofactor/*` and `tf/link.py`: which genes a
   published census judges transcription factors and which a publisher lists as cofactors of
   transcription, in a registered annotation's own gene ids, and which motifs answer for them
+- [Xref](./docs/context/xref.md) — covers `xref/*`: which foreign identifiers name a gene and which
+  genes a foreign identifier names, on one named publisher's assertions at one pinned release, with
+  no genome open
+- [Orthology](./docs/context/orthology.md) — covers `homology/*`: which genes in another species a
+  gene is homologous to, and how many-to-many the publisher's own gene tree says that is
 
 `io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
 It is the return types the API hands back and the CLI renders, so it carries the vocabulary of
@@ -83,10 +88,40 @@ whichever context asked.
   halves and is imported by neither, and it ships as a plain table per species per **Release** rather
   than being computed from a **Motif name** (ADR-0015). Nothing crosses into the motif half: no field
   on **Motif**, no change to the JASPAR loader or the scan path.
+- **Xref → Annotation**: an **Xref set** answers in **Gene id stem**s and stops there. Putting those
+  into a registered **Annotation**'s own gene ids is `AnnotationRegistry.resolve_gene_ids`, used
+  unchanged, so the hop is one existing call the caller makes and no xref module imports the
+  registry. The edge runs one way: a set is anchored to a species and a **Release**, never to an
+  **Assembly** or an annotation, so an id conversion never needs a **Genome** open.
+- **Xref → TF gene**: a census and a **Cofactor table** are keyed by **Gene id stem** too, so an
+  **Xref set** is how an Entrez, HGNC or UniProt column reaches them — the gap that let two UniProt
+  entry names ship in the human census unnoticed. One way only: nothing shipped here is keyed by a
+  foreign **Namespace**, and the xref half reads no census.
+- **Xref ↔ Motif**: shape shared, and nothing else. Both a **Motif set** and an **Xref set** belong
+  to no **Assembly**, live outside the assembly tree under the **Data dir**, are pinned to a
+  **Release** and are prepared by construction — the same object, learned once. Neither imports the
+  other, and a **Motif name** is never fed to a **Symbol match**: it labels a matrix and names no
+  gene.
+- **Orthology → Annotation**: the same one existing call the Xref edge uses, `resolve_gene_ids`,
+  against the same registry, unchanged. A **Homology type** crosses it untouched and a **Dropped
+  partner** count says what the crossing removed, so a link that only looks one-to-one in your
+  annotation is distinguishable from one the publisher called one-to-one (ADR-0020).
+- **Orthology → TF gene**: a prohibition rather than a call. No **TF gene table**, **Cofactor
+  table** or list of this package's own is ever derived through homology and no answer is silently
+  species-mapped (ADR-0019), so neither half imports the other and a species with no census raises
+  and names the ones that have one.
+- **Orthology ↔ Motif**: a **Cross-species link** is not a **Homology link**. JASPAR files an
+  orthologous pair's matrix under whichever species was assayed and asserts no orthology by doing so
+  (ADR-0013), and nothing joins the flag to a **Homology set** — a marked motif link stays a fact
+  about where an assay was run.
+- **Xref ↔ Orthology**: two sets that share a key and read each other never. Both are keyed by
+  **Gene id stem** and both are one publisher at one **Release**, but a homology answer is never
+  translated through an **Xref set** and an identifier answer is never carried across species — the
+  same refusal to compose two hops into a third that ADR-0017 states within the xref half.
 
 ## Shared kernel
 
-Ten words every context uses. Anything defined here is not redefined in a context file.
+Eleven words every context uses. Anything defined here is not redefined in a context file.
 
 **Assembly**:
 The identity of one reference — a free-form **local** key that names its directory under the **Data
@@ -134,6 +169,18 @@ slicing and reverse-complement, and is discarded only by asking, since `TwoBit(m
 default. Scanning is the one exception and discards it unasked — ADR-0012.
 _Avoid_: case, lowercase, formatting; bare "masking" — hard-masking writes `N` and is a different
 thing
+
+**Gene id stem**:
+A gene id with its version suffix dropped: `ENSG00000123456` for `ENSG00000123456.7`. A stem may
+name more than one gene id inside one **Annotation** — nine do in `gencode_v50lift37`, eight of them
+pseudoautosomal-Y — so resolution answers with every id a stem names and never picks one. A stem
+carrying no version resolves to itself, which is why an annotation whose ids are not Ensembl-shaped
+is unaffected. The mechanism belongs to the annotation registry rather than to any one context's
+code, and reading gene ids is the first thing that opens the **Annotation database** this package
+has always built; TF genes are merely its first caller.
+_Avoid_: base id — that already names a **Motif id** with its version dropped, `MA0139` for
+`MA0139.2`, and one term must not name two things inside one package; unversioned id, stripped id,
+gene id (the versioned thing this is a stem *of*), ENSG (one publisher's spelling)
 
 **Data dir**:
 The root of all lab reference data, read from `$LIULAB_DATA` (`src/genome/io/registration.py`). Most

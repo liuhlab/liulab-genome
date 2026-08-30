@@ -97,6 +97,54 @@
 
 ::: genome.tf.link
 
+## `genome.xref.ids`
+
+::: genome.xref.ids
+
+## `genome.xref.metadata`
+
+::: genome.xref.metadata
+
+## `genome.xref.evidence`
+
+::: genome.xref.evidence
+
+## `genome.xref.symbols`
+
+::: genome.xref.symbols
+
+## `genome.xref.alliance`
+
+::: genome.xref.alliance
+
+## `genome.xref.ensembl`
+
+::: genome.xref.ensembl
+
+## `genome.xref.hgnc`
+
+::: genome.xref.hgnc
+
+## `genome.xref.bgi`
+
+::: genome.xref.bgi
+
+## `genome.xref.xref`
+
+::: genome.xref.xref
+
+## `genome.homology.metadata`
+
+::: genome.homology.metadata
+
+## `genome.homology.compara`
+
+::: genome.homology.compara
+
+## `genome.homology.annotation`
+
+::: genome.homology.annotation
+
 ## `genome.external`
 
 ::: genome.external

@@ -1,0 +1,4 @@
+release	species	other_species	holding_species	publisher	pubmed_id	source_url	md5
+116	Caenorhabditis elegans	Homo sapiens	Homo sapiens	Ensembl Compara	26896847	https://ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/homo_sapiens/Compara.116.protein_default.homologies.tsv.gz	59857f48bbbdf6812999d58d7a24ccc4
+116	Caenorhabditis elegans	Mus musculus	Mus musculus	Ensembl Compara	26896847	https://ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/mus_musculus/Compara.116.protein_default.homologies.tsv.gz	8f9870f0f12ece5032f8e62117de9924
+116	Homo sapiens	Mus musculus	Mus musculus	Ensembl Compara	26896847	https://ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/mus_musculus/Compara.116.protein_default.homologies.tsv.gz	8f9870f0f12ece5032f8e62117de9924
