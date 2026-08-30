@@ -1001,11 +1001,10 @@ def xref(
         raise typer.Exit(code=2)
 
     # Which default an unnamed source is filled in with is the question's to decide, and
-    # the question is on the flags: labelling a stem with a symbol is a symbol question, so
-    # it opens the set that carries them. The choosing is the API's — this names it.
-    opener = _XrefSet.for_symbols if namespace.strip().lower() == _SYMBOL else _XrefSet
+    # the question is on the flags — so the namespace goes to the constructor that decides,
+    # and nothing here chooses between two of them.
     try:
-        xrefs = opener(species, source, progressbar=not json)
+        xrefs = _XrefSet.for_namespace(species, namespace, source, progressbar=not json)
         answer = xrefs.to_stems(ids, namespace) if to_hub else xrefs.from_stems(ids, namespace)
     except _XREF_ERRORS as err:
         typer.echo(f"error: {err}", err=True)

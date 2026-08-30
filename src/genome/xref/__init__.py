@@ -31,11 +31,13 @@ of spelling matched and, on the answer as a whole, which kinds that source could
 and why.
 
 **A default is therefore per species and per question** (ADR-0021), and the question is
-named where the source is filled in: :meth:`~genome.xref.xref.XrefSet.for_symbols` is the
-constructor that reaches one of those two, where the plain constructor reaches the
-identifier default. The two sit side by side on purpose — a set built for one publisher is
-never answered out of another's bytes, so ``XrefSet("Homo sapiens")`` matches no symbol at
-all and raises naming the source that does.
+named where the source is filled in and nowhere else:
+:meth:`~genome.xref.xref.XrefSet.for_symbols` is the constructor that reaches one of those
+two, :meth:`~genome.xref.xref.XrefSet.for_namespace` the same fill-in for a caller holding
+a **Namespace** rather than a verb, and the plain constructor reaches the identifier
+default. They sit side by side on purpose — a set built for one publisher is never answered
+out of another's bytes, so ``XrefSet("Homo sapiens")`` matches no symbol at all and raises
+naming the source that does.
 
 Putting an answer into your own annotation's gene ids is the call that already existed,
 :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which is why the hub is the

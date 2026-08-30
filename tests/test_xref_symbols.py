@@ -417,6 +417,10 @@ class TestTheDefaultWhenTheQuestionIsSymbols:
     Both halves are asserted here, because the two behaviours sitting next to each other is
     the confusing part: the question-named path reaches the symbol-carrying source, and the
     plain constructor still does not — it carries no symbol and says exactly what to pass.
+
+    :meth:`XrefSet.for_namespace` is the same fill-in for a caller holding a **Namespace**
+    rather than a verb, which is what every caller reading one off a flag holds. It exists
+    so the shell has nothing left to decide.
     """
 
     def test_every_species_flags_exactly_one_source_for_symbols(self) -> None:
@@ -474,6 +478,45 @@ class TestTheDefaultWhenTheQuestionIsSymbols:
             HGNC_ARCHIVE
         )
 
+    def test_naming_the_namespace_reaches_the_same_set_as_naming_the_verb(
+        self, sources: FakeFetch
+    ) -> None:
+        # The fill-in a caller holding a namespace asks for. It is `for_symbols` under
+        # another name when that namespace is the symbol one, and must not be a second
+        # opinion about which source answers.
+        by_namespace = XrefSet.for_namespace("Homo sapiens", SYMBOL)
+        by_verb = XrefSet.for_symbols("Homo sapiens")
+
+        assert (by_namespace.source, by_namespace.release) == (by_verb.source, by_verb.release)
+        assert by_namespace.source == HGNC_ARCHIVE
+
+    def test_the_labelling_direction_answers_off_it_with_no_source_named(
+        self, sources: FakeFetch
+    ) -> None:
+        # `from_stems(stems, "symbol")` is the other symbol question, so it reaches the same
+        # source — which is what makes the rule a rule rather than one verb's special case.
+        assert XrefSet.for_namespace("Homo sapiens", SYMBOL).from_stems(
+            [BMAL1], SYMBOL
+        ).resolved == {BMAL1: ("BMAL1",)}
+
+    def test_every_other_namespace_reaches_the_identifier_default(
+        self, alliance_human: XrefSet
+    ) -> None:
+        # Only the symbol question moves the default; for every other namespace this is the
+        # ordinary constructor under a name that says which question is being asked.
+        assert XrefSet.for_namespace("Homo sapiens", ENTREZ).source == ALLIANCE
+
+    def test_a_source_named_beside_a_namespace_is_still_never_swapped(
+        self, alliance_human: XrefSet
+    ) -> None:
+        # Naming a source is the deliberate scientific choice, and the question fills a
+        # default in rather than overriding one — so this is the Alliance, symbols and all.
+        chosen = XrefSet.for_namespace("Homo sapiens", SYMBOL, ALLIANCE)
+
+        assert chosen.source == ALLIANCE
+        with pytest.raises(NamespaceNotCarriedError):
+            chosen.from_stems([BMAL1], SYMBOL)
+
     def test_the_plain_constructor_still_answers_from_the_id_default(
         self, alliance_human: XrefSet
     ) -> None:
@@ -495,6 +538,29 @@ class TestTheDefaultWhenTheQuestionIsSymbols:
         # Mouse's and worm's source is not what to pass for a human set.
         assert ALLIANCE_BGI not in message
 
+    def test_the_labelling_direction_misses_with_the_same_route(
+        self, alliance_human: XrefSet
+    ) -> None:
+        # Both symbol questions miss on this set, so both must route the same way: naming
+        # the namespaces it carries and stopping there sent nobody anywhere.
+        with pytest.raises(NamespaceNotCarriedError) as labelling:
+            alliance_human.from_stems([BMAL1], SYMBOL)
+        with pytest.raises(NamespaceNotCarriedError) as matching:
+            alliance_human.match_symbols([RETIRED_EPIFACTORS_SYMBOL])
+
+        assert str(labelling.value) == str(matching.value)
+        assert "for_symbols" in str(labelling.value)
+
+    def test_no_other_namespace_is_sent_to_a_symbol_source(self, alliance_human: XrefSet) -> None:
+        # The hint belongs to the symbol question alone: a human set asked in mouse's
+        # namespace is not helped by being told where human symbols come from.
+        with pytest.raises(NamespaceNotCarriedError) as raised:
+            alliance_human.from_stems([BMAL1], MGI)
+
+        message = str(raised.value)
+        assert "for_symbols" not in message
+        assert MGI in message
+
     def test_a_species_no_row_flags_names_the_sources_it_has(self) -> None:
         rows = tuple(
             replace(row, symbol_default=False)
@@ -508,9 +574,24 @@ class TestTheDefaultWhenTheQuestionIsSymbols:
         for source in xref_sources("Homo sapiens"):
             assert source in str(raised.value)
 
+    def test_the_miss_names_a_route_the_caller_can_actually_take(self) -> None:
+        # The curated table ships inside the wheel, so "flag it in the table" is not
+        # something the person reading this can do. Handing rows of their own to the lookup
+        # is, and naming a source is the ordinary answer.
+        rows = tuple(
+            replace(row, symbol_default=False)
+            for row in metadata_mod.xref_table()
+            if row.species == "Homo sapiens"
+        )
+
+        with pytest.raises(NoXrefSetError) as raised:
+            lookup_xref("Homo sapiens", for_symbols=True, table=rows)
+
+        assert "table=" in str(raised.value)
+
     def test_one_source_is_not_a_symbol_default_just_by_being_the_only_one(self) -> None:
-        # The id default falls back to a species' single source; this one does not. A source
-        # that carries no symbol does not start carrying them by being alone.
+        # The id default answers a species' single source with no flag; this one does not. A
+        # source that carries no symbol does not start carrying them by being alone.
         rows = (replace(lookup_xref("Homo sapiens"), symbol_default=False),)
 
         assert lookup_xref("Homo sapiens", table=rows).source == ALLIANCE
