@@ -51,6 +51,7 @@ from genome.tf.motif.jaspar import MOTIF_COUNTS
 from genome.xref import (
     ALLIANCE,
     ENSEMBL,
+    ENSEMBL_TSV,
     ENTREZ,
     HGNC,
     MGI,
@@ -1880,13 +1881,17 @@ class TestXrefCommand:
     def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
         self, xref_release: FakeFetch
     ) -> None:
+        # "ncbi" rather than a source that merely happens to be unlisted today: NCBI Gene
+        # is excluded on purpose, being rebuilt in place with no retrievable old release
+        # (ADR-0018), so this stays a miss however many sources the table grows.
         result = runner.invoke(
-            app, ["xref", _XREF_SPECIES, "--source", "ensembl", "--to-stems", ENTREZ, "7157"]
+            app, ["xref", _XREF_SPECIES, "--source", "ncbi", "--to-stems", ENTREZ, "7157"]
         )
 
         assert result.exit_code == 1
         assert result.stdout == ""
         assert ALLIANCE in _output(result)
+        assert ENSEMBL_TSV in _output(result)
 
     def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
         self, xref_release: FakeFetch
