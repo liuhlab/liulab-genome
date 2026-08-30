@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json as _json
+import re
 import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -343,15 +344,24 @@ def symbol_sources(
     return fake_fetch
 
 
+#: Every ANSI escape sequence rich writes — the colour, the bolding and the resets it
+#: emits at each line boundary. Stripped before a help string is asserted against, because
+#: whether the runner is drawing colour is a property of the terminal that happens to be
+#: attached and never of what the help says: CI colours its output and a local run may not,
+#: which is a test that passes on one machine and fails on the other.
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
 def _help_text(*command: str) -> str:
-    """One command's ``--help``, with the box rules and the wrapping taken out of the words.
+    """One command's ``--help``, with the drawing taken out of the words.
 
     Rich draws the options in a bordered table, so a sentence too long for one line arrives
-    with a ``│`` and a newline through the middle of it. What a test asserts is what the help
-    *says*, so the drawing goes and the whitespace collapses.
+    with a ``│`` and a newline through the middle of it, and a colour reset wherever it
+    broke. What a test asserts is what the help *says*, so the escapes and the rules go and
+    the whitespace collapses.
     """
     rendered = _output(runner.invoke(app, [*command, "--help"]))
-    return " ".join(rendered.replace("│", " ").split())
+    return " ".join(_ANSI.sub("", rendered).replace("│", " ").split())
 
 
 def _match_symbols(*arguments: str) -> Result:
