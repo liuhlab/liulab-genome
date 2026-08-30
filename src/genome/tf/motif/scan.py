@@ -72,7 +72,7 @@ import pandas as pd
 from genome.tf.motif.background import BackgroundArg, resolve_background
 from genome.tf.motif.motif import DEFAULT_THRESHOLD, MIN_MOTIF_LENGTH, Motif
 from genome.tf.motif.thresholds import cutoffs_for
-from genome.tf.motif.workers import DEFAULT_WORKERS, resolve_workers
+from genome.workers import DEFAULT_WORKERS, resolve_workers
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the import runs the other way
     from genome.tf.motif.motif import MotifSet
@@ -234,7 +234,7 @@ def scan_stream(
     workers : int, default 1
         How many processes to shard the scan across. **One by default**, so importing this
         and calling it never starts a process unasked; ``None`` resolves the machine's
-        allocation with :func:`~genome.tf.motif.workers.resolve_workers`, which is what
+        allocation with :func:`~genome.workers.resolve_workers`, which is what
         the command line passes. More than one produces the identical table.
 
     Returns

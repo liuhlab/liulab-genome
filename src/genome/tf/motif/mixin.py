@@ -40,7 +40,7 @@ import pandas as pd
 from genome.region import Region
 from genome.tf.motif.motif import DEFAULT_THRESHOLD
 from genome.tf.motif.scan import HIT_DTYPES, HIT_PROVENANCE
-from genome.tf.motif.workers import DEFAULT_WORKERS
+from genome.workers import DEFAULT_WORKERS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the dependency runs one way
     from pathlib import Path
@@ -134,7 +134,7 @@ class MotifScanMixin:
             How many processes to shard the scan across — see
             :meth:`~genome.tf.motif.motif.MotifSet.scan_sequences`. **One by default**, as
             everywhere in the library; ``None`` resolves the count with
-            :func:`~genome.tf.motif.workers.resolve_workers`, which is what an allocation
+            :func:`~genome.workers.resolve_workers`, which is what an allocation
             on a cluster is read by. Regions are distributed whole, so **more than one
             produces the identical table**, lifted coordinates included.
         output : None

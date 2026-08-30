@@ -42,7 +42,11 @@ from genome.tf.motif.scan import (
     FastaFormatError,
 )
 from genome.tf.motif.thresholds import threshold_cache_dir
-from genome.tf.motif.workers import DEFAULT_WORKERS, SLURM_CPU_VARS, resolve_workers
+
+# Worker resolution lives at the package root — it is lab-HPC infrastructure and names
+# nothing in this context. Re-exported here so `from genome.tf.motif import
+# resolve_workers` keeps answering, since a scan is what most callers ask it about.
+from genome.workers import DEFAULT_WORKERS, SLURM_CPU_VARS, resolve_workers
 
 __all__ = [
     "BACKGROUND_FLOOR",

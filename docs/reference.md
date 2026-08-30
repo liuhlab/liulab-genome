@@ -45,6 +45,10 @@
 
 ::: genome.gene_list
 
+## `genome.workers`
+
+::: genome.workers
+
 ## `genome.tf.gene.census`
 
 ::: genome.tf.gene.census
@@ -72,10 +76,6 @@
 ## `genome.tf.motif.scan`
 
 ::: genome.tf.motif.scan
-
-## `genome.tf.motif.workers`
-
-::: genome.tf.motif.workers
 
 ## `genome.tf.motif.parallel`
 
