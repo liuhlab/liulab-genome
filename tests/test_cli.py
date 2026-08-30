@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import gzip
+import hashlib
 import json as _json
 import shutil
 from dataclasses import dataclass, replace
@@ -19,6 +21,7 @@ from genome.external import REQUIRED_TOOLS
 from genome.external import doctor as doctor_api
 from genome.gene_list import curated_gene_list
 from genome.io import download as download_mod
+from genome.io import fetch as fetch_mod
 from genome.io.completion import read_record, record_path, write_record
 from genome.io.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.io.gtf import (
@@ -35,12 +38,31 @@ from genome.tf.gene import TFGeneTable, tf_gene_table
 from genome.tf.motif import MIN_MOTIF_LENGTH, hit_count, provenance_of, read_hits
 from genome.tf.motif import jaspar as jaspar_mod
 from genome.tf.motif.jaspar import MOTIF_COUNTS
+from genome.xref import (
+    ALLIANCE,
+    ENSEMBL,
+    ENTREZ,
+    HGNC,
+    MGI,
+    UNIPROT,
+    XrefSet,
+    lookup_xref,
+    xref_prepare_command,
+    xref_set_dir,
+    xref_slice_name,
+    xref_species,
+    xref_table,
+)
+from genome.xref import metadata as xref_metadata_mod
 
 from .conftest import CHIMERA_COMPONENTS, COMPONENT_ANNOTATION, FakeFetch
 from .test_jaspar import FIXTURE as _MOTIF_FIXTURE
 from .test_jaspar import FIXTURE_COUNT as _MOTIF_COUNT
 from .test_jaspar import FIXTURE_MOTIFS as _MOTIF_RECORDS
 from .test_scan import FIXTURE as _PLANTED_FASTA
+from .test_xref import FIXTURE as _XREF_FIXTURE
+from .test_xref import HUMAN_GENE_WITHOUT_A_HUB as _XREF_NO_HUB
+from .test_xref import RELEASE as _XREF_RELEASE
 
 runner = CliRunner()
 _BINARIES_PRESENT = all(shutil.which(t) is not None for t in REQUIRED_TOOLS)
@@ -74,6 +96,11 @@ _TINY_ANNOTATION = AnnotationMetadata(
 #: uniform four — and a command that only ever met Lambert's would not know that.
 _TF_ASSEMBLY, _TF_ANNOTATION = "hg38", "gencode_v50"
 _MOUSE_ASSEMBLY, _MOUSE_ANNOTATION = "mm39", "gencode_vM39"
+
+#: The species ``genome xref`` is exercised against. Human, because the committed Alliance
+#: fixture carries the two things the command's shape exists for: a foreign id naming two
+#: **Gene id stem**s, and a real gene with no Ensembl cross-reference to reach at all.
+_XREF_SPECIES = "Homo sapiens"
 
 #: Which of the committed motifs a scan leaves out, and how many are left to scan with.
 #: Read off the fixture table rather than written down again, so a changed fixture moves the
@@ -183,6 +210,29 @@ def motif_release(fake_fetch: FakeFetch, monkeypatch: pytest.MonkeyPatch) -> Fak
 def planted_fasta(data_dir: Path) -> Path:
     """The committed FASTA with motifs planted at positions ``tests/data/README.md`` lists."""
     return data_dir / _PLANTED_FASTA
+
+
+@pytest.fixture
+def xref_pinned(monkeypatch: pytest.MonkeyPatch, data_dir: Path) -> None:
+    """Pin the curated **Xref source** rows to the committed Alliance fixture's digest.
+
+    The arrangement ``tests/test_xref.py`` uses: the checksum check that holds a truncated
+    download to be an error rather than a quietly short answer is never switched off, only
+    pointed at what the fake fetch actually serves. Every other cell survives, the real URL
+    among them, so what the command prints as provenance is the shipped row's own.
+    """
+    with gzip.open(data_dir / _XREF_FIXTURE, "rb") as handle:
+        # md5 because that is the algorithm Alliance publishes, not a choice made here.
+        digest = f"md5:{hashlib.md5(handle.read()).hexdigest()}"
+    rows = tuple(replace(row, source_checksum=digest) for row in xref_table())
+    monkeypatch.setattr(xref_metadata_mod, "xref_table", lambda: rows)
+
+
+@pytest.fixture
+def xref_release(fake_fetch: FakeFetch, xref_pinned: None) -> FakeFetch:
+    """Serve the committed Alliance slice as the publisher's file, pinned to it."""
+    fake_fetch.serve(_XREF_FIXTURE)
+    return fake_fetch
 
 
 class TestVersion:
@@ -1611,6 +1661,269 @@ class TestTFCofactorListCommand:
         assert result.stdout == ""
         assert "nothing says what species 'tiny' is, so no cofactor table" in _output(result)
         assert "Mus musculus" in _output(result)
+
+
+class TestXrefCommand:
+    """``genome xref`` — the shell surface over an **Xref set**, driven off the fixture.
+
+    Offline throughout, the way ``tests/test_xref.py`` is: the fake fetch serves the
+    committed Alliance slice and the curated rows are pinned to it, so the command prepares
+    and reads a real set under the test's own data root. What is asserted here is the
+    command and not the hop — ``tests/test_xref.py`` owns that — so: the direction being
+    named rather than sniffed out of the id strings, the stdout/stderr split that makes the
+    output pipe, the ids that resolved to nothing staying visible in *both* renderings, and
+    a non-zero exit naming the next action for each way it can fail.
+
+    The strongest claim here is that the command holds no logic the API does not, and it is
+    checked the only way that can be: ``--json`` is asserted equal to what the same two
+    calls answer in Python, whole, in both directions.
+    """
+
+    def test_it_converts_foreign_ids_to_gene_id_stems(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "672"])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "7157\tENSG00000141510",
+            "672\tENSG00000012048",
+        ]
+
+    def test_it_converts_gene_id_stems_to_foreign_ids(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--from-stems", HGNC, "ENSG00000141510"]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == ["ENSG00000141510\tHGNC:11998"]
+
+    def test_the_direction_is_named_and_never_inferred_from_the_ids(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # One string, one namespace, two directions, two different answers. `HGNC:11998` is
+        # an HGNC id and is not a **Gene id stem**, and nothing here works that out from the
+        # characters: the flag says which way the hop goes, and asking the wrong way answers
+        # *nothing found* rather than quietly turning around.
+        toward = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998"])
+        away = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", HGNC, "HGNC:11998"])
+
+        assert toward.exit_code == away.exit_code == 0
+        assert toward.stdout.splitlines() == ["HGNC:11998\tENSG00000141510"]
+        assert away.stdout.splitlines() == ["HGNC:11998\t"]
+
+    def test_naming_no_direction_exits_two_naming_both_flags(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "7157"])
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        assert "--to-stems" in _output(result)
+        assert "--from-stems" in _output(result)
+
+    def test_naming_both_directions_exits_two(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "--from-stems", HGNC, "7157"]
+        )
+
+        assert result.exit_code == 2
+        assert result.stdout == ""
+        assert "exactly one" in _output(result)
+
+    def test_json_is_the_answer_the_api_renders_toward_the_hub(
+        self, xref_release: FakeFetch
+    ) -> None:
+        asked = ["7157", "8086", "999999999"]
+
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, *asked, "--json"])
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout) == XrefSet(_XREF_SPECIES).to_stems(asked, ENTREZ).as_json()
+        )
+
+    def test_json_is_the_answer_the_api_renders_away_from_the_hub(
+        self, xref_release: FakeFetch
+    ) -> None:
+        asked = ["ENSG00000141510", "ENSG00000012048", "ENSG00000288541"]
+
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--from-stems", UNIPROT, *asked, "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet(_XREF_SPECIES).from_stems(asked, UNIPROT).as_json()
+        )
+
+    def test_the_pairs_go_to_stdout_and_the_provenance_to_stderr_so_the_output_pipes(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+
+        assert result.exit_code == 0
+        assert result.stdout == "7157\tENSG00000141510\n"
+        # Which publisher said so, and when, is what a reader needs and what a pipeline must
+        # not be handed: it goes beside the pairs rather than among them.
+        assert f"{ALLIANCE} {_XREF_RELEASE}" in result.stderr
+        assert _XREF_SPECIES in result.stderr
+        assert lookup_xref(_XREF_SPECIES).url in result.stderr
+        assert f"{ENTREZ} ids -> gene id stems" in result.stderr
+
+    def test_ids_that_resolved_to_nothing_stay_in_the_human_output(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # The one thing a hand-rolled join drops. `HGNC:10041` is a real human gene the
+        # Alliance lists with no Ensembl cross-reference at all, so it has no hub to reach.
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998", _XREF_NO_HUB]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "HGNC:11998\tENSG00000141510",
+            f"{_XREF_NO_HUB}\t",
+        ]
+        assert "1 this release names none for" in result.stderr
+
+    def test_ids_that_resolved_to_nothing_stay_in_the_json(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(
+            app,
+            ["xref", _XREF_SPECIES, "--to-stems", HGNC, "HGNC:11998", _XREF_NO_HUB, "--json"],
+        )
+
+        assert result.exit_code == 0
+        payload = _json.loads(result.stdout)
+        assert payload["unresolved"] == [_XREF_NO_HUB]
+        assert _XREF_NO_HUB not in payload["resolved"]
+
+    def test_an_id_naming_two_stems_prints_both_and_nothing_picks_one(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # 6.2% of human HGNC ids name two stems in this release, so this is the ordinary
+        # case rather than an edge one.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "8086"])
+
+        assert result.exit_code == 0
+        assert result.stdout.splitlines() == [
+            "8086\tENSG00000094914",
+            "8086\tENSG00000291836",
+        ]
+
+    def test_the_answer_names_the_source_and_release_that_produced_it(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
+
+        payload = _json.loads(result.stdout)
+        assert (payload["source"], payload["release"]) == (ALLIANCE, _XREF_RELEASE)
+        assert (payload["species"], payload["namespace"]) == (_XREF_SPECIES, ENTREZ)
+
+    def test_a_source_may_be_named(self, xref_release: FakeFetch) -> None:
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--source", ALLIANCE, "--to-stems", ENTREZ, "7157"]
+        )
+
+        assert result.exit_code == 0
+        assert result.stdout == "7157\tENSG00000141510\n"
+        assert f"{ALLIANCE} {_XREF_RELEASE}" in result.stderr
+
+    def test_omitting_the_source_uses_the_default_xref_source(
+        self, xref_release: FakeFetch
+    ) -> None:
+        named = runner.invoke(
+            app,
+            ["xref", _XREF_SPECIES, "--source", ALLIANCE, "--to-stems", ENTREZ, "7157", "--json"],
+        )
+        defaulted = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"]
+        )
+
+        assert named.exit_code == defaulted.exit_code == 0
+        assert _json.loads(defaulted.stdout) == _json.loads(named.stdout)
+        assert lookup_xref(_XREF_SPECIES).default is True
+
+    def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--source", "ensembl", "--to-stems", ENTREZ, "7157"]
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert ALLIANCE in _output(result)
+
+    def test_an_unsupported_species_exits_one_naming_the_species_that_have_a_set(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["xref", "Danio rerio", "--to-stems", ENTREZ, "7157"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        for species in xref_species():
+            assert species in _output(result)
+        # Refused before anything was fetched: a species with no Ensembl presence has no hub
+        # to hang a namespace off and is unanswerable by design, not pending a download.
+        assert xref_release.calls == []
+
+    def test_a_namespace_the_source_does_not_carry_exits_one_naming_the_ones_it_does(
+        self, xref_release: FakeFetch
+    ) -> None:
+        # The three species have three different authorities, so a human set asked for MGI
+        # ids fails loudly rather than answering nothing — the failure that would otherwise
+        # look like a gene list with no matches.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", MGI, "MGI:88276"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        for namespace in (ENSEMBL, ENTREZ, UNIPROT, HGNC):
+            assert namespace in _output(result)
+
+    def test_the_reverse_direction_refuses_the_same_namespace(
+        self, xref_release: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--from-stems", MGI, "ENSG00000141510"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert HGNC in _output(result)
+
+    def test_a_set_that_is_not_downloaded_exits_one_naming_the_call_for_a_login_node(
+        self, monkeypatch: pytest.MonkeyPatch, xref_pinned: None
+    ) -> None:
+        def no_internet(url: str, dest_dir: Path, **kwargs: object) -> Path:
+            raise ConnectionError("the compute node has no internet")
+
+        monkeypatch.setattr(fetch_mod, "fetch_url", no_internet)
+
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE) in _output(result)
+        assert "login node" in _output(result)
+
+    def test_a_set_left_unfinished_exits_one_naming_the_repair(
+        self, xref_release: FakeFetch
+    ) -> None:
+        directory = xref_set_dir(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE)
+        directory.mkdir(parents=True)
+        (directory / xref_slice_name(_XREF_SPECIES)).write_bytes(b"half a file")
+
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert xref_prepare_command(_XREF_SPECIES, ALLIANCE, _XREF_RELEASE) in _output(result)
+
+    def test_the_progress_display_is_suppressed_under_json(self, xref_release: FakeFetch) -> None:
+        runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
+
+        assert xref_release.last.progressbar is False
+
+    def test_the_progress_display_is_drawn_without_it(self, xref_release: FakeFetch) -> None:
+        runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157"])
+
+        assert xref_release.last.progressbar is True
 
 
 class TestTheSurfacesThatDidNotChange:

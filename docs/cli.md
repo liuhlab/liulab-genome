@@ -276,6 +276,70 @@ assembly's species — the message names the species that have one — and when 
 what species the assembly is. Three different facts, each with its own message. None of them
 prints an empty list of genes.
 
+## `genome xref <species> <ids>...`
+
+Convert identifiers to and from gene id stems against one published xref set — the way a
+column of Entrez GeneIDs from a GEO series, UniProt accessions from a mass-spec run or HGNC
+ids from a curated resource reaches this package's answers without writing Python, and
+without the hand-built join everyone in the lab writes slightly differently. No assembly is
+named and no genome is opened: an identifier is a name and not a place.
+
+**The direction is named, never inferred.** `--to-stems NAMESPACE` reads the ids as that
+namespace and answers in gene id stems; `--from-stems NAMESPACE` reads them as stems and
+answers in that namespace. Exactly one is given — they carry the namespace, so neither can
+be half-specified — and naming neither or both exits `2`. A string does not say which system
+it belongs to, so `HGNC:11998` asked the wrong way answers *nothing found* rather than
+quietly turning around.
+
+```console
+$ genome xref "Homo sapiens" --to-stems hgnc HGNC:11998 HGNC:13666 HGNC:10041 > stems.tsv
+hgnc ids -> gene id stems for Homo sapiens (alliance 9.0.0)
+  source  https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz
+  2 resolved, 3 gene id stems, 1 this release names none for
+
+$ cat stems.tsv
+HGNC:11998	ENSG00000141510
+HGNC:13666	ENSG00000094914
+HGNC:13666	ENSG00000291836
+HGNC:10041
+```
+
+The pairs go to stdout, tab-separated, so the output pipes — `cut -f2` is the answer and
+`cut -f1` says what asked for it — and the heading, the publisher's URL and the counts go to
+stderr. **Every id you passed gets at least one row.** One naming two genes prints both
+rather than whichever came first (6.2% of human HGNC ids name two stems in this release),
+and one that resolved to nothing gets a row with an empty second column: what your list
+holds and this release does not is the one thing a hand-rolled join drops silently.
+
+`--source NAME` picks the xref source; omitting it answers from the species' default one, so
+everyone in the lab reaches for the same one without discussing it. It is a default and not
+a recommendation — naming a source is how the scientific choice gets made deliberately, and
+NCBI and Ensembl agree on only 57.5% of human gene-level (GeneID, ENSG) pairs. Every answer
+names the source and release that produced it either way, so a result is reproducible a year
+later.
+
+`--json` carries the same answer the API renders, keyed by what was asked about, with the
+ids that named nothing under `unresolved`.
+
+```console
+$ genome xref "Homo sapiens" --from-stems uniprot ENSG00000141510.18 ENSG00000288541 --json
+{"species": "Homo sapiens", "source": "alliance", "release": "9.0.0", "namespace": "uniprot",
+ "resolved": {"ENSG00000141510.18": ["P04637"]}, "unresolved": ["ENSG00000288541"],
+ "xref_ids": ["P04637"]}
+```
+
+There is no third direction: Entrez to HGNC is two calls and the join is yours, which keeps
+the hop visible in your pipeline rather than invisible in ours. `genome.xref.XrefSet` in the
+[API reference](reference.md) is the same two verbs from Python, on one code path with this.
+
+Naming a species prepares its set, which the first time is a download — so run it once on a
+login node before submitting a job that needs it, as the lab's compute nodes have no
+internet. Exits `1` when no set exists for the species (the message names the ones that do),
+when the source is not one this package prepares, when the set is not here and cannot be
+fetched (the message names the call to make on a login node), when the namespace is not one
+the set carries (the message names the ones it does), and when a directory holds a set an
+interrupted download left unfinished.
+
 ## `genome verify <assembly>`
 
 Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is
