@@ -119,7 +119,9 @@ def test_a_component_registered_again_underneath_a_chimera_refuses_to_reopen(
         "tinySc", source=_other_fasta(tmp_path / "corrected.fa"), force=True, progressbar=False
     )
 
-    with pytest.raises(RegistrationMismatchError, match=f"genome register {_PAIR} --force"):
+    with pytest.raises(
+        RegistrationMismatchError, match=f"genome assembly register {_PAIR} --force"
+    ):
         Genome.chimera(worm, chimera_component("tinySc"))
 
     # Nothing was rewritten on the way to refusing, and the stale bytes are still there
@@ -141,7 +143,7 @@ def test_a_component_registered_again_underneath_a_chimera_fails_verification(
         verify_assembly(_PAIR)
 
     # The message names both digests and the command that rebuilds the chimera.
-    assert f"genome register {_PAIR} --force" in str(excinfo.value)
+    assert f"genome assembly register {_PAIR} --force" in str(excinfo.value)
     assert "tinySc" in str(excinfo.value)
 
 
@@ -164,7 +166,7 @@ def test_a_component_annotation_registered_again_underneath_a_chimera_refuses(
     with pytest.raises(RegistrationMismatchError) as excinfo:
         Genome.chimera(worm, yeast)
 
-    assert f"genome register {_PAIR} --force" in str(excinfo.value)
+    assert f"genome assembly register {_PAIR} --force" in str(excinfo.value)
     assert COMPONENT_ANNOTATION in str(excinfo.value)
     # The sequence half really is untouched: a failure only the annotation digests see.
     assert sha256_file(chimera.fasta_path) == fasta_digest

@@ -17,7 +17,7 @@ writes the record. By **path**:
 hatch for a GTF no row lists — the caller says where the file is, and it is placed, built
 and recorded the same way. :func:`register_annotation` and :func:`register_gtf` are those
 same two addressed by assembly name and answering with the record rather than the paths,
-one apiece, matching ``genome register-annotation`` and ``genome register-gtf`` exactly;
+one apiece, matching ``genome annotation register`` and ``genome annotation register-gtf`` exactly;
 both build a registry for the length of the call, so they add no second code path. They
 register, which is why they are here rather than beside the other assembly-addressed
 functions. What they answer *with* — :class:`RegisteredAnnotation` — is here too, beside
@@ -185,9 +185,9 @@ def annotation_register_command(assembly: str, name: str) -> str:
     Examples
     --------
     >>> annotation_register_command("hg38", "gencode_v50")
-    'genome register-annotation hg38 gencode_v50'
+    'genome annotation register hg38 gencode_v50'
     """
-    return f"genome register-annotation {assembly} {name}"
+    return f"genome annotation register {assembly} {name}"
 
 
 def chromosome_check_summary(details: Mapping[str, Any]) -> str:
@@ -339,7 +339,7 @@ class RegisteredAnnotation:
     """What registering one annotation produced: its record, and where that landed.
 
     :func:`register_annotation`'s answer and :func:`register_gtf`'s — what ``genome
-    register-annotation`` and ``genome register-gtf`` print, and what their ``--json``
+    annotation register`` and ``genome annotation register-gtf`` print, and what their ``--json``
     serializes. A :class:`GtfAnnotation` says where an annotation's two files are; this
     says what the run that wrote them did, which is the **Completion marker** itself,
     carried whole. Every question a surface then asks — the digest, the source, the files
@@ -453,7 +453,7 @@ def _register_gtf_command(assembly: str, source: str, name: str) -> str:
     ``source`` is rendered by the caller, so a message about a GTF nobody has yet named
     can say ``<path>`` where one about a real file says the file, shell-quoted.
     """
-    return f"genome register-gtf {assembly} {source} {name}"
+    return f"genome annotation register-gtf {assembly} {source} {name}"
 
 
 def _repair_command(assembly: str, name: str) -> str:
@@ -801,7 +801,7 @@ def register_annotation(
 
     :meth:`~genome.annotation.registry.AnnotationRegistry.register` addressed by assembly
     name, and answering with the
-    record rather than the paths — the call ``genome register-annotation`` makes, and the
+    record rather than the paths — the call ``genome annotation register`` makes, and the
     one a script makes when it wants to serialize what happened. An annotation that is
     already registered is returned from its record without fetching anything.
     :func:`register_gtf` is the same shape for a GTF the table does not
@@ -885,7 +885,7 @@ def register_gtf(
 
     :meth:`~genome.annotation.registry.AnnotationRegistry.register_path` addressed by
     assembly name, and answering
-    with the record rather than the paths — the call ``genome register-gtf`` makes, and
+    with the record rather than the paths — the call ``genome annotation register-gtf`` makes, and
     the way a script registers an annotation the curated table does not list and then
     serializes what happened. :func:`register_annotation` is the same shape for one the
     table does list.

@@ -89,7 +89,7 @@ def test_a_directory_with_no_record_raises_naming_the_repair(tmp_path: Path) -> 
     (tmp_path / "tiny.fa").write_text(">chrI\nACGT\n")
     registration = AssemblyRegistration("tiny", tmp_path)
 
-    with pytest.raises(UnfinishedRegistrationError, match="genome register tiny --force"):
+    with pytest.raises(UnfinishedRegistrationError, match="genome assembly register tiny --force"):
         registration._completed_genome(overwrite=False, repair=registration._repair_command())
 
 

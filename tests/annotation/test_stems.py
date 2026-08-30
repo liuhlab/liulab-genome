@@ -168,7 +168,7 @@ class TestResolveGeneIds:
         registry = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path)
         with pytest.raises(AnnotationNotRegisteredError) as excinfo:
             registry.resolve_gene_ids([_ALONE_STEM], _CURATED)
-        assert f"genome register-annotation {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
+        assert f"genome annotation register {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
 
         default_dir = tmp_path / "default"
         default_dir.mkdir()

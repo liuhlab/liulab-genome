@@ -110,7 +110,7 @@ def assembly_repair_command(assembly: str, source: str | Path | None = None) -> 
 
     One spelling, wherever it is quoted: a broken **Assembly dir** names it, and so does a
     **Merged annotation** whose only repair is rebuilding the chimera that wrote it. A
-    seeded assembly carries its own source into it — ``genome register tiny --force``
+    seeded assembly carries its own source into it — ``genome assembly register tiny --force``
     would fetch from the golden path, which is not where such an assembly came from.
 
     Parameters
@@ -128,11 +128,11 @@ def assembly_repair_command(assembly: str, source: str | Path | None = None) -> 
     Examples
     --------
     >>> assembly_repair_command("hg38")
-    'genome register hg38 --force'
+    'genome assembly register hg38 --force'
     >>> assembly_repair_command("tiny", "/data/my ref.fa")
-    "genome register tiny --force --source '/data/my ref.fa'"
+    "genome assembly register tiny --force --source '/data/my ref.fa'"
     """
-    base = f"genome register {assembly} --force"
+    base = f"genome assembly register {assembly} --force"
     return base if source is None else f"{base} --source {shlex.quote(str(source))}"
 
 
@@ -311,7 +311,7 @@ class AssemblyDir:
         Examples
         --------
         >>> AssemblyDir.locate("hg38", "/tmp/definitely-not-a-build").completed_files(
-        ...     repair="genome register hg38 --force"
+        ...     repair="genome assembly register hg38 --force"
         ... ) is None
         True
         """
@@ -354,7 +354,7 @@ class AssemblyRegistration:
     >>> from pathlib import Path
     >>> registration = AssemblyRegistration("hg38", Path("/scratch/hg38"))
     >>> registration._repair_command()
-    'genome register hg38 --force'
+    'genome assembly register hg38 --force'
     """
 
     def __init__(self, assembly: str, cache_dir: str | Path | None = None) -> None:

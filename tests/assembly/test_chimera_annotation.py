@@ -397,7 +397,7 @@ def test_a_broken_merged_annotation_names_the_command_that_rebuilds_the_chimera(
         broken = reopened.annotations.broken
 
     assert [entry.name for entry in broken] == [_EVERYDAY_MERGED]
-    assert broken[0].repair == f"genome register {chimera.assembly} --force"
+    assert broken[0].repair == f"genome assembly register {chimera.assembly} --force"
 
 
 # --------------------------------------------------------------------------------------

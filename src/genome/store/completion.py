@@ -528,7 +528,7 @@ def check_registration(
         The directory a build writes its outputs and its record into.
     repair : str
         The command that fixes a broken state, quoted verbatim in the error message —
-        e.g. ``"genome register hg38 --force"``. An error a caller cannot act on is a
+        e.g. ``"genome assembly register hg38 --force"``. An error a caller cannot act on is a
         bug, not an error message.
     ignore : iterable of str, optional
         Names in ``directory`` that are not this build's to account for. An
@@ -551,7 +551,7 @@ def check_registration(
 
     Examples
     --------
-    >>> check_registration(Path("/data/genome/hg38"), repair="genome register hg38")
+    >>> check_registration(Path("/data/genome/hg38"), repair="genome assembly register hg38")
     ... # doctest: +SKIP
     CompletionRecord(kind='genome', name='hg38', ...)
     """

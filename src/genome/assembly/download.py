@@ -15,9 +15,9 @@ importable from this module, which is where they used to live.
 :func:`~genome.assembly.source.resolve_source`: one name becomes a **Source** of one of three
 kinds, and :meth:`UCSCGenomeDownloader.fetch_genome` dispatches on which came back rather
 than asking again. A URL is fetched here; a component set is handed to
-:func:`~genome.assembly.chimera_build.build_chimera`. That is what makes ``genome register <name>``
-one command for every kind of **Source** — and what keeps the command line a thin client,
-since neither the resolution nor its refusals are written there.
+:func:`~genome.assembly.chimera_build.build_chimera`. That is what makes ``genome assembly
+register <name>`` one command for every kind of **Source** — and what keeps the command line
+a thin client, since neither the resolution nor its refusals are written there.
 
 An assembly listed in the curated metadata table brings its own source URL and, where
 the lab has pinned one, the sha256 of its **unpacked** FASTA. That digest is checked
@@ -34,7 +34,7 @@ whether it is usable.
 
 A directory that cannot be trusted stops the work rather than being quietly rebuilt:
 :func:`~genome.store.completion.check_registration` turns files-without-a-record and a
-record-that-disagrees into errors naming ``genome register <assembly> --force``, and
+record-that-disagrees into errors naming ``genome assembly register <assembly> --force``, and
 that command is what repairs them (ADR-0007).
 
 What :func:`register_assembly` and :func:`verify_assembly` answer *with* —
@@ -106,7 +106,7 @@ EXPECTED_FROM_RECORD = "record"
 class RegisteredAssembly:
     """What preparing an assembly on disk produced: its record, and where that landed.
 
-    :func:`register_assembly`'s answer — what ``genome register`` prints, and what its
+    :func:`register_assembly`'s answer — what ``genome assembly register`` prints, and what its
     ``--json`` serializes. The **Completion marker** the run wrote *is* the answer, so it
     is carried whole rather than copied out field by field, and the two questions a surface
     then asks — which files are claimed, and is this a **Chimera** — are answered from that
@@ -589,9 +589,9 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         FASTA is fetched or concatenated from components already on this disk, and only the
         first of those is what the rest of this method does. A
         :class:`~genome.assembly.source.ComponentSource` is handed to
-        :func:`~genome.assembly.chimera_build.build_chimera` instead, which is why ``genome register
-        <name> --force`` is one command for all three kinds of **Source** rather than a
-        download that fails on two of them.
+        :func:`~genome.assembly.chimera_build.build_chimera` instead, which is why ``genome
+        assembly register <name> --force`` is one command for all three kinds of **Source**
+        rather than a download that fails on two of them.
 
         A finished registration is returned from its record either way, and a chimera's
         components are checked against their own records as it is handed back — the one
@@ -615,7 +615,7 @@ class UCSCGenomeDownloader(AssemblyRegistration):
 
         A directory that cannot be trusted — files with no record, or a record that
         disagrees with what is on disk — **raises** rather than being rebuilt or
-        trusted, naming ``genome register <assembly> --force`` (ADR-0007). That is what
+        trusted, naming ``genome assembly register <assembly> --force`` (ADR-0007). That is what
         ``overwrite=True`` is: it skips the question, keeps the unpacked FASTA when its
         digest can be shown to be the pinned one, and fetches the source again when it
         cannot (see :meth:`_proven_fasta`). An absent or empty directory is not a broken
@@ -756,7 +756,7 @@ class UCSCGenomeDownloader(AssemblyRegistration):
         genome.store.completion.RegistrationError
             If the assembly directory holds files but no record, or a record that
             disagrees with what is on disk. The message names this same call as the
-            repair — ``genome register <assembly> --force --source <source>`` — rather
+            repair — ``genome assembly register <assembly> --force --source <source>`` — rather
             than the plain one, which would fetch from somewhere this assembly never
             came from.
         FileNotFoundError
@@ -1001,7 +1001,7 @@ def verify_assembly(
         if registered is None or not target.is_file():
             raise FileNotFoundError(
                 f"{assembly} is not registered in {assembly_dir.path}, so there is "
-                f"nothing to verify. Register it with `genome register {assembly}`, or "
+                f"nothing to verify. Register it with `genome assembly register {assembly}`, or "
                 f"pass the FASTA to check with --fasta."
             )
         # Beside the digest, never instead of it: this one reads records rather than
@@ -1102,8 +1102,9 @@ def assembly_table_row(
             f"fetched, and no sha256, because a chimera's bytes are derived by this package "
             f"from components that are themselves pinned, and pinning them again would turn "
             f"our own concatenation into a contract that fails on every disk (ADR-0008). "
-            f"Build it with `genome register {assembly}` and check it with `genome verify "
-            f"{assembly}`, which compares the components rather than a pin."
+            f"Build it with `genome assembly register {assembly}` and check it with "
+            f"`genome assembly verify {assembly}`, which compares the components rather "
+            f"than a pin."
         )
     fasta = downloader.fetch_fasta(progressbar=progressbar)
     # Every identifier the row knows, and all of them blank when the table lists no row at

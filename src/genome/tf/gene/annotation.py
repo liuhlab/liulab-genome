@@ -21,7 +21,7 @@ judgement it all is.
 Two ways in and one code path. :func:`resolve_tf_genes` takes a registry, which is what
 :meth:`~genome.assembly.genome.Genome.tf_gene_list` already holds; :func:`tf_gene_list` takes an
 assembly name and builds one for the length of the call, which is what ``genome
-tf-gene-list`` runs. Nothing is prepared, fetched or built to answer either, and the
+tf gene-list`` runs. Nothing is prepared, fetched or built to answer either, and the
 census is read from inside the package.
 
 Examples
@@ -337,7 +337,7 @@ def tf_gene_list(
     """Return the genes a published census judges transcription factors in ``assembly``.
 
     :func:`resolve_tf_genes` for an assembly named rather than opened, which is what
-    ``genome tf-gene-list`` runs. A registry is built for the length of the call, so a
+    ``genome tf gene-list`` runs. A registry is built for the length of the call, so a
     shell surface over it adds no second code path. Nothing is prepared, fetched or built
     to answer it, and the census is read from inside the package.
 

@@ -193,7 +193,7 @@ def test_a_record_that_claims_to_be_a_chimera_and_is_not_readable_raises(
 
     message = str(excinfo.value)
     assert wrong in message  # which half of the shape was wrong
-    assert f"genome register {_PAIR} --force" in message  # and the repair
+    assert f"genome assembly register {_PAIR} --force" in message  # and the repair
 
 
 def test_a_broken_record_raises_where_a_chimeras_details_are_asked_for(tmp_path: Path) -> None:
@@ -201,7 +201,7 @@ def test_a_broken_record_raises_where_a_chimeras_details_are_asked_for(tmp_path:
     # rather than one a caller had to remember to pass.
     chimera = _chimera(tmp_path, details={"separator": "__"})
 
-    with pytest.raises(RegistrationError, match=f"genome register {_PAIR} --force"):
+    with pytest.raises(RegistrationError, match=f"genome assembly register {_PAIR} --force"):
         read_chimera_details(chimera.path)
 
 
@@ -253,7 +253,7 @@ def test_a_component_registered_again_underneath_the_chimera_is_refused(tmp_path
     message = str(excinfo.value)
     assert "5e6f" in message  # what the chimera recorded
     assert "differentnow" in message  # and what is pinned now
-    assert f"genome register {_PAIR} --force" in message
+    assert f"genome assembly register {_PAIR} --force" in message
 
 
 def test_an_absent_current_or_recorded_digest_reads_as_unknown_rather_than_a_mismatch(
@@ -290,7 +290,7 @@ def test_an_annotation_registered_again_after_the_merge_is_refused(tmp_path: Pat
     message = str(excinfo.value)
     assert "genes" in message
     assert "3c4d" in message
-    assert f"genome register {_PAIR} --force" in message
+    assert f"genome assembly register {_PAIR} --force" in message
 
 
 def test_an_annotation_with_no_record_leaves_the_component_unproven(tmp_path: Path) -> None:

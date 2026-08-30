@@ -2,8 +2,8 @@
 
 A **Default xref source** is flagged twice in the curated table — once for identifiers, once for
 symbols — and the question is named where an unnamed source is filled in: `for_symbols` on
-`lookup_xref` and on the `XrefSet` constructor, and so on `genome match-symbols` and on `genome xref
---from-stems symbol`. One flag per species made the epic's most common question fail on the first
+`lookup_xref` and on the `XrefSet` constructor, and so on `genome xref symbols` and on
+`genome xref ids --from-stems symbol`. One flag per species made the epic's most common question fail on the first
 try, since human's default is the Alliance, which publishes no human symbol at all: a gene list
 copied out of a paper needed `--source hgnc` before it worked once, and mouse and worm reach a third
 source again. Resolving the source at the *question* instead — `match_symbols` picking a

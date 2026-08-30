@@ -47,7 +47,7 @@ sacCer3.chrom_sizes["chrIV"]                  # 1531933
 The same from a shell:
 
 ```bash
-$ genome register sacCer3
+$ genome assembly register sacCer3
 $ genome revcomp ATCG
 CGAT
 ```

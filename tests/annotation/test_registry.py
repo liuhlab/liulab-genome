@@ -144,7 +144,7 @@ class TestListBrokenAnnotations:
         record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
         offered = list_broken_annotations(tmp_path, "sacCer3")
         assert offered["ensgene_v101"].repair == (
-            "genome register-annotation sacCer3 ensgene_v101 --force"
+            "genome annotation register sacCer3 ensgene_v101 --force"
         )
         assert offered["ensgene_v101"].repair in offered["ensgene_v101"].problem
 
@@ -152,7 +152,7 @@ class TestListBrokenAnnotations:
         unlisted = _register_by_path(tmp_path, src, "mine")
         unlisted.db.write_bytes(b"truncated")
         broken = list_broken_annotations(tmp_path, "tiny")
-        assert broken["mine"].repair == f"genome register-gtf tiny {src} mine --force"
+        assert broken["mine"].repair == f"genome annotation register-gtf tiny {src} mine --force"
 
         # No record survives to say which GTF it was built from, so there is no path to
         # print: the command is named with the one thing it still needs filled in,
@@ -160,7 +160,10 @@ class TestListBrokenAnnotations:
         _register_by_path(tmp_path, src, "unknowable")
         record_path(annotation_dir(tmp_path, "unknowable")).unlink()
         broken = list_broken_annotations(tmp_path, "tiny")
-        assert broken["unknowable"].repair == "genome register-gtf tiny <path> unknowable --force"
+        assert (
+            broken["unknowable"].repair
+            == "genome annotation register-gtf tiny <path> unknowable --force"
+        )
 
         # A record survives, but the path it names is gone — same placeholder, for the
         # same reason: the path it remembers would not run either.
@@ -169,7 +172,7 @@ class TestListBrokenAnnotations:
         src.unlink()
         broken = list_broken_annotations(tmp_path, "tiny")
         assert str(src) not in broken["gone"].repair
-        assert broken["gone"].repair == "genome register-gtf tiny <path> gone --force"
+        assert broken["gone"].repair == "genome annotation register-gtf tiny <path> gone --force"
 
 
 class TestDefaultAnnotation:
@@ -216,7 +219,7 @@ class TestAnnotationStatus:
             "annotations": [asdict(row) for row in payload.annotations],
         }
 
-        # What the closing line of `genome annotations` needs: the default's own state,
+        # What the closing line of `genome annotation list` needs: the default's own state,
         # so "not registered here" and "broken here" are told apart by the report itself.
         default = payload.default_row
         assert default is payload.annotations[0]
@@ -275,7 +278,7 @@ class TestAnnotationStatus:
             ("ensgene_v101", True, False, True)
         ]
         assert broken_offered_rows[0].repair == (
-            "genome register-annotation sacCer3 ensgene_v101 --force"
+            "genome annotation register sacCer3 ensgene_v101 --force"
         )
         assert "holds files but no .completion.json" in str(broken_offered_rows[0].problem)
         assert broken_offered_rows[0].path is None
@@ -284,7 +287,7 @@ class TestAnnotationStatus:
         assert [(r.name, r.offered, r.registered, r.broken) for r in unlisted_rows] == [
             ("gone", False, False, True)
         ]
-        assert unlisted_rows[0].repair == f"genome register-gtf tiny {src} gone --force"
+        assert unlisted_rows[0].repair == f"genome annotation register-gtf tiny {src} gone --force"
 
     def test_one_broken_annotation_does_not_hide_the_others(self, tmp_path: Path) -> None:
         src = tmp_path / "ann.gtf"
@@ -373,7 +376,7 @@ class TestAnnotationRegistry:
         record_path(annotation_dir(tmp_path, "ensgene_v101")).unlink()
         with pytest.raises(AnnotationNotRegisteredError) as broken:
             AnnotationRegistry.locate("sacCer3", tmp_path).path("ensgene_v101")
-        assert "genome register-annotation sacCer3 ensgene_v101 --force" in str(broken.value)
+        assert "genome annotation register sacCer3 ensgene_v101 --force" in str(broken.value)
 
     def test_registering_adopts_the_result_and_the_default_is_the_flag_unless_overridden(
         self, fake_fetch: FakeFetch, tmp_path: Path
@@ -427,7 +430,7 @@ class TestAnnotationRegistry:
         (directory / "WS298.db").write_bytes(b"half a database")
         with pytest.raises(UnfinishedRegistrationError) as excinfo:
             registry.register_path(source, "WS298")
-        assert f"genome register-gtf tiny {source} WS298 --force" in str(excinfo.value)
+        assert f"genome annotation register-gtf tiny {source} WS298 --force" in str(excinfo.value)
 
         # Chrom.sizes defaults to the assembly's own...
         chrom_dir = tmp_path / "chrom"
@@ -591,7 +594,7 @@ class TestGeneList:
         unregistered = AnnotationRegistry.locate(_CURATED_ASSEMBLY, tmp_path / "unregistered")
         with pytest.raises(AnnotationNotRegisteredError) as excinfo:
             unregistered.gene_list("rRNA", _CURATED)
-        assert f"genome register-annotation {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
+        assert f"genome annotation register {_CURATED_ASSEMBLY} {_CURATED}" in str(excinfo.value)
 
         no_default = AnnotationRegistry.locate("tiny", tmp_path / "no-default")
         with pytest.raises(ValueError, match="annotation") as no_default_excinfo:
@@ -795,12 +798,12 @@ class TestTheDefaultAnnotationLine:
         absent = _state("gencode_v50", _state_row())
         assert absent.default_summary == (
             "default: gencode_v50 — not registered here; register it with "
-            "`genome register-annotation hg38 gencode_v50`"
+            "`genome annotation register hg38 gencode_v50`"
         )
         # The command it names is the one the package spells once, not a copy of it.
         assert annotation_register_command("hg38", "gencode_v50") in absent.default_summary
 
-        repair = "genome register-annotation hg38 gencode_v50 --force"
+        repair = "genome annotation register hg38 gencode_v50 --force"
         broken = _state("gencode_v50", _state_row(broken=True, repair=repair))
         assert broken.default_summary == (
             f"default: gencode_v50 — broken here; repair it with `{repair}`"

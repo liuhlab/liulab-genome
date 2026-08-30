@@ -10,6 +10,24 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **BREAKING — the CLI grows a sub-app per topic, and fourteen commands are renamed.** `genome
+  register` is `genome assembly register`, `genome tf-gene-list` is `genome tf gene-list`, `genome
+  xref` is `genome xref ids`, `genome match-symbols` is `genome xref symbols`, `genome homologs` is
+  `genome homology links`, `genome motif-scan` is `genome motif scan`, and the eight remaining
+  moves follow the same rule — a sub-app named for the package its commands ship from, which is
+  why the Orthology context's is `homology`. `version`, `revcomp` and `doctor` belong to no topic
+  and are unchanged. Each topic package now ships its own CLI module and its own renderers beside
+  the result types they render, so what `gene-list` prints and what a `GeneList` holds change in
+  one place; `genome.cli` keeps the three commands, the `add_typer` calls and no rendering helper,
+  and the console script still points `genome` at `genome.cli:app`. The seam under the commands did
+  not move: no command constructs a `Genome` it did not construct before, every one still takes
+  `--json`, and every error message and docstring naming a command names the new spelling.
+  **Every old spelling still runs for this one release**, hidden from `genome --help` and printing
+  a deprecation notice on **stderr** so `--json` on stdout still parses — one function object per
+  command registered under both names, from one table and one loop in `genome.cli`. The single
+  exception is `genome xref`, whose old spelling is a sub-app's name as well as a command's: the
+  `xref` group answers it by handing an unrecognised first token to `ids`, with the same notice on
+  stderr. **The aliases go in the release after this one**, deleted as a unit with that table.
 - **`io/` retired: every context owns its own I/O, and what is left is a store.** The one
   directory grouped by *kind of work* is gone, and its modules moved to whatever they are about.
   `genome.assembly` is the whole Assembly context — `genome.py`, `chimera.py` and the seven

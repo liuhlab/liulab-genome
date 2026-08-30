@@ -121,7 +121,7 @@ class Genome(AlignerMixin, MotifScanMixin):
         If the assembly's directory holds a registration that cannot be trusted —
         files with no record (an interrupted run), or a record that disagrees with
         what is on disk. The message names the file and
-        ``genome register <assembly> --force``, which repairs it (ADR-0007). An
+        ``genome assembly register <assembly> --force``, which repairs it (ADR-0007). An
         absent or empty directory is not this: that is a fresh registration.
     genome.external.ToolNotFoundError
         If a required native tool (``samtools``, ``faToTwoBit``, ``twoBitInfo``)
@@ -198,7 +198,7 @@ class Genome(AlignerMixin, MotifScanMixin):
         ``_``, so ``ce11`` and ``ecHT115`` in either order build and reopen the one
         ``ce11_ecHT115``. A chimera whose record says it finished is opened without
         rewriting anything; a directory that cannot be trusted raises and names
-        ``genome register <name> --force``, which is what ``force`` is.
+        ``genome assembly register <name> --force``, which is what ``force`` is.
 
         Nothing is fetched, and no annotation argument is needed or accepted: each
         component carries its own :attr:`default_gtf`, so a caller's ``(assembly, gtf)``

@@ -253,7 +253,7 @@ class TestRegisterByName:
 
         with pytest.raises(UnfinishedRegistrationError) as excinfo:
             _register_by_name(tmp_path / "half", "tiny", _NAME, progressbar=False, metadata=_row())
-        assert f"genome register-annotation tiny {_NAME} --force" in str(excinfo.value)
+        assert f"genome annotation register tiny {_NAME} --force" in str(excinfo.value)
 
         repaired = _register_by_name(
             tmp_path / "half", "tiny", _NAME, progressbar=False, force=True, metadata=_row()
@@ -722,7 +722,7 @@ class TestRegisterGtf:
 
         with pytest.raises(UnfinishedRegistrationError) as excinfo:
             register_gtf("tiny", source, "WS298", cache_dir=tmp_path)
-        assert f"genome register-gtf tiny {source} WS298 --force" in str(excinfo.value)
+        assert f"genome annotation register-gtf tiny {source} WS298 --force" in str(excinfo.value)
 
         payload = register_gtf("tiny", source, "WS298", cache_dir=tmp_path, force=True)
         assert payload.name == "WS298"
