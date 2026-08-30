@@ -19,6 +19,7 @@ from genome.tf.motif.jaspar import (
     JASPAR_TAX_GROUPS,
     JasparDatabase,
     JasparReleaseError,
+    MotifSetNotDownloadedError,
     TransfacError,
     parse_transfac,
 )
@@ -76,6 +77,7 @@ __all__ = [
     "MotifNotFoundError",
     "MotifScanMixin",
     "MotifSet",
+    "MotifSetNotDownloadedError",
     "RaggedComparisonError",
     "TransfacError",
     "hit_count",

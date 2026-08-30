@@ -11,7 +11,9 @@ The package is a scaffold today and its modules land one at a time. The words ar
 that every issue, test name, error message and docstring on the way uses one set.
 
 Words every context shares — **Genome**, **Region**, **Strand**, **0-based half-open**,
-**Soft-masking**, **Data dir** and the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
+**Soft-masking**, **Data dir** and the rest — are defined once in the repo-root `CONTEXT-MAP.md`,
+**Prepared set** among them: what a downloaded **Release** on disk *is*, and how one is prepared,
+is that entry's and is not restated here.
 
 ## Language
 
@@ -87,9 +89,9 @@ motif list
 One dated, versioned publication of the source a downloaded set is pinned to — here JASPAR's
 non-redundant CORE data, 2024 and 2026 being the two this package prepares, and the same word for
 an **Xref source**'s and for Ensembl Compara's. A release and a **Tax group** together name exactly
-one JASPAR file, fetched once into the `motif/` subtree of the **Data dir** and shared by every
-project on the machine; both are recorded on every **Hit table**, so a table saved months ago still
-says what it was scanned with.
+one JASPAR file, and one such file is one **Prepared set**, filed under the `motif/` subtree of the
+**Data dir** and shared by every project on the machine; both are recorded on every **Hit table**,
+so a table saved months ago still says what it was scanned with.
 _Avoid_: version — the package has one and a **Motif id** has one, and neither is this; JASPAR
 version, database version, edition, snapshot
 

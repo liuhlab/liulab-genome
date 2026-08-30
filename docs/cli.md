@@ -640,7 +640,8 @@ serially and produces the identical table.
 **Prepare the release from a login node.** Naming a release prepares it, and the first
 time that is a download. The lab's CPU cluster compute nodes have no internet, so run this
 once on a login node before submitting a job that needs it; every run afterwards reads the
-cached file out of `<LIULAB_DATA>/motif/jaspar/`, shared by every project on the machine.
+prepared release out of `<LIULAB_DATA>/motif/jaspar/<release>/<tax group>/`, shared by every
+project on the machine.
 
 Exits `1` when the FASTA is not there or is not FASTA, when the release or tax group is
 not one this package prepares, when the threshold is not a p-value in `(0, 1)`, when the

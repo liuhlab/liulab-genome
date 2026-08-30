@@ -12,15 +12,30 @@ It carries the **Count matrix** and all six annotations in a single file and it 
 round counts to integers — nine of the 1019 vertebrate matrices in the 2026 release carry
 fractional counts that ``.jaspar`` discards.
 
-**There is no Completion marker here, and that is deliberate.** Every other multi-step
-build in this package writes one, and a reader who knows that will otherwise read its
-absence as an omission. These files are all under 1 MB and arrive in a single step, so
-the two things a record would buy are bought more cheaply: the file is downloaded under a
-temporary name in the working area and renamed into place only on success, so an
-interrupted download never occupies the final name; and every construction — a fresh
-download and a cache re-read alike — counts the motifs it parsed against
-:data:`MOTIF_COUNTS`, so a short file raises rather than quietly scanning with a partial
-release. There is nothing a record could add that those two do not already say.
+**There is a Completion marker here, and there did not use to be.** This module once
+substituted an atomic rename plus a motif count for one, on the grounds that these files
+are under a megabyte and arrive in a single step. That reasoning covered *is this
+finished* and missed the other half of what a record is for: it is the only answer to *how
+was this made* — which URL, which package version, when, and what the bytes hashed to —
+and a count proves the file holds the right number of records rather than that it is the
+file that was fetched. So a **Motif set** is prepared exactly as an **Xref set** and a
+**Homology set** are, by :mod:`genome.io.prepared`, and a directory that answers *is this
+finished* one way is the whole of the answer.
+
+**What is verified, and what cannot be.** JASPAR publishes no checksum, so nothing here
+holds a download to a *published* digest — the marker records the digest of what was
+stored and every re-read is held to it, which is what turns "it opened cleanly" into
+evidence that these are the bytes that were prepared. Compara's own note, that a resumed
+download of one of its gzips passed ``gzip -t`` with the wrong md5, is why that distinction
+is worth a small JSON file. The motif count and the base-id check stay and are not
+replaced by it: they say this is the *right release, whole*, which a digest of our own
+cannot say.
+
+**One set, one directory.** A record is written in the directory the build filled, so each
+``(Release, Tax group)`` gets one of its own — ``motif/jaspar/<release>/<tax group>/`` —
+where the files used to sit flat beside each other under ``motif/jaspar/``. A file
+prepared by an earlier version is left where it lies and prepared again under the new
+layout, which costs one download of under a megabyte.
 
 Examples
 --------
@@ -34,15 +49,21 @@ Motif(motif_id='MA0139.2', motif_name='CTCF', length=15, offset=0)
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 
 import numpy as np
 
-from genome.io import fetch
-from genome.io.completion import clear_work_dir, work_dir
-from genome.io.registration import motif_data_dir
+from genome.io.prepared import (
+    PreparedSetNotDownloadedError,
+    PreparedSource,
+    motif_data_dir,
+    prepare,
+    unpacked_lines,
+    write_through,
+)
 from genome.tf.motif.motif import BASES, Motif, MotifSet, base_id
 
 #: Where JASPAR publishes its versioned flat files. The REST API is not used: it silently
@@ -50,9 +71,14 @@ from genome.tf.motif.motif import BASES, Motif, MotifSet, base_id
 #: so only these files can be pinned to a **Release**.
 JASPAR_BASE_URL = "https://jaspar.elixir.no/download/data"
 
-#: Subdirectory of the **Data dir**'s ``motif/`` tree holding JASPAR's files, flat. One
-#: source, one directory: a second motif source would get its own beside this.
+#: Subdirectory of the **Data dir**'s ``motif/`` tree holding JASPAR's sets, one directory
+#: per **Release** and **Tax group** under it. One source, one subtree: a second motif
+#: source would get its own beside this.
 JASPAR_SUBDIR = "jaspar"
+
+#: What a **Completion marker** written here calls what it recorded, beside the ``xref``
+#: and ``homology`` kinds the other **Prepared set**s write.
+MOTIF_KIND = "motif"
 
 #: The **Release**s this package prepares, oldest first.
 JASPAR_RELEASES: tuple[str, ...] = ("2024", "2026")
@@ -78,10 +104,10 @@ JASPAR_TAX_GROUPS: tuple[str, ...] = (
 DEFAULT_TAX_GROUP = "vertebrates"
 
 #: How many motifs each ``(release, tax group)`` file holds, counted from the published
-#: files themselves. **This is the integrity check**, standing where a **Completion
-#: marker** stands elsewhere: a parse that yields any other number raises, so a truncated
-#: download or a half-written cache is an error rather than a quiet partial release. Note
-#: ``diatoms``, which really does hold one motif in both releases.
+#: files themselves. **This is what says the file is the right release, whole**, which the
+#: **Completion marker**'s digest cannot: a parse that yields any other number raises, so a
+#: truncated download or a half-written cache is an error rather than a quiet partial
+#: release. Note ``diatoms``, which really does hold one motif in both releases.
 MOTIF_COUNTS: Mapping[tuple[str, str], int] = MappingProxyType(
     {
         ("2024", "vertebrates"): 879,
@@ -131,14 +157,30 @@ class TransfacError(ValueError):
     """
 
 
+class MotifSetNotDownloadedError(PreparedSetNotDownloadedError):
+    """The release is not prepared here, and JASPAR's file could not be fetched.
+
+    The Motif context's own spelling of what every **Prepared set** raises here, so the
+    message names *this* release and tax group and quotes :func:`jaspar_prepare_command`.
+    Before there was one, a compute node with no internet met pooch's own transport error
+    and was left to work out that the repair is to run this somewhere else first.
+
+    Examples
+    --------
+    >>> issubclass(MotifSetNotDownloadedError, RuntimeError)
+    True
+    """
+
+
 class JasparReleaseError(ValueError):
     """A file read as a **Release** is not the release it should be.
 
     Not a parse failure — every record read cleanly — but the file as a whole is wrong:
-    the wrong number of motifs, or two versions of one matrix where a non-redundant
-    release ships exactly one. Both mean the same thing to a caller, which is why they are
-    one class: what is on disk is not what was asked for, and the repair is to delete it
-    and construct again. The message names the file, so the repair is one ``rm``.
+    the wrong number of motifs, two versions of one matrix where a non-redundant release
+    ships exactly one, or bytes that are not the ones its **Completion marker** recorded.
+    All three mean the same thing to a caller, which is why they are one class: what is on
+    disk is not what was asked for, and the repair is to prepare the release again. The
+    message names the file and the command.
 
     Examples
     --------
@@ -226,14 +268,15 @@ def jaspar_filename(release: str, tax_group: str = DEFAULT_TAX_GROUP) -> str:
 
 
 def jaspar_data_dir() -> Path:
-    """Return the directory JASPAR's files are cached in, flat and shared.
+    """Return the subtree JASPAR's sets are prepared under, shared by every project.
 
-    ``<liulab_data>/motif/jaspar/``. Nothing is created by asking.
+    ``<liulab_data>/motif/jaspar/``, holding one directory per **Release** and **Tax
+    group** — see :func:`jaspar_set_dir`. Nothing is created by asking.
 
     Returns
     -------
     pathlib.Path
-        The JASPAR cache directory.
+        The JASPAR subtree.
 
     Examples
     --------
@@ -244,6 +287,63 @@ def jaspar_data_dir() -> Path:
     >>> del os.environ["LIULAB_DATA"]
     """
     return motif_data_dir() / JASPAR_SUBDIR
+
+
+def jaspar_set_dir(release: str, tax_group: str = DEFAULT_TAX_GROUP) -> Path:
+    """Return the directory one **Release** and **Tax group** is prepared in.
+
+    ``<liulab_data>/motif/jaspar/<release>/<tax group>/``: one directory per set, because
+    each carries a **Completion marker** of its own, and releases sit side by side so
+    holding two is not a re-download.
+
+    Parameters
+    ----------
+    release : str
+        One of :data:`JASPAR_RELEASES`.
+    tax_group : str, default ``"vertebrates"``
+        One of :data:`JASPAR_TAX_GROUPS`.
+
+    Returns
+    -------
+    pathlib.Path
+        The set's own directory. Nothing is created by asking.
+
+    Examples
+    --------
+    >>> import os
+    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
+    >>> jaspar_set_dir("2024", "nematodes")
+    PosixPath('/scratch/liulab/motif/jaspar/2024/nematodes')
+    >>> del os.environ["LIULAB_DATA"]
+    """
+    return jaspar_data_dir() / check_release(release) / check_tax_group(tax_group)
+
+
+def jaspar_prepare_command(release: str, tax_group: str = DEFAULT_TAX_GROUP) -> str:
+    r"""Return the call that prepares one **Release**, for an error message to quote.
+
+    One spelling of it, so a renamed entry point is renamed once. Quoted by every error
+    here that a caller repairs by fetching the release on a machine with internet.
+
+    Parameters
+    ----------
+    release : str
+        One of :data:`JASPAR_RELEASES`.
+    tax_group : str, default ``"vertebrates"``
+        One of :data:`JASPAR_TAX_GROUPS`.
+
+    Returns
+    -------
+    str
+        A shell command, unquoted and unfenced — the caller decides how to set it.
+
+    Examples
+    --------
+    >>> jaspar_prepare_command("2024", "nematodes")
+    'python -c "from genome.tf.motif import JasparDatabase; JasparDatabase(\'2024\', \'nematodes\')"'
+    """
+    call = f"from genome.tf.motif import JasparDatabase; JasparDatabase({release!r}, {tax_group!r})"
+    return f'python -c "{call}"'
 
 
 def check_release(release: str) -> str:
@@ -457,9 +557,10 @@ class JasparDatabase(MotifSet):
     longer that release.
 
     **Constructing one prepares it**, as opening a :class:`~genome.genome.Genome` does:
-    the file is fetched into :func:`jaspar_data_dir` on the first construction and re-read
-    on every one after, with nothing fetched. The lab's CPU cluster compute nodes have no
-    internet, so the first construction of a release must happen on a login node.
+    the file is fetched into :func:`jaspar_set_dir` on the first construction and recorded
+    with a **Completion marker**, and every construction after re-reads what is there and
+    fetches nothing. The lab's CPU cluster compute nodes have no internet, so the first
+    construction of a release must happen on a login node.
 
     Parameters
     ----------
@@ -469,8 +570,11 @@ class JasparDatabase(MotifSet):
         One of :data:`JASPAR_TAX_GROUPS`. It chooses which file is downloaded rather than
         filtering one afterwards, so a worm scan never pays for a thousand plant matrices.
     cache_dir : str or pathlib.Path, optional
-        The directory to cache in, overriding :func:`jaspar_data_dir`. The directory
-        itself, not a root to file under.
+        The directory to prepare in, overriding the one :func:`jaspar_set_dir` lays out.
+        The directory itself, not a root to file under — the same word means the same thing
+        for an :class:`~genome.xref.xref.XrefSet` and a
+        :class:`~genome.homology.compara.HomologySet`. One set per directory either way,
+        since each carries a **Completion marker** of its own.
     progressbar : bool, default True
         Show the download's progress bar. Nothing is drawn when the file is already there.
 
@@ -489,10 +593,17 @@ class JasparDatabase(MotifSet):
     ------
     ValueError
         If the release or tax group is not one this package prepares.
+    MotifSetNotDownloadedError
+        If the release is not prepared here and could not be fetched. The message names the
+        call to make on a login node.
     TransfacError
         If a record in the file cannot be read.
     JasparReleaseError
-        If the file holds the wrong number of motifs, or two versions of one matrix.
+        If the file holds the wrong number of motifs, two versions of one matrix, or bytes
+        that are not the ones its **Completion marker** recorded.
+    genome.io.completion.RegistrationError
+        If the directory holds a file with no marker, or a marker that disagrees with what
+        is on disk — an interrupted run, which reads as unfinished rather than as present.
 
     Examples
     --------
@@ -517,11 +628,17 @@ class JasparDatabase(MotifSet):
         self.release = check_release(release)
         self.tax_group = check_tax_group(tax_group)
         self.source_url = jaspar_url(self.release, self.tax_group)
-        directory = Path(cache_dir).expanduser() if cache_dir is not None else jaspar_data_dir()
-        self.path = _prepare(
-            self.release, self.tax_group, directory=directory, progressbar=progressbar
+        directory = (
+            Path(cache_dir).expanduser()
+            if cache_dir is not None
+            else jaspar_set_dir(self.release, self.tax_group)
         )
-        motifs = parse_transfac(self.path.read_text(encoding="utf-8"))
+        source = _source(self.release, self.tax_group, directory=directory)
+        prepared = prepare(source, progressbar=progressbar)
+        self.path = prepared.path
+        text, digest = _read_release(self.path)
+        _check_digest(digest, recorded=prepared.record.sha256, path=self.path, source=source)
+        motifs = parse_transfac(text)
         _check_count(motifs, release=self.release, tax_group=self.tax_group, path=self.path)
         _check_base_ids(motifs, path=self.path)
         super().__init__(motifs)
@@ -534,35 +651,58 @@ class JasparDatabase(MotifSet):
         )
 
 
-def _prepare(release: str, tax_group: str, *, directory: Path, progressbar: bool) -> Path:
-    """Return the cached transfac file, downloading it once if it is not there yet.
+def _source(release: str, tax_group: str, *, directory: Path) -> PreparedSource:
+    """Return what this **Release** declares: a URL, no checksum, and bytes stored as sent.
 
-    The download lands in the directory's working area under a name of its own and is
-    renamed into place only once the fetch returned — the rename is atomic within one
-    filesystem, and the working area is inside the cache directory so that it is one. So
-    the final name is occupied by a whole file or by nothing, which is what stands here in
-    place of a **Completion marker**.
+    Everything else — the working area, the fetch, the digest, the staged rename and the
+    **Completion marker** — is :mod:`genome.io.prepared`'s. The reader is
+    :func:`~genome.io.prepared.write_through` because JASPAR's transfac file *is* the
+    stored form: nothing is sliced out of it, and a set that stores what it fetched is one
+    path through the pipeline rather than a second one beside it.
 
-    The working area is emptied *before* the fetch as well as after. Every other build in
-    this package keeps what an interrupted run downloaded so the repair does not fetch it
-    again; that trade is worth nothing under a megabyte, and taking it would mean the fetch
-    step could adopt an abandoned part-file as a finished download — the one way bytes from
-    an interrupted run could still reach the final name.
+    ``checksum=None`` because JASPAR publishes none. Nothing here invents one — a digest
+    this package computed says the file has not changed since it was prepared, which the
+    marker records, and it can never say what JASPAR published.
     """
-    path = directory / jaspar_filename(release, tax_group)
-    if path.is_file():
-        return path
-    clear_work_dir(directory)
-    fetched = fetch.fetch_url(
-        jaspar_url(release, tax_group),
-        work_dir(directory),
-        fname=f"{path.name}.part",
-        progressbar=progressbar,
+    return PreparedSource(
+        url=jaspar_url(release, tax_group),
+        directory=directory,
+        stored_name=jaspar_filename(release, tax_group),
+        kind=MOTIF_KIND,
+        name=f"{JASPAR_SUBDIR}/{release}/{tax_group}",
+        prepare_command=jaspar_prepare_command(release, tax_group),
+        description=f"the JASPAR {release} {tax_group} motif set",
+        read=write_through,
+        not_downloaded=MotifSetNotDownloadedError,
+        details={"source": JASPAR_SUBDIR, "release": release, "tax_group": tax_group},
     )
-    directory.mkdir(parents=True, exist_ok=True)
-    fetched.replace(path)
-    clear_work_dir(directory)
-    return path
+
+
+def _read_release(path: Path) -> tuple[str, str]:
+    """Return a prepared release's text and the sha256 of its bytes, in one pass.
+
+    Read whole, as :func:`parse_transfac` needs and as these under-a-megabyte files allow,
+    with the digest taken by the same decompress-while-hashing step that took it when the
+    file was stored.
+    """
+    digest = hashlib.sha256()
+    return "".join(unpacked_lines(path, digest)), digest.hexdigest()
+
+
+def _check_digest(digest: str, *, recorded: str | None, path: Path, source: PreparedSource) -> None:
+    """Hold a prepared release to the digest its **Completion marker** recorded.
+
+    What the marker buys that a motif count does not: the same records, one byte edited,
+    is a file the count still accepts and this refuses.
+    """
+    if recorded is None or digest == recorded:
+        return
+    raise JasparReleaseError(
+        f"{path} hashes to {digest} where its completion record claims {recorded}, so the "
+        f"file on disk is not the one that was prepared. Something rewrote it after the "
+        f"record was written; nothing here can be trusted as the release it is filed under. "
+        f"Prepare it again with `{source.repair}`."
+    )
 
 
 def _check_count(motifs: Sequence[Motif], *, release: str, tax_group: str, path: Path) -> None:

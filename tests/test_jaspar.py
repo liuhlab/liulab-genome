@@ -11,20 +11,24 @@ is asserted here rather than trusted — the traps especially: values separated 
 semicolon and never by a comma, commas that live *inside* one value, an annotation the
 source left empty, and counts that are not integers.
 
-There is no **Completion marker** for a motif download, deliberately, so the two things
-standing in its place get tests of their own: the rename into place, which is why an
-interrupted download never occupies the final name, and the count check, which is why a
-short file raises instead of scanning with half a release.
+A motif download writes a **Completion marker** like every other **Prepared set**, and
+what it buys over the atomic rename it replaced gets tests of its own: a release whose
+record went missing reads as unfinished rather than as finished, and one rewritten
+afterwards is refused by the digest the record holds it to. The count check is tested
+beside them, because it says something no digest of ours can — that this is the right
+release, whole.
 
 The unit lane, unmarked: nothing here needs a binary.
 """
 
 from __future__ import annotations
 
+import hashlib
 import itertools
+import json
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 import pytest
@@ -32,6 +36,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from genome.io import fetch as fetch_mod
+from genome.io.completion import RECORD_NAME, UnfinishedRegistrationError, read_record
 from genome.tf.motif import MIN_MOTIF_LENGTH, AmbiguousMotifNameError, Motif, MotifSet
 from genome.tf.motif import jaspar as jaspar_mod
 from genome.tf.motif.jaspar import (
@@ -42,9 +47,12 @@ from genome.tf.motif.jaspar import (
     MOTIF_COUNTS,
     JasparDatabase,
     JasparReleaseError,
+    MotifSetNotDownloadedError,
     TransfacError,
     jaspar_data_dir,
     jaspar_filename,
+    jaspar_prepare_command,
+    jaspar_set_dir,
     jaspar_url,
     parse_transfac,
 )
@@ -73,6 +81,14 @@ FIXTURE_MOTIFS: tuple[tuple[str, str, int, str], ...] = (
 #: How many motifs the fixture holds — the count every database test is held to, in place
 #: of the release's real one.
 FIXTURE_COUNT = len(FIXTURE_MOTIFS)
+
+
+class PublishText(Protocol):
+    """Makes JASPAR publish some text, whatever is in it, for one test."""
+
+    def __call__(self, text: str) -> None:
+        """Serve ``text`` as the release's published file from now on."""
+        ...
 
 
 @pytest.fixture
@@ -445,26 +461,46 @@ class TestJasparDatabaseDownload:
             f"JASPAR{release}_CORE_{segment}non-redundant_pfms_transfac.txt"
         )
 
-    def test_the_cache_layout_is_flat_and_a_sibling_of_the_assembly_tree(
+    def test_the_layout_is_one_set_per_directory_beside_the_assembly_tree(
         self, served: FakeFetch, liulab_data: Path
     ) -> None:
+        # One directory per release and tax group, because each carries a marker of its
+        # own — the shape an Xref set and a Homology set are prepared in.
         database = JasparDatabase("2024", "nematodes")
         expected = (
             liulab_data
             / "motif"
             / "jaspar"
+            / "2024"
+            / "nematodes"
             / "JASPAR2024_CORE_nematodes_non-redundant_pfms_transfac.txt"
         )
         assert database.path == expected
         assert expected.is_file()
-        assert jaspar_data_dir() == expected.parent
+        assert jaspar_set_dir("2024", "nematodes") == expected.parent
+        assert jaspar_data_dir() == liulab_data / "motif" / "jaspar"
         assert not (liulab_data / "genome").exists()
+        # The marker is written last, beside the file it claims, and it is what says the
+        # release is finished — not the file's mere existence.
+        record = read_record(expected.parent)
+        assert record is not None
+        assert record.kind == "motif"
+        assert record.source_url == jaspar_url("2024", "nematodes")
+        assert record.details["release"] == "2024"
+        assert record.details["tax_group"] == "nematodes"
+        assert record.files == {expected.name: expected.stat().st_size}
+        # Nothing JASPAR published to pin, so what is recorded is the digest of what was
+        # stored — which is what a re-read is held to.
+        assert record.sha256 == hashlib.sha256(expected.read_bytes()).hexdigest()
+        assert not (expected.parent / ".work").exists()
 
         JasparDatabase("2026", "all")
-        cached = sorted(path.name for path in jaspar_data_dir().iterdir())
-        assert cached == [
-            "JASPAR2024_CORE_nematodes_non-redundant_pfms_transfac.txt",
-            "JASPAR2026_CORE_all_non-redundant_pfms_transfac.txt",
+        prepared = sorted(
+            str(path.relative_to(jaspar_data_dir())) for path in jaspar_data_dir().glob("*/*/*.txt")
+        )
+        assert prepared == [
+            "2024/nematodes/JASPAR2024_CORE_nematodes_non-redundant_pfms_transfac.txt",
+            "2026/all/JASPAR2026_CORE_all_non-redundant_pfms_transfac.txt",
         ]
 
     def test_fetching_happens_once_per_release_and_tax_group(self, served: FakeFetch) -> None:
@@ -485,11 +521,13 @@ class TestJasparDatabaseDownload:
         assert database.path.parent == elsewhere
         assert served.last.progressbar is False
 
-    def test_an_interrupted_download_never_occupies_the_final_name(
+    def test_an_interrupted_download_leaves_no_release_and_names_the_login_node(
         self, monkeypatch: pytest.MonkeyPatch, jaspar_counts: None, data_dir: Path
     ) -> None:
-        # Half a file arrives and the fetch then dies. The final name must be untouched:
-        # this is what stands in for a completion record.
+        # Half a file arrives and the fetch then dies. Nothing is placed and no marker is
+        # written, so the release reads as absent rather than as a short one — and what a
+        # compute node with no internet gets is the call to make on a login node, where it
+        # used to get pooch's own transport error.
         half = (data_dir / FIXTURE).read_text(encoding="utf-8")[:2000]
 
         def die(url: str, dest_dir: Path, **kwargs: Any) -> Path:
@@ -498,29 +536,67 @@ class TestJasparDatabaseDownload:
             raise ConnectionError("the network went away")
 
         monkeypatch.setattr(fetch_mod, "fetch_url", die)
-        with pytest.raises(ConnectionError):
+        with pytest.raises(MotifSetNotDownloadedError) as raised:
             JasparDatabase("2024", "vertebrates")
-        final = jaspar_data_dir() / jaspar_filename("2024", "vertebrates")
-        assert not final.exists()
+        assert "login node" in str(raised.value)
+        assert jaspar_prepare_command("2024", "vertebrates") in str(raised.value)
+
+        directory = jaspar_set_dir("2024", "vertebrates")
+        assert not (directory / jaspar_filename("2024", "vertebrates")).exists()
+        assert read_record(directory) is None
 
     def test_what_an_interrupted_download_left_behind_is_never_adopted(
         self, monkeypatch: pytest.MonkeyPatch, jaspar_counts: None, data_dir: Path
     ) -> None:
-        # The half file is still in the working area when the next construction starts;
-        # it must be swept rather than picked up as though it had finished.
+        # The half file is still in the working area when the next construction starts.
+        # JASPAR pins no checksum, so nothing could vouch for it — and pooch serves a file
+        # already sitting at the destination — which is why the working area is swept
+        # before the fetch rather than picked up as though it had finished.
         half = (data_dir / FIXTURE).read_text(encoding="utf-8")[:2000]
-        work = jaspar_data_dir() / ".work"
+        directory = jaspar_set_dir("2024", "vertebrates")
+        work = directory / ".work"
         work.mkdir(parents=True)
-        part = work / f"{jaspar_filename('2024', 'vertebrates')}.part"
-        part.write_text(half)
+        stale = work / jaspar_filename("2024", "vertebrates")
+        stale.write_text(half)
 
         fake = FakeFetch(FIXTURE)
         monkeypatch.setattr(fetch_mod, "fetch_url", fake)
         database = JasparDatabase("2024", "vertebrates")
         assert len(database) == FIXTURE_COUNT
-        assert not part.exists()
+        assert not stale.exists()
         # And the working area itself is gone once a normal download is in place too.
-        assert not (jaspar_data_dir() / ".work").exists()
+        assert not work.exists()
+
+    def test_a_release_left_unfinished_reads_as_unfinished_and_the_repair_names_the_rebuild(
+        self, served: FakeFetch
+    ) -> None:
+        # What the marker buys over an atomic rename: a file whose record went missing is
+        # not silently re-read as a finished release, and the message names both halves of
+        # the repair rather than leaving the caller with nothing and no way back.
+        database = JasparDatabase("2024", "nematodes")
+        (database.path.parent / RECORD_NAME).unlink()
+
+        with pytest.raises(UnfinishedRegistrationError, match="rm -rf") as raised:
+            JasparDatabase("2024", "nematodes")
+        assert jaspar_prepare_command("2024", "nematodes") in str(raised.value)
+
+    def test_a_release_rewritten_after_it_was_prepared_is_refused_by_its_own_digest(
+        self, served: FakeFetch, fixture_text: str
+    ) -> None:
+        # The same ten records with one byte changed: the motif count still accepts this
+        # file and the recorded digest does not, which is the whole of what the marker
+        # adds. JASPAR publishes no checksum, so the digest is of what was stored.
+        database = JasparDatabase("2024", "nematodes")
+        edited = fixture_text.replace("ID lin-14", "ID lin-15")
+        assert edited != fixture_text
+        database.path.write_text(edited, encoding="utf-8")
+        marker = database.path.parent / RECORD_NAME
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        payload["files"][database.path.name] = database.path.stat().st_size
+        marker.write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(JasparReleaseError, match="hashes to"):
+            JasparDatabase("2024", "nematodes")
 
 
 class TestJasparDatabaseIdentity:
@@ -592,42 +668,53 @@ class TestJasparDatabaseQueries:
 
 
 class TestJasparDatabaseIntegrity:
-    def _cache(self, text: str, release: str = "2024", tax_group: str = "all") -> Path:
-        """Put ``text`` where a download would have left it, so the cache path is read."""
-        path = jaspar_data_dir() / jaspar_filename(release, tax_group)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        return path
+    @pytest.fixture
+    def publish(self, fake_fetch: FakeFetch, tmp_path: Path) -> PublishText:
+        """Return a helper that makes JASPAR publish ``text``, whatever is in it.
+
+        Through the fetch step rather than written into the set's directory by hand: the
+        release is then prepared exactly as a real one is, marker and all, so what these
+        tests exercise is a *prepared* release being read — which is where a truncated
+        publisher file would actually be caught.
+        """
+
+        def publish(text: str) -> None:
+            path = tmp_path / "published_transfac.txt"
+            path.write_text(text, encoding="utf-8")
+            fake_fetch.serve(path)
+
+        return publish
 
     def test_a_wrong_motif_count_raises_rather_than_yielding_a_partial_release(
-        self, jaspar_counts: None, fixture_text: str
+        self, publish: PublishText, jaspar_counts: None, fixture_text: str
     ) -> None:
-        short = "".join(part + "//\n" for part in fixture_text.split("//\n")[:3])
-        path = self._cache(short)
+        publish("".join(part + "//\n" for part in fixture_text.split("//\n")[:3]))
         with pytest.raises(JasparReleaseError) as raised:
             JasparDatabase("2024", "all")
         message = str(raised.value)
         assert "holds 3 motifs" in message
         assert f"has {FIXTURE_COUNT}" in message
-        assert str(path) in message
+        assert str(jaspar_set_dir("2024", "all")) in message
 
-        # Checked on a cache read too, not only on a download: nothing is fetched here.
-        self._cache(fixture_text + fixture_text.split("//\n")[0] + "//\n")
-        with pytest.raises(JasparReleaseError, match="holds 11 motifs"):
+        # Checked on every read and not only on the download: the release is prepared and
+        # recorded, and constructing it again reads what is there and still refuses it.
+        with pytest.raises(JasparReleaseError, match="holds 3 motifs"):
             JasparDatabase("2024", "all")
 
-    def test_the_real_count_is_what_an_unpatched_read_is_held_to(self, fixture_text: str) -> None:
+    def test_the_real_count_is_what_an_unpatched_read_is_held_to(
+        self, publish: PublishText, fixture_text: str
+    ) -> None:
         # Ten records where the 2024 union file has 2346: the constant is not decoration.
-        self._cache(fixture_text)
+        publish(fixture_text)
         with pytest.raises(JasparReleaseError, match="has 2346"):
             JasparDatabase("2024", "all")
 
     def test_two_versions_of_one_matrix_are_refused(
-        self, jaspar_counts: None, fixture_text: str
+        self, publish: PublishText, jaspar_counts: None, fixture_text: str
     ) -> None:
         # A non-redundant release ships one version of each, which is what makes a bare
         # base id address one motif — asserted rather than assumed.
-        self._cache(fixture_text.replace("AC MA1929.2", "AC MA0139.1"))
+        publish(fixture_text.replace("AC MA1929.2", "AC MA0139.1"))
         with pytest.raises(JasparReleaseError, match="two versions of the matrix MA0139"):
             JasparDatabase("2024", "all")
 
@@ -637,8 +724,8 @@ class TestJasparDatabaseIntegrity:
         assert len(set(bases)) == len(bases)
 
     def test_a_bad_record_raises_a_parse_error_and_not_a_release_error(
-        self, jaspar_counts: None, fixture_text: str
+        self, publish: PublishText, jaspar_counts: None, fixture_text: str
     ) -> None:
-        self._cache(fixture_text.replace("PO\tA\tC\tG\tT", "PO\tA\tG\tC\tT", 1))
+        publish(fixture_text.replace("PO\tA\tC\tG\tT", "PO\tA\tG\tC\tT", 1))
         with pytest.raises(TransfacError):
             JasparDatabase("2024", "all")

@@ -17,11 +17,11 @@ and the subtrees other contexts own — because every one of those steps is expr
 it and it cannot be read from anywhere else without a cycle. The names stay importable
 from :mod:`genome.io.download`, which is where they used to live.
 
-Most of the **Data dir** is that assembly tree, and not all of it: :func:`motif_data_dir`
-and :func:`xref_data_dir` are filed *beside* it rather than inside it, because neither a
-motif nor an identifier belongs to an assembly. They are here so that what lives under the
-data root is legible in one file — what lives under ``motif/`` and ``xref/`` is each
-context's own business and is spelled there.
+Most of the **Data dir** is that assembly tree, and not all of it. What belongs to no
+assembly is filed *beside* it — a **Motif set**, an **Xref set**, a **Homology set** — and
+those roots are declared together in :mod:`genome.io.prepared`, which owns the pipeline
+that fills them. :func:`liulab_data_dir` is the one thing they share with the assembly
+tree, and it is here.
 
 :class:`AssemblyDir` is that layout as a **value**: where an assembly lives is settled
 once, by :meth:`AssemblyDir.locate`, and then carried. A caller holding one — a
@@ -72,17 +72,6 @@ DEFAULT_LIULAB_DATA_PATHS = [
 #: Subdirectory of the **Data dir** holding the assembly tree — one directory per
 #: **Assembly** under it, and most of the data root.
 ASSEMBLIES_SUBDIR = "genome"
-
-#: Subdirectory of the **Data dir** holding motif data, and the first thing filed as a
-#: *sibling* of the assembly tree rather than inside it: a **Motif** belongs to no
-#: assembly, so there is no assembly directory it could go under.
-MOTIF_SUBDIR = "motif"
-
-#: Subdirectory of the **Data dir** holding **Xref set**s, a sibling of the assembly tree
-#: beside ``motif/`` and for the same reason: an identifier is a name and not a place, so
-#: it names no **Assembly** either. What lives *under* it — a directory per **Xref
-#: source**, release and species — is the Xref context's business and is spelled there.
-XREF_SUBDIR = "xref"
 
 #: Subdirectory of an **Assembly dir** holding its annotations. The Assembly context
 #: owns the layout, so the name lives here and the Annotation context reads it.
@@ -154,55 +143,6 @@ def assembly_data_dir(assembly: str) -> Path:
     >>> del os.environ["LIULAB_DATA"]
     """
     return liulab_data_dir() / ASSEMBLIES_SUBDIR / assembly
-
-
-def motif_data_dir() -> Path:
-    """Return the directory holding motif data, which belongs to no assembly.
-
-    ``<liulab_data>/motif/``, a **sibling** of the assembly tree rather than a tenant of
-    it: a **Motif** is a pattern and not a place, so it names no **Assembly** and there is
-    no per-assembly directory it could be filed under. Shared by every project on the
-    machine, exactly as an assembly is. Nothing is created here — the caller that writes
-    creates what it needs.
-
-    Returns
-    -------
-    pathlib.Path
-        ``<liulab_data>/motif``.
-
-    Examples
-    --------
-    >>> import os
-    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
-    >>> motif_data_dir()
-    PosixPath('/scratch/liulab/motif')
-    >>> del os.environ["LIULAB_DATA"]
-    """
-    return liulab_data_dir() / MOTIF_SUBDIR
-
-
-def xref_data_dir() -> Path:
-    """Return the directory holding **Xref set**s, which belong to no assembly.
-
-    ``<liulab_data>/xref/``, a **sibling** of the assembly tree and of ``motif/``: an
-    identifier is a name and not a place, so an **Xref set** names no **Assembly** and
-    answers with no **Genome** open. Shared by every project on the machine. Nothing is
-    created here — the caller that writes creates what it needs.
-
-    Returns
-    -------
-    pathlib.Path
-        ``<liulab_data>/xref``.
-
-    Examples
-    --------
-    >>> import os
-    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
-    >>> xref_data_dir()
-    PosixPath('/scratch/liulab/xref')
-    >>> del os.environ["LIULAB_DATA"]
-    """
-    return liulab_data_dir() / XREF_SUBDIR
 
 
 def assembly_repair_command(assembly: str, source: str | Path | None = None) -> str:
