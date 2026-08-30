@@ -7,7 +7,11 @@ taken when the suite held 517 tests; it held 2425 two weeks later.
 **Three findings. (1) CI's largest single item was not a test at all — it was numba recompiling
 memelite from source on every run, 27.5 s, because the JIT cache lands inside the pixi env and
 setup-pixi saves that env *before* any test has run. Redirecting the cache costs no coverage and
-removes 47% of the test lane's wall. (2) The suite was cut 2425 → 933 tests with coverage
+removes 47% of the test lane's wall — but redirecting it only makes the artifacts cacheable, and
+took two further fixes to make them reliably *usable*: rotating the key so a partial cache cannot
+freeze, and pinning the compile target so the key stops varying with the runner's CPU model, the
+second measured only after the first had shipped and kept working intermittently.
+(2) The suite was cut 2425 → 933 tests with coverage
 unchanged at 98%, which says most of what was removed was re-execution, not checking. (3) A
 handful of tests spawn their own process pools, and distributing them by load made the lane's wall
 *bimodal* — 13.5 s or 16.1 s on the same commit, decided by scheduling alone. `--dist=loadgroup`
@@ -23,6 +27,12 @@ Repeated runs per configuration; where a configuration is unstable the **maximum
 because a limit is only met if the worst run meets it. Caches warm unless stated — the first run
 of a session is materially slower and is called out where it matters. CI numbers are read from
 `gh api` job and step timings over six consecutive runs.
+
+One set of numbers is not from that box and says so where it appears: the codegen comparison under
+"What the pin costs" needed x86-64, because that is what CI runs and what the question is about.
+Those were taken on a lab compute node — Intel Xeon Platinum 8468, 48 cores — inside a throwaway
+pixi env pinning the same memelite 0.4.0 and numba 0.67.0, and they time library calls directly
+rather than a pytest lane, so they are not comparable to the wall-clock figures elsewhere here.
 
 ## 1. Where CI's 80 seconds went
 
@@ -61,8 +71,10 @@ populated:
 | warm cache | 0.60 s | **0.02 s** | 0.00 s |
 
 350×, and the cache is 936 KB in 8 files. On CI the compile is larger and the cores slower, which
-is why it shows up there as 27.5 s rather than 7 s. Fixed by redirecting `NUMBA_CACHE_DIR` to a
-workspace path and caching it.
+is why it shows up there as 27.5 s rather than 7 s. Redirecting `NUMBA_CACHE_DIR` to a workspace
+path and caching it is what makes the artifacts *cacheable* — it is not, on its own, what makes
+them *usable*, which took two further findings: the key rotation below, and the target pin under
+"The cache was reused only when the runner's CPU model happened to match".
 
 **The cache key must rotate, and a fixed key is a trap.** numba caches per type signature, so any
 one run compiles only the specialisations it happened to reach, and `actions/cache` refuses to
@@ -77,6 +89,118 @@ A serial warm-up step was tried first and rejected: seeding by one `tomtom` call
 cache against 1448 KB from a parallel test run, and the suite was *slower* afterwards (8.35 s
 against 2.90 s) because the warm-up reached fewer signatures than the tests do. Seeding from the
 real run is what fills the cache; the key rotation is what lets it accumulate.
+
+## The cache was reused only when the runner's CPU model happened to match
+
+Measured after the redirect above shipped, because the win kept arriving intermittently and the
+miss was silent.
+A `pull_request` run took the test lane to 32 s with a 2.28 s slowest test; a push to `main`
+logged `Cache restored from key: …` and then recompiled anyway — 38.96 s, 26.06 s, 23.63 s and
+23.60 s, leaving the lane at 72 s. Deleting every cache and seeding a clean one changed nothing.
+
+`actions/cache` was never the thing failing. numba keys each compiled overload on a tuple whose
+middle element is the target description, read here out of a `.nbi` written on an M4:
+
+```
+((float64, float64),
+ ('arm64-apple-darwin25.6.0', 'apple-m4', ''),
+ ('65ebbeab…', 'e3b0c442…'))
+```
+
+**The host CPU model is part of the cache key.** GitHub's runners are heterogeneous and which one
+a job lands on is not something the workflow chooses, so whether the restored cache applied was
+luck. There is nothing special about the ref; the earlier guess that this was branch scoping was
+wrong.
+
+The failure mode is worse than a plain miss because the two caches disagree about what a hit is.
+Seeding a cache under one CPU name and re-running under another, counting with numba's own
+`Dispatcher.stats`:
+
+| run | numba's counter | index after |
+|---|---|---|
+| seed as `apple-m4` | miss ×1 | one entry |
+| again as `apple-m4` | **hit ×1** | one entry |
+| as `apple-m1` | **miss ×1** | *two* entries |
+
+Every file present and readable in the third row, and numba recompiles regardless, adding an entry
+beside the old one rather than reporting anything. `actions/cache` reports on the files; numba
+decides on the contents; only `--durations` says which happened.
+
+**Fixed by pinning `NUMBA_CPU_NAME=generic` on the `test` job**, which collapses the key's middle
+element to `('…', 'generic', '')` — stable across machines of one architecture.
+
+### What the pin costs
+
+Warm runs of `tests/tf/test_compare.py` and `tests/tf/test_scan.py`, 59 tests, three repeats each
+after one cold run to fill the cache:
+
+| | cold | warm | cache |
+|---|---|---|---|
+| `generic` | 10.82 s | 3.97 / 4.47 / 3.97 s | 1388 KB |
+| host (`apple-m4`) | 10.73 s | 4.02 / 4.01 / 4.02 s | 1452 KB |
+
+Indistinguishable, and all 59 pass either way, so the pin changes no result. These numbers replace
+an earlier pass over the same two files that read 6.93 s generic against 7.29 s host: same
+conclusion, different absolute times because that pass timed the files without the suite's
+fixtures warm. The cache is also *not* quite the same size either way, as that pass reported —
+1388 KB against 1452 KB, host being the larger, which is what host-specific codegen should do.
+
+**That measurement cannot speak for CI, which is why it is not the one the decision rests on.**
+It was taken on arm64, where `generic` still includes NEON — mandatory in ARMv8-A — so
+generic-versus-host is nearly free *by construction*. CI is x86-64, where `generic` means the
+SSE2 baseline and gives up AVX2 and AVX-512 entirely. That is the architecture the pin actually
+runs on, and the gap there could have been real.
+
+Re-measured on an Intel Xeon Platinum 8468 (Sapphire Rapids), which numba resolves to
+`sapphirerapids` with the full AVX-512 set on — `avx512f`, `avx512bw`, `avx512dq`, `avx512vnni`,
+`avx512fp16` and the rest — so this is the *largest* gap the pin can cost anywhere on x86-64.
+memelite's two engines, one numba thread throughout so a varying thread count cannot swamp the
+codegen difference, warm calls only, three repeats:
+
+| workload | host (`sapphirerapids`) | `generic` |
+|---|---|---|
+| `fimo`, 10 motifs × 600 bp (the suite's shape) | 12.6 / 12.2 / 12.3 ms | 12.1 / 11.9 / 15.0 ms |
+| `fimo`, 20 motifs × 200 kb (333× the suite) | 30.2 / 30.0 / 29.9 ms | 30.1 / 29.8 / 29.8 ms |
+| `tomtom`, 60 × 60 motifs | 69.6 / 70.4 / 70.2 ms | 67.9 / 68.5 / 68.9 ms |
+| `tomtom`, 60 × 60 motifs (scan run) | 69.7 / 69.8 / 69.3 ms | 72.5 / 72.0 / 72.2 ms |
+
+**AVX-512 buys these engines nothing measurable.** `fimo` is a dead heat at both scales and does
+not diverge as the sequence grows 333×; `tomtom` lands within ±4% and falls on both sides of host
+across the two runs, which is noise, not a trend. So the honest framing is no longer *no cost to
+CI, unknown cost to a production scan* — it is **no cost to CI, and none detected up to 200 kb on
+the widest-vector x86-64 available**, which is the case that was supposed to pay for AVX-512.
+
+What remains unmeasured is a genuinely genome-scale scan — hg38 against a full vertebrate release.
+The finding above is evidence that the ratio does not move with scale rather than proof it never
+will, and a production question deserves its own dated measurement rather than an extrapolation
+from this one. But nothing here suggests host codegen is worth the reintroduced cache bug.
+
+The pin is set on the CI job and deliberately not in the pixi task: a developer's cache is warm
+from ordinary use and their CPU does not change, so there is nothing to fix locally.
+
+### The other candidate, and why it is not this one
+
+The index also carries a source stamp, `(st_mtime, st_size)` of the `.py` numba compiled, and the
+pixi env is restored from a tarball every run — so mtime drift would invalidate the cache too,
+independently of the CPU, with the same silent symptom. It is not ruled out, and under
+`NUMBA_CACHE_DIR` it is a sharper risk than it looks: the locator in play is
+`UserProvidedCacheLocator`, which stamps at full float precision — the locator that floors the
+mtime is a different one, for in-tree caches — so sub-second drift counts.
+
+The two are distinguishable without instrumenting anything, because they lose different amounts.
+A stamp mismatch makes `_load_index` return `{}` and discards the **whole** index at once; a CPU
+mismatch loses only the overloads compiled elsewhere. The bad run recompiled four compare tests
+while the rest of the numba-touching suite stayed fast, which is the CPU's signature and not the
+stamp's.
+
+That is an inference from the shape of the loss, not a measurement, and it is worth being clear
+that the stamp is **argued down rather than ruled out**. What settles it is two runs, because a
+stamp is only unstable relative to another restore of the same env: `scripts/show_numba_cache_key.py`
+prints the stamp on every run, so comparing the line across two runs on one lockfile answers it
+directly — identical stamps mean the tarball preserves mtimes and this candidate is dead; drifting
+stamps mean it is real and the CPU pin alone was never going to be enough. Until a second run
+exists to compare against, the honest status is unresolved, and the instrumentation is there so
+that resolving it costs nothing but reading.
 
 ## 3. The suite, cut to a third
 

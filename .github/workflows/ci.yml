@@ -60,8 +60,34 @@ jobs:
     #
     # Redirecting the cache to a path of our own is what makes it cacheable separately.
     # It is 936 KB and restores in under a second.
+    #
+    # `NUMBA_CPU_NAME` is what makes the restored cache USABLE. numba keys each compiled
+    # overload on a tuple whose middle element is `(target_triple, cpu_name, cpu_features)`,
+    # so the host CPU MODEL is part of the key. GitHub's runners are heterogeneous and which
+    # one a job lands on is not ours to choose, so an unpinned key varies per run: the cache
+    # restores, numba rejects it per overload, and the suite recompiles. That failure is
+    # silent and reads as a hit — `actions/cache` reports on the FILES, numba decides on the
+    # CONTENTS, and only `--durations` below tells you which happened. Measured on a run that
+    # logged `Cache restored from key: …` and then paid 38.96 s, 26.06 s, 23.63 s and 23.60 s.
+    #
+    # `generic` gives up CPU-specific vectorisation and that was measured, not assumed, on a
+    # Sapphire Rapids Xeon with the full AVX-512 set — the widest vectors x86-64 has, so the
+    # largest gap the pin can cost: memelite's engines came out a dead heat, and did not
+    # diverge as the scanned sequence grew 333×. Numbers and method in
+    # docs/research/test-suite-cost-and-parallelism-2026-08-30.md, which is also where to add
+    # anything learned later rather than growing this comment.
+    #
+    # Set HERE and not in the pixi task on purpose: a developer's cache is warm from ordinary
+    # use and their CPU never changes, so there is nothing to fix locally.
+    #
+    # `NUMBA_CPU_FEATURES` is redundant TODAY — numba defaults it to `""` whenever
+    # `NUMBA_CPU_NAME` is `generic`. It is set anyway because that default is numba's private
+    # business, and if it ever changes the key silently starts varying by the host feature
+    # string, which is a long one (117 flags on that Xeon) and the exact bug this pin ends.
     env:
       NUMBA_CACHE_DIR: ${{ github.workspace }}/.numba-cache
+      NUMBA_CPU_NAME: generic
+      NUMBA_CPU_FEATURES: ''
     steps:
       - uses: actions/checkout@v5
       - uses: prefix-dev/setup-pixi@v0.10.0
@@ -93,6 +119,12 @@ jobs:
           key: numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-
+      # What the restored cache is keyed against, printed before anything reads it. The CPU
+      # half of this key has already gone wrong silently once and the source-stamp half is
+      # merely unconfirmed; neither is visible in the cache step's own output, and they fail
+      # by different amounts — see the script for which loss looks like which cause.
+      - name: numba cache key
+        run: pixi run -e test python scripts/show_numba_cache_key.py
       - name: pytest -m 'not aligner'
         run: pixi run -e test test -- --durations=10
 
