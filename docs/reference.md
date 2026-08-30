@@ -37,6 +37,10 @@
 
 ::: genome.aligner.chromap
 
+## `genome.shipped`
+
+::: genome.shipped
+
 ## `genome.metadata`
 
 ::: genome.metadata

@@ -121,7 +121,7 @@ whichever context asked.
 
 ## Shared kernel
 
-Eleven words every context uses. Anything defined here is not redefined in a context file.
+Twelve words every context uses. Anything defined here is not redefined in a context file.
 
 **Assembly**:
 The identity of one reference — a free-form **local** key that names its directory under the **Data
@@ -210,3 +210,14 @@ chromap an **Index** is built with. Whether a tool's output is captured or strea
 not a second implementation.
 _Avoid_: dependency, native dependency (that is the packaging view), subprocess, backend, wrapper,
 bare "binary"
+
+**Shipped table**:
+A small tab-separated file that ships inside the wheel, is read whole and validated as it is read,
+and is repaired by re-running a build script rather than by anything a caller can do — the curated
+**Assembly metadata**, **Annotation metadata** and **Xref source** tables, the provenance tables
+beside each shipped-data directory, the censuses, the **Cofactor table**s and the **Motif link**
+tables. One module reads every one of them (`src/genome/shipped.py`), and a table declares itself
+to it: resource path, columns, row type, and the command that repairs it. Bulk ships gzipped and
+small metadata plain.
+_Avoid_: data file, curated table, packaged data, resource; and never the shipped **Gene list**
+JSON, which is keyed by **Registered name** and nested rather than tabular

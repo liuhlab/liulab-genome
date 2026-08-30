@@ -10,6 +10,23 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **One module reads every shipped table, where six brought their own loader.** `genome.shipped`
+  owns resource lookup, gzip, header validation, cell parsing, the blank-cell rules, duplicate-key
+  refusal and the shape of the error a broken file raises; `metadata.py`, `xref/metadata.py`,
+  `homology/metadata.py`, `tf/gene/census.py`, `tf/cofactor/table.py` and `tf/link.py` keep a
+  **table declaration** — resource path, columns, row type, the noun the table is called by and the
+  command that repairs it — and nothing else. Six failures are now checked in one place and reach
+  every table: an empty file, a header that is not the declared columns, a row with the wrong cell
+  count, a blank required cell, a flag spelled a way no table spells one, and a repeated key. The
+  last is declared per table, since a motif link table carries many rows per **Gene id stem** by
+  design. **The curated assembly, annotation and xref tables gain the header validation they
+  lacked**: those two readers went through pandas and checked no header at all, so a renamed or
+  missing column reached the cell parser as a blank cell — or read as `None` where the column was
+  optional. Every message still names its own noun and its own repair, pinned word for word by
+  `tests/test_shipped.py`, and several gained a repair they never carried. `species_slug` and
+  `parse_cell` move to live with the reader; `genome.metadata`, `genome.tf.gene` and
+  `genome.tf.cofactor` re-export them, so every existing import path still resolves. No shipped
+  `.tsv` or `.tsv.gz` byte changed — this is the reader half only.
 - **CI no longer recompiles memelite's JIT on every run, and the suite is a third of its size.**
   The `test` lane's largest single item was not a test: `memelite`'s scan and compare engines are
   `@numba.njit(cache=True)`, numba writes that cache inside the pixi env, and `setup-pixi` saves
