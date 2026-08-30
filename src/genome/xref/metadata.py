@@ -28,6 +28,13 @@ it. It is a default and not a recommendation: naming a source is how the scienti
 gets made deliberately, and NCBI and Ensembl agree on only 57.6% of human gene-level
 (GeneID, ENSG) pairs, so the choice determines nearly half the answer.
 
+``symbol_default`` marks the same thing **for the other question this package answers**
+(ADR-0021). A default is per species *and* per question, because the source that carries a
+species' ids is often not the one that carries its symbols: human's ids default to the
+Alliance, whose cross-reference file publishes no human symbol at all, while HGNC's
+quarterly archive does. Two flags rather than one, so ``lookup_xref(species)`` and
+``lookup_xref(species, for_symbols=True)`` each read a row somebody wrote down.
+
 **Rows for one ``(species, source)`` are listed oldest release first**, and the last is
 what a caller who names no release gets. Ordering is the table's and never parsed out of
 the release string: ``"10.0.0"`` sorts before ``"9.0.0"`` as text and after it as a
@@ -130,14 +137,21 @@ class XrefMetadata:
         integrity check: what is stored on disk is a per-species slice and not the
         publisher's bytes, so the slice carries a digest of its own.
     default : bool
-        Whether this is the species' **Default xref source**.
+        Whether this is the species' **Default xref source** when the question is
+        identifiers.
+    symbol_default : bool
+        Whether this is it when the question is symbols (ADR-0021). A separate flag because
+        the two answers are usually different rows: the source carrying a species' ids
+        often publishes none of its symbols.
 
     Examples
     --------
     >>> record = lookup_xref("Caenorhabditis elegans")
-    >>> record.ncbi_taxid, record.default
-    (6239, True)
+    >>> record.ncbi_taxid, record.default, record.symbol_default
+    (6239, True, False)
     >>> record.url.endswith(".tsv.gz")
+    True
+    >>> lookup_xref("Caenorhabditis elegans", for_symbols=True).symbol_default
     True
     """
 
@@ -151,6 +165,7 @@ class XrefMetadata:
     url: str
     source_checksum: str
     default: bool = False
+    symbol_default: bool = False
 
     @classmethod
     def from_row(cls, row: Mapping[str, object]) -> XrefMetadata:
@@ -187,6 +202,7 @@ class XrefMetadata:
         ...         "url": "https://example.org/beast.tsv.gz",
         ...         "source_checksum": "md5:" + "0" * 32,
         ...         "default": "yes",
+        ...         "symbol_default": "no",
         ...     }
         ... ).pubmed_id is None
         True
@@ -337,6 +353,7 @@ def lookup_xref(
     source: str | None = None,
     release: str | None = None,
     *,
+    for_symbols: bool = False,
     table: Sequence[XrefMetadata] | None = None,
 ) -> XrefMetadata:
     """Return the curated row for one **Xref set**, filling in the defaults.
@@ -345,13 +362,19 @@ def lookup_xref(
     there. It is total in the other direction: it always answers with a row or raises, so
     nothing downstream guards a ``None`` before reading a field.
 
+    **A default is per species and per question** (ADR-0021), which is what ``for_symbols``
+    selects. It changes what an *unnamed* source resolves to and nothing else: a named
+    source is the caller's deliberate scientific choice and is never swapped for another,
+    and a named release is still honoured against whichever source was filled in.
+
     Parameters
     ----------
     species : str
         The species, in either the table's own spelling (``"Homo sapiens"``) or its slug
         (``"homo_sapiens"``).
     source : str, optional
-        The **Xref source**. Omitted, the species' **Default xref source** answers.
+        The **Xref source**. Omitted, the species' **Default xref source** answers — the
+        one flagged for identifiers, or the one flagged for symbols when ``for_symbols``.
     release : str, optional
         The **Release**. Omitted, the newest the table lists for that source answers —
         which is the last row, the table being in release order. Named, it is honoured
@@ -359,6 +382,11 @@ def lookup_xref(
         source either answers with that release or raises naming the ones that source has,
         and is never quietly swapped for another. Each source numbers its own releases and
         they do not correspond, so ``"116"`` is not a release the default source has.
+    for_symbols : bool, default False
+        Fill an unnamed source in with the species' symbol-carrying default rather than its
+        identifier one. The question a caller is about to ask, named here because a row is
+        resolved before anybody knows it — an **Xref set** is built for a species, a source
+        and a release, and which of the two verbs it will be asked is not part of that.
     table : sequence of XrefMetadata, optional
         The rows to read; the shipped table when omitted. A caller curating rows of their
         own hands them over here, and nothing is installed by passing them.
@@ -371,8 +399,9 @@ def lookup_xref(
     Raises
     ------
     NoXrefSetError
-        If no set exists for that species, that source, or that release of it. The message
-        names the species, sources or releases that do exist, whichever missed.
+        If no set exists for that species, that source, or that release of it — or, under
+        ``for_symbols``, if no row for the species is flagged to answer symbols. The
+        message names the species, sources or releases that do exist, whichever missed.
 
     Examples
     --------
@@ -381,6 +410,10 @@ def lookup_xref(
     >>> lookup_xref("Homo sapiens", "alliance", "9.0.0").ncbi_taxid
     9606
     >>> lookup_xref("Homo sapiens", release="9.0.0").source
+    'alliance'
+    >>> lookup_xref("Homo sapiens", for_symbols=True).source
+    'hgnc'
+    >>> lookup_xref("Homo sapiens", "alliance", for_symbols=True).source
     'alliance'
     >>> try:
     ...     lookup_xref("Homo sapiens", "alliance", "1.0")
@@ -403,8 +436,15 @@ def lookup_xref(
     # and then falling through to the release check keeps one path: naming a release
     # without a source must answer with *that* release or say which ones exist, never
     # quietly with another — two sources numbering their releases differently is exactly
-    # where a silently substituted release stops being reproducible.
-    source = _default_row(for_species, species=species).source if source is None else source
+    # where a silently substituted release stops being reproducible. Which of the two
+    # defaults is filled in is the only thing `for_symbols` decides.
+    if source is None:
+        filled = (
+            _symbol_default_row(for_species)
+            if for_symbols
+            else _default_row(for_species, species=species)
+        )
+        source = filled.source
     for_source = [record for record in for_species if record.source == source]
     if not for_source:
         listed = ", ".join(xref_sources(species, table=rows))
@@ -451,3 +491,24 @@ def _default_row(for_species: Sequence[XrefMetadata], *, species: str) -> XrefMe
         )
     source = chosen[-1].source
     return [record for record in for_species if record.source == source][-1]
+
+
+def _symbol_default_row(for_species: Sequence[XrefMetadata]) -> XrefMetadata:
+    """Return the newest release of the source flagged to answer symbols for the species.
+
+    **No fallback to a species' only source**, which is where this parts company with
+    :func:`_default_row`: a publisher that carries no symbol does not begin carrying them
+    by being the only one prepared, and answering from it would hand back a gene list with
+    no matches where the honest answer is that nothing here matches symbols for that
+    species yet.
+    """
+    flagged = [record for record in for_species if record.symbol_default]
+    if not flagged:
+        listed = ", ".join(dict.fromkeys(record.source for record in for_species))
+        raise NoXrefSetError(
+            f"no xref source answers symbols for {for_species[0].species!r}: the ones "
+            f"prepared for it are {listed}, and none of their rows is flagged to answer a "
+            f"symbol question. Name the source you want, or flag one in the curated xref "
+            f"metadata table's 'symbol_default' column."
+        )
+    return [record for record in for_species if record.source == flagged[-1].source][-1]

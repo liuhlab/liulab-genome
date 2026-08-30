@@ -55,6 +55,7 @@ from genome.xref import (
     EvidenceNotRecordedError,
     HgncFileError,
     NamespaceNotCarriedError,
+    NoXrefSetError,
     SymbolDirectionError,
     XrefSet,
     fold_symbol,
@@ -399,6 +400,124 @@ class TestTheNewSourcesAreRows:
         assert worm.version == "WS298"
 
 
+# ---------------------------------------------------------------------------
+# Which set answers when no source is named
+# ---------------------------------------------------------------------------
+
+
+class TestTheDefaultWhenTheQuestionIsSymbols:
+    """The **Default xref source** is per species *and per question* (ADR-0021).
+
+    The papercut this closes: human's id default is the Alliance, whose cross-reference file
+    carries no human symbol at all, so the epic's most common question — a gene list copied
+    out of a paper — failed on the first try until a source was named. The flag that answers
+    it is a second column of the curated table, and the path that reads it is
+    :meth:`XrefSet.for_symbols`, which is the constructor with the question named.
+
+    Both halves are asserted here, because the two behaviours sitting next to each other is
+    the confusing part: the question-named path reaches the symbol-carrying source, and the
+    plain constructor still does not — it carries no symbol and says exactly what to pass.
+    """
+
+    def test_every_species_flags_exactly_one_source_for_symbols(self) -> None:
+        # Read off the shipped rows, so a fourth species added without the flag fails here
+        # rather than at the first `match-symbols` somebody runs.
+        flagged = {
+            species: [
+                row.source
+                for row in metadata_mod.xref_table()
+                if row.species == species and row.symbol_default
+            ]
+            for species in ("Homo sapiens", "Mus musculus", "Caenorhabditis elegans")
+        }
+        assert flagged == {
+            "Homo sapiens": [HGNC_ARCHIVE],
+            "Mus musculus": [ALLIANCE_BGI],
+            "Caenorhabditis elegans": [ALLIANCE_BGI],
+        }
+
+    def test_the_two_defaults_are_different_rows_and_the_id_one_did_not_move(self) -> None:
+        for species in ("Homo sapiens", "Mus musculus", "Caenorhabditis elegans"):
+            assert lookup_xref(species).source == ALLIANCE
+            assert lookup_xref(species, for_symbols=True).source != ALLIANCE
+
+    def test_a_human_symbol_needs_no_source_named(self, sources: FakeFetch) -> None:
+        # Story 10 of the epic, on the retired spelling the whole feature exists for.
+        answer = XrefSet.for_symbols("Homo sapiens").match_symbols([RETIRED_EPIFACTORS_SYMBOL])
+
+        assert answer.source == HGNC_ARCHIVE
+        assert answer.resolved[RETIRED_EPIFACTORS_SYMBOL] == (
+            SymbolMatch(symbol=RETIRED_EPIFACTORS_SYMBOL, gene_id_stem=BMAL1, kind=PREVIOUS),
+        )
+
+    def test_mouse_and_worm_reach_their_third_source_the_same_way(self, sources: FakeFetch) -> None:
+        # Symbols come from a third source again for these two, so the flag has to hold for
+        # them or it is a human special case wearing a general name.
+        mouse, worm = (
+            XrefSet.for_symbols("Mus musculus"),
+            XrefSet.for_symbols("Caenorhabditis elegans"),
+        )
+
+        assert (mouse.source, worm.source) == (ALLIANCE_BGI, ALLIANCE_BGI)
+        assert mouse.match_symbols(["Trp53"]).gene_id_stems == ["ENSMUSG00000059552"]
+        assert worm.match_symbols(["daf-16"]).gene_id_stems == ["WBGene00000912"]
+
+    def test_a_named_source_is_never_swapped_for_the_flagged_one(self) -> None:
+        # Naming a source is how the scientific choice gets made deliberately, so the
+        # question changes what an unnamed source resolves to and nothing else.
+        assert lookup_xref("Homo sapiens", ALLIANCE, for_symbols=True).source == ALLIANCE
+
+    def test_a_release_named_alone_is_still_honoured_against_the_flagged_source(self) -> None:
+        # The release check runs after the source is filled in, exactly as it does for the
+        # id default — a release asked for is answered or raises, never quietly swapped.
+        assert lookup_xref("Homo sapiens", release=HGNC_RELEASE, for_symbols=True).source == (
+            HGNC_ARCHIVE
+        )
+
+    def test_the_plain_constructor_still_answers_from_the_id_default(
+        self, alliance_human: XrefSet
+    ) -> None:
+        assert alliance_human.source == ALLIANCE
+        assert alliance_human.symbol_kinds == ()
+
+    def test_a_set_carrying_no_symbols_names_exactly_what_to_pass(
+        self, alliance_human: XrefSet
+    ) -> None:
+        # The set genuinely carries no symbol, and answering from another publisher's bytes
+        # is what one query reading exactly one set forbids (ADR-0017) — so it raises, and
+        # the message names this species' symbol source and the call that fills it in.
+        with pytest.raises(NamespaceNotCarriedError) as raised:
+            alliance_human.match_symbols([RETIRED_EPIFACTORS_SYMBOL])
+
+        message = str(raised.value)
+        assert HGNC_ARCHIVE in message
+        assert "for_symbols" in message
+        # Mouse's and worm's source is not what to pass for a human set.
+        assert ALLIANCE_BGI not in message
+
+    def test_a_species_no_row_flags_names_the_sources_it_has(self) -> None:
+        rows = tuple(
+            replace(row, symbol_default=False)
+            for row in metadata_mod.xref_table()
+            if row.species == "Homo sapiens"
+        )
+
+        with pytest.raises(NoXrefSetError) as raised:
+            lookup_xref("Homo sapiens", for_symbols=True, table=rows)
+
+        for source in xref_sources("Homo sapiens"):
+            assert source in str(raised.value)
+
+    def test_one_source_is_not_a_symbol_default_just_by_being_the_only_one(self) -> None:
+        # The id default falls back to a species' single source; this one does not. A source
+        # that carries no symbol does not start carrying them by being alone.
+        rows = (replace(lookup_xref("Homo sapiens"), symbol_default=False),)
+
+        assert lookup_xref("Homo sapiens", table=rows).source == ALLIANCE
+        with pytest.raises(NoXrefSetError):
+            lookup_xref("Homo sapiens", for_symbols=True, table=rows)
+
+
 class TestWhatAPreparedSetHolds:
     def test_each_set_carries_the_symbol_namespace_beside_its_ids(
         self, human: XrefSet, mouse: XrefSet, worm: XrefSet
@@ -577,19 +696,18 @@ class TestTheTwoDirectionsAreNotMirrorImages:
             with pytest.raises(NamespaceNotCarriedError):
                 human.to_stems([RETIRED_EPIFACTORS_SYMBOL], stored)
 
-    def test_a_set_whose_source_carries_no_symbols_says_which_ones_do(
+    def test_a_set_whose_source_carries_no_symbols_matches_none(
         self, alliance_human: XrefSet
     ) -> None:
         # The Alliance's cross-reference file carries symbols for worm alone, in rows this
         # package reads as gene ids, and none at all for human — measured on the whole
-        # 25 MB file. So a human set built on it answers no symbol at all, and says which
-        # sources would.
+        # 25 MB file. So a human set built on it answers no symbol at all and raises rather
+        # than reaching for another publisher's bytes. What the message must name is
+        # `TestTheDefaultWhenTheQuestionIsSymbols`'s.
         assert alliance_human.symbol_kinds == ()
         assert SYMBOL not in alliance_human.namespaces
-        with pytest.raises(NamespaceNotCarriedError) as raised:
+        with pytest.raises(NamespaceNotCarriedError):
             alliance_human.match_symbols(["TP53"])
-        assert HGNC_ARCHIVE in str(raised.value)
-        assert ALLIANCE_BGI in str(raised.value)
 
 
 # ---------------------------------------------------------------------------

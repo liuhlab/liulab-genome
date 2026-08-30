@@ -316,7 +316,9 @@ everyone in the lab reaches for the same one without discussing it. It is a defa
 a recommendation — naming a source is how the scientific choice gets made deliberately, and
 NCBI and Ensembl agree on only 57.6% of human gene-level (GeneID, ENSG) pairs. Every answer
 names the source and release that produced it either way, so a result is reproducible a year
-later.
+later. **The default is per species and per question** (ADR-0021): `--from-stems symbol` is
+the one question here that is about symbols, and it is answered by the source that carries
+them rather than by the identifier default, which for human carries none.
 
 `--json` carries the same answer the API renders, keyed by what was asked about, with the
 ids that named nothing under `unresolved`.
@@ -332,10 +334,11 @@ There is no third direction: Entrez to HGNC is two calls and the join is yours, 
 the hop visible in your pipeline rather than invisible in ours. `genome.xref.XrefSet` in the
 [API reference](reference.md) is the same two verbs from Python, on one code path with this.
 
-**`--from-stems symbol` labels; the other way round is a command of its own.** Against a
-source that carries symbols — `hgnc` for human, `alliance_bgi` for mouse and worm —
+**`--from-stems symbol` labels; the other way round is a command of its own.**
 `--from-stems symbol` gives the authority's single current approved spelling for each stem,
-which is what a figure axis wants. Toward stems is not its mirror: a symbol also matches
+which is what a figure axis wants, and reaches the source that carries symbols — `hgnc` for
+human, `alliance_bgi` for mouse and worm — without your naming it. Toward stems is not its
+mirror: a symbol also matches
 spellings the authority has retired, answers with every gene any of them names, and carries
 which kind matched — so it is [`genome match-symbols`](#genome-match-symbols-species-symbols)
 that answers it, and `--to-stems symbol` exits `2` naming that command. The `--to-stems` help
@@ -357,7 +360,7 @@ that silently drops every row spelling its gene the way the authority used to. N
 named and no genome is opened: a symbol is a name and not a place.
 
 ```console
-$ genome match-symbols "Homo sapiens" --source hgnc ARNTL ADCY3 Brca1 > genes.tsv
+$ genome match-symbols "Homo sapiens" ARNTL ADCY3 Brca1 > genes.tsv
 gene symbols -> gene id stems for Homo sapiens (hgnc 2026-07-07)
   source   https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt
   columns  asked, symbol, gene_id_stem, kind
@@ -394,7 +397,7 @@ working. `--case-insensitive` folds both sides and still answers with **every** 
 rather than picking one.
 
 ```console
-$ genome match-symbols "Homo sapiens" --source hgnc brca1 --case-insensitive --json
+$ genome match-symbols "Homo sapiens" brca1 --case-insensitive --json
 {"species": "Homo sapiens", "source": "hgnc", "release": "2026-07-07",
  "case_insensitive": true, "kinds": ["approved", "previous", "alias"], "limits": null,
  "resolved": {"brca1": [{"symbol": "BRCA1", "gene_id_stem": "ENSG00000012048",
@@ -411,7 +414,7 @@ without which *this gene is not in the release* and *this source does not publis
 spelling you used* would both be silence.
 
 ```console
-$ genome match-symbols "Mus musculus" --source alliance_bgi Arntl
+$ genome match-symbols "Mus musculus" Arntl
 gene symbols -> gene id stems for Mus musculus (alliance_bgi 9.0.0)
   source   https://download.alliancegenome.org/9.0.0/BGI/MGI/1.0.2.5_BGI_MGI_0.json.gz
   columns  asked, symbol, gene_id_stem, kind
@@ -421,17 +424,22 @@ gene symbols -> gene id stems for Mus musculus (alliance_bgi 9.0.0)
 Arntl
 ```
 
-`--source` names the xref source, as it does on `genome xref`. The species' default source is
-not always one that carries symbols — human's is `alliance`, whose cross-reference file
-carries no human symbol at all — and one that carries none exits `1` naming the ones that do
-rather than matching nothing. `genome.xref.XrefSet.match_symbols` in the
-[API reference](reference.md) is the same one verb, on one code path with this.
+**Omitting `--source` answers from the species' default source for symbols**, which is not
+the row its identifiers default to: human's ids come from `alliance`, whose cross-reference
+file carries no human symbol at all, and its symbols from `hgnc`; mouse's and worm's from
+`alliance_bgi`. A default is per species and per question for that reason (ADR-0021), and
+every answer names the source and release that produced it either way. Naming a source is
+still how the scientific choice gets made deliberately and a named one is never swapped, so
+`--source alliance` exits `1` saying that set carries no symbol and naming the one that does,
+rather than quietly answering out of somebody else's file. `XrefSet.for_symbols(species)` in
+the [API reference](reference.md) is the same fill-in, on one code path with this, and
+`genome.xref.XrefSet.match_symbols` the same one verb.
 
 Naming a species prepares its set, which the first time is a download — so run it once on a
 login node before submitting a job that needs it, as the lab's compute nodes have no
 internet. Exits `1` when no set exists for the species (the message names the ones that do),
-when the source is not one this package prepares, when the source carries no symbols (the
-message names the ones that do), when the set is not here and cannot be fetched (the message
+when the source is not one this package prepares, when a named source carries no symbols (the
+message names the one that does), when the set is not here and cannot be fetched (the message
 names the call to make on a login node), and when a directory holds a set an interrupted
 download left unfinished.
 
