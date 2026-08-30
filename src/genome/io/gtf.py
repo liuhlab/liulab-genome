@@ -27,10 +27,11 @@ placed, built and recorded the same way. :func:`register_annotation` and
 :func:`register_gtf` are those same two addressed by assembly name and answering with the
 record rather than the paths, one apiece, matching ``genome register-annotation`` and
 ``genome register-gtf`` exactly; both build a registry for the length of the call, so they
-add no second code path. What they answer *with* —
-:class:`~genome.io.results.RegisteredAnnotation`, and the two shapes
-:meth:`AnnotationRegistry.status` reports in — is :mod:`genome.io.results`, so this module
-changes when registering changes and not when the shape of an answer does.
+add no second code path. What they answer *with* — :class:`RegisteredAnnotation`, and the
+two shapes :meth:`AnnotationRegistry.status` reports in — is here, beside whatever returns
+it (ADR-0022). A registration carries the **Completion marker** whole rather than copying
+it out field by field, so every question a surface then asks is answered off the record in
+hand rather than by reading the directory again.
 
 A third way in has exactly one caller. :func:`register_merged_gtf` writes the **Merged
 annotation** a **Chimera** build derives from its components' own annotations, inside the
@@ -112,8 +113,8 @@ import gzip
 import hashlib
 import shlex
 import shutil
-from collections.abc import Container, Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Container, Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import IO, Any
 
@@ -131,6 +132,7 @@ from genome.gene_list import (
 from genome.io import fetch
 from genome.io.completion import (
     RECORD_NAME,
+    CompletionRecord,
     RegistrationError,
     build_record,
     check_registration,
@@ -142,17 +144,6 @@ from genome.io.completion import (
 )
 from genome.io.fasta import read_chrom_sizes
 from genome.io.registration import ANNOTATIONS_SUBDIR, AssemblyDir, assembly_repair_command
-from genome.io.results import (
-    UNCHECKED_CALLER_OVERRIDE,
-    UNCHECKED_NO_CHROM_SIZES,
-    AnnotationStatus,
-    AnnotationStatusRow,
-    GeneList,
-    GeneListSource,
-    RegisteredAnnotation,
-    ResolvedGeneIds,
-    annotation_register_command,
-)
 from genome.io.utils import ChecksumMismatchError, _gunzip, sha256_file
 from genome.metadata import (
     AnnotationMetadata,
@@ -195,6 +186,116 @@ _GENE_IDS_QUERY = "SELECT id FROM features WHERE featuretype = 'gene' ORDER BY i
 #: What separates a gene id from its version — ``ENSG00000123456.7`` — and therefore what
 #: a **Gene id stem** is everything before. An id carrying none is its own stem.
 _VERSION_SEPARATOR = "."
+
+#: What ``details["chromosomes_unchecked_because"]`` says when the caller stood the check
+#: down — ``check_chromosomes=False``, or ``--no-check-chromosomes`` from a shell. There is
+#: no advice to give about it: the assembly may be registered and the names deliberately
+#: accepted, so all a surface can say is what the record therefore does not vouch for.
+UNCHECKED_CALLER_OVERRIDE = "caller-override"
+
+#: …and when the check was asked for but had nothing to run against, the assembly having
+#: no ``chrom.sizes`` yet. Registering the assembly is what makes the check possible, so
+#: this is the one of the two states where saying so is useful advice rather than noise.
+UNCHECKED_NO_CHROM_SIZES = "no-chrom-sizes"
+
+#: What each state of the chromosome check reads as, one sentence apiece — including the
+#: one where it ran and passed, since a surface that says nothing about it reads as a pass.
+#: Keyed by ``details["chromosomes_unchecked_because"]``; ``None`` is the check that ran.
+_CHECK_SUMMARIES = {
+    None: "chromosomes checked — every name the GTF uses is one the assembly carries",
+    UNCHECKED_NO_CHROM_SIZES: (
+        "chromosomes not checked — nothing to check against; register the assembly first "
+        "to verify them"
+    ),
+    UNCHECKED_CALLER_OVERRIDE: (
+        "chromosomes not checked — the check was stood down, so the record does not vouch "
+        "for the names"
+    ),
+}
+
+#: What a record written before the reason was recorded reads as. Its bare ``False`` was
+#: written for either reason and nothing on disk says which, so it is reported as neither.
+_UNKNOWN_REASON_SUMMARY = (
+    "chromosomes not checked — this record does not say why, so whether the names match "
+    "the assembly is unknown"
+)
+
+
+def annotation_register_command(assembly: str, name: str) -> str:
+    """Return the command that registers the annotation ``name`` for ``assembly``.
+
+    The one spelling of it. Errors quote it, the repair adds ``--force`` to it, and
+    :attr:`AnnotationStatus.default_summary` names it for a **Default annotation** nobody
+    has fetched yet — so a renamed command is renamed once.
+
+    Parameters
+    ----------
+    assembly : str
+        The **Assembly** the annotation belongs to, e.g. ``"hg38"``.
+    name : str
+        The **Registered name** to address it by.
+
+    Returns
+    -------
+    str
+        A shell command, unquoted and unfenced — the caller decides how to set it.
+
+    Examples
+    --------
+    >>> annotation_register_command("hg38", "gencode_v50")
+    'genome register-annotation hg38 gencode_v50'
+    """
+    return f"genome register-annotation {assembly} {name}"
+
+
+def chromosome_check_summary(details: Mapping[str, Any]) -> str:
+    """Return the one line a surface prints about an annotation's chromosome-name check.
+
+    Four states, four sentences, and one of them is always returned: the check ran and
+    passed; it had nothing to run against, and registering the assembly is what fixes
+    that; the caller stood it down, which is not something to advise about; or the record
+    does not say which, and none of the three may be claimed. Silence is not a fifth
+    state — a surface that prints nothing about the check reads as one that passed.
+
+    ``details`` is a registration record's ``details``; a caller holding what a
+    registration answered with asks :attr:`RegisteredAnnotation.chromosome_check` instead
+    and never spells the two fields. Those are ``chromosomes_checked`` — the check ran and
+    the GTF's names were all the assembly's — and ``chromosomes_unchecked_because``, which
+    says which of the two reasons it did not, and is ``None`` when it did.
+
+    A record written before the second field existed carries a bare
+    ``chromosomes_checked: false`` that was written for either reason, and nothing on disk
+    says which. It reads as *unknown* rather than as either one, and rather than raising:
+    the reason is a fact that was never gathered, which is what an absent entry in
+    ``tool_versions`` means too.
+
+    Parameters
+    ----------
+    details : mapping of str to object
+        A registration record's ``details``. Anything else it holds is ignored, and a
+        mapping holding neither field reads as unknown.
+
+    Returns
+    -------
+    str
+        One sentence, with no trailing punctuation and no leading indent — the caller
+        decides how to set it.
+
+    Examples
+    --------
+    >>> chromosome_check_summary({"chromosomes_checked": True})
+    'chromosomes checked — every name the GTF uses is one the assembly carries'
+    >>> print(chromosome_check_summary({"chromosomes_unchecked_because": "caller-override"}))
+    chromosomes not checked — the check was stood down, so the record does not vouch for the names
+    """
+    if details.get("chromosomes_checked") is True:
+        return _CHECK_SUMMARIES[None]
+    # Anything else — the field absent, or a reason a later version writes and this one
+    # has never heard of — is a reason that cannot be reported, which is the unknown.
+    because = details.get("chromosomes_unchecked_because")
+    if isinstance(because, str) and because in _CHECK_SUMMARIES:
+        return _CHECK_SUMMARIES[because]
+    return _UNKNOWN_REASON_SUMMARY
 
 
 class ChromosomeMismatchError(ValueError):
@@ -466,6 +567,537 @@ class BrokenAnnotation:
     directory: Path
     problem: str
     repair: str
+
+
+@dataclass(frozen=True)
+class RegisteredAnnotation:
+    """What registering one annotation produced: its record, and where that landed.
+
+    :func:`register_annotation`'s answer and :func:`register_gtf`'s — what ``genome
+    register-annotation`` and ``genome register-gtf`` print, and what their ``--json``
+    serializes. A :class:`GtfAnnotation` says where an annotation's two files are; this
+    says what the run that wrote them did, which is the **Completion marker** itself,
+    carried whole. Every question a surface then asks — the digest, the source, the files
+    claimed, whether the chromosome names were actually checked — is answered from that one
+    record rather than by reading the directory again.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** the annotation belongs to. It is not in the record, which names
+        the annotation rather than what it annotates.
+    directory : pathlib.Path
+        The annotation's own directory, ``<assembly dir>/gtf/<name>/``.
+    record : genome.io.completion.CompletionRecord
+        The record the registration wrote, read back.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> from genome.io.completion import CompletionRecord
+    >>> registered = RegisteredAnnotation(
+    ...     assembly="hg38",
+    ...     directory=Path("/data/genome/hg38/gtf/gencode_v50"),
+    ...     record=CompletionRecord(
+    ...         kind="annotation",
+    ...         name="gencode_v50",
+    ...         files={"gencode_v50.gtf": 12, "gencode_v50.db": 34},
+    ...         source_url="https://example.org/gencode_v50.gtf.gz",
+    ...         sha256="1a2b3c",
+    ...         tool_versions={},
+    ...         package_version="2026.8.0",
+    ...         completed_at="2026-08-12T09:00:00+00:00",
+    ...         details={"chromosomes_checked": True},
+    ...     ),
+    ... )
+    >>> registered.name, registered.file_names
+    ('gencode_v50', ['gencode_v50.db', 'gencode_v50.gtf'])
+    >>> print(registered.chromosome_check)
+    chromosomes checked — every name the GTF uses is one the assembly carries
+    """
+
+    assembly: str
+    directory: Path
+    record: CompletionRecord
+
+    @property
+    def name(self) -> str:
+        """The **Registered name** it is addressed by — the record's own name."""
+        return self.record.name
+
+    @property
+    def source_url(self) -> str | None:
+        """The URL fetched, or the path a GTF was handed over at; ``None`` for a merge."""
+        return self.record.source_url
+
+    @property
+    def sha256(self) -> str | None:
+        """Digest of the placed GTF, or ``None`` when none was computed."""
+        return self.record.sha256
+
+    @property
+    def file_names(self) -> list[str]:
+        """Every file the record claims, sorted — a fresh list each call."""
+        return sorted(self.record.files)
+
+    @property
+    def chromosome_check(self) -> str:
+        """The one line saying what the chromosome-name check settled for this annotation.
+
+        :func:`chromosome_check_summary` over the record this registration wrote, so the
+        surface that prints it never reads the record's own keys. Always a sentence:
+        silence would read as a pass.
+        """
+        return chromosome_check_summary(self.record.details)
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this registration as ``--json`` serializes it.
+
+        The record's own fields under the record's own names, then the ``assembly`` it
+        belongs to and the ``directory`` it landed in — the two facts a record does not
+        hold about itself. The names are the ones written on disk and are never respelled
+        here.
+
+        Returns
+        -------
+        dict
+            The record's fields, followed by ``assembly`` and ``directory``.
+        """
+        return {**asdict(self.record), "assembly": self.assembly, "directory": str(self.directory)}
+
+
+@dataclass(frozen=True)
+class AnnotationStatusRow:
+    """One annotation, in whichever of its states it is: offered, registered, broken.
+
+    One shape for all of them, so a reader never has to ask which fields a row has — a
+    name the table does not list carries the table's columns as ``None``, and one nothing
+    is wrong with carries the broken columns as ``None``. :attr:`registered` and
+    :attr:`broken` are never both true: a registration nothing vouches for is not one, and
+    :attr:`state` is that invariant said in one word.
+
+    Attributes
+    ----------
+    name : str
+        The **Registered name** this row is about.
+    offered : bool
+        Whether the annotation table lists it for this assembly.
+    registered : bool
+        Whether a record here vouches for it.
+    broken : bool
+        Whether its directory is here and cannot be trusted.
+    default : bool
+        The table's own default flag, ``False`` for a name no row lists.
+    provider : str or None
+        Who publishes it, from the table's row; ``None`` for an unlisted one.
+    version : str or None
+        The provider's release identifier; ``None`` for an unlisted one.
+    url : str or None
+        Where the table says its GTF is fetched from; ``None`` for an unlisted one.
+    sha256 : str or None
+        The digest the table pins; ``None`` when it pins none, and for an unlisted one.
+    path : str or None
+        The registered GTF's path, or ``None`` when it is not registered here.
+    problem : str or None
+        What is wrong, when :attr:`broken`; ``None`` otherwise.
+    repair : str or None
+        The command that registers it again from scratch, when :attr:`broken`.
+
+    Examples
+    --------
+    >>> row = AnnotationStatusRow(
+    ...     name="gencode_v50",
+    ...     offered=True,
+    ...     registered=False,
+    ...     broken=False,
+    ...     default=True,
+    ...     provider="GENCODE",
+    ...     version="v50",
+    ...     url="https://example.org/gencode_v50.gtf.gz",
+    ...     sha256=None,
+    ...     path=None,
+    ...     problem=None,
+    ...     repair=None,
+    ... )
+    >>> row.as_json()["offered"]
+    True
+    >>> row.state
+    'offered, not registered'
+    """
+
+    name: str
+    offered: bool
+    registered: bool
+    broken: bool
+    default: bool
+    provider: str | None
+    version: str | None
+    url: str | None
+    sha256: str | None
+    path: str | None
+    problem: str | None
+    repair: str | None
+
+    @property
+    def state(self) -> str:
+        """Which of its states this row is in, in the words a surface prints.
+
+        ``broken`` first, because the three fields it is read from are not independent:
+        a broken annotation is not registered — no record vouches for it — so answering
+        with the absence of one would be true and useless, and it is the state that needs
+        acting on. A row nothing offers is one this disk holds and the table does not, so
+        the only thing left to say about it is that.
+
+        Returns
+        -------
+        str
+            One of ``broken``, ``registered, not offered``, ``registered``, or
+            ``offered, not registered``.
+        """
+        if self.broken:
+            return "broken"
+        if not self.offered:
+            return "registered, not offered"
+        return "registered" if self.registered else "offered, not registered"
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this row as ``--json`` serializes it: every attribute above, in order.
+
+        :attr:`state` is not among them: it is read from :attr:`broken`, :attr:`offered`
+        and :attr:`registered`, which are all here, so writing it out too would be a
+        second spelling of the same rule for a reader to disagree with.
+
+        Returns
+        -------
+        dict
+            The row's fields, under their own names.
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AnnotationStatus:
+    """What one assembly's table offers, set against what is registered on this machine.
+
+    :meth:`AnnotationRegistry.status`'s answer, and what ``genome annotations`` prints. Two
+    questions joined for one reader, with a third riding along because this is where anyone
+    would look for it: a directory that cannot be trusted is ``broken`` rather than
+    registered, and reporting one is the point — nothing here raises.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** reported on.
+    directory : pathlib.Path
+        Its **Assembly dir**, whether or not anything is there.
+    default_annotation : str or None
+        The **Default annotation**'s name, or ``None`` when nothing decides one. It may
+        name one nobody has registered here, which is a fresh machine's ordinary state.
+    annotations : tuple of AnnotationStatusRow
+        One row per name: the offered ones in table order, then anything on this disk
+        that no row lists.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> status = AnnotationStatus(
+    ...     assembly="hg38",
+    ...     directory=Path("/data/genome/hg38"),
+    ...     default_annotation=None,
+    ...     annotations=(),
+    ... )
+    >>> status.default_row is None
+    True
+    >>> status.default_summary
+    'default: (none)'
+    >>> status.as_json()["directory"]
+    '/data/genome/hg38'
+    """
+
+    assembly: str
+    directory: Path
+    default_annotation: str | None
+    annotations: tuple[AnnotationStatusRow, ...]
+
+    @property
+    def default_row(self) -> AnnotationStatusRow | None:
+        """The **Default annotation**'s own row, or ``None`` when no row is about it.
+
+        ``None`` covers both of the ways that happens, and a caller wanting to tell them
+        apart reads :attr:`default_annotation` beside this: nothing decided a default, or
+        one is decided and the table lists it under a name this disk knows nothing about.
+        """
+        return next((row for row in self.annotations if row.name == self.default_annotation), None)
+
+    @property
+    def default_summary(self) -> str:
+        """The closing sentence naming the **Default annotation**, and how to get it.
+
+        Four answers, and three of them tell the reader what to do next: nothing decided a
+        default; one is decided and registered, which needs no advice; one is decided and
+        broken, which is repaired by the command its own row already carries; or one is
+        decided and absent, which is the ordinary state of a fresh machine and is
+        registered by :func:`annotation_register_command`. Both commands come off an
+        interface rather than being assembled here, so the two halves of this sentence
+        cannot drift apart.
+
+        Returns
+        -------
+        str
+            One line, beginning ``default: `` — the whole of what ``genome annotations``
+            prints last.
+        """
+        default = self.default_annotation
+        if default is None:
+            return "default: (none)"
+        row = self.default_row
+        if row is not None and row.broken:
+            return f"default: {default} — broken here; repair it with `{row.repair}`"
+        if row is not None and row.registered:
+            return f"default: {default}"
+        return (
+            f"default: {default} — not registered here; register it with "
+            f"`{annotation_register_command(self.assembly, default)}`"
+        )
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this report as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``assembly``, the ``directory`` as text, the ``default_annotation`` name, and
+            ``annotations`` as a list of :meth:`AnnotationStatusRow.as_json` rows.
+        """
+        return {
+            "assembly": self.assembly,
+            "directory": str(self.directory),
+            "default_annotation": self.default_annotation,
+            "annotations": [row.as_json() for row in self.annotations],
+        }
+
+
+@dataclass(frozen=True)
+class GeneListSource:
+    """One **Curated gene list** that contributed to an answer, and what it contributed.
+
+    What makes a **Merged annotation**'s genes attributable: one of these per contributing
+    annotation, so a caller counting worm ribosomal RNA can drop the *E. coli* entry
+    rather than being handed one number it cannot take apart. An annotation that is not a
+    merge has exactly one, whose ``component`` is ``None``.
+
+    ``description`` and ``source`` travel with the ids rather than being looked up
+    separately, because they are what says whether these ids mean what the caller's metric
+    needs: two annotations spelling a category the same way need not have curated it the
+    same way.
+
+    Attributes
+    ----------
+    component : str or None
+        The **Component** assembly whose genes these are, for a contributor to a **Merged
+        annotation**; ``None`` for anything else.
+    annotation : str
+        The **Registered name** of the contributing annotation.
+    description : str
+        What membership in this category means for that annotation.
+    source : str
+        Where that membership came from, and the caveats on using it.
+    gene_ids : tuple of str
+        The gene ids it contributed, in the order its curated list lists them.
+
+    Examples
+    --------
+    >>> source = GeneListSource(
+    ...     component="ce11",
+    ...     annotation="wormbase_ws298",
+    ...     description="the mature ribosomal RNA genes",
+    ...     source="WormBase WS298 gene_biotype",
+    ...     gene_ids=("WBGene00004512", "WBGene00004513"),
+    ... )
+    >>> source.as_json()["component"]
+    'ce11'
+    >>> len(source.gene_ids)
+    2
+    """
+
+    component: str | None
+    annotation: str
+    description: str
+    source: str
+    gene_ids: tuple[str, ...]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this contribution as ``--json`` serializes it: every attribute, in order.
+
+        Returns
+        -------
+        dict
+            The fields above, under their own names, with ``gene_ids`` as a list.
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class GeneList:
+    """The genes one annotation puts in one **Gene category**, attributed to their sources.
+
+    :meth:`AnnotationRegistry.gene_list`'s answer — what ``genome gene-list`` prints and
+    what its ``--json`` serializes. There is no empty one: an annotation that declares no
+    categories, and one that declares categories but not this one, each raise a
+    :class:`LookupError` of their own rather than answering with nothing, so holding one of
+    these means the category was really declared and really has genes in it.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** asked about.
+    annotation : str
+        The **Registered name** asked about — the merged name for a **Merged annotation**,
+        whose contributors are named in :attr:`sources`.
+    category : str
+        The **Gene category**, as the curated lists spell it.
+    sources : tuple of GeneListSource
+        One entry per contributing **Curated gene list**, in contributor order. Never
+        empty. A contributor that does not declare this category is simply absent — a
+        bacterium has no mitochondria, and that is not a failure to report.
+
+    Examples
+    --------
+    >>> genes = GeneList(
+    ...     assembly="ce11",
+    ...     annotation="wormbase_ws298",
+    ...     category="rRNA",
+    ...     sources=(
+    ...         GeneListSource(None, "wormbase_ws298", "rRNA genes", "WormBase", ("a", "b")),
+    ...     ),
+    ... )
+    >>> genes.gene_ids
+    ['a', 'b']
+    >>> genes.as_json()["category"]
+    'rRNA'
+    """
+
+    assembly: str
+    annotation: str
+    category: str
+    sources: tuple[GeneListSource, ...]
+
+    @property
+    def gene_ids(self) -> list[str]:
+        """Every source's gene ids, concatenated in source order — a fresh list each call.
+
+        **Concatenated and not de-duplicated.** A merge rewrites only the seqname and
+        never the ``gene_id``, so two components carrying the same id would be a real
+        ambiguity in the merged annotation, and collapsing it here would hide exactly that
+        — a caller summing over these would silently under-count one of the two. Where
+        that matters, :attr:`sources` says which contributor each id came from.
+        """
+        return [gene_id for source in self.sources for gene_id in source.gene_ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``assembly``, ``annotation``, ``category``, the concatenated ``gene_ids``, and
+            ``sources`` as a list of :meth:`GeneListSource.as_json` entries.
+            :attr:`gene_ids` is written out beside the sources it is read from rather than
+            left to the reader: assembling it is where a reader would reach for a set and
+            de-duplicate, which is the one thing this answer must not do.
+        """
+        return {
+            "assembly": self.assembly,
+            "annotation": self.annotation,
+            "category": self.category,
+            "gene_ids": self.gene_ids,
+            "sources": [source.as_json() for source in self.sources],
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedGeneIds:
+    """The gene ids one **Annotation** carries for the **Gene id stem**s it was asked about.
+
+    :meth:`AnnotationRegistry.resolve_gene_ids`'s answer, and the one result type two
+    contexts share: it is defined beside the call that returns it, and
+    :mod:`genome.tf.gene`, :mod:`genome.tf.cofactor` and :mod:`genome.homology.annotation`
+    import it from here (ADR-0022). A stem is a gene id with its version dropped, and
+    inside one annotation it may name more than one gene id — nine do in
+    ``gencode_v50lift37``, eight of them pseudoautosomal-Y — so every stem answers with
+    **all** of them and nothing here picks one. Two stems never name the same gene id,
+    since an id has exactly one stem.
+
+    **What was asked about and is not there rides back on the answer.** A caller holding a
+    few thousand stems gets the ones this annotation carries no gene for in
+    :attr:`unresolved` rather than a shorter list than it passed, so what the thing it was
+    holding contains and this annotation does not is visible instead of dropped.
+
+    Attributes
+    ----------
+    assembly : str
+        The **Assembly** asked about.
+    annotation : str
+        The **Registered name** whose own gene ids these are.
+    resolved : mapping of str to tuple of str
+        Every stem that named at least one gene id, in the order the stems were asked
+        about, to the ids it names, in ascending order. No value is ever an empty tuple —
+        a stem that named nothing is in :attr:`unresolved` instead.
+    unresolved : tuple of str
+        The stems no gene id in the annotation is of, in the order they were asked about.
+
+    Examples
+    --------
+    >>> answer = ResolvedGeneIds(
+    ...     assembly="hg19",
+    ...     annotation="gencode_v50lift37",
+    ...     resolved={
+    ...         "ENSG00000182378": ("ENSG00000182378.14", "ENSG00000182378.14_PAR_Y"),
+    ...         "ENSG00000141510": ("ENSG00000141510.18",),
+    ...     },
+    ...     unresolved=("ENSG00000288541",),
+    ... )
+    >>> answer.gene_ids
+    ['ENSG00000182378.14', 'ENSG00000182378.14_PAR_Y', 'ENSG00000141510.18']
+    >>> answer.as_json()["unresolved"]
+    ['ENSG00000288541']
+    """
+
+    assembly: str
+    annotation: str
+    resolved: Mapping[str, tuple[str, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_ids(self) -> list[str]:
+        """Every gene id resolved, stem order and then id order — a fresh list each call.
+
+        **Every** id, not one per stem. Flattening is exactly where a reader would take
+        the first id of each stem and lose the second, which is the pseudoautosomal gene
+        this answer's shape exists to keep; :attr:`resolved` is what says which stem an id
+        came from.
+        """
+        return [gene_id for ids in self.resolved.values() for gene_id in ids]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``assembly``, ``annotation``, ``resolved`` as a mapping of stem to a list of
+            gene ids, ``unresolved`` as a list, and the flattened ``gene_ids``. The last
+            is written out beside the mapping it is read from for the reason
+            :attr:`gene_ids` gives: a reader assembling it is a reader who might take one
+            id per stem.
+        """
+        return {
+            "assembly": self.assembly,
+            "annotation": self.annotation,
+            "resolved": {stem: list(ids) for stem, ids in self.resolved.items()},
+            "unresolved": list(self.unresolved),
+            "gene_ids": self.gene_ids,
+        }
 
 
 @dataclass(frozen=True)
@@ -1166,9 +1798,9 @@ class AnnotationRegistry:
 
         Returns
         -------
-        genome.io.results.GeneList
+        GeneList
             The category, its gene ids, and one
-            :class:`~genome.io.results.GeneListSource` per contributing curated list.
+            :class:`GeneListSource` per contributing curated list.
 
         Raises
         ------
@@ -1218,7 +1850,7 @@ class AnnotationRegistry:
 
         Returns
         -------
-        tuple of genome.io.results.GeneList
+        tuple of GeneList
             One entry per declared category, in declaration order. Never empty.
 
         Raises
@@ -1262,9 +1894,9 @@ class AnnotationRegistry:
         is a mapping to *all* of them, ascending.
 
         **Nothing is dropped.** Stems this annotation carries no gene for come back in
-        :attr:`~genome.io.results.ResolvedGeneIds.unresolved`, so a caller resolving a few
-        thousand at once can see which of them this annotation does not have rather than
-        counting the answer and wondering.
+        :attr:`~ResolvedGeneIds.unresolved`, so a caller resolving a few thousand at once
+        can see which of them this annotation does not have rather than counting the
+        answer and wondering.
 
         The annotation must be **registered here**, and a **Merged annotation** is read
         exactly as any other: it has one database of its own, holding both components' gene
@@ -1287,7 +1919,7 @@ class AnnotationRegistry:
 
         Returns
         -------
-        genome.io.results.ResolvedGeneIds
+        ResolvedGeneIds
             The stems that named gene ids, mapped to every id each names, and the stems
             that named none.
 
@@ -1494,7 +2126,7 @@ def gene_list(
 
     Returns
     -------
-    genome.io.results.GeneList
+    GeneList
         The answer :meth:`AnnotationRegistry.gene_list` describes.
 
     Raises
@@ -1536,7 +2168,7 @@ def gene_lists(
 
     Returns
     -------
-    tuple of genome.io.results.GeneList
+    tuple of GeneList
         One entry per declared category, in declaration order. Never empty.
 
     Raises
@@ -2125,7 +2757,7 @@ def _chromosome_check_details(known: frozenset[str] | None, *, requested: bool) 
 def _registered_annotation(
     annotation: GtfAnnotation, *, assembly: str, repair: str
 ) -> RegisteredAnnotation:
-    """Return the :class:`~genome.io.results.RegisteredAnnotation` a just-finished run left.
+    """Return the :class:`RegisteredAnnotation` a just-finished run left.
 
     The record is what registering *produced*, so a registration that reports success
     and leaves none is a contradiction rather than a missing file, and raises naming the

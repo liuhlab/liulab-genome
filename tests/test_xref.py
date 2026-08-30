@@ -45,7 +45,6 @@ from genome.io.completion import (
 )
 from genome.io.gtf import _gene_id_stem as annotation_gene_id_stem
 from genome.io.prepared import PreparedChecksumError
-from genome.io.results import ResolvedStems, ResolvedXrefIds
 from genome.xref import (
     ALLIANCE,
     ENSEMBL,
@@ -74,7 +73,13 @@ from genome.xref import (
 )
 from genome.xref import metadata as metadata_mod
 from genome.xref.alliance import ALLIANCE_COLUMNS, read_alliance
-from genome.xref.xref import SLICE_COLUMNS, parse_slice, xref_prepare_command
+from genome.xref.xref import (
+    SLICE_COLUMNS,
+    ResolvedStems,
+    ResolvedXrefIds,
+    parse_slice,
+    xref_prepare_command,
+)
 
 from .conftest import FakeFetch
 

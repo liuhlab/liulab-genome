@@ -47,12 +47,6 @@ substitute for *module*.
 - [Orthology](./docs/context/orthology.md) — covers `homology/*`: which genes in another species a
   gene is homologous to, and how many-to-many the publisher's own gene tree says that is
 
-`io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
-It is the return types the API hands back and the CLI renders, so it carries the vocabulary of
-whichever context asked. What a *shipped table* answers with is not there: a **TF gene list** and a
-**TF cofactor list** live with the halves that read those files, so the vocabulary of one publisher's
-columns stays inside the context that owns it.
-
 `cli.py` is covered by no context — the map covers what carries domain vocabulary, not the whole tree.
 
 ## Relationships

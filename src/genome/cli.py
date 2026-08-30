@@ -21,27 +21,24 @@ from genome.homology import DEFAULT_RELEASE as _HOMOLOGY_RELEASE
 from genome.homology import NULL_CELL as _NULL_CELL
 from genome.homology import HomologyMetadata as _HomologyMetadata
 from genome.homology import HomologySet as _HomologySet
+from genome.homology.compara import HomologyAnswer as _HomologyAnswer
 from genome.io.components import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
 from genome.io.components import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
 from genome.io.components import ChimeraDetails as _ChimeraDetails
+from genome.io.download import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
+from genome.io.download import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
+from genome.io.download import VerifiedAssembly as _VerifiedAssembly
 from genome.io.download import assembly_table_row as _assembly_table_row
 from genome.io.download import register_assembly as _register_assembly
 from genome.io.download import verify_assembly as _verify_assembly
+from genome.io.gtf import GeneList as _GeneList
+from genome.io.gtf import GeneListSource as _GeneListSource
+from genome.io.gtf import RegisteredAnnotation as _RegisteredAnnotation
 from genome.io.gtf import annotation_status as _annotation_status
 from genome.io.gtf import gene_list as _gene_list
 from genome.io.gtf import gene_lists as _gene_lists
 from genome.io.gtf import register_annotation as _register_annotation
 from genome.io.gtf import register_gtf as _register_gtf
-from genome.io.results import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
-from genome.io.results import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
-from genome.io.results import GeneList as _GeneList
-from genome.io.results import GeneListSource as _GeneListSource
-from genome.io.results import HomologyAnswer as _HomologyAnswer
-from genome.io.results import RegisteredAnnotation as _RegisteredAnnotation
-from genome.io.results import ResolvedStems as _ResolvedStems
-from genome.io.results import ResolvedSymbols as _ResolvedSymbols
-from genome.io.results import ResolvedXrefIds as _ResolvedXrefIds
-from genome.io.results import VerifiedAssembly as _VerifiedAssembly
 from genome.metadata import format_table_row as _format_table_row
 from genome.seq import DNA
 from genome.tf.cofactor import tf_cofactor_list as _tf_cofactor_list
@@ -61,6 +58,9 @@ from genome.tf.motif.scan import scan_stream as _scan_stream
 from genome.workers import resolve_workers as _resolve_workers
 from genome.xref import NAMESPACES as _NAMESPACES
 from genome.xref import SYMBOL as _SYMBOL
+from genome.xref import ResolvedStems as _ResolvedStems
+from genome.xref import ResolvedSymbols as _ResolvedSymbols
+from genome.xref import ResolvedXrefIds as _ResolvedXrefIds
 from genome.xref import XrefSet as _XrefSet
 
 #: What a failed assembly command raises, in one place. Every one of them is already
@@ -133,7 +133,7 @@ _XREF_SYMBOL_HELP = (
 )
 
 #: The columns one **Symbol match** is printed as, which are the keys
-#: :meth:`~genome.io.results.SymbolMatch.as_json` writes and in its order — so the text
+#: :meth:`~genome.xref.xref.SymbolMatch.as_json` writes and in its order — so the text
 #: rendering and ``--json`` cannot drift apart, and every cell printed is a value the API put
 #: in the answer rather than one assembled here. ``kind`` is what makes a spelling the
 #: authority retired distinguishable from its current one, which is the whole point of
@@ -156,7 +156,7 @@ _SYMBOL_COLUMNS: tuple[str, ...] = ("asked", *_SYMBOL_MATCH_COLUMNS)
 _HOMOLOGY_ERRORS = (ValueError, OSError, RuntimeError, LookupError)
 
 #: The columns a **Homology link** is printed as, which are the keys
-#: :meth:`~genome.io.results.HomologyLink.as_json` writes and in its order — so the text
+#: :meth:`~genome.homology.compara.HomologyLink.as_json` writes and in its order — so the text
 #: rendering and ``--json`` cannot drift apart, and every cell printed is a value the API
 #: put in the answer rather than one assembled here. ``homology_type`` and ``is_ortholog``
 #: are what **mark** a **Paralogy link**: a duplication label prints where a speciation one

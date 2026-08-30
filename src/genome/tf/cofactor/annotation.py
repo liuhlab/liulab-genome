@@ -30,8 +30,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from genome.io.gtf import AnnotationRegistry
-from genome.io.results import ResolvedGeneIds
+from genome.io.gtf import AnnotationRegistry, ResolvedGeneIds
 from genome.metadata import assembly_metadata, species_slug
 from genome.tf.cofactor.table import (
     TRUE_CELL,

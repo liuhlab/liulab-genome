@@ -10,6 +10,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+<<<<<<< HEAD
 - **One module reads every shipped table, where six brought their own loader.** `genome.shipped`
   owns resource lookup, gzip, header validation, cell parsing, the blank-cell rules, duplicate-key
   refusal and the shape of the error a broken file raises; `metadata.py`, `xref/metadata.py`,
@@ -58,6 +59,24 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   under the new layout**, one download of under a megabyte. A fetch that fails now raises
   `MotifSetNotDownloadedError` naming the call to make on a login node, where it used to surface
   pooch's own transport error.
+=======
+- **Every result type moved beside whatever returns it, and `genome.io.results` retired.** The
+  module held frozen dataclasses whose one shared property was being returned; a third of it
+  belonged to contexts no module under `io/` imports. `RegisteredAssembly` and `VerifiedAssembly`
+  are now in `genome.io.download`, beside the two functions that build them; `RegisteredAnnotation`,
+  `AnnotationStatus`, `AnnotationStatusRow`, `GeneList`, `GeneListSource`, `ResolvedGeneIds`,
+  `chromosome_check_summary` and `annotation_register_command` in `genome.io.gtf`; `ResolvedStems`,
+  `ResolvedXrefIds`, `ResolvedSymbols` and `SymbolMatch` in `genome.xref.xref`; `HomologyLink` and
+  `HomologyAnswer` in `genome.homology.compara`; `ResolvedHomologs` in
+  `genome.homology.annotation`. `ResolvedGeneIds` is the one type two contexts share and it lands
+  beside `resolve_gene_ids`, because the rule is where a type is returned and not where it is read.
+  The module had been opened as a seam both halves of `io` could reach, and that reason expired
+  once each type sat beside its producer; the guard that closed it is replaced by its assembly-half
+  mirror in `tests/test_download.py`, `io.gtf` already holding the annotation half's. The `as_json`
+  convention the module's docstring stated is now ADR-0022. **Nothing a caller can see changed.**
+  Every name `genome`, `genome.io` and `genome.xref` exported still imports from the same place,
+  `genome.__all__` is untouched, and every command's `--json` emits the same keys in the same order.
+>>>>>>> refactor/158-results
 - **The TF context moved out of the Annotation module, and the registry kept one seam.**
   `AnnotationRegistry.resolve_gene_ids` is now the only identifier surface `genome.io.gtf` exposes:
   it answers *which gene ids does this **Gene id stem** name here* and knows nothing about what it
@@ -65,8 +84,8 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   `TFGeneList`, `NoTFCensusError` and the census plumbing to the new `genome.tf.gene.annotation`;
   `TFCofactor`, `TFCofactorList`, `NoCofactorTableError` and the table plumbing to
   `genome.tf.cofactor.annotation`; and `UnknownSpeciesError`, shared by both halves, to
-  `genome.tf.species`. `genome.io.gtf` and `genome.io.results` now import nothing under
-  `genome.tf`, held by a guard apiece: those two import lines used to pull in sixteen `genome.tf`
+  `genome.tf.species`. `genome.io.gtf` now imports nothing under
+  `genome.tf`, held by a guard: those import lines used to pull in sixteen `genome.tf`
   modules — both shipped-table readers, the motif link table and the whole motif tree down to the
   scan, its worker pool and its Parquet sink — so neither module drags the motif tree in any
   longer. The package still re-exports the five TF names eagerly, so `import genome` loads

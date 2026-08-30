@@ -23,6 +23,7 @@ import requests
 from genome import __version__
 from genome.io import download as download_mod
 from genome.io.completion import (
+    CompletionRecord,
     RegistrationMismatchError,
     UnfinishedRegistrationError,
     read_record,
@@ -30,7 +31,11 @@ from genome.io.completion import (
     work_dir,
 )
 from genome.io.download import (
+    EXPECTED_FROM_RECORD,
+    EXPECTED_FROM_TABLE,
+    RegisteredAssembly,
     UCSCGenomeDownloader,
+    VerifiedAssembly,
     assembly_data_dir,
     assembly_table_row,
     liulab_data_dir,
@@ -43,6 +48,7 @@ from genome.io.utils import ChecksumMismatchError, sha256_file
 from genome.metadata import AssemblyMetadata, format_table_row
 
 from .conftest import FakeFetch
+from .test_source import _module_level_imports
 
 #: sha256 of the committed ``tiny.fa`` — the *unpacked* bytes ``tiny.fa.gz`` yields.
 _TINY_FA_SHA256 = "9316629bab14f9298a043f8b92e1e04a573b12d6a367ccc07c8f8040e5a13981"
@@ -844,3 +850,128 @@ def test_fetch_genome_from_chains_materialize_and_prepare(
     assert files.fasta == tmp_path / "tiny.fa"
     # UCSC is never contacted when seeding from a user-provided FASTA.
     assert head_recorder.calls == []
+
+
+# --- what registering and verifying answer with -----------------------------
+
+# Nothing below registers anything: these are the values registration *returns*, so they
+# are built by hand from the fields a record carries.
+
+
+def _completion(kind: str, name: str, **details: object) -> CompletionRecord:
+    """A completion record with everything filled in, so ``as_json`` has every key."""
+    return CompletionRecord(
+        kind=kind,
+        name=name,
+        files={f"{name}.fa.fai": 21, f"{name}.fa": 12},
+        source_url="https://example.org/x.gz",
+        sha256="1a2b3c",
+        tool_versions={"samtools": "1.21"},
+        package_version="2026.8.0",
+        completed_at="2026-08-12T09:00:00+00:00",
+        details=dict(details),
+    )
+
+
+class TestTheJsonKeysAndTheirOrder:
+    """``as_json`` — every ``--json`` surface here, pinned key for key and in order.
+
+    ``--json`` is what a script parses, so a key renamed, dropped or reordered is a break
+    whether or not anything in this suite notices. These assert the whole list rather than
+    a key inside it, which is the only form that fails on an addition.
+    """
+
+    def test_a_registered_assembly_is_a_record_plus_what_a_record_does_not_hold(self) -> None:
+        # The same shape a registered annotation serializes in, deliberately: a record
+        # plus the two facts a record does not hold about itself. test_gtf pins that half.
+        registered = RegisteredAssembly(
+            assembly="hg38",
+            directory=Path("/data/genome/hg38"),
+            record=_completion("genome", "hg38"),
+        )
+
+        assert list(registered.as_json()) == [
+            "kind",
+            "name",
+            "files",
+            "source_url",
+            "sha256",
+            "tool_versions",
+            "package_version",
+            "completed_at",
+            "details",
+            "assembly",
+            "directory",
+        ]
+        assert registered.as_json()["directory"] == "/data/genome/hg38"
+
+    def test_a_verified_assembly_pins_its_keys_and_serializes_what_supplied_the_digest(
+        self,
+    ) -> None:
+        checked = VerifiedAssembly(
+            assembly="sacCer3",
+            fasta=Path("/data/genome/sacCer3/sacCer3.fa"),
+            sha256="6ff72f07",
+            expected="6ff72f07",
+            expected_from=EXPECTED_FROM_TABLE,
+            components=None,
+        )
+
+        assert list(checked.as_json()) == [
+            "assembly",
+            "fasta",
+            "sha256",
+            "expected",
+            "expected_from",
+            "verified",
+            "components",
+        ]
+        assert checked.as_json()["verified"] is True
+        assert checked.as_json()["fasta"] == "/data/genome/sacCer3/sacCer3.fa"
+
+        # `expected_from` is serialized as the constant the CLI keys on.
+        def _from(expected_from: str | None) -> object:
+            return VerifiedAssembly(
+                assembly="sacCer3",
+                fasta=Path("/tmp/x.fa"),
+                sha256="6ff72f07",
+                expected=None if expected_from is None else "6ff72f07",
+                expected_from=expected_from,
+                components=None,
+            ).as_json()["expected_from"]
+
+        assert _from(EXPECTED_FROM_TABLE) == "table"
+        assert _from(EXPECTED_FROM_RECORD) == "record"
+        assert _from(None) is None
+
+
+def test_a_registered_assembly_is_carried_whole_and_not_copied_out() -> None:
+    # The properties that exist so a surface never re-reads a directory.
+    registered = RegisteredAssembly(
+        assembly="hg38", directory=Path("/data/genome/hg38"), record=_completion("genome", "hg38")
+    )
+
+    assert registered.source_url == "https://example.org/x.gz"
+    assert registered.sha256 == "1a2b3c"
+    assert registered.file_names == ["hg38.fa", "hg38.fa.fai"]
+    first = registered.file_names
+    first.append("intruder")
+    assert registered.file_names == ["hg38.fa", "hg38.fa.fai"]  # a fresh list each call
+    assert registered.chimera is None  # no build merged this one
+
+
+# ---------------------------------------------------------------------------------------
+# The edge this module must not grow back
+# ---------------------------------------------------------------------------------------
+
+
+def test_downloading_an_assembly_imports_nothing_that_registers_an_annotation() -> None:
+    # The assembly half of the guard test_gtf holds for the annotation half, and the
+    # reason the leaf both used to reach through could retire: what registering an
+    # assembly answers with lives here and what registering an annotation answers with
+    # lives in `io.gtf`, and neither module imports the other. Were this edge to open,
+    # the two would be one module by another route and the cycle `io.chimera` closes
+    # through `io.gtf` would come back with it.
+    forbidden = {"genome.io.gtf", "genome.genome"}
+
+    assert _module_level_imports(download_mod) & forbidden == set()

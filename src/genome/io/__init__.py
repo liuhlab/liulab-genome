@@ -4,6 +4,12 @@ Modules here are where the package talks to the outside world: the network
 (:mod:`genome.io.download`) and on-disk genomic files plus the native binaries
 that process them (:mod:`genome.io.fasta`). Keep real, side-effect-free logic
 in ``core``/``features``; this layer only moves bytes.
+
+What a registration answers with is re-exported here beside what produces it, because
+these are the types a caller holds: a script keeps one, the CLI prints it, ``--json``
+serializes it. Each is defined in the module that returns it (ADR-0022) — an assembly's
+in :mod:`genome.io.download`, an annotation's in :mod:`genome.io.gtf` — so this package
+is where they are gathered and nowhere is where they are declared twice.
 """
 
 from genome.io.completion import (
@@ -19,7 +25,9 @@ from genome.io.completion import (
     write_record,
 )
 from genome.io.download import (
+    RegisteredAssembly,
     UCSCGenomeDownloader,
+    VerifiedAssembly,
     assembly_data_dir,
     assembly_table_row,
     liulab_data_dir,
@@ -44,25 +52,17 @@ from genome.io.fasta import (
 from genome.io.gtf import (
     AnnotationNotRegisteredError,
     AnnotationRegistry,
+    AnnotationStatus,
+    AnnotationStatusRow,
     BrokenAnnotation,
     ChromosomeMismatchError,
     GtfAnnotation,
+    RegisteredAnnotation,
     annotation_dir,
     annotation_status,
+    chromosome_check_summary,
     register_annotation,
     register_gtf,
-)
-
-# What a registration answers with, defined in one module and re-exported here because
-# these are the types a caller holds: a script keeps one, the CLI prints it, `--json`
-# serializes it.
-from genome.io.results import (
-    AnnotationStatus,
-    AnnotationStatusRow,
-    RegisteredAnnotation,
-    RegisteredAssembly,
-    VerifiedAssembly,
-    chromosome_check_summary,
 )
 from genome.io.twobit import TwoBit
 from genome.io.utils import ChecksumMismatchError, sha256_file

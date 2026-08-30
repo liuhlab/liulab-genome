@@ -35,7 +35,6 @@ from hypothesis import strategies as st
 
 from genome.io import fetch as fetch_mod
 from genome.io.completion import read_record
-from genome.io.results import ResolvedSymbols, SymbolMatch
 from genome.xref import (
     ALIAS,
     ALLIANCE,
@@ -67,6 +66,7 @@ from genome.xref import metadata as metadata_mod
 from genome.xref.bgi import BGI_SYMBOL_LIMIT, read_bgi
 from genome.xref.hgnc import HGNC_COLUMNS, read_hgnc
 from genome.xref.symbols import KIND_NAMESPACES
+from genome.xref.xref import ResolvedSymbols, SymbolMatch
 
 from .conftest import FakeFetch
 
