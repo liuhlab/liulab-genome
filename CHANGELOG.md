@@ -193,6 +193,21 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   13.5 s or 16.1 s on the same commit, decided by scheduling alone. `--dist=loadgroup` pins each
   such module to one worker and is faster on a 4-core runner too (9.4 s against 12.3 s). The
   worker cap moves 8 → 10; on a CI runner `auto` finds four and the cap does not bind.
+- **The docs site is rewritten for a reader who writes Python and is not a genomicist.** Three long
+  pages become eleven task pages under three nav sections: Get started, then *Working with a genome*
+  (Assembly, Sequences and regions, Annotations, Aligner indexes), *Topics* (Transcription factors,
+  Motifs, Gene identifiers, Homology) and *Interfaces* (a CLI overview and two command pages, plus
+  the API reference). `docs/genome.md`, `docs/sequences.md` and `docs/cli.md` are gone, split into
+  the pages that replace them. **`xref` and `homology` get Python coverage for the first time**, and
+  so do the JASPAR motif surface and the shipped TF-to-motif link table, which appeared nowhere
+  before. Biology and file-format context get a sentence; design rationale and ADR numbers get
+  nothing, since `docs/adr/`, `docs/context/` and `docs/research/` are excluded from the built site.
+  Every example is read-verified against the source, and every quoted output is one that was
+  actually produced. **`docs/reference.md` drops from 59 module directives to eight package
+  sections**, rendering only what each package's `__init__.py` re-exports, so the page no longer
+  publishes some fifty private modules to a reader who should never reach for them; `genome.store`
+  re-exports nothing on purpose and so gets no section. The README is rewritten to the same pitch
+  and points at the site. Nothing under `src/` changed.
 
 ### Added
 

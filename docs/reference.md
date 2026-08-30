@@ -1,242 +1,59 @@
 # API reference
 
-!!! note
-    Generated from docstrings. The hand-authored pages — [Genome](genome.md),
-    [Sequences](sequences.md) and [CLI](cli.md) — are the primary documentation; reach
-    for this one for a signature or a parameter you already know you want.
-
-## `genome.assembly.genome`
-
-::: genome.assembly.genome
-
-## `genome.assembly.chimera`
-
-::: genome.assembly.chimera
-
-## `genome.region`
-
-::: genome.region
-
-## `genome.seq`
-
-::: genome.seq
-
-## `genome.aligner.mixin`
-
-::: genome.aligner.mixin
-
-## `genome.aligner.aligner`
-
-::: genome.aligner.aligner
-
-## `genome.aligner.star`
-
-::: genome.aligner.star
-
-## `genome.aligner.chromap`
-
-::: genome.aligner.chromap
-
-## `genome.shipped`
-
-::: genome.shipped
-
-## `genome.shipped_writer`
-
-::: genome.shipped_writer
-
-## `genome.assembly.metadata`
-
-::: genome.assembly.metadata
-
-## `genome.annotation.metadata`
-
-::: genome.annotation.metadata
-
-## `genome.annotation.curated`
-
-::: genome.annotation.curated
-
-## `genome.workers`
-
-::: genome.workers
-
-## `genome.tf.gene.census`
-
-::: genome.tf.gene.census
-
-## `genome.tf.gene.annotation`
-
-::: genome.tf.gene.annotation
-
-## `genome.tf.cofactor.table`
-
-::: genome.tf.cofactor.table
-
-## `genome.tf.cofactor.annotation`
-
-::: genome.tf.cofactor.annotation
-
-## `genome.tf.species`
-
-::: genome.tf.species
-
-## `genome.tf.motif.motif`
-
-::: genome.tf.motif.motif
-
-## `genome.tf.motif.jaspar`
-
-::: genome.tf.motif.jaspar
-
-## `genome.tf.motif.background`
-
-::: genome.tf.motif.background
-
-## `genome.tf.motif.thresholds`
-
-::: genome.tf.motif.thresholds
-
-## `genome.tf.motif.scan`
-
-::: genome.tf.motif.scan
-
-## `genome.tf.motif.parallel`
-
-::: genome.tf.motif.parallel
-
-## `genome.tf.motif.parquet`
-
-::: genome.tf.motif.parquet
-
-## `genome.tf.motif.compare`
-
-::: genome.tf.motif.compare
-
-## `genome.tf.motif.mixin`
-
-::: genome.tf.motif.mixin
-
-## `genome.tf.link`
-
-::: genome.tf.link
-
-## `genome.xref.ids`
-
-::: genome.xref.ids
-
-## `genome.xref.metadata`
-
-::: genome.xref.metadata
-
-## `genome.xref.evidence`
-
-::: genome.xref.evidence
-
-## `genome.xref.symbols`
-
-::: genome.xref.symbols
-
-## `genome.xref.alliance`
-
-::: genome.xref.alliance
-
-## `genome.xref.ensembl`
-
-::: genome.xref.ensembl
-
-## `genome.xref.hgnc`
-
-::: genome.xref.hgnc
-
-## `genome.xref.bgi`
-
-::: genome.xref.bgi
-
-## `genome.xref.xref`
-
-::: genome.xref.xref
-
-## `genome.homology.metadata`
-
-::: genome.homology.metadata
-
-## `genome.homology.compara`
-
-::: genome.homology.compara
-
-## `genome.homology.annotation`
-
-::: genome.homology.annotation
-
-## `genome.external`
-
-::: genome.external
-
-## `genome.assembly.source`
-
-::: genome.assembly.source
-
-## `genome.assembly.components`
-
-::: genome.assembly.components
-
-## `genome.store.fetch`
-
-::: genome.store.fetch
-
-## `genome.assembly.download`
-
-::: genome.assembly.download
-
-## `genome.assembly.fasta`
-
-::: genome.assembly.fasta
-
-## `genome.annotation.registration`
-
-::: genome.annotation.registration
-
-## `genome.annotation.registry`
-
-::: genome.annotation.registry
-
-## `genome.annotation.stems`
-
-::: genome.annotation.stems
-
-## `genome.annotation.database`
-
-::: genome.annotation.database
-
-## `genome.assembly.twobit`
-
-::: genome.assembly.twobit
-
-## `genome.store.completion`
-
-::: genome.store.completion
-
-## `genome.assembly.registration`
-
-::: genome.assembly.registration
-
-## `genome.store.data_dir`
-
-::: genome.store.data_dir
-
-## `genome.store.prepared`
-
-::: genome.store.prepared
-
-## `genome.store.checksum`
-
-::: genome.store.checksum
-
-## `genome.assembly.chimera_build`
-
-::: genome.assembly.chimera_build
-
-## `genome.cli`
-
-::: genome.cli
+Generated from the source. Each entry carries the signature, the argument types and the
+attributes exactly as the code declares them.
+
+The written pages come first. They cover the same calls in the order you would make them:
+[Assembly](genome/assembly.md), [Sequences and regions](genome/sequences.md),
+[Annotations](genome/annotations.md) and [Aligner indexes](genome/aligner.md) for working
+with a genome; [Transcription factors](topics/transcription-factors.md),
+[Motifs](topics/motifs.md), [Gene identifiers](topics/gene-identifiers.md) and
+[Homology](topics/homology.md) for the tables the package ships; and
+[CLI overview](cli/index.md) for the shell. Come here once you know the name you want.
+
+Each section below is one package's public surface: what its `__init__.py` re-exports, and
+nothing else. A name you can only reach through a submodule path is internal, and it can
+move or disappear between releases.
+
+| Package | What it holds |
+|---|---|
+| `genome` | `Genome`, `Region`, the sequence types, and the results the common calls return |
+| `genome.aligner` | The STAR and chromap index builders |
+| `genome.annotation` | Registering a GTF and asking an annotation for gene ids |
+| `genome.assembly` | The assembly table, the files on disk, and chimera naming |
+| `genome.homology` | Ensembl Compara ortholog sets |
+| `genome.tf` | The shipped table linking transcription factors to motifs |
+| `genome.tf.motif` | JASPAR matrices, scanning, and reading hit files |
+| `genome.xref` | Identifier conversion and symbol matching |
+
+::: genome
+    options:
+      show_root_full_path: true
+
+::: genome.aligner
+    options:
+      show_root_full_path: true
+
+::: genome.annotation
+    options:
+      show_root_full_path: true
+
+::: genome.assembly
+    options:
+      show_root_full_path: true
+
+::: genome.homology
+    options:
+      show_root_full_path: true
+
+::: genome.tf
+    options:
+      show_root_full_path: true
+
+::: genome.tf.motif
+    options:
+      show_root_full_path: true
+
+::: genome.xref
+    options:
+      show_root_full_path: true
