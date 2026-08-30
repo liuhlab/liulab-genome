@@ -75,7 +75,7 @@ from genome.io.completion import (
 )
 from genome.io.registration import xref_data_dir
 from genome.io.results import ResolvedStems, ResolvedSymbols, ResolvedXrefIds, SymbolMatch
-from genome.tf.gene.census import species_slug
+from genome.metadata import species_slug
 from genome.xref.alliance import ALLIANCE, read_alliance
 from genome.xref.bgi import ALLIANCE_BGI, BGI_SYMBOL_LIMIT, read_bgi
 from genome.xref.ensembl import ENSEMBL_TSV, read_ensembl

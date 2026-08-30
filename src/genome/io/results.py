@@ -1223,6 +1223,14 @@ class ResolvedHomologs:
     looks one-to-one, and the label still reads ``ortholog_one2many``; what the crossing
     removed is in :attr:`dropped_partners` rather than folded into the label.
 
+    **Both qualifications the answer carried ride through.** A **Dropped partner** counts
+    partners lost to either step — a **Homology type** filter before the crossing, or an
+    annotation missing the gene during it — so the count a caller reads is what the whole
+    path cost rather than what its last step did. And
+    :attr:`~HomologyAnswer.null_quality_scores` is a fact about the set the answer came
+    from, not about the crossing, so it is repeated here for a caller who filters on
+    ``goc_score`` after resolving.
+
     Attributes
     ----------
     species : str
@@ -1249,8 +1257,14 @@ class ResolvedHomologs:
         because *this annotation is missing every partner* and *this release knows no
         homolog* are different facts about a gene.
     dropped_partners : tuple of str
-        The **Dropped partner**s: every partner **Gene id stem** this annotation carries
-        no gene for, ascending. What the crossing cost, counted rather than hidden.
+        The **Dropped partner**s: every partner **Gene id stem** this answer no longer
+        names, ascending — those a **Homology type** filter removed before the crossing
+        and those this annotation carries no gene for, in one count, since the definition
+        covers both and a caller wants what the whole path cost.
+    null_quality_scores : tuple of str
+        The names of the confidence fields the **Homology set** behind this holds no value
+        in, carried through from :attr:`HomologyAnswer.null_quality_scores` unchanged. The
+        crossing neither adds a score nor removes one.
 
     Examples
     --------
@@ -1267,6 +1281,7 @@ class ResolvedHomologs:
     ...     gene_ids={"ENSMUSG00000059552": ("ENSMUSG00000059552.5",)},
     ...     unresolved=(),
     ...     dropped_partners=("ENSMUSG00000000001",),
+    ...     null_quality_scores=(),
     ... )
     >>> crossed.homolog_gene_ids
     ['ENSMUSG00000059552.5']
@@ -1283,6 +1298,7 @@ class ResolvedHomologs:
     gene_ids: Mapping[str, tuple[str, ...]]
     unresolved: tuple[str, ...]
     dropped_partners: tuple[str, ...]
+    null_quality_scores: tuple[str, ...]
 
     @property
     def homolog_gene_ids(self) -> list[str]:
@@ -1303,8 +1319,8 @@ class ResolvedHomologs:
         dict
             The species pair, the ``release``, the ``assembly`` and ``annotation``,
             ``resolved`` as a mapping of stem to a list of :meth:`HomologyLink.as_json`
-            links, ``gene_ids`` as a plain mapping, ``unresolved`` and
-            ``dropped_partners`` as lists, and the flattened ``homolog_gene_ids``.
+            links, ``gene_ids`` as a plain mapping, ``unresolved``, ``dropped_partners``
+            and ``null_quality_scores`` as lists, and the flattened ``homolog_gene_ids``.
         """
         return {
             "species": self.species,
@@ -1318,6 +1334,7 @@ class ResolvedHomologs:
             "gene_ids": {stem: list(ids) for stem, ids in self.gene_ids.items()},
             "unresolved": list(self.unresolved),
             "dropped_partners": list(self.dropped_partners),
+            "null_quality_scores": list(self.null_quality_scores),
             "homolog_gene_ids": self.homolog_gene_ids,
         }
 

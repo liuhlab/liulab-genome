@@ -98,12 +98,12 @@ from typing import Any
 
 import pandas as pd
 
-# Imported rather than written a third time. ``species_slug`` is the file-naming
-# convention every shipped-data directory here uses and belongs to none of them in
-# particular; promoting it to a shared home is a one-line refactor whenever a third
-# caller wants it. The flag spellings come along for the same reason: one spelling of
-# *yes* across every table this package ships.
-from genome.tf.gene.census import FALSE_CELL, TRUE_CELL, species_slug
+# ``species_slug`` is the file-naming convention every shipped-data directory here uses
+# and belongs to none of them in particular, so it lives beside the curated tables a
+# species is spelled in. The flag spellings stay with the census for a different reason:
+# one spelling of *yes* across every table this package ships.
+from genome.metadata import species_slug
+from genome.tf.gene.census import FALSE_CELL, TRUE_CELL
 
 #: Directory inside the package holding one **Cofactor table** per species, plus the
 #: two provenance tables beside them.

@@ -20,6 +20,7 @@ Examples
 AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/AnimalTFDB4_static/download/TF_list_final/Mus_musculus_TF
 """
 
+from genome.metadata import species_slug
 from genome.tf.gene.census import (
     CENSUS_METADATA_RESOURCE,
     CENSUS_SUBDIR,
@@ -32,7 +33,6 @@ from genome.tf.gene.census import (
     TFGeneTableError,
     census_metadata,
     census_species,
-    species_slug,
     tf_gene_table,
 )
 

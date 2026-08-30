@@ -43,9 +43,8 @@ substitute for *module*.
 - [Xref](./docs/context/xref.md) — covers `xref/*`: which foreign identifiers name a gene and which
   genes a foreign identifier names, on one named publisher's assertions at one pinned release, with
   no genome open
-- [Orthology](./docs/context/orthology.md) — covers `homology/*` _(decided, not built — ADR-0019,
-  ADR-0020)_: which genes in another species a gene is homologous to, and how many-to-many the
-  publisher's own gene tree says that is
+- [Orthology](./docs/context/orthology.md) — covers `homology/*`: which genes in another species a
+  gene is homologous to, and how many-to-many the publisher's own gene tree says that is
 
 `io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
 It is the return types the API hands back and the CLI renders, so it carries the vocabulary of

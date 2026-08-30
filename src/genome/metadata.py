@@ -33,6 +33,14 @@ That last step is :func:`parse_cell`, which is public because it is the reader e
 curated table in this package shares — the two here, and the **Xref source** table
 :mod:`genome.xref.metadata` declares the same way.
 
+:func:`species_slug` sits here for a different reason. The species column of these tables
+is what every shipped-data directory in the package names its files after — the censuses,
+the **Cofactor table**s, the **Xref set**s and Ensembl Compara's own genome names — so
+reconciling the table's spelling with a file name belongs to none of those in particular
+and to the context that owns the table it is read from. Every other context reads this
+module, so a helper here is reachable from all of them without any of them importing
+another.
+
 A row is a record's other spelling, and both directions are public:
 :func:`format_table_row` writes one, :meth:`AssemblyMetadata.from_row` and
 :meth:`AnnotationMetadata.from_row` read one. A table is the records it lists, so every
@@ -368,6 +376,38 @@ def format_table_row(row: Mapping[str, object]) -> str:
     'sacCer3\t\t\t\t\t559292\t\t\t\t'
     """
     return "\t".join("" if row.get(name) is None else str(row[name]) for name in METADATA_FIELDS)
+
+
+def species_slug(species: str) -> str:
+    """Return the file-name spelling of ``species``.
+
+    Lower case, with each run of anything that is not a letter or a digit collapsed to one
+    underscore. It is the one place a curated table's spelling of a species and a file name
+    are reconciled, so neither has to be written the other's way — and it lives beside the
+    tables the species is read from rather than inside any one of the shipped-data
+    directories that name their files with it.
+
+    Parameters
+    ----------
+    species : str
+        A species name, in any spelling.
+
+    Returns
+    -------
+    str
+        Its slug.
+
+    Examples
+    --------
+    >>> species_slug("Homo sapiens")
+    'homo_sapiens'
+    >>> species_slug("Escherichia coli HT115")
+    'escherichia_coli_ht115'
+    >>> species_slug("homo_sapiens")
+    'homo_sapiens'
+    """
+    kept = "".join(character if character.isalnum() else " " for character in species.lower())
+    return "_".join(kept.split())
 
 
 @cache

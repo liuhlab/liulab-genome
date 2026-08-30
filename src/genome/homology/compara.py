@@ -61,7 +61,7 @@ import gzip
 import hashlib
 import re
 import shlex
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
@@ -79,11 +79,10 @@ from genome.io.completion import (
 from genome.io.registration import liulab_data_dir
 from genome.io.results import HomologyAnswer, HomologyLink
 
-# Imported rather than written a second time: the file-naming convention every
-# shipped-data directory here uses belongs to none of them in particular, and for the
-# three species this prepares it is also Ensembl's own genome name. Promoting it to a
-# shared home is a one-line refactor whenever that is worth doing.
-from genome.tf.gene.census import species_slug
+# The file-naming convention every shipped-data directory here uses, read from the module
+# that owns the curated tables a species is spelled in. For the three species this prepares
+# it is also Ensembl's own genome name.
+from genome.metadata import species_slug
 
 #: Where Ensembl publishes its releases. The FTP tree is used and no REST or BioMart API
 #: is: everything here is a bulk file fetched once and read locally, so a run is
@@ -205,6 +204,11 @@ class ComparaPartitionError(RuntimeError):
 
     A :class:`RuntimeError` rather than a :class:`LookupError`: nothing the caller asked
     for is missing, the shipped provenance row is out of date.
+
+    Examples
+    --------
+    >>> issubclass(ComparaPartitionError, RuntimeError)
+    True
     """
 
 
@@ -229,9 +233,18 @@ class HomologySetNotDownloadedError(RuntimeError):
 class ComparaFileError(ValueError):
     """A file read as Compara's is not one, or a prepared slice is not what was recorded.
 
-    One class for both because they mean the same thing to a caller — what is on disk is
-    not what it should be — and the repair is the same: delete the set's directory and
-    construct it again. The message names the file and the repair.
+    One class for three states because they mean the same thing to a caller — what is on
+    disk is not what it should be — and the repair is the same: delete the set's directory
+    and construct it again. The third is a cell that cannot be read as the column's own
+    type, which is a different fact from :data:`NULL_CELL` and never folded into it: *the
+    publisher recorded no score* and *this package could not read the score it recorded*
+    would otherwise both arrive as ``None`` in a column a caller filters on. The message
+    names the file and the repair, and for a bad cell the column and the value too.
+
+    Examples
+    --------
+    >>> issubclass(ComparaFileError, ValueError)
+    True
     """
 
 
@@ -397,6 +410,11 @@ def slice_filename(row: HomologyMetadata) -> str:
     -------
     str
         The local file name.
+
+    Examples
+    --------
+    >>> slice_filename(check_pair("Homo sapiens", "Mus musculus", "116"))
+    'Compara.116.homo_sapiens-mus_musculus.homologies.tsv.gz'
     """
     return f"Compara.{row.release}.{pair_name(*row.pair)}.homologies.tsv.gz"
 
@@ -413,6 +431,17 @@ def source_filename(row: HomologyMetadata) -> str:
     -------
     str
         The download's file name, carrying the release and the species whose dump it is.
+
+    Notes
+    -----
+    Which species that is, is the pair's *holding species* and not either of the two the
+    caller named — the partition decides it, and the shipped row records which file was
+    counted to hold the pair.
+
+    Examples
+    --------
+    >>> source_filename(check_pair("Homo sapiens", "Mus musculus", "116"))
+    'Compara.116.mus_musculus.protein_default.homologies.tsv.gz'
     """
     return (
         f"Compara.{row.release}.{species_slug(row.holding_species)}."
@@ -430,14 +459,22 @@ def set_dir(root: Path, row: HomologyMetadata) -> Path:
     Parameters
     ----------
     root : pathlib.Path
-        The homology root — :func:`homology_data_dir`, or a ``cache_dir`` override.
+        The homology root, which is :func:`homology_data_dir` unless a caller is laying
+        one out somewhere else. A ``cache_dir`` passed to :class:`HomologySet` is *not*
+        this: it names the set's own directory and skips the layout entirely.
     row : genome.homology.metadata.HomologyMetadata
         The provenance row for the pair.
 
     Returns
     -------
     pathlib.Path
-        The set's own directory.
+        The set's own directory. Nothing is created by asking.
+
+    Examples
+    --------
+    >>> from pathlib import Path
+    >>> set_dir(Path("/scratch/liulab/homology"), check_pair("Homo sapiens", "Mus musculus", "116"))
+    PosixPath('/scratch/liulab/homology/ensembl_compara/116/homo_sapiens-mus_musculus')
     """
     return root / COMPARA_SUBDIR / row.release / pair_name(*row.pair)
 
@@ -606,10 +643,12 @@ class HomologySet:
     release : str, default ``"116"``
         The Compara **Release**, one of those the shipped table pins.
     cache_dir : str or pathlib.Path, optional
-        The homology root to prepare under, overriding :func:`homology_data_dir`. The
-        directory itself, not a root to file ``homology/`` under; the
-        ``ensembl_compara/<release>/<pair>/`` layout is still applied beneath it, since a
-        set carries a **Completion marker** and needs a directory of its own.
+        The directory to prepare in, overriding the one :func:`set_dir` lays out under
+        :func:`homology_data_dir`. The directory itself, not a root to file a layout
+        under — the same word means the same thing for a
+        :class:`~genome.xref.xref.XrefSet` and a
+        :class:`~genome.tf.motif.jaspar.JasparDatabase`. One set per directory either way,
+        since each carries a **Completion marker** of its own.
     progressbar : bool, default True
         Show the download's progress bar. Nothing is drawn when the set is already there.
 
@@ -647,8 +686,9 @@ class HomologySet:
     ComparaPartitionError
         If the recorded file holds none of the pair's rows — the partition moved.
     ComparaFileError
-        If the fetched dump is not Compara's, or a prepared slice disagrees with its
-        record.
+        If the fetched dump is not Compara's, if a prepared slice disagrees with its
+        record, or if one of its quality cells is neither a number nor the publisher's
+        own null.
 
     Examples
     --------
@@ -677,8 +717,11 @@ class HomologySet:
         self.species = check_species(species)
         self.other_species = check_species(other_species)
         self.source_url = row.source_url
-        root = Path(cache_dir).expanduser() if cache_dir is not None else homology_data_dir()
-        directory = set_dir(root, row)
+        directory = (
+            Path(cache_dir).expanduser()
+            if cache_dir is not None
+            else set_dir(homology_data_dir(), row)
+        )
         self.path, record = _prepare(row, directory=directory, progressbar=progressbar)
         links, nulls = _read_slice(self.path, row=row, species=self.species, record=record)
         self._links = links
@@ -779,7 +822,13 @@ def _prepare(
     written, so a set that would answer empty does not exist on disk to be re-read.
     """
     path = directory / slice_filename(row)
-    repair = f"rm -rf {shlex.quote(str(directory))}"
+    # Both halves of the repair, because deleting the directory on its own leaves the
+    # caller with nothing and no way back — and the second half is the call that needs a
+    # login node, which is worth reading before the first half has run.
+    repair = (
+        f"rm -rf {shlex.quote(str(directory))} && "
+        f"{homology_prepare_command(row.species, row.other_species, row.release)}"
+    )
     record = check_registration(directory, repair=repair)
     if record is not None:
         return path, record
@@ -934,8 +983,18 @@ def _read_slice(
                     homolog_gene_id_stem=cells[_GENE if flip else _HOMOLOG],
                     homology_type=cells[_TYPE],
                     is_high_confidence=_flag(cells[_HIGH_CONFIDENCE]),
-                    goc_score=_whole(cells[_QUALITY_AT["goc_score"]]),
-                    wga_coverage=_fraction(cells[_QUALITY_AT["wga_coverage"]]),
+                    goc_score=_score(
+                        cells[_QUALITY_AT["goc_score"]],
+                        column="goc_score",
+                        path=path,
+                        read=int,
+                    ),
+                    wga_coverage=_score(
+                        cells[_QUALITY_AT["wga_coverage"]],
+                        column="wga_coverage",
+                        path=path,
+                        read=float,
+                    ),
                 )
             )
             scored.update(_scored_columns(cells))
@@ -961,21 +1020,25 @@ def _flag(cell: str) -> bool | None:
     return None
 
 
-def _whole(cell: str) -> int | None:
-    """Read a whole-number quality score — ``None`` where Compara recorded nothing."""
+def _score[Number: (int, float)](
+    cell: str, *, column: str, path: Path, read: Callable[[str], Number]
+) -> Number | None:
+    """Read one quality-score cell — ``None`` only where Compara recorded nothing.
+
+    One reader for both score columns, differing in the type each is written in: ``int``
+    for ``goc_score`` and ``float`` for ``wga_coverage``. A cell that is neither the
+    publisher's own null nor that type raises rather than reading as null, because *no
+    score was published* and *the published score could not be read* are different facts
+    and only one of them is a property of the release.
+    """
     if cell == NULL_CELL or not cell:
         return None
     try:
-        return int(cell)
-    except ValueError:
-        return None
-
-
-def _fraction(cell: str) -> float | None:
-    """Read a fractional quality score — ``None`` where Compara recorded nothing."""
-    if cell == NULL_CELL or not cell:
-        return None
-    try:
-        return float(cell)
-    except ValueError:
-        return None
+        return read(cell)
+    except ValueError as error:
+        raise ComparaFileError(
+            f"{path} records {cell!r} in its {column!r} column, which is neither a number nor "
+            f"Compara's own {NULL_CELL!r} for a cell it left empty. Reading it as null would "
+            f"say the publisher scored nothing here, which is a claim about the release rather "
+            f"than about this file — delete {path.parent} and construct the set again."
+        ) from error

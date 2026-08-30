@@ -31,6 +31,7 @@ from __future__ import annotations
 import ast
 import gzip
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,13 @@ MANY2MANY_MICE = ("ENSMUSG00000070377", "ENSMUSG00000070378")
 #: A stem no fixture mentions, for the unresolved bucket.
 ABSENT = "ENSG00000000000"
 
+#: A mouse stem no fixture mentions, standing in for a partner a filter removed before an
+#: answer ever reached an annotation. Sorts before every mouse stem the fixtures carry.
+ABSENT_PARTNER = "ENSMUSG00000000001"
+
+#: The package's own source tree, which the structural bans at the foot of this file read.
+PACKAGE = Path(__file__).resolve().parents[1] / "src" / "genome"
+
 
 def _row(species: str, other: str) -> HomologyMetadata:
     """The shipped provenance row for one pair, which every test builds through."""
@@ -170,6 +178,25 @@ def _built(
     """
     fake_fetch.serve(FIXTURES[_row(species, other).holding_species])
     return HomologySet(species, other, progressbar=False, cache_dir=cache_dir)
+
+
+def _rewrite_cell(path: Path, *, column: str, value: str) -> None:
+    """Put ``value`` in one column of a stored slice's first row, record still agreeing.
+
+    The **Completion marker**'s file sizes are re-stated afterwards, so what the re-read
+    trips over is the edited cell rather than a directory that no longer looks finished.
+    """
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        lines = handle.read().splitlines()
+    cells = lines[1].split("\t")
+    cells[COMPARA_COLUMNS.index(column)] = value
+    lines[1] = "\t".join(cells)
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write("\n".join(lines) + "\n")
+    marker = path.parent / RECORD_NAME
+    payload = json.loads(marker.read_text())
+    payload["files"][path.name] = path.stat().st_size
+    marker.write_text(json.dumps(payload))
 
 
 def _registry_declaring(tmp_path: Path, *gene_ids: str) -> AnnotationRegistry:
@@ -262,7 +289,7 @@ class TestFixtureBytes:
         assert all(row[11] != "NULL" and row[12] != "NULL" for row in scored)
 
     @pytest.mark.parametrize(("species", "other", "_links"), PAIRS)
-    def test_every_pair_carries_all_three_cardinalities(
+    def test_every_pair_carries_all_three_speciation_homology_types(
         self, data_dir: Path, species: str, other: str, _links: int
     ) -> None:
         assert {row[4] for row in _published(data_dir, species, other)} == {
@@ -393,16 +420,17 @@ class TestPreparation:
         assert backward.path == forward.path
         assert len(backward) == len(forward)
 
-    def test_cache_dir_overrides_the_homology_root_and_keeps_the_layout_beneath_it(
+    def test_cache_dir_names_the_directory_itself_as_it_does_for_every_sibling_type(
         self, fake_fetch: FakeFetch, tmp_path: Path
     ) -> None:
+        # One meaning of `cache_dir` across the package: an `XrefSet` and a
+        # `JasparDatabase` both prepare *in* the directory they are handed, and a set that
+        # re-applied a layout beneath it would be the one exception nobody expects.
         elsewhere = tmp_path / "elsewhere"
 
         homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus", cache_dir=elsewhere)
 
-        assert homologs.path.parent == (
-            elsewhere / "ensembl_compara" / "116" / "homo_sapiens-mus_musculus"
-        )
+        assert homologs.path.parent == elsewhere
 
     def test_the_stored_slice_is_a_plain_gzipped_tsv_of_the_publishers_own_rows(
         self, fake_fetch: FakeFetch, data_dir: Path
@@ -441,6 +469,38 @@ class TestPreparation:
 
         with pytest.raises(UnfinishedRegistrationError, match="rm -rf"):
             HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
+
+    def test_the_repair_for_an_unfinished_set_names_the_call_that_rebuilds_it(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # Deleting the directory is half a repair: it leaves the caller with nothing and
+        # no way back. The xref half already quotes both, and so must this.
+        homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
+        (homologs.path.parent / RECORD_NAME).unlink()
+
+        with pytest.raises(UnfinishedRegistrationError) as raised:
+            HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
+
+        assert homology_prepare_command("Homo sapiens", "Mus musculus", DEFAULT_RELEASE) in str(
+            raised.value
+        )
+
+    def test_a_quality_cell_that_cannot_be_read_raises_rather_than_reading_as_a_null(
+        self, fake_fetch: FakeFetch
+    ) -> None:
+        # Two different facts, and the same `None` would have said both: *Compara recorded
+        # no score* and *this package could not read the one it recorded*. The second is a
+        # hole in a column a caller filters on, so it is named — file, column and cell.
+        homologs = _built(fake_fetch, "Mus musculus", "Homo sapiens")
+        _rewrite_cell(homologs.path, column="goc_score", value="not-a-score")
+
+        with pytest.raises(ComparaFileError) as raised:
+            HomologySet("Mus musculus", "Homo sapiens", progressbar=False)
+
+        message = str(raised.value)
+        assert str(homologs.path) in message
+        assert "goc_score" in message
+        assert "not-a-score" in message
 
     def test_a_slice_changed_after_it_was_prepared_raises_rather_than_answering_short(
         self, fake_fetch: FakeFetch
@@ -915,6 +975,38 @@ class TestCrossingIntoAnAnnotation:
         assert list(crossed.gene_ids) == list(MANY2MANY_MICE)
         assert crossed.dropped_partners == ()
 
+    def test_a_partner_dropped_before_the_crossing_is_still_counted_after_it(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        # A **Dropped partner** is one an answer no longer names, whichever step removed
+        # it — a Homology type filter or the annotation — so the crossing adds to the
+        # count rather than replacing it. Release 116 publishes no cross-species paralogy
+        # for these pairs, so the already-filtered answer is written out here instead of
+        # asked for from a set that could not produce one.
+        homologs = _built(fake_fetch, "Homo sapiens", "Mus musculus")
+        answer = homologs.homologs([MANY2MANY_HUMAN_OF_MOUSE])
+        filtered = replace(answer, dropped_partners=(ABSENT_PARTNER,))
+        registry = _registry_declaring(tmp_path, f"{MANY2MANY_MICE[0]}.3")
+
+        crossed = resolve_homologs(filtered, registry, "mine")
+
+        assert crossed.dropped_partners == (ABSENT_PARTNER, MANY2MANY_MICE[1])
+
+    def test_the_crossing_carries_the_null_quality_scores_it_was_handed(
+        self, fake_fetch: FakeFetch, tmp_path: Path
+    ) -> None:
+        # The measurement rides on every answer, and a crossing is still an answer: a
+        # caller who filters on `goc_score` after resolving must be told it is empty for
+        # this pair in the same breath, not left to discover it.
+        homologs = _built(fake_fetch, "Homo sapiens", "Caenorhabditis elegans")
+        answer = homologs.homologs([ONE2MANY_HUMAN])
+        registry = _registry_declaring(tmp_path, f"{ONE2MANY_WORMS[0]}.1")
+
+        crossed = resolve_homologs(answer, registry, "mine")
+
+        assert crossed.null_quality_scores == QUALITY_SCORE_COLUMNS
+        assert crossed.as_json()["null_quality_scores"] == list(QUALITY_SCORE_COLUMNS)
+
 
 # ---------------------------------------------------------------------------
 # What is refused, and what the refusal names
@@ -980,15 +1072,31 @@ class TestRefusals:
 # ---------------------------------------------------------------------------
 
 
+def _imported_modules(path: Path) -> set[str]:
+    """Return every module ``path`` names in an import, read off its source.
+
+    The whole tree of the file is walked rather than its top level, so an import deferred
+    into a function body or hidden under ``TYPE_CHECKING`` counts too — a ban that only
+    the laziest evasion defeats is not a structural guarantee. Read rather than observed,
+    since importing a module loads its package and ``sys.modules`` would then say more
+    than any one module asked for.
+    """
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            found.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            found.add(node.module or "")
+    return found
+
+
 def test_nothing_this_package_publishes_is_derived_through_homology() -> None:
     """No module outside ``genome.homology`` may import it, so no shipped table can use it.
 
     The structural half of ADR-0019: a **TF gene table**, a **Cofactor table** or any list
     this package ships cannot be derived through homology if nothing that builds one can
     reach it — not even ``genome/__init__.py``, which is why the subpackage is addressed
-    as ``genome.homology`` and never re-exported at the top level. Read off the source
-    rather than observed, since importing a module loads its package and ``sys.modules``
-    would then say more than any module asked for.
+    as ``genome.homology`` and never re-exported at the top level.
 
     ``cli.py`` is the one exemption, and it is sound because *consume* here means
     *derive a claim of this package's own*. The CLI publishes no table: it parses
@@ -997,26 +1105,38 @@ def test_nothing_this_package_publishes_is_derived_through_homology() -> None:
     Python. Nothing it prints outlives the process, and no list that ships in the wheel
     passes through it. Every other module keeps the ban whole — a reader of this list
     should be able to say, of any name added to it, which table it could not build.
-
-    The whole tree is walked rather than its top level, so an import deferred into a
-    function body or hidden under ``TYPE_CHECKING`` is caught too — a ban that only the
-    laziest evasion defeats is not a structural guarantee.
     """
-    package = Path(__file__).resolve().parents[1] / "src" / "genome"
-    served = {package / "cli.py"}
-    offenders: list[str] = []
-    for path in sorted(package.rglob("*.py")):
-        if path.parent.name == "homology" or path in served:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                names = [node.module or ""]
-            else:
-                continue
-            if any(name.startswith("genome.homology") for name in names):
-                offenders.append(str(path.relative_to(package)))
+    served = {PACKAGE / "cli.py"}
+    offenders = sorted(
+        str(path.relative_to(PACKAGE))
+        for path in PACKAGE.rglob("*.py")
+        if path.parent.name != "homology"
+        and path not in served
+        and any(name.startswith("genome.homology") for name in _imported_modules(path))
+    )
+    assert offenders == []
+
+
+@pytest.mark.parametrize("context", ["homology", "xref"])
+def test_neither_cross_species_context_imports_the_tf_half(context: str) -> None:
+    """*Orthology → TF gene* and *Xref → TF gene* both run one way, held structurally.
+
+    The context map says of the first that it is "a prohibition rather than a call …
+    neither half imports the other", and of the second that "the xref half reads no
+    census". One guard for both edges, and it lives beside its mirror image above — that
+    one lets nothing outside ``genome.homology`` import *it*, this one lets neither the
+    Orthology half nor the Xref half import ``genome.tf``.
+
+    What made this fail before it was written: ``species_slug``, a file-naming helper that
+    happened to be defined in ``genome.tf.gene.census`` and is now in ``genome.metadata``,
+    the Assembly context's module that every context may read. A helper is not a concept,
+    and an import edge does not care about the difference.
+    """
+    offenders = sorted(
+        str(path.relative_to(PACKAGE))
+        for path in (PACKAGE / context).rglob("*.py")
+        if any(name.startswith("genome.tf") for name in _imported_modules(path))
+    )
     assert offenders == []
 
 

@@ -73,7 +73,7 @@ prepared. A pair whose slice comes back empty raises and names the other file; a
   `wga_coverage` are `NULL` on 100% of the 23,982 human↔worm rows and 100% of the 25,006 mouse↔worm
   rows. An answer says which score columns its set holds nothing in, measured over the slice, so a
   filter written on one is told rather than left to empty in silence.
-- **Cardinality is far from one-to-one for worm.** Of the human↔worm rows, 75.66% are
+- **The Homology type is far from one-to-one for worm.** Of the human↔worm rows, 75.66% are
   `ortholog_many2many` and one-to-one reaches 14.1% of human genes, against 83.0% for mouse. That
   spread is the argument for **Homology type** being a typed fact on every link rather than a
   footnote, and it is why nothing this package publishes is derived through homology (ADR-0019).

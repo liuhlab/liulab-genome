@@ -43,7 +43,10 @@ def resolve_homologs(
     annotation carries a gene for is kept, with its **Homology type** untouched, and every
     partner it carries none for is reported in
     :attr:`~genome.io.results.ResolvedHomologs.dropped_partners` rather than dropped in
-    silence.
+    silence — *added to* whatever the answer had already dropped, since a **Dropped
+    partner** is one the answer no longer names whichever step removed it. Which quality
+    columns the set holds nothing in is a fact about the set rather than about the
+    crossing, and rides through unchanged.
 
     **The registry must annotate the answer's other species.** Nothing here checks that —
     an assembly's species is the assembly's own metadata and a registry does not carry
@@ -66,7 +69,8 @@ def resolve_homologs(
     -------
     genome.io.results.ResolvedHomologs
         The links whose partners this annotation spells, the gene ids it spells them with,
-        the asked stems left naming nothing, and the partners it carries no gene for.
+        the asked stems left naming nothing, every partner dropped along the way, and the
+        quality columns the set behind it holds nothing in.
 
     Raises
     ------
@@ -116,5 +120,13 @@ def resolve_homologs(
         # `ResolvedGeneIds` does — and because *this annotation is missing every partner*
         # and *this release knows no homolog* are two different facts about a gene.
         unresolved=tuple(stem for stem in answer.resolved if stem not in kept) + answer.unresolved,
-        dropped_partners=tuple(sorted(crossed.unresolved)),
+        # Both causes in one count. A **Dropped partner** is a partner the answer no
+        # longer names, and the definition does not care which step removed it — so what
+        # a Homology type filter dropped before the crossing is added to what the
+        # annotation dropped during it, rather than being replaced by it. ADR-0020 turns
+        # on the count being reported, not on the label being corrected.
+        dropped_partners=tuple(sorted(set(answer.dropped_partners) | set(crossed.unresolved))),
+        # A fact about the set the answer came from, not about the crossing, and the
+        # module documentation says it rides on every answer. A crossing is an answer.
+        null_quality_scores=answer.null_quality_scores,
     )

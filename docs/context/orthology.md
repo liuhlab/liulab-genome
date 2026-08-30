@@ -12,8 +12,11 @@ table**, no list of its own — is derived through homology, and no answer is ev
 species-mapped. A species with no census or no shipped table raises and names the ones that have
 them, rather than being answered with a translated guess.
 
-None of it is built. Every entry below is *(decided, not built — ADR-0019, ADR-0020)* in the sense
-the context map describes: use the word, do not call the API it describes.
+Every term below is built. `genome.homology` answers for all three pairings among human, mouse and
+worm off Ensembl Compara's protein gene-tree dumps at release 116 — the per-species dump that holds
+a pair is fetched once, verified against the publisher's own md5, sliced to the pair and read back
+locally — and `resolve_homologs` puts an answer into one registered **Annotation**'s own gene ids
+through the call the Xref half already uses.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker** and the
 rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem** among them. **TF gene

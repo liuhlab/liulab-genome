@@ -57,8 +57,7 @@ from typing import Any, get_type_hints
 
 import pandas as pd
 
-from genome.metadata import parse_cell
-from genome.tf.gene.census import species_slug
+from genome.metadata import parse_cell, species_slug
 
 #: Directory inside the package holding the curated **Xref source** table and the
 #: attribution beside it. No **Xref set** ships here — only the row that fetches one.
