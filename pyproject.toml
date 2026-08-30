@@ -123,10 +123,15 @@ fmt-check = "ruff format --check ."
 typecheck = "pyright"
 
 # Two lanes, and together they are the suite — see AGENTS.md for why they must stay one.
-# The cap: `auto` alone oversubscribes, a bare 8 oversubscribes a small runner.
-# docs/research/test-suite-parallelism-2026-08-14.md
-test        = { cmd = "pytest -m 'not aligner' -n auto --maxprocesses 8 --dist=load", depends-on = ["require-tools"] }
-# Serial: three tests. `depends-on` because pixi runs it first, proving the binaries answer.
+# The cap: `auto` alone oversubscribes, a bare number is wrong on a small runner. Ten is the
+# floor of the curve on a 14-core box; on a 4-core CI runner `auto` finds four and the cap
+# does not bind. `loadgroup` rather than `load` because a handful of tests spawn their own
+# process pools: distributed by load, eight of them could fork pools at once and the lane's
+# wall went bimodal — 13.5 s or 16.1 s on the same commit, decided by scheduling alone.
+# Grouping pins each such module to one worker, which is faster on BOTH box sizes (4 workers:
+# 9.4 s against 12.3 s). docs/research/test-suite-parallelism-2026-08-30.md
+test        = { cmd = "pytest -m 'not aligner' -n auto --maxprocesses 10 --dist=loadgroup", depends-on = ["require-tools"] }
+# Serial: eight tests. `depends-on` because pixi runs it first, proving the binaries answer.
 test-aligner = { cmd = "pytest -m aligner", depends-on = ["require-aligners"] }
 require-aligners = "bash scripts/require_aligners.sh"
 require-tools    = "bash scripts/require_tools.sh"

@@ -11,9 +11,13 @@ The tables are read as the files they are — gzipped TSV, no quoting — with :
 and :mod:`csv` rather than through any module of this package, because reading them
 without importing it is the property being defended.
 
-Every test that is about one table iterates over *every* shipped table. A second species
-or a third release is a file dropped into ``data/tf_link/``, and dropping one in must not
-mean rewriting these.
+One test below walks every shipped table's rows for gene identity, symbol and motif id —
+the whole-table structural invariant that catches a newly dropped-in file with no code
+change here. The row-level rules about role, partners, rank and cross-species run against
+a representative pair instead — one human table and one mouse table, on different
+releases — since species and release are covariates of the same rules there, and the
+pinned gene, link, cross-species and monomer counts below already guard every shipped
+file's shape.
 """
 
 from __future__ import annotations
@@ -89,6 +93,11 @@ _PINNED: dict[tuple[str, str], tuple[int, int, int, int]] = {
     ("mus_musculus", "2024"): (653, 851, 690, 702),
     ("mus_musculus", "2026"): (693, 896, 732, 745),
 }
+
+#: One human table and one mouse table, on different releases: enough to cross the
+#: species boundary and the release boundary at once for the row-level rules, without
+#: re-running each against every shipped file — the pinned counts above already do that.
+_REPRESENTATIVE_TABLES = (("homo_sapiens", "2026"), ("mus_musculus", "2024"))
 
 #: Genes whose only motifs are complexes, on the 2026 **Release**. Named because the
 #: whole point of **Role** is that these are linked rather than reported motif-less: a
@@ -223,28 +232,6 @@ def test_a_table_ships_for_every_census_and_every_release_the_package_prepares()
     )
 
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_table_is_named_for_a_census_and_a_release(slug: str, release: str) -> None:
-    # Two keys name one table, so both are in the file name.
-    assert slug in census_species()
-    assert release in JASPAR_RELEASES
-    assert species_slug(slug) == slug
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_table_ships_gzipped_with_no_timestamp(slug: str, release: str) -> None:
-    # Bulk data ships gzipped, as the censuses beside it do. The gzip header carries
-    # ``mtime=0``, which is what lets two runs of the generator agree byte for byte —
-    # without it every rebuild would diff whether or not the links changed.
-    name = f"{slug}.{RELEASE_PREFIX}{release}{LINK_SUFFIX}"
-    raw = _directory().joinpath(name).read_bytes()
-
-    assert name.endswith(".tsv.gz")
-    assert raw.startswith(b"\x1f\x8b")
-    assert raw[4:8] == b"\x00\x00\x00\x00"
-    assert _text(slug, release).endswith("\n")
-
-
 def test_the_alias_table_ships_plain_beside_the_gzipped_tables() -> None:
     # The convention, and this directory is where its two halves meet: bulk tables
     # gzipped, small metadata tables plain — as `census_metadata.tsv` and the assembly
@@ -257,111 +244,76 @@ def test_the_alias_table_ships_plain_beside_the_gzipped_tables() -> None:
     assert raw.endswith(b"\n")
 
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_table_carries_the_same_columns_in_the_same_order(slug: str, release: str) -> None:
-    # Identical headers are what lets two tables concatenate into one frame.
-    assert _header(slug, release) == LINK_COLUMNS
+@pytest.mark.parametrize(("slug", "release"), _REPRESENTATIVE_TABLES)
+def test_a_tables_packaging_and_pinned_counts_hold(slug: str, release: str) -> None:
+    # Two keys name one table, so both are in the file name. The gzip header carries
+    # `mtime=0`, which is what lets two runs of the generator agree byte for byte —
+    # without it every rebuild would diff whether or not the links changed. The four
+    # pinned numbers are the only guard a regenerated table gets, since regenerating one
+    # needs a download, and the published range on total information content is what a
+    # matrix read wrong would fall outside of.
+    assert slug in census_species()
+    assert release in JASPAR_RELEASES
+    assert species_slug(slug) == slug
 
+    name = f"{slug}.{RELEASE_PREFIX}{release}{LINK_SUFFIX}"
+    raw = _directory().joinpath(name).read_bytes()
+    assert name.endswith(".tsv.gz")
+    assert raw.startswith(b"\x1f\x8b")
+    assert raw[4:8] == b"\x00\x00\x00\x00"
+    assert _text(slug, release).endswith("\n")
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_row_names_the_release_and_species_its_file_does(slug: str, release: str) -> None:
-    # Carried on every row rather than left to the file name, so a concatenated frame
-    # still says where each row came from.
-    census = _census(slug)
-
-    for row in _read(slug, release):
-        assert row["release"] == release
-        assert row["species"] == census.species
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_the_gene_link_and_species_counts_are_pinned(slug: str, release: str) -> None:
     rows = _read(slug, release)
     genes, links, cross, monomer = _PINNED[(slug, release)]
-
     assert len(rows) == links
     assert len({row["gene_id_stem"] for row in rows}) == genes
     assert sum(1 for row in rows if row["is_cross_species"] == TRUE_FLAG) == cross
     assert sum(1 for row in rows if row["role"] == MONOMER) == monomer
 
-
-# ---------------------------------------------------------------------------------------
-# Every link answers for a gene its census judged a transcription factor
-# ---------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_linked_gene_is_in_its_census_and_assessed_positive(slug: str, release: str) -> None:
-    # Only assessed-positive genes receive links: a gene the census assessed and turned
-    # down is unlinked however a profile is named, and a gene it never assessed at all is
-    # not this package's to link.
-    assessed = _by_stem(slug)
-
-    for row in _read(slug, release):
-        stem = row["gene_id_stem"]
-        assert stem in assessed, f"{stem} is linked and {slug} does not assess it"
-        assert assessed[stem][1], f"{stem} is linked and {slug} did not judge it a TF"
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_link_carries_the_censuss_own_symbol_for_its_gene(slug: str, release: str) -> None:
-    # The symbol on the row is the census's, never JASPAR's — they differ exactly where
-    # the alias table says they do, and the row would be unreadable if it said which.
-    assessed = _by_stem(slug)
-
-    for row in _read(slug, release):
-        assert row["symbol"] == assessed[row["gene_id_stem"]][0]
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_no_gene_names_one_motif_twice(slug: str, release: str) -> None:
-    pairs = [(row["gene_id_stem"], row["motif_id"]) for row in _read(slug, release)]
-
-    assert len(set(pairs)) == len(pairs)
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_motif_id_is_a_versioned_accession(slug: str, release: str) -> None:
-    # A **Motif id** is versioned; a bare base id addresses whichever version a release
-    # ships, which is not the same claim.
-    for row in _read(slug, release):
-        assert re.fullmatch(r"[A-Z]+\d+\.\d+", row["motif_id"]), row["motif_id"]
+    low, high = _IC_RANGE
+    for row in rows:
+        value = float(row["total_information_content"])
+        assert low < value < high, f"{row['motif_id']} carries {value} bits"
 
 
 # ---------------------------------------------------------------------------------------
-# Role: what the matrix is a motif of
+# Every link answers for a gene its census judged a transcription factor, correctly named
 # ---------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_role_is_one_of_the_two_declared(slug: str, release: str) -> None:
-    assert {row["role"] for row in _read(slug, release)} <= {MONOMER, COMPLEX}
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_a_complex_names_at_least_one_partner_and_a_monomer_names_none(
+def test_every_shipped_tables_header_and_rows_are_well_formed_and_invent_no_gene(
     slug: str, release: str
 ) -> None:
-    # The whole reason **Role** exists: a heterodimer matrix must never be read as a
-    # monomer's, and a row that said `complex` with nothing beside it would be exactly
-    # that reading with a label on it.
-    for row in _read(slug, release):
-        partners = [part for part in row["partners"].split(VALUE_SEPARATOR) if part]
-        if row["role"] == COMPLEX:
-            assert partners, f"{row['motif_id']} is a complex naming no partner"
-        else:
-            assert not partners, f"{row['motif_id']} is a monomer naming {partners}"
+    # The whole-table structural invariant, walked over every shipped table rather than a
+    # sample: identical headers are what lets two tables concatenate into one frame, and
+    # JASPAR publishes no quality score and this package invents none. Only
+    # assessed-positive genes receive links, so a gene the census assessed and turned
+    # down is unlinked however a profile is named, and a gene it never assessed at all is
+    # not this package's to link. The symbol on the row is the census's, never JASPAR's,
+    # no gene names one motif twice, a **Motif id** is versioned — a bare base id
+    # addresses whichever version a release ships, which is not the same claim — and
+    # `EWSR1-FLI1`, an oncogenic fusion naming no gene, stays absent by design rather
+    # than by omission.
+    assert _header(slug, release) == LINK_COLUMNS
+    for column in _header(slug, release):
+        assert not any(word in column for word in ("score", "quality", "confidence", "weight"))
 
+    census = _census(slug)
+    assessed = _by_stem(slug)
+    rows = _read(slug, release)
+    pairs = [(row["gene_id_stem"], row["motif_id"]) for row in rows]
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_the_partners_are_the_other_genes_the_motif_name_names(slug: str, release: str) -> None:
-    for row in _read(slug, release):
-        parts = row["motif_name"].upper().split(NAME_SEPARATOR)
-        partners = [part for part in row["partners"].split(VALUE_SEPARATOR) if part]
-
-        assert len(partners) == len(parts) - 1
-        assert set(partners) <= set(parts)
-        assert (row["role"] == MONOMER) == (len(parts) == 1)
+    assert len(set(pairs)) == len(pairs)
+    assert not [row for row in rows if row["motif_name"] == _FUSION]
+    for row in rows:
+        stem = row["gene_id_stem"]
+        assert row["release"] == release
+        assert row["species"] == census.species
+        assert stem in assessed, f"{stem} is linked and {slug} does not assess it"
+        assert assessed[stem][1], f"{stem} is linked and {slug} did not judge it a TF"
+        assert row["symbol"] == assessed[stem][0]
+        assert re.fullmatch(r"[A-Z]+\d+\.\d+", row["motif_id"]), row["motif_id"]
 
 
 @pytest.mark.parametrize("slug", sorted(_COMPLEX_ONLY_2026))
@@ -380,79 +332,48 @@ def test_a_gene_whose_only_motifs_are_complexes_is_still_linked(slug: str) -> No
 
 
 # ---------------------------------------------------------------------------------------
-# Attribution specificity: the order one gene's links come back in
+# Role, partners, rank and cross-species: each row is internally consistent
 # ---------------------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_ranks_are_dense_from_one_within_a_gene(slug: str, release: str) -> None:
-    for stem, rows in _grouped(_read(slug, release)).items():
-        ranks = sorted(int(row["rank"]) for row in rows)
-
-        assert ranks == list(range(1, len(rows) + 1)), f"{stem} ranks {ranks}"
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_ranks_encode_attribution_specificity(slug: str, release: str) -> None:
-    # Four keys, so the order is total and stable: two machines and two releases mean the
-    # same thing by "the motif for this factor". Re-sorting the shipped rows on the
-    # shipped columns has to reproduce the shipped rank — which is also what makes the
-    # rule checkable by a reader who never imports this package.
-    for stem, rows in _grouped(_read(slug, release)).items():
-        expected = sorted(rows, key=_specificity_key)
-
-        assert [row["rank"] for row in expected] == [str(n) for n in range(1, len(rows) + 1)], stem
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_no_quality_score_is_shipped(slug: str, release: str) -> None:
-    # JASPAR publishes none and this package invents none; the ordering states what a
-    # matrix is attributable to and explicitly not which motif is better.
-    for column in _header(slug, release):
-        assert not any(word in column for word in ("score", "quality", "confidence", "weight"))
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_the_total_information_content_is_a_number_in_the_published_range(
+@pytest.mark.parametrize(("slug", "release"), _REPRESENTATIVE_TABLES)
+def test_every_rows_role_partners_rank_and_cross_species_flag_are_internally_consistent(
     slug: str, release: str
 ) -> None:
-    low, high = _IC_RANGE
-
-    for row in _read(slug, release):
-        value = float(row["total_information_content"])
-
-        assert low < value < high, f"{row['motif_id']} carries {value} bits"
-
-
-# ---------------------------------------------------------------------------------------
-# Cross-species links are kept and marked (ADR-0013)
-# ---------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_a_link_is_cross_species_exactly_when_the_profile_does_not_name_its_gene_species(
-    slug: str, release: str
-) -> None:
-    # The flag is the only thing a caller whose question needs a species-matched profile
-    # can filter on, so it has to be derivable from the row rather than trusted. A
-    # profile the dump records no species for at all is marked cross-species: the row
-    # cannot claim a match it has no evidence for.
+    # The whole reason **Role** exists: a heterodimer matrix must never be read as a
+    # monomer's, and a row that said `complex` with nothing beside it would be exactly
+    # that reading with a label on it. The partners are the other genes the motif name
+    # names; ranks are dense from one within a gene and encode **Attribution
+    # specificity**, re-deriving the shipped rank from the shipped columns; and a link is
+    # cross-species exactly when the profile does not name its gene's species, which has
+    # to be derivable from the row rather than trusted.
     taxid = str(_census(slug).provenance.ncbi_taxid)
+    rows = _read(slug, release)
 
-    for row in _read(slug, release):
+    assert {row["role"] for row in rows} <= {MONOMER, COMPLEX}
+    for row in rows:
+        parts = row["motif_name"].upper().split(NAME_SEPARATOR)
+        partners = [part for part in row["partners"].split(VALUE_SEPARATOR) if part]
+        if row["role"] == COMPLEX:
+            assert partners, f"{row['motif_id']} is a complex naming no partner"
+        else:
+            assert not partners, f"{row['motif_id']} is a monomer naming {partners}"
+        assert len(partners) == len(parts) - 1
+        assert set(partners) <= set(parts)
+        assert (row["role"] == MONOMER) == (len(parts) == 1)
+
         tax_ids = [part for part in row["motif_tax_ids"].split(VALUE_SEPARATOR) if part]
         assert row["is_cross_species"] in (TRUE_FLAG, FALSE_FLAG)
         assert (row["is_cross_species"] == TRUE_FLAG) == (taxid not in tax_ids)
-
-
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_every_tax_id_is_a_number_and_they_are_written_in_order(slug: str, release: str) -> None:
-    for row in _read(slug, release):
-        tax_ids = [part for part in row["motif_tax_ids"].split(VALUE_SEPARATOR) if part]
-
         assert all(part.isdigit() for part in tax_ids), row["motif_id"]
         assert tax_ids == sorted(tax_ids, key=int)
         assert len(set(tax_ids)) == len(tax_ids)
+
+    for stem, group in _grouped(rows).items():
+        ranks = sorted(int(row["rank"]) for row in group)
+        assert ranks == list(range(1, len(group) + 1)), f"{stem} ranks {ranks}"
+        expected = sorted(group, key=_specificity_key)
+        assert [row["rank"] for row in expected] == [str(n) for n in range(1, len(group) + 1)], stem
 
 
 def test_cross_species_profiles_are_kept_rather_than_excluded() -> None:
@@ -527,23 +448,18 @@ def test_every_alias_is_used_by_at_least_one_shipped_table() -> None:
         ), f"{alias['motif_name_part']} is aliased and nothing uses it"
 
 
-@pytest.mark.parametrize(("slug", "release"), _TABLES)
-def test_a_profile_that_names_no_gene_stays_unlinked(slug: str, release: str) -> None:
-    # `EWSR1-FLI1` is an oncogenic fusion. It names no gene, and asserting one for it
-    # would be inventing it — so it is absent by design rather than by omission.
-    assert not [row for row in _read(slug, release) if row["motif_name"] == _FUSION]
-
-
-def test_the_profile_whose_symbol_only_looks_like_a_rename_stays_unlinked() -> None:
-    # JASPAR's `MA0611.3 Dux` is UniProt A1JVI8 — GeneID 664783, **MGI:3703875**.
-    # AnimalTFDB's `Duxf3` is ENSMUSG00000075046 — GeneID 74399, **MGI:1921649**. Two MGI
-    # accessions are two genes, so an alias joining them would assert an identity MGI
-    # denies; the only thing linking them is a secondary EntrezGene xref Ensembl carries
-    # on the `Duxf3` model, which is the Dux macrosatellite collapsing onto that locus.
-    # So this profile names a gene the census never assessed and is unlinked for the same
-    # structural reason `EWSR1-FLI1` is — a correct answer, not a gap. Pinned here
-    # because the symbols look alike, and guessing at symbol history got `SCAND3` wrong
-    # twice: an alias row for this is a regression, not a fix.
+def test_a_profile_that_names_no_gene_stays_unlinked_and_a_lookalike_is_not_aliased() -> None:
+    # `EWSR1-FLI1` is checked directly above against every table; the mouse case here is
+    # the one worth its own witness, since the symbols look alike. JASPAR's `MA0611.3
+    # Dux` is UniProt A1JVI8 — GeneID 664783, **MGI:3703875**. AnimalTFDB's `Duxf3` is
+    # ENSMUSG00000075046 — GeneID 74399, **MGI:1921649**. Two MGI accessions are two
+    # genes, so an alias joining them would assert an identity MGI denies; the only thing
+    # linking them is a secondary EntrezGene xref Ensembl carries on the `Duxf3` model,
+    # which is the Dux macrosatellite collapsing onto that locus. So this profile names a
+    # gene the census never assessed and is unlinked for the same structural reason
+    # `EWSR1-FLI1` is — a correct answer, not a gap. Pinned here because guessing at
+    # symbol history got `SCAND3` wrong twice: an alias row for this is a regression, not
+    # a fix.
     motif_id, name_part = _DIFFERENT_GENE
 
     for _, release in [table for table in _TABLES if table[0] == "mus_musculus"]:

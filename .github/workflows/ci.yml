@@ -44,7 +44,7 @@ jobs:
   # The unit lane: everything that does not need an aligner. It cannot select until
   # samtools, faToTwoBit and twoBitInfo answer (the verb depends on
   # scripts/require_tools.sh, which CI inherits rather than spelling a second copy of
-  # which binaries the lane needs) — with those three absent, 136 of its 830 tests skip
+  # which binaries the lane needs) — with those three absent, 90 of its 925 tests skip
   # themselves and the lane reports green having written no FASTA at all.
   # `--durations=10` because what sets a parallel lane's wall is one indivisible test,
   # and no worker count goes below one test — printing it makes that floor visible in
@@ -80,9 +80,9 @@ jobs:
       - name: pytest -m 'not aligner'
         run: pixi run -e test test -- --durations=10
 
-  # The aligner lane: the three tests that build a real index. It used to re-run the
+  # The aligner lane: the eight tests that build a real index. It used to re-run the
   # WHOLE suite here just to un-skip them, which meant the unit lane's coverage was a
-  # function of what happened to be installed — those three skipped there, silently,
+  # function of what happened to be installed — those eight skipped there, silently,
   # and a skip is green. The marker partition ends both halves of that: this lane
   # selects only what it installed binaries for, and cannot select at all until they
   # answer (the verb depends on scripts/require_aligners.sh, which CI inherits rather

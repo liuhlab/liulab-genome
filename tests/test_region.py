@@ -27,25 +27,24 @@ _coord = st.integers(min_value=0, max_value=10**9)
 
 def test_parse_region_basic() -> None:
     assert parse_region("chr1:0-10") == ("chr1", 0, 10)
-
-
-def test_parse_region_tolerates_thousands_separators() -> None:
+    # Thousands separators and surrounding whitespace are tolerated too.
     assert parse_region("chr1:1,000-2,000") == ("chr1", 1000, 2000)
-
-
-def test_parse_region_strips_surrounding_whitespace() -> None:
     assert parse_region("  chr1:0-10\n") == ("chr1", 0, 10)
 
 
-@pytest.mark.parametrize("text", ["chrM", "GL000009.2", "2", "scaffold_17"])
-def test_parse_region_bare_chromosome_has_no_coords(text: str) -> None:
-    assert parse_region(text) == (text, None, None)
+def test_parse_region_bare_chromosome_has_no_coords() -> None:
+    # One representative each: a plain name, an accession with a dot, a bare digit
+    # that could be mistaken for a coordinate, and an underscore-separated scaffold.
+    for text in ("chrM", "GL000009.2", "2", "scaffold_17"):
+        assert parse_region(text) == (text, None, None)
 
 
-@pytest.mark.parametrize("bad", ["chr1:abc", "chr1:0-", "chr1:-5", "chr1:0:10", "chr1:1.5-2"])
-def test_parse_region_malformed_locus_raises(bad: str) -> None:
-    with pytest.raises(ValueError, match="malformed region"):
-        parse_region(bad)
+def test_parse_region_malformed_locus_raises() -> None:
+    # One representative each: no separator, missing end, missing start, wrong
+    # separator, and a non-integer coordinate.
+    for bad in ("chr1:abc", "chr1:0-", "chr1:-5", "chr1:0:10", "chr1:1.5-2"):
+        with pytest.raises(ValueError, match="malformed region"):
+            parse_region(bad)
 
 
 @given(chrom=_chrom, start=_coord, span=st.integers(min_value=0, max_value=10**6))
@@ -57,40 +56,30 @@ def test_parse_region_roundtrips(chrom: str, start: int, span: int) -> None:
 # --- Region ---
 
 
-def test_region_defaults_to_unknown_strand() -> None:
-    r = Region("chr1", 0, 10)
-    assert (r.chrom, r.start, r.end, r.strand) == ("chr1", 0, 10, ".")
-
-
-def test_region_len_and_length_agree() -> None:
+def test_region_basic_properties() -> None:
+    unstranded = Region("chr1", 0, 10)
+    assert (unstranded.chrom, unstranded.start, unstranded.end, unstranded.strand) == (
+        "chr1",
+        0,
+        10,
+        ".",
+    )
     r = Region("chr1", 10, 25)
     assert len(r) == r.length == 15
+    assert len(Region("chr1", 5, 5)) == 0  # an empty half-open interval is valid
+    assert str(Region("chr2", 100, 200)) == "chr2:100-200"  # 0-based in, 0-based out
 
 
-def test_region_empty_interval_is_valid() -> None:
-    assert len(Region("chr1", 5, 5)) == 0
-
-
-def test_region_str_is_zero_based() -> None:
-    assert str(Region("chr2", 100, 200)) == "chr2:100-200"
-
-
-def test_region_from_string_attaches_strand() -> None:
+def test_region_from_string() -> None:
     assert Region.from_string("chr2:100-200", strand="-") == Region("chr2", 100, 200, "-")
-
-
-def test_region_from_string_requires_coordinates() -> None:
     with pytest.raises(ValueError, match="no coordinates"):
         Region.from_string("chrM")
 
 
-@pytest.mark.parametrize(("start", "end"), [(-1, 5), (5, 3)])
-def test_region_invalid_coordinates_raise(start: int, end: int) -> None:
-    with pytest.raises(ValueError, match="must be >="):
-        Region("chr1", start, end)
-
-
-def test_region_invalid_strand_raises() -> None:
+def test_region_construction_validates_coordinates_and_strand() -> None:
+    for start, end in ((-1, 5), (5, 3)):
+        with pytest.raises(ValueError, match="must be >="):
+            Region("chr1", start, end)
     with pytest.raises(ValueError, match="strand"):
         Region("chr1", 0, 10, strand="x")
 

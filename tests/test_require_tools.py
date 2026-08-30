@@ -64,17 +64,12 @@ def _run_guard(bin_dir: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_the_guard_names_every_missing_binary_at_once(stub_bin: Path) -> None:
+def test_the_guard_names_every_missing_binary_and_what_to_do_next(stub_bin: Path) -> None:
     result = _run_guard(stub_bin)
 
     assert result.returncode != 0
     for tool in REQUIRED_TOOLS:
         assert tool in result.stderr
-
-
-def test_the_message_names_what_to_do_next(stub_bin: Path) -> None:
-    result = _run_guard(stub_bin)
-
     assert "pixi install" in result.stderr
 
 
@@ -86,7 +81,7 @@ def test_the_guard_passes_when_every_binary_answers(answering_bin: Path) -> None
     assert result.returncode == 0, result.stderr
 
 
-def test_a_binary_that_resolves_but_cannot_execute_is_missing(
+def test_a_binary_that_resolves_but_wont_answer_is_missing_whichever_way_it_declines(
     answering_bin: Path, stub_binary: StubBinary
 ) -> None:
     # `which` would answer yes here. The guard asks the binary instead, and a file the
@@ -100,20 +95,17 @@ def test_a_binary_that_resolves_but_cannot_execute_is_missing(
     assert "faToTwoBit" in result.stderr
     assert "twoBitInfo" not in result.stderr
 
-
-def test_a_samtools_that_will_not_report_its_version_is_missing(
-    answering_bin: Path, stub_binary: StubBinary
-) -> None:
-    # A samtools whose shared libraries are gone runs and fails rather than resolving to
-    # nothing, and it cannot index a FASTA either way.
+    # A different way to decline: a samtools whose shared libraries are gone runs and
+    # fails rather than resolving to nothing, and it cannot index a FASTA either way.
+    stub_binary(answering_bin, "faToTwoBit", _ANSWERS["faToTwoBit"])  # repaired
     stub_binary(
         answering_bin, "samtools", "echo 'error while loading shared libraries' >&2\nexit 1"
     )
 
-    result = _run_guard(answering_bin)
+    result2 = _run_guard(answering_bin)
 
-    assert result.returncode != 0
-    assert "samtools" in result.stderr
+    assert result2.returncode != 0
+    assert "samtools" in result2.stderr
 
 
 def test_the_guard_probes_exactly_the_tools_the_package_requires() -> None:

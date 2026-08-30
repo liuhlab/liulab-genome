@@ -244,7 +244,7 @@ def building_run(tools: _Tools) -> list[list[str]]:
 # -- pure logic -------------------------------------------------------------
 
 
-def test_one_renderer_spells_each_aligners_long_options(
+def test_one_renderer_spells_each_aligners_long_options_and_expands_list_values(
     stub_star: STAR, stub_chromap: Chromap
 ) -> None:
     # There is one renderer, and the only thing an aligner varies is the character its
@@ -252,167 +252,130 @@ def test_one_renderer_spells_each_aligners_long_options(
     # its own. Handing both the same keywords is what shows the difference is only that.
     kwargs = {"min_frag_length": 30, "read_format": ["r1", "bc"]}
 
-    star_flags = ["--min_frag_length", "30", "--read_format", "r1", "bc"]
-    chromap_flags = ["--min-frag-length", "30", "--read-format", "r1", "bc"]
-    assert stub_star._flags(kwargs) == star_flags
-    assert stub_chromap._flags(kwargs) == chromap_flags
-
-
-def test_one_renderer_expands_a_list_value_after_its_flag(stub_star: STAR) -> None:
+    assert stub_star._flags(kwargs) == ["--min_frag_length", "30", "--read_format", "r1", "bc"]
+    assert stub_chromap._flags(kwargs) == [
+        "--min-frag-length",
+        "30",
+        "--read-format",
+        "r1",
+        "bc",
+    ]
+    # A list value expands after its own flag, whatever the flag itself is called.
     flags = stub_star._flags({"genomeSAindexNbases": 11, "genomeFastaFiles": ["a.fa", "b.fa"]})
     assert flags == ["--genomeSAindexNbases", "11", "--genomeFastaFiles", "a.fa", "b.fa"]
 
 
-def test_constructing_an_aligner_runs_nothing(
+def test_constructing_an_aligner_runs_nothing_but_indexing_raises_naming_what_installs_it(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # Nothing on PATH and no interpreter bin/ either: an aligner that resolved its binary
     # in its constructor could not be built here at all, which is what made every test
-    # above patch resolution out.
+    # above patch resolution out. The instructions then travel in the error rather than
+    # being printed to stderr on the way past: a library that writes to a console its
+    # caller may not have is not an error message, and the caller cannot catch what it
+    # cannot see. Driven for both aligners, so neither's message is a copy that quietly
+    # stopped matching its own tool.
     monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(external_mod.sys, "executable", str(tmp_path / "bin" / "python"))
 
     star = STAR(_make_genome(tmp_path), gtf="toy")
-
-    assert star.index_dir.name == "star_toy"
-
-
-def test_a_missing_binary_raises_naming_what_installs_it(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    # The instructions travel in the error rather than being printed to stderr on the way
-    # past: a library that writes to a console its caller may not have is not an error
-    # message, and the caller cannot catch what it cannot see.
-    monkeypatch.setenv("PATH", "")
-    monkeypatch.setattr(external_mod.sys, "executable", str(tmp_path / "bin" / "python"))
-    star = STAR(_make_genome(tmp_path), gtf="toy")
+    assert star.index_dir.name == "star_toy"  # construction alone runs nothing
 
     with pytest.raises(ToolNotFoundError) as raised:
         star.index()
-
     message = str(raised.value)
     assert "STAR is not installed" in message
     assert "pixi add star" in message
     assert "bioconda" in message
     assert message == star.install_instructions()
 
-
-def test_a_missing_chromap_raises_naming_what_installs_it(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("PATH", "")
-    monkeypatch.setattr(external_mod.sys, "executable", str(tmp_path / "bin" / "python"))
     chromap = Chromap(_make_genome(tmp_path))
-
     with pytest.raises(ToolNotFoundError, match="pixi add chromap"):
         chromap.index()
-
     assert "chromap is not installed" in chromap.install_instructions()
 
 
-def test_index_dir_is_per_annotation(stub_star: STAR) -> None:
+def test_index_dir_naming_is_per_annotation_and_rooted_in_the_genomes_own_assembly_dir(
+    stub_star: STAR,
+    tools: _Tools,
+    tmp_path: Path,
+    chimera_component: ComponentFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # The annotation key names the genomeDir, so different GTFs never collide.
     assert stub_star.index_dir.parts[-4:] == ("genome", "tiny", "index", "star_toy")
 
-
-def test_distinct_gtf_keys_use_distinct_index_dirs(tools: _Tools, tmp_path: Path) -> None:
     genome = _make_genome(tmp_path, {"a": _TOY_GTF, "b": _TOY_GTF})
     star_a = STAR(genome, gtf="a", tool=tools("STAR"))
     star_b = STAR(genome, gtf="b", tool=tools("STAR"))
-
     assert star_a.index_dir != star_b.index_dir
     assert star_a.index_dir.name == "star_a"
     assert star_b.index_dir.name == "star_b"
 
-
-def test_the_index_dir_is_the_one_inside_the_genomes_own_assembly_dir(
-    chimera_component: ComponentFactory,
-    tools: _Tools,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
     # An **Index dir** is `<assembly dir>/index/<name>/`, and the assembly dir is the one
     # this genome was opened in — never one re-derived from the shared data root. Moving
     # the root out from under an already-open genome is the case that tells the two apart:
-    # every other test's genome sits under the root, where the two answers agree.
-    genome = chimera_component("tinyCe")
+    # every other test's genome sits under the root, where the two answers agree. The
+    # digest guard reads the same assembly dir, and re-deriving it would read a record
+    # that is not there — a reference rebuilt underneath the index would stop being
+    # noticed, silently, which is what makes this worth pinning down alongside it.
+    chimera = chimera_component("tinyCe")
     monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
-
-    chromap = Chromap(genome, tool=tools("chromap"))
-
-    assert chromap.index_dir == genome.fasta_path.parent / "index" / "chromap"
-
-
-def test_an_index_pins_the_digest_of_the_assembly_it_was_opened_from(
-    chimera_component: ComponentFactory,
-    tools: _Tools,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    # The other half of the same fact, and the one that fails silently. The digest guard
-    # reads the assembly's record out of the assembly dir; re-derive that dir from the
-    # shared root and it reads a record that is not there, so the digest is `None`, the
-    # key is omitted, and a reference rebuilt underneath the index stops being noticed —
-    # a guard that passes without having been exercised.
-    genome = chimera_component("tinyCe")
-    monkeypatch.setenv("LIULAB_DATA", str(tmp_path / "elsewhere"))
-    assembly = read_record(genome.fasta_path.parent)
+    assembly = read_record(chimera.fasta_path.parent)
     assert assembly is not None
     assert assembly.sha256 is not None
 
-    chromap = Chromap(genome, tool=tools("chromap"))
-    chromap.index()
+    chromap = Chromap(chimera, tool=tools("chromap"))
+    assert chromap.index_dir == chimera.fasta_path.parent / "index" / "chromap"
 
+    chromap.index()
     assert _record_of(chromap).details[_DIGEST_KEY] == assembly.sha256
 
 
 # -- asking for an index that is not there ----------------------------------
 
 
-def test_index_path_raises_when_nothing_was_ever_built(stub_star: STAR) -> None:
+def test_index_path_raises_for_every_kind_of_unfinished_or_damaged_index(
+    stub_star: STAR, stub_chromap: Chromap, building_run: list[list[str]]
+) -> None:
     with pytest.raises(IndexNotBuiltError) as raised:
         _ = stub_star.index_path
-
     message = str(raised.value)
     assert "nothing has been built" in message
     assert str(stub_star.index_dir) in message
     assert "Genome.build_star_index(gtf='toy')" in message
 
-
-def test_index_path_raises_differently_when_a_build_was_interrupted(stub_star: STAR) -> None:
     # Index files with no record: a run that died between writing them and vouching
     # for them. Not the same as never built, and not silently rebuilt either.
     stub_star.index_dir.mkdir(parents=True)
     (stub_star.index_dir / "SA").write_text("half a suffix array\n")
-
     with pytest.raises(UnfinishedRegistrationError) as raised:
         _ = stub_star.index_path
-
     message = str(raised.value)
     assert "SA" in message
     assert "Genome.build_star_index(gtf='toy', overwrite=True)" in message
 
+    # A directory prepared by an older version: the flag is not read, so it cannot
+    # vouch for anything either, and raises exactly as any other unfinished build.
+    (stub_star.index_dir / "SA").unlink()
+    (stub_star.index_dir / ".success").touch()
+    with pytest.raises(UnfinishedRegistrationError):
+        _ = stub_star.index_path
+    (stub_star.index_dir / ".success").unlink()
 
-def test_index_path_raises_when_a_claimed_file_changed(
-    stub_star: STAR, building_run: list[list[str]]
-) -> None:
+    # A real build, then damaged two different ways: changed in place (STAR) and
+    # deleted outright (chromap) — the base class's guard, exercised through both
+    # concrete aligners so neither could have special-cased the other's shape.
     stub_star.index()
     (stub_star.index_dir / "SA").write_text("truncated\n")
-
     with pytest.raises(RegistrationMismatchError) as raised:
         _ = stub_star.index_path
-
     message = str(raised.value)
     assert "SA" in message
     assert "Genome.build_star_index(gtf='toy', overwrite=True)" in message
 
-
-def test_index_path_raises_when_a_claimed_file_is_deleted(
-    stub_chromap: Chromap, building_run: list[list[str]]
-) -> None:
     built = stub_chromap.index()
     built.unlink()
-
     with pytest.raises(RegistrationMismatchError, match=re.escape("chromap.index")):
         _ = stub_chromap.index_path
 
@@ -420,8 +383,8 @@ def test_index_path_raises_when_a_claimed_file_is_deleted(
 # -- what a finished build writes -------------------------------------------
 
 
-def test_index_writes_a_completion_record_and_returns_the_dir(
-    stub_star: STAR, captured_run: list[list[str]]
+def test_index_writes_a_complete_record_and_renders_each_knob_exactly_once(
+    stub_star: STAR, stub_chromap: Chromap, captured_run: list[list[str]], tmp_path: Path
 ) -> None:
     out = stub_star.index(threads=3)
 
@@ -433,26 +396,11 @@ def test_index_writes_a_completion_record_and_returns_the_dir(
     assert record.name == "star_toy"
     assert record.package_version
     assert record.completed_at
-
-
-def test_the_record_carries_the_aligner_version_and_the_fasta_consumed(
-    stub_star: STAR, captured_run: list[list[str]], tmp_path: Path
-) -> None:
-    stub_star.index()
-
-    record = _record_of(stub_star)
     assert record.tool_versions == {"STAR": "0.0-test"}
     assert record.details["fasta"] == str(tmp_path / "tiny.fa")
     assert record.details["assembly"] == "tiny"
     assert record.details["aligner"] == "star"
 
-
-def test_the_record_carries_the_exact_command_and_the_parameters(
-    stub_star: STAR, captured_run: list[list[str]]
-) -> None:
-    stub_star.index(threads=3)
-
-    record = _record_of(stub_star)
     command = record.details["command"]
     assert command[0] == "STAR"
     assert command[1:] == captured_run[0]
@@ -465,85 +413,90 @@ def test_the_record_carries_the_exact_command_and_the_parameters(
     # Small genome -> a reduced suffix-array size is auto-added.
     assert "genomeSAindexNbases" in parameters
 
-
-def test_star_records_the_knobs_it_spells_itself_and_renders_neither_twice(
-    stub_star: STAR, captured_run: list[list[str]]
-) -> None:
     # `parameters` is every tuning knob that determined the build — the four STAR writes
     # under its own flag names included — and the command line is rendered from the
     # caller's keywords alone. Recording and rendering read the same dict in the old
     # code; a knob appearing under both spellings is what that confusion looked like.
-    stub_star.index(threads=3, sjdb_overhang=49)
-
+    stub_star.index(threads=3, sjdb_overhang=49, overwrite=True)
     parameters = _record_of(stub_star).details["parameters"]
     assert {"threads", "gtf", "sjdb_gtf_file", "sjdb_overhang"} <= set(parameters)
-
-    args = captured_run[0]
+    args = captured_run[-1]
     assert _flag_value(args, "--runThreadN") == "3"
     assert _flag_value(args, "--sjdbOverhang") == "49"
     assert not {"--threads", "--gtf", "--sjdb_gtf_file", "--sjdb_overhang"} & set(args)
 
-
-def test_chromap_records_the_knobs_it_spells_itself_and_renders_neither_twice(
-    stub_chromap: Chromap, captured_run: list[list[str]]
-) -> None:
     # The same contract from the other side: chromap now spells its two minimizer knobs
     # on the command line and records them, so rendering the recorded dict as well would
     # emit each flag a second time. `_flag_value` asserts the flag appears exactly once.
     stub_chromap.index(kmer=20, window=10, min_frag_length=25)
-
-    parameters = _record_of(stub_chromap).details["parameters"]
-    assert parameters == {"kmer": 20, "window": 10, "min_frag_length": 25}
-
-    args = captured_run[0]
-    assert _flag_value(args, "--kmer") == "20"
-    assert _flag_value(args, "--window") == "10"
-    assert _flag_value(args, "--min-frag-length") == "25"
+    chromap_parameters = _record_of(stub_chromap).details["parameters"]
+    assert chromap_parameters == {"kmer": 20, "window": 10, "min_frag_length": 25}
+    chromap_args = captured_run[-1]
+    assert _flag_value(chromap_args, "--kmer") == "20"
+    assert _flag_value(chromap_args, "--window") == "10"
+    assert _flag_value(chromap_args, "--min-frag-length") == "25"
 
 
-def test_the_record_claims_every_file_the_build_left(
-    stub_star: STAR, building_run: list[list[str]]
+def test_each_aligners_record_claims_every_file_and_writes_none_of_the_retired_ones(
+    stub_star: STAR, stub_chromap: Chromap, building_run: list[list[str]]
 ) -> None:
     # An index is claimed whole — the log the tool dropped in its working directory
     # included — so a file going missing later is caught, not just the artifact.
     stub_star.index()
-
     record = _record_of(stub_star)
     assert set(record.files) == {"SA", "Log.out"}
     assert record.files["SA"] == (stub_star.index_dir / "SA").stat().st_size
-    # The record never claims itself.
-    assert RECORD_NAME not in record.files
+    assert RECORD_NAME not in record.files  # the record never claims itself
 
+    built = stub_chromap.index()
+    assert _record_of(stub_chromap).files["chromap.index"] == built.stat().st_size
 
-@pytest.mark.parametrize("retired", _RETIRED_FILES)
-def test_the_build_writes_none_of_the_retired_bookkeeping_files(
-    stub_star: STAR, building_run: list[list[str]], retired: str
-) -> None:
-    stub_star.index()
-
-    assert not (stub_star.index_dir / retired).exists()
-
-
-def test_a_retired_success_flag_no_longer_makes_an_index_readable(stub_star: STAR) -> None:
-    # A directory prepared by an older version raises and is registered once more;
-    # the flag is not read, so it cannot vouch for anything.
-    stub_star.index_dir.mkdir(parents=True)
-    (stub_star.index_dir / ".success").touch()
-
-    with pytest.raises(UnfinishedRegistrationError):
-        _ = stub_star.index_path
+    # Old bookkeeping this build no longer writes: a bare success flag and a parameter
+    # sidecar beside it, both absorbed into the one completion record above.
+    for retired in _RETIRED_FILES:
+        assert not (stub_star.index_dir / retired).exists()
+        assert not (stub_chromap.index_dir / retired).exists()
 
 
 # -- reuse, repair and rebuild ----------------------------------------------
 
 
-def test_index_is_reused_when_the_record_says_it_finished(
-    stub_star: STAR, building_run: list[list[str]]
+def test_index_is_reused_unless_overwrite_forces_a_rebuild(
+    stub_star: STAR, tools: _Tools, tmp_path: Path, building_run: list[list[str]]
 ) -> None:
     stub_star.index()
     stub_star.index()  # a valid record -> reused, no rebuild
-
     assert len(building_run) == 1
+
+    stub_star.index(overwrite=True)
+    assert len(building_run) == 2
+
+    # A different, half-built index: a plain rebuild refuses it, and only overwrite
+    # repairs it — reuse and refusal are the same rule seen from its two sides.
+    interrupted = STAR(_make_genome(tmp_path, {"b": _TOY_GTF}), gtf="b", tool=tools("STAR"))
+    interrupted.index_dir.mkdir(parents=True)
+    (interrupted.index_dir / "SA").write_text("half a suffix array\n")
+
+    with pytest.raises(UnfinishedRegistrationError, match=re.escape("overwrite=True")):
+        interrupted.index()
+    assert len(building_run) == 2  # the interrupted one was left alone
+
+    out = interrupted.index(overwrite=True)
+    assert len(building_run) == 3
+    assert out == interrupted.index_path
+
+    # A rebuild that dies leaves nothing vouching for the directory. A second STAR over
+    # the already-finished `stub_star` assembly, this one exiting non-zero — the failure
+    # comes out of the tool's own error path rather than a raise patched over the call.
+    tools.fail()
+    dying = STAR(_make_genome(tmp_path), gtf="toy", tool=tools("STAR"))
+    with pytest.raises(RuntimeError, match="STAR failed"):
+        dying.index(overwrite=True)
+
+    # The earlier record was dropped before the tool ran, so what is left reads as
+    # interrupted rather than as a finished index whose sizes happen to still match.
+    with pytest.raises(UnfinishedRegistrationError):
+        _ = stub_star.index_path
 
 
 def test_reusing_a_star_index_never_resolves_the_annotation_that_named_it(
@@ -570,59 +523,7 @@ def test_reusing_a_star_index_never_resolves_the_annotation_that_named_it(
     assert mixin_genome.get_star_index("toy") == built
 
 
-def test_overwrite_rebuilds_a_finished_index(
-    stub_star: STAR, building_run: list[list[str]]
-) -> None:
-    stub_star.index()
-
-    stub_star.index(overwrite=True)
-
-    assert len(building_run) == 2
-
-
-def test_index_refuses_to_rebuild_over_an_interrupted_build(
-    stub_star: STAR, building_run: list[list[str]]
-) -> None:
-    stub_star.index_dir.mkdir(parents=True)
-    (stub_star.index_dir / "SA").write_text("half a suffix array\n")
-
-    with pytest.raises(UnfinishedRegistrationError, match=re.escape("overwrite=True")):
-        stub_star.index()
-
-    assert building_run == []
-
-
-def test_overwrite_rebuilds_over_an_interrupted_build(
-    stub_star: STAR, building_run: list[list[str]]
-) -> None:
-    stub_star.index_dir.mkdir(parents=True)
-    (stub_star.index_dir / "SA").write_text("half a suffix array\n")
-
-    out = stub_star.index(overwrite=True)
-
-    assert len(building_run) == 1
-    assert out == stub_star.index_path
-
-
-def test_a_rebuild_that_dies_leaves_nothing_vouching_for_the_directory(
-    stub_star: STAR, tools: _Tools, tmp_path: Path, building_run: list[list[str]]
-) -> None:
-    stub_star.index()
-
-    # A second STAR over the same assembly, this one exiting non-zero — the failure comes
-    # out of the tool's own error path rather than a raise patched over the call.
-    tools.fail()
-    dying = STAR(_make_genome(tmp_path), gtf="toy", tool=tools("STAR"))
-    with pytest.raises(RuntimeError, match="STAR failed"):
-        dying.index(overwrite=True)
-
-    # The earlier record was dropped before the tool ran, so what is left reads as
-    # interrupted rather than as a finished index whose sizes happen to still match.
-    with pytest.raises(UnfinishedRegistrationError):
-        _ = stub_star.index_path
-
-
-def test_index_emits_sjdb_flags_from_bound_gtf(
+def test_index_emits_sjdb_flags_from_bound_gtf_and_an_explicit_bin_size_wins(
     stub_star: STAR, captured_run: list[list[str]], tmp_path: Path
 ) -> None:
     stub_star.index(sjdb_overhang=49)
@@ -638,6 +539,11 @@ def test_index_emits_sjdb_flags_from_bound_gtf(
     assert parameters["gtf"] == "toy"
     assert parameters["sjdb_gtf_file"] == gtf_path
     assert parameters["sjdb_overhang"] == 49
+
+    # This genome would compute 13 for its bin size; what the caller asked for wins.
+    stub_star.index(genomeChrBinNbits=16, overwrite=True)
+    assert _flag_value(captured_run[-1], "--genomeChrBinNbits") == "16"
+    assert _record_of(stub_star).details["parameters"]["genomeChrBinNbits"] == 16
 
 
 # -- index parameters computed from the reference's shape -------------------
@@ -671,44 +577,32 @@ def test_chr_bin_nbits_is_computed_from_the_shape_of_the_reference(
     assert _record_of(star).details["parameters"]["genomeChrBinNbits"] == expected
 
 
-def test_chr_bin_nbits_is_passed_even_when_it_lands_on_stars_own_default(
+def test_chr_bin_nbits_stays_within_its_bounds_for_extreme_shapes(
     tools: _Tools, tmp_path: Path, captured_run: list[list[str]]
 ) -> None:
     # Two 1 Gb sequences: the recommendation is ~29.9, and the clause is a min, so 18
     # stands. It is still passed, so a record's parameters mean one thing either way.
     star = _star_over(tools, tmp_path, pd.Series({"chr1": 10**9, "chr2": 10**9}))
     star.index()
-
     assert _flag_value(captured_run[0], "--genomeChrBinNbits") == "18"
     assert _record_of(star).details["parameters"]["genomeChrBinNbits"] == 18
 
-
-@pytest.mark.parametrize(("sjdb_overhang", "expected"), [(100, 6), (149, 7)])
-def test_chr_bin_nbits_never_drops_below_one_read(
-    tools: _Tools,
-    tmp_path: Path,
-    captured_run: list[list[str]],
-    sjdb_overhang: int,
-    expected: int,
-) -> None:
     # 40 scaffolds of 50 bp: the average sequence is far shorter than a read, so the
-    # read length is what the bin is sized from. log2(101) -> 6 and log2(150) -> 7,
-    # never the 5 that log2(50) would give — the read length being sjdb_overhang + 1.
-    star = _star_over(tools, tmp_path, pd.Series({f"scaffold{i}": 50 for i in range(40)}))
-    star.index(sjdb_overhang=sjdb_overhang)
-
-    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == str(expected)
-    assert _record_of(star).details["parameters"]["genomeChrBinNbits"] == expected
-
-
-def test_an_explicit_chr_bin_nbits_wins_over_the_computed_one(
-    stub_star: STAR, captured_run: list[list[str]]
-) -> None:
-    # This genome would compute 13; what the caller asked for is what STAR is given.
-    stub_star.index(genomeChrBinNbits=16)
-
-    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == "16"
-    assert _record_of(stub_star).details["parameters"]["genomeChrBinNbits"] == 16
+    # read length is what the bin is sized from — never the 5 that log2(50) would give
+    # — the read length being sjdb_overhang + 1. Two overhangs, straddling a log2
+    # truncation boundary: log2(100) -> 6 and log2(150) -> 7, so a truncation bug at one
+    # magnitude cannot hide behind the other. A distinct annotation key each time, not
+    # just a distinct shape: every star here shares one assembly dir, and reusing "toy"
+    # would hand back an earlier build instead of a new one.
+    scaffolds = pd.Series({f"scaffold{i}": 50 for i in range(40)})
+    for overhang, expected in ((99, "6"), (149, "7")):
+        genome = _make_genome(
+            tmp_path, gtfs={f"scattered{overhang}": _TOY_GTF}, chrom_sizes=scaffolds
+        )
+        scattered = STAR(genome, gtf=f"scattered{overhang}", tool=tools("STAR"))
+        scattered.index(sjdb_overhang=overhang)
+        assert _flag_value(captured_run[-1], "--genomeChrBinNbits") == expected
+        assert _record_of(scattered).details["parameters"]["genomeChrBinNbits"] == int(expected)
 
 
 # -- mixin: build/get index entry points ------------------------------------
@@ -734,27 +628,27 @@ def mixin_genome(tmp_path: Path) -> Genome:
     return cast("Genome", genome)
 
 
-def test_resolve_aligner_is_case_insensitive() -> None:
+def test_resolve_aligner_and_get_index_shortcuts_all_agree(
+    mixin_genome: Genome, tools: _Tools
+) -> None:
     assert _resolve_aligner("star") is STAR
     assert _resolve_aligner("STAR") is STAR
-
-
-def test_resolve_aligner_unknown_raises() -> None:
+    assert _resolve_aligner("chromap") is Chromap
+    assert _resolve_aligner("CHROMAP") is Chromap
     with pytest.raises(ValueError, match="Unknown aligner 'bowtie'"):
         _resolve_aligner("bowtie")
 
+    star_built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
+    assert mixin_genome.get_index("star", gtf="toy") == star_built
+    assert mixin_genome.get_star_index("toy") == star_built
 
-def test_get_index_returns_built_index_path(mixin_genome: Genome, tools: _Tools) -> None:
-    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
-    assert mixin_genome.get_index("star", gtf="toy") == built
+    chromap_built = mixin_genome.build_chromap_index(tool=tools("chromap"))
+    assert mixin_genome.get_index("chromap") == chromap_built
+    assert mixin_genome.get_chromap_index() == chromap_built
+    assert chromap_built.name == "chromap.index"
 
 
-def test_get_star_index_matches_generic_get_index(mixin_genome: Genome, tools: _Tools) -> None:
-    mixin_genome.build_star_index("toy", tool=tools("STAR"))
-    assert mixin_genome.get_star_index("toy") == mixin_genome.get_index("star", gtf="toy")
-
-
-def test_build_star_index_falls_back_to_the_default_annotation(
+def test_default_annotation_is_used_when_present_needed_by_neither_chromap_nor_when_absent(
     mixin_genome: Genome, tools: _Tools
 ) -> None:
     # The everyday call: a chimera, and any assembly the table flags one for, already
@@ -769,63 +663,47 @@ def test_build_star_index_falls_back_to_the_default_annotation(
     assert defaulted.name == "star_toy"
     assert len(tools.calls) == 1  # the second call reused the first's finished index
 
-
-def test_build_star_index_with_no_default_names_both_ways_to_supply_one(
-    mixin_genome: Genome, tools: _Tools
-) -> None:
-    # A STAR index is built against one annotation and cannot be built against none, so
-    # the refusal is a ValueError naming the per-call fix and the once-and-for-all one.
-    mixin_genome.default_gtf = None  # type: ignore[misc]
-
-    with pytest.raises(ValueError, match="no default") as excinfo:
-        mixin_genome.build_star_index(tool=tools("STAR"))
-
-    message = str(excinfo.value)
-    assert "build_star_index(gtf=<name>)" in message
-    assert "default_gtf=<name>" in message
-    assert tools.calls == []  # nothing ran
-
-
-def test_build_chromap_index_needs_no_annotation_not_even_a_default(
-    mixin_genome: Genome, tools: _Tools
-) -> None:
     # The other half of the same rule: chromap carries no annotation at all, so a genome
     # with no default indexes for it perfectly well.
     mixin_genome.default_gtf = None  # type: ignore[misc]
-
     assert mixin_genome.build_chromap_index(tool=tools("chromap")).name == "chromap.index"
 
+    # A STAR index is built against one annotation and cannot be built against none, so
+    # the refusal is a ValueError naming the per-call fix and the once-and-for-all one.
+    calls_before = len(tools.calls)
+    with pytest.raises(ValueError, match="no default") as excinfo:
+        mixin_genome.build_star_index(tool=tools("STAR"))
+    message = str(excinfo.value)
+    assert "build_star_index(gtf=<name>)" in message
+    assert "default_gtf=<name>" in message
+    assert len(tools.calls) == calls_before  # nothing ran
 
-def test_the_mixin_forwards_the_tool_to_the_aligner_it_builds(
+
+def test_the_tool_is_forwarded_to_the_aligner_and_never_read_as_a_selector(
     mixin_genome: Genome, tools: _Tools
 ) -> None:
     # The seam `Aligner.__init__` offers is open the whole way from `Genome`. It used to
     # be closed here — the mixin built the aligner and handed it nothing — so the only
     # way to stand a binary in was to patch the fallback out from under it.
-    mixin_genome.build_star_index("toy", tool=tools("STAR"))
+    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
     mixin_genome.build_chromap_index(tool=tools("chromap"))
 
     assert len(tools.calls) == 2
     assert "genomeGenerate" in tools.calls[0]
     assert "--build-index" in tools.calls[1]
 
-
-def test_get_index_takes_a_tool_rather_than_reading_it_as_a_selector(
-    mixin_genome: Genome, tools: _Tools
-) -> None:
     # `get_index`'s remaining keywords pin down *which* index; `tool` is not one of them
     # and is spelled out so it cannot be mistaken for one.
-    built = mixin_genome.build_star_index("toy", tool=tools("STAR"))
-
     assert mixin_genome.get_index("star", gtf="toy", tool=tools("STAR")) == built
 
 
-def test_get_index_raises_before_build(mixin_genome: Genome) -> None:
+def test_get_index_raises_before_a_build_and_for_an_unknown_aligner(mixin_genome: Genome) -> None:
     with pytest.raises(IndexNotBuiltError, match=re.escape("Genome.build_star_index(gtf='toy')")):
         mixin_genome.get_index("star", gtf="toy")
 
+    with pytest.raises(IndexNotBuiltError, match=re.escape("Genome.build_chromap_index()")):
+        mixin_genome.get_chromap_index()
 
-def test_get_index_unknown_aligner_raises(mixin_genome: Genome) -> None:
     with pytest.raises(ValueError, match="Unknown aligner 'bowtie'"):
         mixin_genome.get_index("bowtie", gtf="toy")
 
@@ -891,29 +769,24 @@ def test_real_star_index_with_gtf(tmp_path: Path) -> None:
 # -- pure logic -------------------------------------------------------------
 
 
-def test_chromap_index_dir_is_per_assembly(stub_chromap: Chromap) -> None:
+def test_chromap_index_dir_naming_default_record_reuse_and_kmer_window_flags(
+    stub_chromap: Chromap, building_run: list[list[str]], tmp_path: Path
+) -> None:
     # No annotation -> no per-GTF suffix; one chromap index serves the assembly.
     assert stub_chromap.index_dir.parts[-3:] == ("tiny", "index", "chromap")
 
-
-def test_chromap_index_path_raises_when_nothing_was_ever_built(stub_chromap: Chromap) -> None:
     with pytest.raises(IndexNotBuiltError) as raised:
         _ = stub_chromap.index_path
-
     # No annotation selects a chromap index, so the build call takes no arguments.
     assert "Genome.build_chromap_index()" in str(raised.value)
 
-
-def test_chromap_index_writes_a_completion_record_and_returns_the_file(
-    stub_chromap: Chromap, captured_run: list[list[str]]
-) -> None:
     out = stub_chromap.index()
 
     # The artifact is a single file inside the index dir, not the dir itself.
     assert out == stub_chromap.index_path
     assert out.name == "chromap.index"
     assert out.parent == stub_chromap.index_dir
-    assert len(captured_run) == 1
+    assert len(building_run) == 1
 
     record = _record_of(stub_chromap)
     assert record.kind == "index"
@@ -927,52 +800,18 @@ def test_chromap_index_writes_a_completion_record_and_returns_the_file(
     assert "--ref" in command
     assert "--output" in command
 
-
-def test_chromap_record_claims_the_single_index_file(
-    stub_chromap: Chromap, building_run: list[list[str]]
-) -> None:
-    built = stub_chromap.index()
-
-    record = _record_of(stub_chromap)
-    assert record.files["chromap.index"] == built.stat().st_size
-
-
-@pytest.mark.parametrize("retired", _RETIRED_FILES)
-def test_chromap_writes_none_of_the_retired_bookkeeping_files(
-    stub_chromap: Chromap, building_run: list[list[str]], retired: str
-) -> None:
-    stub_chromap.index()
-
-    assert not (stub_chromap.index_dir / retired).exists()
-
-
-def test_chromap_default_index_command_is_minimal(
-    stub_chromap: Chromap, captured_run: list[list[str]], tmp_path: Path
-) -> None:
     # With no tuning kwargs, the command is exactly build-index over ref -> output.
-    stub_chromap.index()
     fasta = str(tmp_path / "tiny.fa")
     artifact = str(stub_chromap.index_dir / "chromap.index")
-    assert captured_run[0] == ["--build-index", "--ref", fasta, "--output", artifact]
+    assert building_run[0] == ["--build-index", "--ref", fasta, "--output", artifact]
 
-
-def test_chromap_index_is_reused_and_overwrite_rebuilds(
-    stub_chromap: Chromap, building_run: list[list[str]]
-) -> None:
-    stub_chromap.index()
     stub_chromap.index()  # a valid record -> reused, no rebuild
     assert len(building_run) == 1
 
-    stub_chromap.index(overwrite=True)  # forced
+    # Overwrite forces a rebuild, tuned this time with its two minimizer knobs.
+    stub_chromap.index(overwrite=True, kmer=20, window=10, min_frag_length=25)
     assert len(building_run) == 2
-
-
-def test_chromap_index_emits_kmer_window_flags(
-    stub_chromap: Chromap, captured_run: list[list[str]]
-) -> None:
-    stub_chromap.index(kmer=20, window=10, min_frag_length=25)
-
-    args = captured_run[0]
+    args = building_run[-1]
     assert args[args.index("--kmer") + 1] == "20"
     assert args[args.index("--window") + 1] == "10"
     assert args[args.index("--min-frag-length") + 1] == "25"
@@ -981,30 +820,6 @@ def test_chromap_index_emits_kmer_window_flags(
     assert parameters["kmer"] == 20
     assert parameters["window"] == 10
     assert parameters["min_frag_length"] == 25
-
-
-# -- mixin: build/get index entry points ------------------------------------
-
-
-def test_resolve_aligner_includes_chromap() -> None:
-    assert _resolve_aligner("chromap") is Chromap
-    assert _resolve_aligner("CHROMAP") is Chromap
-
-
-def test_build_and_get_chromap_index(mixin_genome: Genome, tools: _Tools) -> None:
-    built = mixin_genome.build_chromap_index(tool=tools("chromap"))
-    assert mixin_genome.get_index("chromap") == built
-    assert built.name == "chromap.index"
-
-
-def test_get_chromap_index_matches_generic_get_index(mixin_genome: Genome, tools: _Tools) -> None:
-    mixin_genome.build_chromap_index(tool=tools("chromap"))
-    assert mixin_genome.get_chromap_index() == mixin_genome.get_index("chromap")
-
-
-def test_get_chromap_index_raises_before_build(mixin_genome: Genome) -> None:
-    with pytest.raises(IndexNotBuiltError, match=re.escape("Genome.build_chromap_index()")):
-        mixin_genome.get_chromap_index()
 
 
 # -- integration (require a real chromap) -----------------------------------
@@ -1102,122 +917,68 @@ def stub_aligner(request: pytest.FixtureRequest) -> tuple[aligner_mod.Aligner, s
     return cast("aligner_mod.Aligner", request.getfixturevalue(request.param)), repair
 
 
-def test_a_fresh_index_pins_the_digest_of_the_assembly_it_was_built_from(
+def test_a_rebuilt_reference_is_caught_raised_and_repaired_only_by_overwrite(
     stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
 ) -> None:
-    aligner, _ = stub_aligner
+    # The lifecycle a digest pin goes through: pinned on a fresh build, still trusted
+    # when the assembly is registered again over the same bytes, and a hard stop the
+    # moment those bytes actually change — raised on sight, and refused a second time
+    # by `index()` itself so a caller cannot rebuild over the mismatch by accident.
+    aligner, repair = stub_aligner
     _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
 
     aligner.index()
-
     details = _record_of(aligner).details
     assert details[_DIGEST_KEY] == _DIGEST_BUILT_FROM
-    # The path stays beside the digest: it answers which file, not which bytes.
-    assert details["fasta"].endswith("tiny.fa")
-
-
-def test_reopening_an_index_whose_reference_is_unchanged_succeeds(
-    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
-) -> None:
-    aligner, _ = stub_aligner
-    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
-    built = aligner.index()
+    assert details["fasta"].endswith("tiny.fa")  # the path stays beside the digest
 
     # Registered again over the same bytes — a repeat of `--force`, not a new reference.
     _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
-
-    assert aligner.index_path == built
+    built = aligner.index_path
     aligner.index()
     assert len(building_run) == 1  # still finished, so still reused
 
-
-def test_reopening_an_index_raises_when_the_reference_was_rebuilt(
-    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
-) -> None:
     # The defect this closes: every file the index claims is present at the size it
     # claims, and the reference underneath it is a different genome.
-    aligner, repair = stub_aligner
-    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
-    aligner.index()
-
     _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
-
     with pytest.raises(RegistrationMismatchError) as raised:
         _ = aligner.index_path
-
     message = str(raised.value)
     assert _DIGEST_BUILT_FROM in message
     assert _DIGEST_AFTER_REBUILD in message
     assert repair in message
 
-
-def test_index_refuses_to_rebuild_silently_when_the_reference_was_rebuilt(
-    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
-) -> None:
-    aligner, _ = stub_aligner
-    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
-    aligner.index()
-    _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
-
     with pytest.raises(RegistrationMismatchError, match=re.escape("overwrite=True")):
         aligner.index()
-
     assert len(building_run) == 1  # rebuilding is a deliberate act, as everywhere else
 
-
-def test_overwrite_rebuilds_a_stale_index_and_pins_the_new_digest(
-    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
-) -> None:
     # The repair the message names must not be blocked by the mismatch it repairs.
-    aligner, _ = stub_aligner
-    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
-    aligner.index()
-    _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
-
     out = aligner.index(overwrite=True)
-
     assert len(building_run) == 2
-    assert out == aligner.index_path
+    assert out == aligner.index_path == built
     assert _record_of(aligner).details[_DIGEST_KEY] == _DIGEST_AFTER_REBUILD
 
 
-def test_an_index_that_pins_no_digest_reads_as_unknown(
+def test_no_digest_pinned_anywhere_means_no_guard_and_nothing_recorded(
     stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
-) -> None:
-    # An index built before this was recorded: the price stated rather than hidden,
-    # so it stays unguarded until it is next rebuilt instead of raising on sight.
-    aligner, _ = stub_aligner
-    built = aligner.index()
-    assert _DIGEST_KEY not in _record_of(aligner).details
-
-    _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
-
-    assert aligner.index_path == built
-
-
-def test_an_assembly_that_pins_no_digest_does_not_raise(
-    stub_aligner: tuple[aligner_mod.Aligner, str], building_run: list[list[str]]
-) -> None:
-    aligner, _ = stub_aligner
-    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
-    built = aligner.index()
-
-    _pin_assembly_digest(aligner, None)  # registered, and pinning nothing to compare
-
-    assert aligner.index_path == built
-
-
-def test_a_build_over_an_assembly_pinning_no_digest_records_none(
-    stub_aligner: tuple[aligner_mod.Aligner, str], captured_run: list[list[str]]
 ) -> None:
     # Absent, not null: a fact that could not be gathered is left out, exactly as
     # tool_versions leaves out a tool that would not identify itself.
     aligner, _ = stub_aligner
-    _pin_assembly_digest(aligner, None)
 
-    aligner.index()
-
+    # Built with nothing pinned at all: the record carries no digest...
+    built = aligner.index()
     assert _DIGEST_KEY not in _record_of(aligner).details
+    # ...and a digest that shows up only afterwards does not retroactively guard it.
+    _pin_assembly_digest(aligner, _DIGEST_AFTER_REBUILD)
+    assert aligner.index_path == built
+
+    # Symmetric case: a digest that was pinned and then withdrawn — registered again
+    # pinning nothing to compare — stops guarding just the same.
+    _pin_assembly_digest(aligner, _DIGEST_BUILT_FROM)
+    rebuilt = aligner.index(overwrite=True)
+    _pin_assembly_digest(aligner, None)
+    assert aligner.index_path == rebuilt  # no raise; nothing to compare against
 
 
 # ===========================================================================
@@ -1289,13 +1050,18 @@ def stub_star_over_chimera(everyday_chimera: Genome, tools: _Tools) -> STAR:
 # -- the command a chimera is indexed with ----------------------------------
 
 
-def test_a_chimera_index_directory_is_named_after_the_merged_annotation(
+def test_the_everyday_chimeras_index_is_named_shaped_and_pinned_from_its_own_build(
     everyday_chimera: Genome, stub_star_over_chimera: STAR, captured_run: list[list[str]]
 ) -> None:
     # The per-annotation layout is the general one; what is new is only that both halves
     # of the path are derived — the assembly from its components, the annotation from
     # what those components contributed.
     assert everyday_chimera.default_gtf == _MERGED_ANNOTATION
+    # Nine sequences and 22,750 bases is the whole of what reaches these two knobs:
+    # log2(22750) / 2 - 1 -> 6 for the suffix array, and log2(22750 / 9) -> 11 for the
+    # bin, the mean sequence being far longer than the read sjdb_overhang implies.
+    sizes = everyday_chimera.chrom_sizes
+    assert (len(sizes), int(sizes.sum())) == (9, 22_750)
 
     stub_star_over_chimera.index()
 
@@ -1306,6 +1072,8 @@ def test_a_chimera_index_directory_is_named_after_the_merged_annotation(
         f"star_{_MERGED_ANNOTATION}",
     )
     assert _flag_value(captured_run[0], "--genomeDir") == str(stub_star_over_chimera.index_dir)
+    assert _flag_value(captured_run[0], "--genomeSAindexNbases") == "6"
+    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == "11"
 
     record = _record_of(stub_star_over_chimera)
     assert record.name == f"star_{_MERGED_ANNOTATION}"
@@ -1313,37 +1081,15 @@ def test_a_chimera_index_directory_is_named_after_the_merged_annotation(
     # carries the components, so a key listing them again could only disagree with it.
     assert record.details["assembly"] == _CHIMERA_ASSEMBLY
     assert "components" not in record.details
-
-
-def test_the_everyday_chimeras_index_parameters_come_from_its_shape(
-    everyday_chimera: Genome, stub_star_over_chimera: STAR, captured_run: list[list[str]]
-) -> None:
-    # Nine sequences and 22,750 bases is the whole of what reaches these two knobs:
-    # log2(22750) / 2 - 1 -> 6 for the suffix array, and log2(22750 / 9) -> 11 for the
-    # bin, the mean sequence being far longer than the read sjdb_overhang implies.
-    sizes = everyday_chimera.chrom_sizes
-    assert (len(sizes), int(sizes.sum())) == (9, 22_750)
-
-    stub_star_over_chimera.index()
-
-    assert _flag_value(captured_run[0], "--genomeSAindexNbases") == "6"
-    assert _flag_value(captured_run[0], "--genomeChrBinNbits") == "11"
-    parameters = _record_of(stub_star_over_chimera).details["parameters"]
+    parameters = record.details["parameters"]
     assert (parameters["genomeSAindexNbases"], parameters["genomeChrBinNbits"]) == (6, 11)
 
-
-def test_a_chimera_index_pins_the_digest_of_the_chimera_it_was_built_from(
-    everyday_chimera: Genome, stub_star_over_chimera: STAR, captured_run: list[list[str]]
-) -> None:
-    # A chimera is registered like any other assembly, so the guard needs no case of its
-    # own: the digest is read from the record the chimera build wrote, which is the only
-    # thing that could ever pin bytes no download can be compared against.
-    stub_star_over_chimera.index()
-
+    # A chimera is registered like any other assembly, so the digest guard needs no case
+    # of its own: it is read from the record the chimera build wrote.
     assembly = read_record(everyday_chimera.fasta_path.parent)
     assert assembly is not None
     assert assembly.sha256 is not None
-    assert _record_of(stub_star_over_chimera).details[_DIGEST_KEY] == assembly.sha256
+    assert record.details[_DIGEST_KEY] == assembly.sha256
 
 
 # -- integration: a real STAR over a real chimera ---------------------------

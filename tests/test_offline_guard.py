@@ -23,43 +23,43 @@ from .conftest import NetworkAccessError
 _URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz"
 
 
-@pytest.mark.parametrize("verb", ["head", "get", "post"])
-def test_a_requests_call_is_blocked_and_says_what_to_do_instead(verb: str) -> None:
-    with pytest.raises(NetworkAccessError) as excinfo:
-        getattr(requests, verb)(_URL)
+def test_every_requests_call_is_blocked_and_says_what_to_do_instead() -> None:
+    for verb in ("head", "get", "post"):
+        with pytest.raises(NetworkAccessError) as excinfo:
+            getattr(requests, verb)(_URL)
 
-    message = str(excinfo.value)
-    assert verb.upper() in message  # which call was attempted
-    assert _URL in message  # and to what
-    assert "fake_fetch" in message  # and what serves it offline instead
+        message = str(excinfo.value)
+        assert verb.upper() in message  # which call was attempted
+        assert _URL in message  # and to what
+        assert "fake_fetch" in message  # and what serves it offline instead
 
 
-def test_the_packages_one_fetch_step_is_blocked(tmp_path: Path) -> None:
+def test_the_packages_one_fetch_step_and_the_ucsc_assembly_check_are_both_blocked(
+    tmp_path: Path,
+) -> None:
     # Nothing at the destination, so pooch has to download it — through requests, into
     # the guard. This is what a test that forgot ``fake_fetch`` would hit.
     with pytest.raises(NetworkAccessError, match=r"hg38\.fa\.gz"):
         fetch_mod.fetch_url(_URL, tmp_path, fname="hg38.fa.gz", progressbar=False)
 
-
-def test_the_ucsc_assembly_name_check_is_blocked(tmp_path: Path) -> None:
     # The gap this guard closes: an assembly whose metadata pins no source URL has its
     # name validated with a live HEAD at UCSC, and nothing patched that repo-wide.
     downloader = UCSCGenomeDownloader("hg38", tmp_path)
-
     with pytest.raises(NetworkAccessError, match="requests HEAD"):
         downloader.validate_assembly()
 
 
-@pytest.mark.parametrize("method", ["connect", "connect_ex"])
-def test_a_tcp_connection_is_blocked(method: str) -> None:
+def test_a_tcp_connection_is_blocked_by_either_connect_call() -> None:
     # The backstop under everything that is not requests — pooch's ftp/sftp transports,
     # urllib, a dependency phoning home. 192.0.2.1 is TEST-NET-1 and routes nowhere
-    # anyway; the guard raises before the address is so much as resolved.
-    with (
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock,
-        pytest.raises(NetworkAccessError, match=r"192\.0\.2\.1:80"),
-    ):
-        getattr(sock, method)(("192.0.2.1", 80))
+    # anyway; the guard raises before the address is so much as resolved. Both of
+    # socket's two connect entry points are covered, since either is a way out.
+    for method in ("connect", "connect_ex"):
+        with (
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock,
+            pytest.raises(NetworkAccessError, match=r"192\.0\.2\.1:80"),
+        ):
+            getattr(sock, method)(("192.0.2.1", 80))
 
 
 def test_a_local_unix_socket_is_left_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

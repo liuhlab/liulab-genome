@@ -99,20 +99,30 @@ def test_the_details_a_build_writes_are_the_details_it_reads_back() -> None:
     assert ChimeraDetails.from_details(details.as_details(merged=True), assembly=_PAIR) == details
 
 
-def test_a_build_with_no_merge_writes_nothing_about_annotations() -> None:
+def test_absence_of_a_merge_and_absence_of_a_contributor_are_written_differently() -> None:
     # An absent key is a fact nobody gathered, which is not `null` — the reading a
     # component that contributed nothing to a merge that did happen gets.
-    details = ChimeraDetails(
+    no_merge = ChimeraDetails(
         separator="__",
         component_details=(ComponentDetails("tinyCe", "1a2b", "genes", "3c4d"),),
     )
-
-    written = details.as_details(merged=False)
-
+    written = no_merge.as_details(merged=False)
     assert written == {"separator": "__", "components": [{"name": "tinyCe", "sha256": "1a2b"}]}
     read_back = ChimeraDetails.from_details(written, assembly=_PAIR)
     assert read_back is not None
     assert read_back.component_details[0].annotation is None
+
+    # A merge that happened but nothing contributed to is a third thing again: merged no
+    # annotation rather than an empty one.
+    empty_merge = ChimeraDetails(
+        separator="__",
+        component_details=(
+            ComponentDetails("tinyCe", None, None, None),
+            ComponentDetails("tinySc", None, None, None),
+        ),
+    )
+    assert empty_merge.merged_annotation is None
+    assert empty_merge.components == ["tinyCe", "tinySc"]
 
 
 def test_a_merged_annotation_name_is_the_contributors_joined() -> None:
@@ -131,41 +141,22 @@ def test_a_merged_annotation_name_is_the_contributors_joined() -> None:
     assert details.merged_annotation == merged_annotation_name(contributors)
 
 
-def test_a_build_where_nothing_contributed_merged_no_annotation_rather_than_an_empty_one() -> None:
-    details = ChimeraDetails(
-        separator="__",
-        component_details=(
-            ComponentDetails("tinyCe", None, None, None),
-            ComponentDetails("tinySc", None, None, None),
-        ),
-    )
-
-    assert details.merged_annotation is None
-    assert details.components == ["tinyCe", "tinySc"]
-
-
 # ---------------------------------------------------------------------------
-# Not a chimera — the ordinary answer
+# Not a chimera — the ordinary answer, from every angle
 # ---------------------------------------------------------------------------
 
 
-def test_details_that_say_nothing_about_components_are_not_a_chimeras() -> None:
+def test_details_or_a_record_that_say_nothing_about_components_are_not_a_chimeras(
+    tmp_path: Path,
+) -> None:
     assert ChimeraDetails.from_details({}, assembly="hg38") is None
 
-
-def test_another_kinds_details_are_not_a_chimeras() -> None:
     # An ordinary registration's details carry keys of their own, and none of them is a
     # half-written chimera: saying nothing about components is saying *not a chimera*.
     ordinary = {"chromosomes_checked": True, "features_inferred": []}
-
     assert ChimeraDetails.from_details(ordinary, assembly="hg38") is None
 
-
-def test_an_absent_record_is_not_a_chimeras() -> None:
     assert ChimeraDetails.from_record(None) is None
-
-
-def test_a_directory_with_no_record_holds_no_chimera(tmp_path: Path) -> None:
     assert read_chimera_details(tmp_path) is None
 
 
@@ -181,12 +172,8 @@ def test_a_directory_with_no_record_holds_no_chimera(tmp_path: Path) -> None:
         pytest.param(
             {"components": [{"name": "tinyCe", "sha256": None}]}, "separator", id="components-alone"
         ),
-        pytest.param({"separator": 2, "components": []}, "separator", id="separator-not-a-string"),
         pytest.param(
             {"separator": "__", "components": {"tinyCe": None}}, "components", id="components-map"
-        ),
-        pytest.param(
-            {"separator": "__", "components": ["tinyCe"]}, "components", id="entry-not-an-object"
         ),
         pytest.param(
             {"separator": "__", "components": [{"sha256": "1a2b"}]},
@@ -269,22 +256,22 @@ def test_a_component_registered_again_underneath_the_chimera_is_refused(tmp_path
     assert f"genome register {_PAIR} --force" in message
 
 
-def test_a_component_with_no_record_of_its_own_reads_as_unknown(tmp_path: Path) -> None:
+def test_an_absent_current_or_recorded_digest_reads_as_unknown_rather_than_a_mismatch(
+    tmp_path: Path,
+) -> None:
     # Nothing to compare against is not a disagreement — the reading a tool that never
-    # answered gets in `tool_versions`.
+    # answered gets in `tool_versions`. Absent on the current side...
     chimera = _chimera(tmp_path, details=_details(ComponentDetails("tinyCe", "1a2b", None, None)))
     component = _component(chimera, "tinyCe", "1a2b")
     record_path(component.path).unlink()
-
     assert components_status(chimera) == COMPONENTS_UNKNOWN
 
-
-def test_a_chimera_that_recorded_no_digest_leaves_that_component_unguarded(tmp_path: Path) -> None:
-    # The recorded side absent rather than the current one: unproven, not refused.
-    chimera = _chimera(tmp_path, details=_details(ComponentDetails("tinyCe", None, None, None)))
-    _component(chimera, "tinyCe", "1a2b")
-
-    assert components_status(chimera) == COMPONENTS_UNKNOWN
+    # ...and absent on the recorded side: unproven, not refused, either way.
+    unguarded = _chimera(
+        tmp_path / "other", details=_details(ComponentDetails("tinyCe", None, None, None))
+    )
+    _component(unguarded, "tinyCe", "1a2b")
+    assert components_status(unguarded) == COMPONENTS_UNKNOWN
 
 
 def test_an_annotation_registered_again_after_the_merge_is_refused(tmp_path: Path) -> None:

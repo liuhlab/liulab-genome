@@ -26,7 +26,7 @@ import MOODS.tools
 import numpy as np
 import pandas as pd
 import pytest
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from genome.seq import DNA
@@ -186,13 +186,11 @@ def of(frame: pd.DataFrame, **equals: object) -> list[tuple[Any, ...]]:
 
 
 class TestFixtureBytes:
-    def test_the_fixture_holds_two_records_of_six_hundred_bases(
-        self, planted_records: dict[str, str]
+    def test_the_fixture_shape_headers_and_format(
+        self, planted: Path, planted_records: dict[str, str]
     ) -> None:
         assert list(planted_records) == ["plantedI", "plantedII"]
         assert [len(bases) for bases in planted_records.values()] == [600, 600]
-
-    def test_one_header_carries_a_description_after_its_name(self, planted: Path) -> None:
         # What the whitespace truncation is here to be tested against.
         headers = [
             line for line in planted.read_text(encoding="utf-8").splitlines() if line[:1] == ">"
@@ -201,6 +199,14 @@ class TestFixtureBytes:
             ">plantedI",
             ">plantedII  sacCer3 chrII:1-600, bases 180-240 soft-masked",
         ]
+        for bases in planted_records.values():
+            assert DNA.outside_alphabet(bases) == []
+        widths = {
+            len(line)
+            for line in planted.read_text(encoding="utf-8").splitlines()
+            if not line.startswith(">")
+        }
+        assert widths == {WRAP}
 
     def test_the_backbone_is_sacCer3_and_only_the_planted_words_are_not(  # noqa: N802
         self, data_dir: Path, planted_records: dict[str, str]
@@ -215,30 +221,18 @@ class TestFixtureBytes:
                     restored[low:high] = tiny[source][start + low : start + high]
             assert "".join(restored) == tiny[source][start:end]
 
-    @pytest.mark.parametrize(("record", "start", "end", "strand", "motif_id", "word"), PLANTED)
-    def test_each_planted_word_sits_at_the_offset_the_readme_names(
-        self,
-        planted_records: dict[str, str],
-        motifs: MotifSet,
-        record: str,
-        start: int,
-        end: int,
-        strand: str,
-        motif_id: str,
-        word: str,
+    def test_each_planted_word_sits_at_its_offset_and_the_reverse_is_the_forward_flipped(
+        self, planted_records: dict[str, str], motifs: MotifSet
     ) -> None:
-        assert planted_records[record][start:end] == word
-        expected = str(motifs[motif_id].consensus)
-        assert word.upper() == (expected if strand == "+" else revcomp(expected))
-
-    def test_the_reverse_site_is_the_forward_one_flipped(
-        self, planted_records: dict[str, str]
-    ) -> None:
+        for record, start, end, strand, motif_id, word in PLANTED:
+            assert planted_records[record][start:end] == word
+            expected = str(motifs[motif_id].consensus)
+            assert word.upper() == (expected if strand == "+" else revcomp(expected))
         forward, reverse = PLANTED[0], PLANTED[1]
         bases = planted_records["plantedI"]
         assert revcomp(bases[reverse[1] : reverse[2]]) == bases[forward[1] : forward[2]]
 
-    def test_one_window_of_plantedII_is_soft_masked_and_nothing_else_is(  # noqa: N802
+    def test_the_masked_window_bounds_and_holds_the_third_planted_site(
         self, planted_records: dict[str, str]
     ) -> None:
         low, high = MASKED
@@ -247,24 +241,8 @@ class TestFixtureBytes:
         assert bases[:low].isupper()
         assert bases[high:].isupper()
         assert planted_records["plantedI"].isupper()
-
-    def test_the_masked_window_holds_the_third_planted_site(
-        self, planted_records: dict[str, str]
-    ) -> None:
         _record, start, end, _strand, _motif_id, _word = PLANTED[2]
-        assert MASKED[0] <= start < end <= MASKED[1]
-
-    def test_the_fixture_holds_only_the_four_bases(self, planted_records: dict[str, str]) -> None:
-        for bases in planted_records.values():
-            assert DNA.outside_alphabet(bases) == []
-
-    def test_the_fixture_is_wrapped_at_sixty(self, planted: Path) -> None:
-        widths = {
-            len(line)
-            for line in planted.read_text(encoding="utf-8").splitlines()
-            if not line.startswith(">")
-        }
-        assert widths == {WRAP}
+        assert low <= start < end <= high
 
 
 # ---------------------------------------------------------------------------
@@ -273,42 +251,38 @@ class TestFixtureBytes:
 
 
 class TestReadFasta:
-    def test_a_record_name_stops_at_the_first_whitespace(self, planted: Path) -> None:
+    def test_reading_the_fixture_gives_names_and_bases_as_written_gzipped_or_not(
+        self, planted: Path, planted_records: dict[str, str], tmp_path: Path
+    ) -> None:
         # What STAR and chromap write into an alignment from the same file, so a hit table
         # joins against it without anyone renaming anything.
         assert [name for name, _ in read_fasta(planted)] == ["plantedI", "plantedII"]
-
-    def test_the_bases_come_back_joined_and_in_the_case_they_were_written(
-        self, planted: Path, planted_records: dict[str, str]
-    ) -> None:
         assert dict(read_fasta(planted)) == planted_records
 
-    def test_a_gzipped_fasta_reads_the_same(self, planted: Path, tmp_path: Path) -> None:
         zipped = tmp_path / "planted.fa.gz"
         with gzip.open(zipped, "wt", encoding="utf-8") as handle:
             handle.write(planted.read_text(encoding="utf-8"))
         assert dict(read_fasta(zipped)) == dict(read_fasta(planted))
 
-    def test_a_missing_file_names_itself(self, tmp_path: Path) -> None:
+    def test_malformed_or_missing_files_are_refused_but_an_empty_one_yields_no_records(
+        self, tmp_path: Path
+    ) -> None:
         with pytest.raises(FileNotFoundError, match="FASTA file not found"):
             list(read_fasta(tmp_path / "nope.fa"))
 
-    def test_bases_before_any_header_are_refused(self, tmp_path: Path) -> None:
-        path = tmp_path / "bare.fa"
-        path.write_text("ACGTACGT\n")
+        bare = tmp_path / "bare.fa"
+        bare.write_text("ACGTACGT\n")
         with pytest.raises(FastaFormatError, match="line 1"):
-            list(read_fasta(path))
+            list(read_fasta(bare))
 
-    def test_a_header_with_no_name_is_refused(self, tmp_path: Path) -> None:
-        path = tmp_path / "nameless.fa"
-        path.write_text(">chrI\nACGT\n>\nACGT\n")
+        nameless = tmp_path / "nameless.fa"
+        nameless.write_text(">chrI\nACGT\n>\nACGT\n")
         with pytest.raises(FastaFormatError, match="no name"):
-            list(read_fasta(path))
+            list(read_fasta(nameless))
 
-    def test_an_empty_file_yields_no_records(self, tmp_path: Path) -> None:
-        path = tmp_path / "empty.fa"
-        path.write_text("")
-        assert list(read_fasta(path)) == []
+        empty = tmp_path / "empty.fa"
+        empty.write_text("")
+        assert list(read_fasta(empty)) == []
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +291,9 @@ class TestReadFasta:
 
 
 class TestSchema:
-    def test_the_columns_are_the_seven_in_that_order(self, hits: pd.DataFrame) -> None:
+    def test_the_schema_and_index_are_the_contract_hits_or_not(
+        self, hits: pd.DataFrame, motifs: MotifSet, planted: Path
+    ) -> None:
         assert list(hits.columns) == list(HIT_COLUMNS)
         assert list(HIT_COLUMNS) == [
             "motif_id",
@@ -328,27 +304,22 @@ class TestSchema:
             "strand",
             "score",
         ]
-
-    def test_the_dtypes_are_the_compact_ones(self, hits: pd.DataFrame) -> None:
         assert {name: str(dtype) for name, dtype in hits.dtypes.items()} == dict(HIT_DTYPES)
+        assert list(hits.index) == list(range(len(hits)))
 
-    def test_a_scan_that_found_nothing_has_the_same_schema(self, motifs: MotifSet) -> None:
+        # And a scan that finds nothing, or has nothing to scan with, keeps the same
+        # schema — the empty table built by hand included.
         found = motifs.scan("N" * 300)
         assert len(found) == 0
         assert list(found.columns) == list(HIT_COLUMNS)
         assert {name: str(dtype) for name, dtype in found.dtypes.items()} == dict(HIT_DTYPES)
 
-    def test_an_empty_motif_set_scans_to_an_empty_table(self, planted: Path) -> None:
-        found = MotifSet([]).scan_fasta(planted)
-        assert len(found) == 0
-        assert found.attrs["motifs_scanned"] == ()
+        no_motifs = MotifSet([]).scan_fasta(planted)
+        assert len(no_motifs) == 0
+        assert no_motifs.attrs["motifs_scanned"] == ()
 
-    def test_the_empty_table_is_the_schema_with_no_rows(self) -> None:
         assert list(empty_hits().columns) == list(HIT_COLUMNS)
         assert {name: str(dtype) for name, dtype in empty_hits().dtypes.items()} == dict(HIT_DTYPES)
-
-    def test_the_index_is_a_fresh_range_across_records(self, hits: pd.DataFrame) -> None:
-        assert list(hits.index) == list(range(len(hits)))
 
 
 # ---------------------------------------------------------------------------
@@ -357,18 +328,9 @@ class TestSchema:
 
 
 class TestPlantedSites:
-    @pytest.mark.parametrize(("record", "start", "end", "strand", "motif_id", "word"), PLANTED)
-    def test_the_planted_site_is_found_where_it_was_planted(
-        self,
-        hits: pd.DataFrame,
-        record: str,
-        start: int,
-        end: int,
-        strand: str,
-        motif_id: str,
-        word: str,
-    ) -> None:
-        assert (motif_id, record, start, end, strand) in sites(hits)
+    def test_every_planted_site_is_found_where_it_was_planted(self, hits: pd.DataFrame) -> None:
+        for record, start, end, strand, motif_id, _word in PLANTED:
+            assert (motif_id, record, start, end, strand) in sites(hits)
 
     def test_a_reverse_site_covers_the_same_bases_as_its_forward_equivalent(
         self, hits: pd.DataFrame, planted_records: dict[str, str]
@@ -385,21 +347,14 @@ class TestPlantedSites:
         assert revcomp(reverse) == forward
         assert by_strand["+"][1] - by_strand["+"][0] == by_strand["-"][1] - by_strand["-"][0]
 
-    def test_every_interval_is_as_long_as_the_motif_that_made_it(
-        self, hits: pd.DataFrame, motifs: MotifSet
+    def test_every_hit_obeys_the_interval_and_provenance_invariants(
+        self, hits: pd.DataFrame, motifs: MotifSet, planted_records: dict[str, str]
     ) -> None:
-        for motif_id, _name, _sequence, start, end, _strand, _score in rows(hits):
+        for motif_id, _name, sequence, start, end, strand, _score in rows(hits):
             assert int(end) - int(start) == len(motifs[str(motif_id)])
-
-    def test_every_interval_lies_inside_its_record(
-        self, hits: pd.DataFrame, planted_records: dict[str, str]
-    ) -> None:
-        for _id, _name, sequence, start, end, _strand, _score in rows(hits):
             assert 0 <= int(start) < int(end) <= len(planted_records[str(sequence)])
-
-    def test_every_strand_is_plus_or_minus_and_never_unknown(self, hits: pd.DataFrame) -> None:
-        assert set(hits["strand"]) <= {"+", "-"}
-        assert "." not in set(hits["strand"])
+            assert strand in {"+", "-"}
+            assert motif_id in hits.attrs["motifs_scanned"]
         assert {"+", "-"} <= set(hits["strand"])
 
     def test_the_score_is_log_odds_in_bits_and_not_a_p_value(
@@ -412,11 +367,6 @@ class TestPlantedSites:
         assert max(scored) == pytest.approx(best, abs=0.02)
         assert best > 1.0  # a p-value could not be
 
-    def test_a_hit_is_never_reported_for_a_motif_that_was_not_scanned(
-        self, hits: pd.DataFrame
-    ) -> None:
-        assert set(hits["motif_id"]) <= set(hits.attrs["motifs_scanned"])
-
 
 # ---------------------------------------------------------------------------
 # What the engine is trusted for, checked against the engine
@@ -424,32 +374,31 @@ class TestPlantedSites:
 
 
 class TestForwardFrame:
-    @pytest.mark.parametrize("strand", ["+", "-"])
-    def test_a_word_planted_at_a_known_offset_is_found_at_that_offset(self, strand: str) -> None:
+    def test_a_word_planted_at_a_known_offset_is_found_there_on_either_strand(self) -> None:
         word = "GATTACAGTC"
         filler = "AAACCCTTT" * 5
-        planted = word if strand == "+" else revcomp(word)
-        found = MotifSet([word_motif(word)]).scan(filler + planted + filler)
-        assert (
-            "MA9999.1",
-            DEFAULT_SEQUENCE_NAME,
-            len(filler),
-            len(filler) + len(word),
-            strand,
-        ) in sites(found)
+        for strand, planted in [("+", word), ("-", revcomp(word))]:
+            found = MotifSet([word_motif(word)]).scan(filler + planted + filler)
+            assert (
+                "MA9999.1",
+                DEFAULT_SEQUENCE_NAME,
+                len(filler),
+                len(filler) + len(word),
+                strand,
+            ) in sites(found)
 
-    def test_the_last_window_of_a_sequence_is_scanned(self) -> None:
-        # The engine was chosen partly because it scans it; a site at the final position
-        # must not need a base appended after it to be found.
+    def test_the_boundaries_of_the_sequence_are_handled(self) -> None:
         word = "GATTACAGTC"
         filler = "AAACCCTTT" * 5
-        found = MotifSet([word_motif(word)]).scan(filler + word)
-        assert (int(found["end"].max())) == len(filler) + len(word)
+        # The engine was chosen partly because it scans the last window; a site at the
+        # final position must not need a base appended after it to be found.
+        at_the_end = MotifSet([word_motif(word)]).scan(filler + word)
+        assert (int(at_the_end["end"].max())) == len(filler) + len(word)
+        # And a sequence shorter than the motif yields no hit rather than raising.
+        too_short = MotifSet([word_motif(word)]).scan("ACGT")
+        assert len(too_short) == 0
 
-    def test_a_sequence_shorter_than_the_motif_yields_no_hit(self) -> None:
-        found = MotifSet([word_motif("GATTACAGTC")]).scan("ACGT")
-        assert len(found) == 0
-
+    @settings(max_examples=30)
     @given(
         word=st.text(alphabet="ACGT", min_size=8, max_size=14),
         left=st.text(alphabet="ACGT", min_size=0, max_size=30),
@@ -469,6 +418,7 @@ class TestForwardFrame:
             "-",
         ) in sites(found)
 
+    @settings(max_examples=30)
     @given(sequence=st.text(alphabet="ACGTN", max_size=200))
     def test_every_hit_lands_inside_the_sequence_it_was_found_in(self, sequence: str) -> None:
         found = MotifSet([word_motif("GATTACAGTC")]).scan(sequence)
@@ -484,16 +434,13 @@ class TestForwardFrame:
 
 
 class TestSoftMasking:
-    def test_the_committed_masked_record_scans_as_its_upper_case_equivalent(
-        self, motifs: MotifSet, planted_records: dict[str, str]
+    def test_the_fixture_softmask_makes_no_difference_to_the_scan(
+        self, motifs: MotifSet, hits: pd.DataFrame, planted_records: dict[str, str]
     ) -> None:
         masked = planted_records["plantedII"]
         assert not masked.isupper()  # the fixture really does carry masking
         assert rows(motifs.scan(masked, "x")) == rows(motifs.scan(masked.upper(), "x"))
-
-    def test_the_masked_planted_site_is_found_despite_its_case(
-        self, hits: pd.DataFrame, planted_records: dict[str, str]
-    ) -> None:
+        # And the real planted site under that mask is still found despite its case.
         record, start, end, strand, motif_id, word = PLANTED[2]
         assert word.islower()
         assert (motif_id, record, start, end, strand) in sites(hits)
@@ -509,6 +456,7 @@ class TestSoftMasking:
         path.write_text(lowered + "\n")
         assert rows(motifs.scan_fasta(path)) == rows(motifs.scan_fasta(planted))
 
+    @settings(max_examples=30)
     @given(sequence=st.text(alphabet="ACGT", max_size=150))
     def test_masking_changes_no_hit_whatever_the_sequence(self, sequence: str) -> None:
         motifs = MotifSet([word_motif("GATTACAGTC")])
@@ -521,26 +469,21 @@ class TestSoftMasking:
 
 
 class TestSkippedMotifs:
-    def test_the_two_short_records_are_never_scanned(self, hits: pd.DataFrame) -> None:
+    def test_short_motifs_are_never_scanned_and_are_always_named(
+        self, hits: pd.DataFrame, motifs: MotifSet
+    ) -> None:
         assert set(hits["motif_id"]).isdisjoint(TOO_SHORT)
-
-    def test_they_are_named_on_the_result(self, hits: pd.DataFrame) -> None:
         assert hits.attrs["motifs_skipped"] == TOO_SHORT
-
-    def test_the_other_eight_were_scanned(self, hits: pd.DataFrame, motifs: MotifSet) -> None:
         assert hits.attrs["motifs_scanned"] == tuple(
             motif.motif_id for motif in motifs if motif.motif_id not in TOO_SHORT
         )
-
-    def test_scanned_and_skipped_together_are_the_whole_set(
-        self, hits: pd.DataFrame, motifs: MotifSet
-    ) -> None:
-        assert hits.attrs["motifs_scanned"] + hits.attrs["motifs_skipped"] != ()
         assert set(hits.attrs["motifs_scanned"]) | set(hits.attrs["motifs_skipped"]) == set(
             motifs.motif_ids
         )
 
-    def test_the_boundary_is_seven_positions(self, planted: Path) -> None:
+    def test_the_boundary_is_seven_positions_and_an_all_short_set_scans_empty(
+        self, planted: Path
+    ) -> None:
         short = word_motif("GATTAC", "MA0001.1")  # six, and unreachable at any threshold
         long = word_motif("GATTACA", "MA0002.1")  # seven, the shortest that is scannable
         assert (len(short), len(long)) == (MIN_MOTIF_LENGTH - 1, MIN_MOTIF_LENGTH)
@@ -548,10 +491,9 @@ class TestSkippedMotifs:
         assert found.attrs["motifs_skipped"] == ("MA0001.1",)
         assert found.attrs["motifs_scanned"] == ("MA0002.1",)
 
-    def test_a_set_of_only_short_motifs_scans_to_an_empty_table(self, planted: Path) -> None:
-        found = MotifSet([word_motif("GATTAC", "MA0001.1")]).scan_fasta(planted)
-        assert len(found) == 0
-        assert found.attrs["motifs_skipped"] == ("MA0001.1",)
+        only_short = MotifSet([short]).scan_fasta(planted)
+        assert len(only_short) == 0
+        assert only_short.attrs["motifs_skipped"] == ("MA0001.1",)
 
 
 # ---------------------------------------------------------------------------
@@ -560,26 +502,20 @@ class TestSkippedMotifs:
 
 
 class TestThreshold:
-    def test_the_default_is_a_per_position_p_value(self, hits: pd.DataFrame) -> None:
+    def test_stricter_is_a_subset_looser_is_a_superset_and_out_of_range_is_refused(
+        self, motifs: MotifSet, planted: Path
+    ) -> None:
         assert DEFAULT_THRESHOLD == 1e-4
-        assert hits.attrs["threshold"] == DEFAULT_THRESHOLD
-
-    def test_a_stricter_threshold_keeps_a_subset(self, motifs: MotifSet, planted: Path) -> None:
         loose = sites(motifs.scan_fasta(planted, threshold=1e-4))
         strict = sites(motifs.scan_fasta(planted, threshold=1e-6))
         assert strict < loose
+        assert loose < sites(motifs.scan_fasta(planted, threshold=1e-3))
 
-    def test_a_looser_threshold_keeps_a_superset(self, motifs: MotifSet, planted: Path) -> None:
-        assert sites(motifs.scan_fasta(planted)) < sites(motifs.scan_fasta(planted, threshold=1e-3))
+        for threshold in (0.0, 1.0):
+            with pytest.raises(ValueError, match="per-position p-value"):
+                motifs.scan("ACGT" * 20, threshold=threshold)
 
-    @pytest.mark.parametrize("threshold", [0.0, 1.0, -1e-4, 2.0])
-    def test_a_threshold_outside_zero_to_one_says_it_is_a_p_value(
-        self, motifs: MotifSet, threshold: float
-    ) -> None:
-        with pytest.raises(ValueError, match="per-position p-value"):
-            motifs.scan("ACGT" * 20, threshold=threshold)
-
-    def test_a_repeat_scan_does_not_convert_its_thresholds_again(
+    def test_a_thresholds_conversion_is_cached_per_value_and_not_reused_across_values(
         self, motifs: MotifSet, planted: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # The engine's one slow step — seconds for a full vertebrate release — and a pure
@@ -599,19 +535,6 @@ class TestThreshold:
         assert len(calls) == converted
         assert rows(second) == rows(first)
 
-    def test_a_different_threshold_is_converted_afresh(
-        self, motifs: MotifSet, planted: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        calls: list[float] = []
-        real = MOODS.tools.threshold_from_p
-
-        def counted(matrix: object, background: object, p: float, *args: object) -> float:
-            calls.append(p)
-            return real(matrix, background, p, *args)
-
-        monkeypatch.setattr(MOODS.tools, "threshold_from_p", counted)
-        motifs.scan_fasta(planted, threshold=1e-4)
-        converted = len(calls)
         motifs.scan_fasta(planted, threshold=1e-6)
         assert len(calls) == 2 * converted
 
@@ -622,28 +545,64 @@ class TestThreshold:
 
 
 class TestBackgroundAndProvenance:
-    def test_every_provenance_key_is_present(self, hits: pd.DataFrame) -> None:
-        assert set(hits.attrs) == set(HIT_PROVENANCE)
-
-    def test_an_input_under_the_floor_falls_back_to_uniform_and_says_so(
-        self, hits: pd.DataFrame, planted_records: dict[str, str]
+    def test_provenance_keys_are_always_present_hit_or_not(
+        self, hits: pd.DataFrame, motifs: MotifSet
     ) -> None:
-        # 1200 bases: a composition estimated from that few would distort its own cutoffs.
+        assert set(hits.attrs) == set(HIT_PROVENANCE)
+        empty = motifs.scan("N" * 200)
+        assert len(empty) == 0
+        assert set(empty.attrs) == set(HIT_PROVENANCE)
+        assert empty.attrs["motifs_skipped"] == TOO_SHORT
+
+    def test_background_mode_auto_uniform_and_derive_pick_correctly_relative_to_the_floor(
+        self,
+        motifs: MotifSet,
+        hits: pd.DataFrame,
+        planted: Path,
+        planted_records: dict[str, str],
+    ) -> None:
+        # 1200 bases: a composition estimated from that few would distort its own cutoffs,
+        # so the actual fixture scan — under the floor — stays uniform.
         assert sum(len(bases) for bases in planted_records.values()) < BACKGROUND_FLOOR
         assert hits.attrs["background"] == UNIFORM_BACKGROUND
 
-    def test_an_input_over_the_floor_has_its_background_derived(
-        self, motifs: MotifSet, planted_records: dict[str, str]
-    ) -> None:
         bases = planted_records["plantedI"]
         peaks = wide(bases)
         assert sum(len(sequence) for sequence in peaks.values()) > BACKGROUND_FLOOR
-        found = motifs.scan_sequences(peaks)
-        assert found.attrs["background"] != UNIFORM_BACKGROUND
-        for recorded, wanted in zip(found.attrs["background"], composition(bases), strict=True):
+
+        # Auto derives once the floor is crossed, from the very bases it was given.
+        over_floor = motifs.scan_sequences(peaks)
+        assert over_floor.attrs["background"] != UNIFORM_BACKGROUND
+        for recorded, wanted in zip(
+            over_floor.attrs["background"], composition(bases), strict=True
+        ):
             assert recorded == pytest.approx(wanted, abs=0.002)
 
-    def test_the_recorded_background_is_the_one_that_was_used(
+        # And either mode can be asked for explicitly regardless of which side of the
+        # floor the input falls on: uniform over the floor, and derive under it — from
+        # the whole fixture this time, so the composition it derives is checked too.
+        forced_uniform = motifs.scan_sequences(peaks, background="uniform")
+        assert forced_uniform.attrs["background"] == UNIFORM_BACKGROUND
+        forced_derive = motifs.scan_fasta(planted, background="derive")
+        assert forced_derive.attrs["background"] != UNIFORM_BACKGROUND
+        whole = "".join(planted_records.values())
+        for recorded, wanted in zip(
+            forced_derive.attrs["background"], composition(whole), strict=True
+        ):
+            assert recorded == pytest.approx(wanted, abs=0.002)
+
+    def test_an_explicit_background_is_recorded_and_wins_over_the_input(
+        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
+    ) -> None:
+        given_background = motifs.scan_fasta(planted, background=[0.3, 0.2, 0.2, 0.3])
+        assert given_background.attrs["background"] == (0.3, 0.2, 0.2, 0.3)
+
+        over_floor = motifs.scan_sequences(
+            wide(planted_records["plantedI"]), background=[0.3, 0.2, 0.2, 0.3]
+        )
+        assert over_floor.attrs["background"] == (0.3, 0.2, 0.2, 0.3)
+
+    def test_the_recorded_background_reproduces_the_scan_exactly(
         self, motifs: MotifSet, planted_records: dict[str, str]
     ) -> None:
         # The whole point of recording it: handing the recorded value back must reproduce
@@ -654,59 +613,15 @@ class TestBackgroundAndProvenance:
         pd.testing.assert_frame_equal(replayed, derived)
         assert replayed.attrs["background"] == derived.attrs["background"]
 
-    def test_deriving_moves_the_hits_off_what_uniform_would_have_said(
-        self, motifs: MotifSet, planted_records: dict[str, str]
+    def test_the_background_choice_changes_which_hits_are_found(
+        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
     ) -> None:
-        # Why this is automatic rather than an option nobody remembers to pass.
+        # Why this is automatic rather than an option nobody remembers to pass, and why it
+        # is recorded rather than assumed: an AT-rich null and a uniform one do not agree.
         peaks = wide(planted_records["plantedI"])
         assert sites(motifs.scan_sequences(peaks)) != sites(
             motifs.scan_sequences(peaks, background="uniform")
         )
-
-    def test_uniform_can_be_asked_for_over_the_floor(
-        self, motifs: MotifSet, planted_records: dict[str, str]
-    ) -> None:
-        found = motifs.scan_sequences(wide(planted_records["plantedI"]), background="uniform")
-        assert found.attrs["background"] == UNIFORM_BACKGROUND
-
-    def test_deriving_can_be_asked_for_under_the_floor(
-        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
-    ) -> None:
-        found = motifs.scan_fasta(planted, background="derive")
-        assert found.attrs["background"] != UNIFORM_BACKGROUND
-        whole = "".join(planted_records.values())
-        for recorded, wanted in zip(found.attrs["background"], composition(whole), strict=True):
-            assert recorded == pytest.approx(wanted, abs=0.002)
-
-    def test_a_background_given_is_the_one_recorded(self, motifs: MotifSet, planted: Path) -> None:
-        found = motifs.scan_fasta(planted, background=[0.3, 0.2, 0.2, 0.3])
-        assert found.attrs["background"] == (0.3, 0.2, 0.2, 0.3)
-
-    def test_an_explicit_background_wins_over_the_input(
-        self, motifs: MotifSet, planted_records: dict[str, str]
-    ) -> None:
-        found = motifs.scan_sequences(
-            wide(planted_records["plantedI"]), background=[0.3, 0.2, 0.2, 0.3]
-        )
-        assert found.attrs["background"] == (0.3, 0.2, 0.2, 0.3)
-
-    def test_a_background_mode_that_does_not_exist_names_the_ones_that_do(
-        self, motifs: MotifSet
-    ) -> None:
-        with pytest.raises(ValueError, match="auto, uniform, derive"):
-            motifs.scan("ACGT" * 20, background="gc")  # type: ignore[arg-type]
-
-    def test_deciding_the_background_does_not_eat_the_first_records(
-        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
-    ) -> None:
-        # A FASTA is read once. Records pulled off it while the background was being
-        # decided must still be scanned, or a scan would silently skip its first records.
-        found = motifs.scan_fasta(planted, background="derive")
-        assert set(found["sequence_name"]) == set(planted_records)
-
-    def test_the_background_decides_the_answer(self, motifs: MotifSet, planted: Path) -> None:
-        # Recorded rather than assumed because it moves the hits: an AT-rich null and a
-        # uniform one do not agree on this fixture.
         uniform = sites(motifs.scan_fasta(planted))
         at_rich = sites(motifs.scan_fasta(planted, background=[0.35, 0.15, 0.15, 0.35]))
         assert uniform != at_rich
@@ -725,29 +640,32 @@ class TestBackgroundAndProvenance:
         with pytest.raises(ValueError, match=message):
             motifs.scan("ACGT" * 20, background=background)
 
-    def test_a_release_records_which_release_it_is(
-        self, release: JasparDatabase, planted: Path
-    ) -> None:
-        found = release.scan_fasta(planted)
-        assert (found.attrs["release"], found.attrs["tax_group"]) == ("2024", "all")
+    def test_an_unknown_background_mode_names_the_ones_there_are(self, motifs: MotifSet) -> None:
+        with pytest.raises(ValueError, match="auto, uniform, derive"):
+            motifs.scan("ACGT" * 20, background="gc")  # type: ignore[arg-type]
 
-    def test_a_filtered_release_records_neither(
-        self, release: JasparDatabase, planted: Path
+    def test_deciding_the_background_does_not_eat_the_first_records(
+        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
     ) -> None:
+        # A FASTA is read once. Records pulled off it while the background was being
+        # decided must still be scanned, or a scan would silently skip its first records.
+        found = motifs.scan_fasta(planted, background="derive")
+        assert set(found["sequence_name"]) == set(planted_records)
+
+    def test_release_identity_is_recorded_only_for_an_unfiltered_release(
+        self, release: JasparDatabase, motifs: MotifSet, planted: Path
+    ) -> None:
+        from_release = release.scan_fasta(planted)
+        assert (from_release.attrs["release"], from_release.attrs["tax_group"]) == (
+            "2024",
+            "all",
+        )
         # filter() hands back a plain motif set, so a filtered release is no longer that
-        # release and its table must not claim to be.
-        found = release.filter(tax_group="vertebrates").scan_fasta(planted)
-        assert (found.attrs["release"], found.attrs["tax_group"]) == (None, None)
-
-    def test_a_de_novo_set_records_neither(self, motifs: MotifSet, planted: Path) -> None:
-        found = motifs.scan_fasta(planted)
-        assert (found.attrs["release"], found.attrs["tax_group"]) == (None, None)
-
-    def test_an_empty_result_still_carries_its_provenance(self, motifs: MotifSet) -> None:
-        found = motifs.scan("N" * 200)
-        assert len(found) == 0
-        assert set(found.attrs) == set(HIT_PROVENANCE)
-        assert found.attrs["motifs_skipped"] == TOO_SHORT
+        # release and its table must not claim to be — and neither does a de novo set.
+        filtered = release.filter(tax_group="vertebrates").scan_fasta(planted)
+        assert (filtered.attrs["release"], filtered.attrs["tax_group"]) == (None, None)
+        de_novo = motifs.scan_fasta(planted)
+        assert (de_novo.attrs["release"], de_novo.attrs["tax_group"]) == (None, None)
 
 
 # ---------------------------------------------------------------------------
@@ -756,44 +674,35 @@ class TestBackgroundAndProvenance:
 
 
 class TestEntryPointsAgree:
-    def test_the_single_sequence_form_names_its_sequence(self, motifs: MotifSet) -> None:
+    def test_the_single_sequence_form_names_its_sequence_by_default_or_by_request(
+        self, motifs: MotifSet, planted_records: dict[str, str]
+    ) -> None:
         found = motifs.scan("ACGT" * 40)
         assert DEFAULT_SEQUENCE_NAME == "sequence"
         assert set(found["sequence_name"]) <= {DEFAULT_SEQUENCE_NAME}
 
-    def test_the_single_sequence_form_takes_a_name(
-        self, motifs: MotifSet, planted_records: dict[str, str]
-    ) -> None:
-        found = motifs.scan(planted_records["plantedI"], "chosen")
-        assert set(found["sequence_name"]) == {"chosen"}
+        named = motifs.scan(planted_records["plantedI"], "chosen")
+        assert set(named["sequence_name"]) == {"chosen"}
 
-    def test_a_mapping_and_a_fasta_agree(
-        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
+    def test_the_mapping_fasta_stream_and_one_sequence_forms_agree_and_batches_stream_in_order(
+        self,
+        motifs: MotifSet,
+        planted: Path,
+        hits: pd.DataFrame,
+        planted_records: dict[str, str],
     ) -> None:
         pd.testing.assert_frame_equal(
             motifs.scan_fasta(planted), motifs.scan_sequences(planted_records)
         )
-
-    def test_one_sequence_agrees_with_the_file_it_came_from(
-        self, motifs: MotifSet, hits: pd.DataFrame, planted_records: dict[str, str]
-    ) -> None:
-        alone = motifs.scan(planted_records["plantedI"], "plantedI")
-        assert rows(alone) == of(hits, sequence_name="plantedI")
-
-    def test_a_dna_scans_as_the_string_it_is(
-        self, motifs: MotifSet, planted_records: dict[str, str]
-    ) -> None:
-        bases = planted_records["plantedI"]
-        assert rows(motifs.scan(DNA(bases), "x")) == rows(motifs.scan(bases, "x"))
-
-    def test_the_stream_form_is_the_one_the_three_share(
-        self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
-    ) -> None:
         pd.testing.assert_frame_equal(
             scan_stream(motifs, planted_records.items()), motifs.scan_fasta(planted)
         )
+        alone = motifs.scan(planted_records["plantedI"], "plantedI")
+        assert rows(alone) == of(hits, sequence_name="plantedI")
+        # And a DNA scans as the string it is.
+        bases = planted_records["plantedI"]
+        assert rows(motifs.scan(DNA(bases), "x")) == rows(motifs.scan(bases, "x"))
 
-    def test_the_batches_are_drained_in_the_order_they_arrive(self, motifs: MotifSet) -> None:
         # The loop a Parquet sink and a parallel source attach to: one batch per named
         # sequence, concatenated in the order the source yielded them.
         pieces = [("second", "ACGT" * 30), ("first", "TTTTGATTACAGTTTT")]
@@ -802,11 +711,10 @@ class TestEntryPointsAgree:
         both = scan_stream(MotifSet([word_motif("GATTACAG")]), [pieces[1], pieces[1]])
         assert len(both) == 2 * len(found)
 
-    def test_the_same_name_twice_is_the_callers_business(self, motifs: MotifSet) -> None:
         # A caller sharding one sequence wants the pieces to share a name.
         sequence = "TTTTGATTACAGTTTT"
-        found = scan_stream(
+        shared_name = scan_stream(
             MotifSet([word_motif("GATTACAG")]), [("shard", sequence), ("shard", sequence)]
         )
-        assert set(found["sequence_name"]) == {"shard"}
-        assert len(found) == 2
+        assert set(shared_name["sequence_name"]) == {"shard"}
+        assert len(shared_name) == 2

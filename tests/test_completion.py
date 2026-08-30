@@ -78,52 +78,37 @@ def test_a_record_survives_write_and_read_unchanged(record: CompletionRecord) ->
         assert read_record(directory) == record
 
 
-def test_the_record_is_written_under_one_well_known_name(tmp_path: Path) -> None:
+def test_writing_is_atomic_under_one_well_known_name_and_leaves_no_temp_file(
+    tmp_path: Path,
+) -> None:
     (fasta,) = _build(tmp_path, "tiny.fa")
+    first = build_record(tmp_path, kind="genome", name="tiny", files=[fasta], source_url="a://one")
 
-    written = write_record(
-        tmp_path, build_record(tmp_path, kind="genome", name="tiny", files=[fasta])
-    )
+    written = write_record(tmp_path, first)
 
     assert written == record_path(tmp_path) == tmp_path / RECORD_NAME
     assert written.is_file()
 
-
-def test_writing_leaves_no_temporary_file_behind(tmp_path: Path) -> None:
-    (fasta,) = _build(tmp_path, "tiny.fa")
-    record = build_record(tmp_path, kind="genome", name="tiny", files=[fasta])
-
-    write_record(tmp_path, record)
-    write_record(tmp_path, record)  # a second run replaces the record in place
-
+    # A second run replaces the record in place, leaving no other file behind.
+    second = build_record(tmp_path, kind="genome", name="tiny", files=[fasta], source_url="a://two")
+    write_record(tmp_path, second)
     assert sorted(p.name for p in tmp_path.iterdir()) == [RECORD_NAME, "tiny.fa"]
 
-
-def test_a_reader_never_sees_a_half_written_record(tmp_path: Path) -> None:
     # The record is renamed over its destination, so whatever is at that path is
     # always a complete document — including while a rewrite is in flight.
-    (fasta,) = _build(tmp_path, "tiny.fa")
-    first = build_record(tmp_path, kind="genome", name="tiny", files=[fasta], source_url="a://one")
-    write_record(tmp_path, first)
-    second = build_record(tmp_path, kind="genome", name="tiny", files=[fasta], source_url="a://two")
-
-    write_record(tmp_path, second)
-
     payload = json.loads((tmp_path / RECORD_NAME).read_text())
     assert payload["source_url"] == "a://two"
 
 
-def test_no_record_reads_as_unfinished(tmp_path: Path) -> None:
+def test_no_record_or_an_unusable_one_reads_as_unfinished(tmp_path: Path) -> None:
     assert read_record(tmp_path) is None
 
-
-@pytest.mark.parametrize("content", ["", "not json at all", "[]", '{"kind": "genome"}'])
-def test_an_unusable_record_reads_as_unfinished(tmp_path: Path, content: str) -> None:
     # Truncated, malformed or the wrong shape: all of them mean "not finished" here.
-    # Which of them should raise instead is the repairing caller's decision, not this one's.
-    (tmp_path / RECORD_NAME).write_text(content)
-
-    assert read_record(tmp_path) is None
+    # Which of them should raise instead is the repairing caller's decision, not this
+    # one's.
+    for content in ("", "not json at all", "[]", '{"kind": "genome"}'):
+        (tmp_path / RECORD_NAME).write_text(content)
+        assert read_record(tmp_path) is None, f"content {content!r} should read as unfinished"
 
 
 # --- what a record carries ---------------------------------------------------
@@ -167,7 +152,7 @@ def test_claimed_paths_are_relative_so_the_directory_stays_movable(tmp_path: Pat
     assert disagreements(moved, record) == []
 
 
-def test_recording_a_file_outside_the_directory_is_refused(tmp_path: Path) -> None:
+def test_recording_a_file_outside_or_not_yet_in_the_directory_is_refused(tmp_path: Path) -> None:
     (stray,) = _build(tmp_path, "stray.fa")
     directory = tmp_path / "build"
     directory.mkdir()
@@ -175,74 +160,65 @@ def test_recording_a_file_outside_the_directory_is_refused(tmp_path: Path) -> No
     with pytest.raises(ValueError, match="only files inside its own directory"):
         build_record(directory, kind="genome", name="tiny", files=[stray])
 
-
-def test_recording_a_file_that_is_not_there_yet_is_refused(tmp_path: Path) -> None:
     # The record is written last; claiming a file that does not exist is a build bug.
     with pytest.raises(FileNotFoundError, match="written last"):
         build_record(tmp_path, kind="genome", name="tiny", files=[tmp_path / "tiny.fa"])
 
 
-def test_a_tool_that_cannot_be_run_is_left_out_rather_than_raising(tmp_path: Path) -> None:
-    (fasta,) = _build(tmp_path, "tiny.fa")
-
-    record = build_record(
-        tmp_path, kind="genome", name="tiny", files=[fasta], tools=["definitelyNotInstalled"]
-    )
-
-    assert record.tool_versions == {}
-
-
-def test_tool_versions_reports_a_tool_that_answers() -> None:
+def test_tool_versions_reports_what_answers_and_omits_what_cannot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
+) -> None:
     versions = tool_versions(["python", "definitelyNotInstalled"])
-
     assert "definitelyNotInstalled" not in versions
     assert versions["python"].startswith("Python")
 
+    (fasta,) = _build(tmp_path, "tiny.fa")
+    record = build_record(
+        tmp_path, kind="genome", name="tiny", files=[fasta], tools=["definitelyNotInstalled"]
+    )
+    assert record.tool_versions == {}
 
-def test_a_tool_that_will_not_identify_itself_is_left_out_too(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, stub_binary: StubBinary
-) -> None:
     # Installed, and rejecting `--version` the way several UCSC binaries do. An absent
     # key means *unknown*, and it must mean that for both reasons a version can be
     # unknown — otherwise a record would carry an empty string as if it were a fact.
     bin_dir = tmp_path / "bin"
     stub_binary(bin_dir, "faToTwoBit", "echo '--version is not a valid option' >&2\nexit 255")
     monkeypatch.setenv("PATH", str(bin_dir))
-
     assert tool_versions(["faToTwoBit"]) == {}
 
 
 # --- holding a directory to its record ---------------------------------------
 
 
-def test_a_directory_that_matches_its_record_has_nothing_to_report(tmp_path: Path) -> None:
-    fasta, twobit = _build(tmp_path, "tiny.fa", "tiny.2bit")
-    record = build_record(tmp_path, kind="genome", name="tiny", files=[fasta, twobit])
-
-    assert disagreements(tmp_path, record) == []
-
-
-def test_a_deleted_file_is_reported_by_name(tmp_path: Path) -> None:
-    fasta, twobit = _build(tmp_path, "tiny.fa", "tiny.2bit")
-    record = build_record(tmp_path, kind="genome", name="tiny", files=[fasta, twobit])
-
-    twobit.unlink()
-
-    (bad,) = disagreements(tmp_path, record)
-    assert bad.path == "tiny.2bit"
-    assert bad.actual is None
-    assert str(bad) == "tiny.2bit: recorded 3 bytes, missing"
-
-
-def test_a_truncated_file_is_reported_with_both_sizes(tmp_path: Path) -> None:
+def test_a_matching_directory_or_a_same_size_edit_has_nothing_to_report(tmp_path: Path) -> None:
     (fasta,) = _build(tmp_path, "tiny.fa", size=100)
     record = build_record(tmp_path, kind="genome", name="tiny", files=[fasta])
 
-    fasta.write_text("x")
+    assert disagreements(tmp_path, record) == []
 
-    (bad,) = disagreements(tmp_path, record)
-    assert (bad.path, bad.expected, bad.actual) == ("tiny.fa", 100, 1)
-    assert str(bad) == "tiny.fa: recorded 100 bytes, found 1"
+    # The check is presence and size only, deliberately: reading contents would make
+    # reopening a prepared human genome a multi-gigabyte read rather than milliseconds.
+    fasta.write_text("y" * 100)
+    assert disagreements(tmp_path, record) == []
+
+
+def test_a_deleted_or_a_truncated_file_is_reported_with_the_right_message(tmp_path: Path) -> None:
+    fasta, twobit = _build(tmp_path, "tiny.fa", "tiny.2bit")
+    record = build_record(tmp_path, kind="genome", name="tiny", files=[fasta, twobit])
+    twobit.unlink()
+
+    (deleted,) = disagreements(tmp_path, record)
+    assert deleted.path == "tiny.2bit"
+    assert deleted.actual is None
+    assert str(deleted) == "tiny.2bit: recorded 3 bytes, missing"
+
+    (fasta_alone,) = _build(tmp_path, "tiny.fa", size=100)
+    truncated_record = build_record(tmp_path, kind="genome", name="tiny", files=[fasta_alone])
+    fasta_alone.write_text("x")
+
+    (truncated,) = disagreements(tmp_path, truncated_record)
+    assert (truncated.path, truncated.expected, truncated.actual) == ("tiny.fa", 100, 1)
+    assert str(truncated) == "tiny.fa: recorded 100 bytes, found 1"
 
 
 def test_every_offender_is_reported_not_just_the_first(tmp_path: Path) -> None:
@@ -258,17 +234,6 @@ def test_every_offender_is_reported_not_just_the_first(tmp_path: Path) -> None:
     ]
 
 
-def test_a_same_size_edit_goes_unnoticed_because_contents_are_never_read(tmp_path: Path) -> None:
-    # The check is presence and size only, deliberately: reading contents would make
-    # reopening a prepared human genome a multi-gigabyte read rather than milliseconds.
-    (fasta,) = _build(tmp_path, "tiny.fa", size=100)
-    record = build_record(tmp_path, kind="genome", name="tiny", files=[fasta])
-
-    fasta.write_text("y" * 100)
-
-    assert disagreements(tmp_path, record) == []
-
-
 # --- finished, fresh, or broken ----------------------------------------------
 
 _REPAIR = "genome register tiny --force"
@@ -282,19 +247,15 @@ def test_a_finished_build_answers_with_its_record(tmp_path: Path) -> None:
     assert check_registration(tmp_path, repair=_REPAIR) == written
 
 
-def test_an_absent_directory_is_fresh_rather_than_broken(tmp_path: Path) -> None:
+def test_an_absent_or_empty_directory_or_one_holding_only_a_download_is_fresh(
+    tmp_path: Path,
+) -> None:
     assert check_registration(tmp_path / "never-built", repair=_REPAIR) is None
-
-
-def test_an_empty_directory_is_fresh_rather_than_broken(tmp_path: Path) -> None:
     assert check_registration(tmp_path, repair=_REPAIR) is None
 
-
-def test_a_directory_holding_only_a_download_is_still_fresh(tmp_path: Path) -> None:
     # The working area is working state, not a claimed output, so an interrupted
     # download does not make a directory that was never registered look broken.
     _build(work_dir(tmp_path), "tiny.fa.gz")
-
     assert check_registration(tmp_path, repair=_REPAIR) is None
 
 
@@ -328,12 +289,14 @@ def test_a_record_that_disagrees_raises_naming_which_file_and_how(tmp_path: Path
 # --- the working area --------------------------------------------------------
 
 
-def test_the_working_area_is_a_hidden_directory_inside_the_build(tmp_path: Path) -> None:
+def test_the_working_area_is_hidden_and_clearing_it_removes_only_its_own_files(
+    tmp_path: Path,
+) -> None:
     assert work_dir(tmp_path) == tmp_path / WORK_DIR_NAME
     assert WORK_DIR_NAME.startswith(".")
 
+    clear_work_dir(tmp_path)  # never made yet — no raise
 
-def test_clearing_the_working_area_removes_everything_in_it(tmp_path: Path) -> None:
     _build(work_dir(tmp_path), "tiny.fa.gz")
     (kept,) = _build(tmp_path, "tiny.fa")
 
@@ -343,11 +306,7 @@ def test_clearing_the_working_area_removes_everything_in_it(tmp_path: Path) -> N
     assert kept.is_file()
 
 
-def test_clearing_a_working_area_that_was_never_made_is_fine(tmp_path: Path) -> None:
-    clear_work_dir(tmp_path)  # no raise
-
-
-def test_an_annotation_registered_first_does_not_make_its_assembly_look_broken(
+def test_an_ignored_subtree_hides_its_own_leftovers_but_not_a_real_interrupted_run(
     tmp_path: Path,
 ) -> None:
     # An Assembly dir hosts the gtf/ and index/ subtrees other contexts own, and each
@@ -356,14 +315,10 @@ def test_an_annotation_registered_first_does_not_make_its_assembly_look_broken(
     # than as a run that was interrupted.
     (tmp_path / "gtf" / "gencode_v50").mkdir(parents=True)
     (tmp_path / "index" / "star_gencode_v50").mkdir(parents=True)
-
     assert check_registration(tmp_path, repair="...", ignore={"gtf", "index"}) is None
 
-
-def test_a_foreign_subtree_does_not_hide_a_real_interrupted_run(tmp_path: Path) -> None:
-    # Ignoring those subtrees must not ignore the assembly's own leftovers beside them.
-    (tmp_path / "gtf" / "gencode_v50").mkdir(parents=True)
+    # But ignoring those subtrees must not ignore the assembly's own leftovers beside
+    # them.
     (tmp_path / "hg38.fa").write_text(">chr1\nACGT\n")
-
     with pytest.raises(UnfinishedRegistrationError, match=r"hg38\.fa"):
         check_registration(tmp_path, repair="genome register hg38 --force", ignore={"gtf", "index"})

@@ -144,43 +144,36 @@ def grids(draw: st.DrawFn, *, max_queries: int = 4, max_targets: int = 5) -> lis
 
 
 class TestWhatIsAccepted:
-    def test_one_motif(self, targets: MotifSet) -> None:
-        comparison = targets.compare(targets["MA0139.2"])
-        assert comparison.query_ids == ("MA0139.2",)
-        assert comparison.target_ids == targets.motif_ids
+    def test_query_shapes_are_accepted(self, targets: MotifSet) -> None:
+        single = targets.compare(targets["MA0139.2"])
+        assert single.query_ids == ("MA0139.2",)
+        assert single.target_ids == targets.motif_ids
 
-    def test_several_motifs(self, targets: MotifSet) -> None:
-        comparison = targets.compare([targets["MA0139.2"], targets["SP1"]])
-        assert comparison.query_ids == ("MA0139.2", "MA0079.5")
+        several = targets.compare([targets["MA0139.2"], targets["SP1"]])
+        assert several.query_ids == ("MA0139.2", "MA0079.5")
 
-    def test_a_whole_motif_set(self, targets: MotifSet) -> None:
-        comparison = targets.compare(targets)
-        assert comparison.query_ids == targets.motif_ids
-        assert comparison.data.sizes == {"query": 10, "target": 10}
+        whole_set = targets.compare(targets)
+        assert whole_set.query_ids == targets.motif_ids
+        assert whole_set.data.sizes == {"query": 10, "target": 10}
 
-    def test_a_de_novo_motif_that_no_release_published(self, targets: MotifSet) -> None:
-        # The use case: a matrix out of a model, carrying none of the six annotations.
+        # A de novo motif carries none of the six annotations a release would.
         de_novo = Motif("pattern_0", "", np.hstack([np.eye(4) * 20 + 1] * 2))
         assert targets.compare(de_novo).query_ids == ("pattern_0",)
 
-    def test_no_queries_is_refused(self, targets: MotifSet) -> None:
+    def test_refusals(self, targets: MotifSet) -> None:
         with pytest.raises(ValueError, match="no motifs to compare"):
             targets.compare([])
 
-    def test_comparing_against_an_empty_set_is_refused(self, targets: MotifSet) -> None:
         with pytest.raises(ValueError, match="holds no motifs"):
             MotifSet([]).compare(targets["MA0139.2"])
 
-    def test_two_queries_sharing_an_id_are_refused(self, targets: MotifSet) -> None:
         one = targets["MA0139.2"]
         with pytest.raises(ValueError, match="share the motif id"):
             targets.compare([one, one])
 
-    def test_a_top_below_one_is_refused(self, targets: MotifSet) -> None:
         with pytest.raises(ValueError, match="top must be >= 1"):
             targets.compare(targets, top=0)
 
-    def test_a_top_above_the_target_count_is_refused(self, targets: MotifSet) -> None:
         # Guards the engine: asking tomtom for more neighbours than there are targets
         # raises a SystemError out of numba, which names nothing a caller can act on.
         with pytest.raises(ValueError, match="only 10 targets"):
@@ -193,34 +186,30 @@ class TestWhatIsAccepted:
 
 
 class TestAMotifAgainstItself:
-    def test_a_motif_is_its_own_best_target(self, targets: MotifSet) -> None:
-        best = targets.compare(targets["MA0139.2"]).to_frame()
-        assert len(best) == 1
-        assert best.loc[0, "target"] == "MA0139.2"
-
-    def test_the_self_pair_is_a_gapless_forward_alignment_of_the_whole_motif(
+    def test_a_motif_is_gapless_the_strongest_score_but_not_always_the_best_p(
         self, targets: MotifSet
     ) -> None:
-        data = targets.compare(targets).data
+        single = targets.compare(targets["MA0139.2"]).to_frame()
+        assert len(single) == 1
+        assert single.loc[0, "target"] == "MA0139.2"
+
+        comparison = targets.compare(targets)
+        data = comparison.data
         for motif in targets:
             pair = data.sel(query=motif.motif_id, target=motif.motif_id)
             assert int(pair["offset"]) == 0
             assert int(pair["overlap"]) == len(motif)
             assert str(pair["strand"].item()) == "+"
-
-    def test_the_self_pair_is_the_strongest_score_in_its_row(self, targets: MotifSet) -> None:
         # True for all ten, unlike the p-value below: nothing aligns to a motif better
         # than the motif itself, column for column.
-        data = targets.compare(targets).data
         strongest = data["score"].argmax(dim="target")
         assert list(data["target"][strongest].to_numpy()) == list(targets.motif_ids)
 
-    def test_a_nested_motif_can_beat_the_self_pair_on_p_value(self, targets: MotifSet) -> None:
         # Not a defect and worth pinning: TOMTOM's p-value rewards a short dense
         # alignment, so the 15-column CTCF that both of these embed is ranked above
         # them by p even though they align to themselves perfectly. Documented on
         # MotifSet.compare, and the reason the anchor above ranks on score.
-        frame = targets.compare(targets).to_frame()
+        frame = comparison.to_frame()
         best = dict(zip(frame["query"], frame["target"], strict=True))
         assert [best[motif_id] for motif_id in NESTED_CTCFS] == ["MA0139.2", "MA0139.2"]
         unnested = set(targets.motif_ids) - set(NESTED_CTCFS)
@@ -233,21 +222,22 @@ class TestAMotifAgainstItself:
 
 
 class TestTheLabelledArray:
-    def test_the_complete_shape_is_query_by_target(self, targets: MotifSet) -> None:
-        comparison = targets.compare(targets["MA0139.2"])
-        assert comparison.is_ragged is False
-        assert comparison.top is None
-        assert comparison.data.sizes == {"query": 1, "target": 10}
-        assert comparison.targets_compared == 10
+    def test_the_shape_is_query_by_target_or_query_by_rank_when_limited(
+        self, targets: MotifSet
+    ) -> None:
+        complete = targets.compare(targets["MA0139.2"])
+        assert complete.is_ragged is False
+        assert complete.top is None
+        assert complete.data.sizes == {"query": 1, "target": 10}
+        assert complete.targets_compared == 10
 
-    def test_the_limited_shape_is_query_by_rank(self, targets: MotifSet) -> None:
-        comparison = targets.compare(targets, top=3)
-        assert comparison.is_ragged is True
-        assert comparison.top == 3
-        assert comparison.data.sizes == {"query": 10, "rank": 3}
-        assert comparison.targets_compared == 10
+        limited = targets.compare(targets, top=3)
+        assert limited.is_ragged is True
+        assert limited.top == 3
+        assert limited.data.sizes == {"query": 10, "rank": 3}
+        assert limited.targets_compared == 10
 
-    def test_it_is_indexable_by_motif_id(self, targets: MotifSet) -> None:
+    def test_indexing_by_motif_id_works_on_both_shapes(self, targets: MotifSet) -> None:
         data = targets.compare(targets).data
         pair = data.sel(query="MA0139.2", target="MA1929.2")
         assert float(pair["neg_log10_p"]) > 0.0
@@ -256,17 +246,16 @@ class TestTheLabelledArray:
         mirrored = data.sel(query="MA1929.2", target="MA0139.2")
         assert float(mirrored["neg_log10_p"]) != float(pair["neg_log10_p"])
 
-    def test_a_limited_array_is_still_indexable_by_query_id(self, targets: MotifSet) -> None:
         row = targets.compare(targets, top=2).data.sel(query="MA1930.2")
         assert list(row["target"].to_numpy()) == ["MA0139.2", "MA1930.2"]
-
-    def test_a_limited_array_names_a_different_target_per_query(self, targets: MotifSet) -> None:
         # This is what ragged means: rank 0 is a different motif for each query, so
         # there is no shared target axis to index.
         best = targets.compare(targets, top=1).data["target"].to_numpy().ravel()
         assert len(set(best)) > 1
 
-    def test_the_variables_and_their_dtypes_are_the_contract(self, targets: MotifSet) -> None:
+    def test_the_variables_dtypes_and_limited_extra_are_the_contract(
+        self, targets: MotifSet
+    ) -> None:
         assert COMPARISON_VARIABLES == ("neg_log10_p", "score", "offset", "overlap", "strand")
         data = targets.compare(targets).data
         assert set(data.data_vars) == set(COMPARISON_VARIABLES)
@@ -276,17 +265,14 @@ class TestTheLabelledArray:
         assert data["overlap"].dtype == np.int16
         assert data["strand"].dtype.kind == "U"
 
-    def test_a_limited_array_carries_its_targets_as_a_variable(self, targets: MotifSet) -> None:
-        data = targets.compare(targets, top=2).data
-        assert set(data.data_vars) == {*COMPARISON_VARIABLES, "target"}
-        assert data["target"].dims == ("query", "rank")
+        limited = targets.compare(targets, top=2).data
+        assert set(limited.data_vars) == {*COMPARISON_VARIABLES, "target"}
+        assert limited["target"].dims == ("query", "rank")
 
-    def test_the_target_axis_of_a_limited_result_cannot_be_had(self, targets: MotifSet) -> None:
+    def test_a_bad_shape_or_a_ragged_target_axis_is_refused(self, targets: MotifSet) -> None:
         comparison = targets.compare(targets, top=2)
         with pytest.raises(RaggedComparisonError, match="recompute"):
             _ = comparison.target_ids
-
-    def test_a_dataset_that_is_neither_shape_is_refused(self) -> None:
         with pytest.raises(ValueError, match="query"):
             MotifComparison(xr.Dataset({"neg_log10_p": (("a", "b"), np.zeros((1, 1)))}))
 
@@ -302,7 +288,7 @@ class TestTheLabelledArray:
 
 
 class TestNegativeLog10P:
-    def test_a_p_value_half_precision_would_flush_to_zero_survives(self, targets: MotifSet) -> None:
+    def test_p_value_edge_cases_store_correctly(self, targets: MotifSet) -> None:
         # The self-comparison of a real motif lands around p = 2e-14. Stored raw, in the
         # half precision this array uses, that is indistinguishable from zero; stored as
         # its negative log10 it is an ordinary small number.
@@ -316,19 +302,16 @@ class TestNegativeLog10P:
         assert np.float16(raw) == 0.0
         assert stored == pytest.approx(13.7, abs=0.5)
 
-    def test_a_p_value_of_one_stores_as_zero(self) -> None:
         assert _neg_log10(np.array([1.0]))[0] == 0.0
-
-    def test_an_underflowed_p_value_stores_as_infinite_and_warns_about_nothing(self) -> None:
         # The suite turns warnings into errors, so log10(0) must never be evaluated.
         assert np.isinf(_neg_log10(np.array([0.0]))[0])
 
-    @given(p=_p_value)
-    def test_it_is_never_negative(self, p: float) -> None:
-        assert _neg_log10(np.array([p]))[0] >= 0.0
-
     @given(p=_p_value, q=_p_value)
-    def test_the_smaller_p_value_stores_larger(self, p: float, q: float) -> None:
+    def test_it_is_never_negative_and_the_smaller_p_value_stores_larger(
+        self, p: float, q: float
+    ) -> None:
+        assert _neg_log10(np.array([p]))[0] >= 0.0
+        assert _neg_log10(np.array([q]))[0] >= 0.0
         smaller, larger = min(p, q), max(p, q)
         assert _neg_log10(np.array([smaller]))[0] >= _neg_log10(np.array([larger]))[0]
 
@@ -343,13 +326,13 @@ class TestNegativeLog10P:
 
 
 class TestTheFlatFrame:
-    def test_it_defaults_to_one_row_per_query(self, targets: MotifSet) -> None:
+    def test_the_default_frame_has_one_row_per_query_and_the_contract_columns(
+        self, targets: MotifSet
+    ) -> None:
         frame = targets.compare(targets).to_frame()
         assert len(frame) == len(targets)
         assert list(frame["query"]) == list(targets.motif_ids)
         assert set(frame["rank"]) == {0}
-
-    def test_the_columns_are_the_contract(self, targets: MotifSet) -> None:
         assert FRAME_COLUMNS == (
             "query",
             "target",
@@ -360,59 +343,48 @@ class TestTheFlatFrame:
             "overlap",
             "strand",
         )
-        assert tuple(targets.compare(targets).to_frame().columns) == FRAME_COLUMNS
+        assert tuple(frame.columns) == FRAME_COLUMNS
 
-    def test_a_larger_limit_gives_that_many_rows_per_query(self, targets: MotifSet) -> None:
+    def test_the_limit_controls_how_many_rows_per_query(self, targets: MotifSet) -> None:
         frame = targets.compare(targets).to_frame(top=3)
         assert len(frame) == 30
         assert list(frame["rank"][:3]) == [0, 1, 2]
-
-    def test_no_limit_gives_every_pair(self, targets: MotifSet) -> None:
         assert len(targets.compare(targets).to_frame(top=None)) == 100
+        # Nothing is missing from a complete comparison, so asking for more pairs than
+        # exist is answered with the ones that do.
+        assert len(targets.compare(targets).to_frame(top=99)) == 100
 
-    def test_rows_are_ordered_best_first_within_each_query(self, targets: MotifSet) -> None:
-        frame = targets.compare(targets).to_frame(top=None)
+    def test_rows_are_ordered_best_first_and_agree_with_the_array(self, targets: MotifSet) -> None:
+        comparison = targets.compare(targets)
+        frame = comparison.to_frame(top=None)
         for _, group in frame.groupby("query", sort=False):
             assert list(group["neg_log10_p"]) == sorted(group["neg_log10_p"], reverse=True)
             assert list(group["rank"]) == list(range(len(targets)))
-
-    def test_the_frame_says_what_the_array_says(self, targets: MotifSet) -> None:
-        comparison = targets.compare(targets)
-        frame = comparison.to_frame(top=None)
         for row in frame.sample(12, random_state=0).to_dict("records"):
             cell = comparison.data.sel(query=row["query"], target=row["target"])
             assert float(cell["neg_log10_p"]) == float(row["neg_log10_p"])
             assert int(cell["offset"]) == row["offset"]
             assert str(cell["strand"].item()) == row["strand"]
 
-    def test_a_limit_beyond_the_target_count_is_simply_every_pair(self, targets: MotifSet) -> None:
-        # Nothing is missing from a complete comparison, so asking for more pairs than
-        # exist is answered with the ones that do.
-        assert len(targets.compare(targets).to_frame(top=99)) == 100
-
-    def test_it_flattens_a_limited_comparison_too(self, targets: MotifSet) -> None:
+    def test_flattening_a_limited_comparison_respects_what_was_kept(
+        self, targets: MotifSet
+    ) -> None:
         frame = targets.compare(targets, top=3).to_frame()
         assert len(frame) == 10
         assert tuple(frame.columns) == FRAME_COLUMNS
-
-    def test_no_limit_on_a_limited_comparison_gives_what_was_kept(self, targets: MotifSet) -> None:
         assert len(targets.compare(targets, top=3).to_frame(top=None)) == 30
+        # Ragged, but nothing is missing from it, so it answers rather than refusing.
+        assert len(targets.compare(targets, top=10).to_frame(top=10)) == 100
+        # And the two shapes agree on the best target, which is the whole point of the
+        # faster path: it must answer the common question the same way.
+        complete = targets.compare(targets).to_frame()
+        limited = targets.compare(targets, top=1).to_frame()
+        assert list(complete["target"]) == list(limited["target"])
 
     def test_widening_a_limited_comparison_is_refused(self, targets: MotifSet) -> None:
         comparison = targets.compare(targets, top=3)
         with pytest.raises(RaggedComparisonError, match="top=5"):
             comparison.to_frame(top=5)
-
-    def test_the_two_shapes_agree_on_the_best_target(self, targets: MotifSet) -> None:
-        # The whole point of the faster path: it must answer the common question the
-        # same way the complete comparison does.
-        complete = targets.compare(targets).to_frame()
-        limited = targets.compare(targets, top=1).to_frame()
-        assert list(complete["target"]) == list(limited["target"])
-
-    def test_a_limit_asking_for_every_target_is_not_a_widening(self, targets: MotifSet) -> None:
-        # Ragged, but nothing is missing from it, so it answers rather than refusing.
-        assert len(targets.compare(targets, top=10).to_frame(top=10)) == 100
 
 
 # ---------------------------------------------------------------------------
@@ -421,22 +393,28 @@ class TestTheFlatFrame:
 
 
 class TestFlatteningProperties:
-    def test_the_best_target_is_the_largest_stored_value(self) -> None:
+    def test_the_best_target_is_the_largest_stored_value_and_ties_break_on_score(self) -> None:
         frame = wide([[1.0, 9.0, 4.0], [7.0, 2.0, 3.0]]).to_frame()
         assert list(frame["target"]) == ["T1", "T0"]
 
-    def test_ties_are_broken_by_score_then_by_target_order(self) -> None:
         tied = wide([[5.0, 5.0, 5.0]], score=[[1.0, 3.0, 3.0]]).to_frame(top=None)
         assert list(tied["target"]) == ["T1", "T2", "T0"]
 
     @given(grid=grids())
-    def test_every_pair_is_flattened_exactly_once(self, grid: list[list[float]]) -> None:
+    def test_flattening_is_exactly_once_ranked_and_led_by_the_default_row(
+        self, grid: list[list[float]]
+    ) -> None:
         comparison = wide(grid)
         frame = comparison.to_frame(top=None)
         assert len(frame) == len(grid) * len(grid[0])
         assert set(zip(frame["query"], frame["target"], strict=True)) == {
             (query, target) for query in comparison.query_ids for target in comparison.target_ids
         }
+        for _, group in frame.groupby("query", sort=False):
+            values = list(group["neg_log10_p"])
+            assert values == sorted(values, reverse=True)
+        leading = frame.groupby("query", sort=False).head(1)
+        assert list(comparison.to_frame()["target"]) == list(leading["target"])
 
     @given(grid=grids(), top=st.integers(min_value=1, max_value=5))
     def test_the_row_count_is_the_limit_times_the_queries(
@@ -444,21 +422,6 @@ class TestFlatteningProperties:
     ) -> None:
         frame = wide(grid).to_frame(top=top)
         assert len(frame) == len(grid) * min(top, len(grid[0]))
-
-    @given(grid=grids())
-    def test_each_query_is_ranked_best_first(self, grid: list[list[float]]) -> None:
-        frame = wide(grid).to_frame(top=None)
-        for _, group in frame.groupby("query", sort=False):
-            values = list(group["neg_log10_p"])
-            assert values == sorted(values, reverse=True)
-
-    @given(grid=grids())
-    def test_the_default_row_is_the_row_the_full_frame_leads_with(
-        self, grid: list[list[float]]
-    ) -> None:
-        comparison = wide(grid)
-        leading = comparison.to_frame(top=None).groupby("query", sort=False).head(1)
-        assert list(comparison.to_frame()["target"]) == list(leading["target"])
 
 
 class TestRaggedFlatteningProperties:
@@ -468,18 +431,17 @@ class TestRaggedFlatteningProperties:
         assert list(frame["target"]) == ["T3", "T1", "T0", "T3"]
         assert list(frame["rank"]) == [0, 1, 0, 1]
 
-    def test_it_refuses_to_widen_and_names_the_call_that_would(self) -> None:
-        comparison = ragged([[9.0, 2.0]], [["T3", "T1"]], targets_compared=10)
+    def test_widening_refuses_unless_everything_is_already_held(self) -> None:
+        short = ragged([[9.0, 2.0]], [["T3", "T1"]], targets_compared=10)
         with pytest.raises(RaggedComparisonError) as raised:
-            comparison.to_frame(top=4)
+            short.to_frame(top=4)
         message = str(raised.value)
         assert "top=4" in message
         assert "2" in message
         assert "compare" in message
 
-    def test_a_limited_comparison_holding_every_target_widens_fine(self) -> None:
-        comparison = ragged([[9.0, 2.0]], [["T1", "T0"]], targets_compared=2)
-        assert len(comparison.to_frame(top=7)) == 2
+        complete = ragged([[9.0, 2.0]], [["T1", "T0"]], targets_compared=2)
+        assert len(complete.to_frame(top=7)) == 2
 
     @given(grid=grids(max_targets=3))
     def test_every_kept_pair_is_flattened_exactly_once(self, grid: list[list[float]]) -> None:
@@ -499,12 +461,12 @@ class TestRaggedFlatteningProperties:
 
 
 class TestNamingADeNovoPattern:
-    def test_a_pattern_spelling_a_known_consensus_is_named_by_it(
+    def test_the_comparison_answers_the_use_case_it_exists_for(
         self, targets: MotifSet, fixture_motifs: tuple[Motif, ...]
     ) -> None:
-        # The use case, end to end: a matrix out of a model, compared against a set, and
-        # named by what it looks like. Built from CTCF's own counts under another id, so
-        # what comes back is checkable by eye rather than by whatever tomtom prefers.
+        # End to end: a matrix out of a model, compared against a set, and named by what
+        # it looks like. Built from CTCF's own counts under another id, so what comes
+        # back is checkable by eye rather than by whatever tomtom prefers.
         ctcf = targets["MA0139.2"]
         pattern = Motif("pattern_0", "", ctcf.counts)
         named = targets.compare(pattern).to_frame()
@@ -512,7 +474,7 @@ class TestNamingADeNovoPattern:
         assert named.loc[0, "target"] == "MA0139.2"
         assert named.loc[0, "overlap"] == len(ctcf)
 
-    def test_a_filtered_set_is_a_smaller_target_axis(self, targets: MotifSet) -> None:
+        # And a filtered set is simply a smaller target axis.
         vertebrates = targets.filter(tax_group="vertebrates")
         comparison = vertebrates.compare(targets["MA0261.1"])
         assert comparison.target_ids == vertebrates.motif_ids
