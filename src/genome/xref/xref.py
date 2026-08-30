@@ -424,7 +424,8 @@ class XrefSet:
         symbol keeps refusing to match one** — it holds one publisher's bytes and answering
         from another's is exactly what one query reading one set forbids (ADR-0017).
         :meth:`for_symbols` is the constructor with the symbol question named, and is what
-        fills in the source that carries them.
+        fills in the source that carries them; :meth:`for_namespace` is the same fill-in for
+        a caller holding a **Namespace** rather than a verb.
 
         **The sources are not equals, and the choice is nearly half the answer.** Measured
         on human release 116 against NCBI's own file, Ensembl and NCBI agree on only
@@ -568,13 +569,83 @@ class XrefSet:
         self._exact, self._folded = _symbol_index(self._to_stems)
 
     @classmethod
+    def for_namespace(
+        cls,
+        species: str,
+        namespace: str,
+        source: str | None = None,
+        release: str | None = None,
+        *,
+        cache_dir: str | Path | None = None,
+        progressbar: bool = True,
+    ) -> XrefSet:
+        """Return the set that answers a question about ``namespace`` when none is named.
+
+        **A Default xref source is per species and per question** (ADR-0021), and this is
+        where a caller holding a **Namespace** rather than a verb names the question: the
+        symbol one fills in the species' symbol-carrying default, every other one fills in
+        its identifier default. It is :meth:`for_symbols` generalised to the shape a caller
+        who read a namespace off a flag already has, so that surface has nothing left to
+        decide — the choosing happens here and in no second place.
+
+        Which namespace a set actually carries is still the set's to say: this fills a
+        source in and does not check, so a namespace the resolved set does not carry raises
+        on the verb, naming the ones it does.
+
+        Parameters
+        ----------
+        species : str
+            The species, in either the curated table's spelling or its slug.
+        namespace : str
+            The **Namespace** the question is about, which is what picks the default. Case
+            is not significant, as it is not on the verbs.
+        source : str, optional
+            The **Xref source**. Omitted, the default this namespace's question implies
+            answers. Named, it is honoured whatever the namespace is — naming one is the
+            deliberate scientific choice and is never swapped for a flagged row.
+        release : str, optional
+            The pinned **Release**. Omitted, the newest that source has.
+        cache_dir : str or pathlib.Path, optional
+            The directory to prepare in, as on the ordinary constructor.
+        progressbar : bool, default True
+            Show the download's progress bar.
+
+        Returns
+        -------
+        XrefSet
+            The prepared set, which is an ordinary one in every respect — every verb answers
+            on it and nothing about it remembers which question filled its source in.
+
+        Raises
+        ------
+        genome.xref.metadata.NoXrefSetError
+            If no set exists for that species or release, or if the namespace is the symbol
+            one and no row for the species is flagged to answer symbols.
+
+        Examples
+        --------
+        >>> from genome.xref import XrefSet
+        >>> XrefSet.for_namespace("Homo sapiens", "symbol").source   # doctest: +SKIP
+        'hgnc'
+        >>> XrefSet.for_namespace("Homo sapiens", "entrez").source   # doctest: +SKIP
+        'alliance'
+        """
+        row = lookup_xref(species, source, release, for_symbols=namespace.strip().lower() == SYMBOL)
+        return cls(
+            species,
+            row.source,
+            row.release,
+            cache_dir=cache_dir,
+            progressbar=progressbar,
+        )
+
+    @classmethod
     def for_symbols(
         cls,
         species: str,
         source: str | None = None,
         release: str | None = None,
         *,
-        evidence: str | Iterable[str] | None = None,
         cache_dir: str | Path | None = None,
         progressbar: bool = True,
     ) -> XrefSet:
@@ -593,6 +664,9 @@ class XrefSet:
         ``XrefSet(species, "alliance")``, symbols and all — which for human means a set that
         matches none and says so.
 
+        This is :meth:`for_namespace` with the namespace fixed, so the two cannot answer
+        differently: one fill-in, named by a verb here and by a namespace there.
+
         Parameters
         ----------
         species : str
@@ -602,8 +676,6 @@ class XrefSet:
         release : str, optional
             The pinned **Release**. Omitted, the newest that source has. Honoured against
             whichever source was filled in, exactly as on the ordinary constructor.
-        evidence : str or iterable of str, optional
-            The evidence filter, as on the ordinary constructor.
         cache_dir : str or pathlib.Path, optional
             The directory to prepare in, as on the ordinary constructor.
         progressbar : bool, default True
@@ -630,14 +702,8 @@ class XrefSet:
         >>> human.match_symbols(["ARNTL"]).gene_id_stems           # doctest: +SKIP
         ['ENSG00000133794']
         """
-        row = lookup_xref(species, source, release, for_symbols=True)
-        return cls(
-            species,
-            row.source,
-            row.release,
-            evidence=evidence,
-            cache_dir=cache_dir,
-            progressbar=progressbar,
+        return cls.for_namespace(
+            species, SYMBOL, source, release, cache_dir=cache_dir, progressbar=progressbar
         )
 
     def __len__(self) -> int:
@@ -764,7 +830,10 @@ class XrefSet:
         Raises
         ------
         NamespaceNotCarriedError
-            If this set carries no such namespace. The message names the ones it does.
+            If this set carries no such namespace. The message names the ones it does, and
+            for the symbol namespace it names this species' symbol source and
+            :meth:`for_symbols` too — labelling is a symbol question like matching one, and
+            misses on a set carrying none for the same reason.
 
         Examples
         --------
@@ -842,13 +911,7 @@ class XrefSet:
         'hgnc'
         """
         if not self.symbol_kinds:
-            raise NamespaceNotCarriedError(
-                f"the {self.source} {self.release} set for {self.species!r} carries no "
-                f"{SYMBOL!r} namespace: it carries {', '.join(self.namespaces)}. "
-                f"{_symbol_source_hint(self.species)} This set is not asked on another "
-                f"publisher's behalf — two publishers are two answers and one query reads "
-                f"exactly one set (ADR-0017)."
-            )
+            raise self._no_symbols(SYMBOL)
         index = self._folded if case_insensitive else self._exact
         key = fold_symbol if case_insensitive else normalise_symbol
         asked = tuple(dict.fromkeys(symbols))
@@ -865,16 +928,38 @@ class XrefSet:
         )
 
     def _checked(self, namespace: str) -> str:
-        """Return ``namespace`` if this set carries it, else say which ones it does."""
+        """Return ``namespace`` if this set carries it, else say which ones it does.
+
+        The symbol namespace misses differently from every other one: which source carries
+        a species' symbols is a question the curated table answers, so the message routes
+        there rather than stopping at the list of what this set holds.
+        """
         wanted = namespace.strip().lower()
-        if wanted not in self.namespaces:
-            raise NamespaceNotCarriedError(
-                f"the {self.source} {self.release} set for {self.species!r} carries no "
-                f"{namespace!r} namespace: it carries {', '.join(self.namespaces)}. Ask in "
-                f"one of those — the three species have three different authorities, so a "
-                f"namespace that answers for one is not one that answers for another."
-            )
-        return wanted
+        if wanted in self.namespaces:
+            return wanted
+        if wanted == SYMBOL:
+            raise self._no_symbols(namespace)
+        raise NamespaceNotCarriedError(
+            f"the {self.source} {self.release} set for {self.species!r} carries no "
+            f"{namespace!r} namespace: it carries {', '.join(self.namespaces)}. Ask in "
+            f"one of those — the three species have three different authorities, so a "
+            f"namespace that answers for one is not one that answers for another."
+        )
+
+    def _no_symbols(self, namespace: str) -> NamespaceNotCarriedError:
+        """Return the error both symbol questions raise on a set that carries none.
+
+        One message for both directions: matching a symbol and labelling a stem with one
+        miss on this set for the same reason and have the same next action, so they say the
+        same thing rather than one of them naming nowhere to go.
+        """
+        return NamespaceNotCarriedError(
+            f"the {self.source} {self.release} set for {self.species!r} carries no "
+            f"{namespace!r} namespace: it carries {', '.join(self.namespaces)}. "
+            f"{_symbol_source_hint(self.species)} This set is not asked on another "
+            f"publisher's behalf — two publishers are two answers and one query reads "
+            f"exactly one set (ADR-0017)."
+        )
 
 
 def _names(row: XrefMetadata) -> tuple[str, str, str]:

@@ -9,5 +9,6 @@ copied out of a paper needed `--source hgnc` before it worked once, and mouse an
 source again. Resolving the source at the *question* instead — `match_symbols` picking a
 symbol-carrying set for itself — lost on what it breaks: an **Xref set** holds one publisher's
 bytes, and answering from another's is the merge that one query reading exactly one set forbids
-(ADR-0017). The cost is two constructor paths side by side, `XrefSet("Homo sapiens")` still matching
-no symbol and raising to name `for_symbols` — the surprise this record exists to explain.
+(ADR-0017). The cost is a question-named constructor beside the plain one, `XrefSet("Homo sapiens")`
+still matching no symbol and raising to name `for_symbols` — the surprise this record exists to
+explain.

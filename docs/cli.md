@@ -332,25 +332,27 @@ $ genome xref "Homo sapiens" --from-stems uniprot ENSG00000141510.18 ENSG0000028
 
 There is no third direction: Entrez to HGNC is two calls and the join is yours, which keeps
 the hop visible in your pipeline rather than invisible in ours. `genome.xref.XrefSet` in the
-[API reference](reference.md) is the same two verbs from Python, on one code path with this.
+[API reference](reference.md) is the same two verbs from Python, on one code path with this,
+and `XrefSet.for_namespace(species, namespace)` is the same fill-in — the command hands the
+namespace it was given to that constructor and decides nothing on its own.
 
 **`--from-stems symbol` labels; the other way round is a command of its own.**
 `--from-stems symbol` gives the authority's single current approved spelling for each stem,
 which is what a figure axis wants, and reaches the source that carries symbols — `hgnc` for
 human, `alliance_bgi` for mouse and worm — without your naming it. Toward stems is not its
-mirror: a symbol also matches
-spellings the authority has retired, answers with every gene any of them names, and carries
-which kind matched — so it is [`genome match-symbols`](#genome-match-symbols-species-symbols)
-that answers it, and `--to-stems symbol` exits `2` naming that command. The `--to-stems` help
-lists the namespaces it does convert and no longer offers the one it refuses.
+mirror: a symbol also matches spellings the authority has retired, answers with every gene
+any of them names, and carries which kind matched — so it is
+[`genome match-symbols`](#genome-match-symbols-species-symbols) that answers it, and
+`--to-stems symbol` exits `2` naming that command. The `--to-stems` help lists the namespaces
+it does convert and no longer offers the one it refuses.
 
 Naming a species prepares its set, which the first time is a download — so run it once on a
 login node before submitting a job that needs it, as the lab's compute nodes have no
 internet. Exits `1` when no set exists for the species (the message names the ones that do),
 when the source is not one this package prepares, when the set is not here and cannot be
 fetched (the message names the call to make on a login node), when the namespace is not one
-the set carries (the message names the ones it does), and when a directory holds a set an
-interrupted download left unfinished.
+the set carries (the message names the ones it does, and for `symbol` the source that does
+carry them), and when a directory holds a set an interrupted download left unfinished.
 
 ## `genome match-symbols <species> <symbols>...`
 

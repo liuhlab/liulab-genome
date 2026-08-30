@@ -496,10 +496,10 @@ def _default_row(for_species: Sequence[XrefMetadata], *, species: str) -> XrefMe
 def _symbol_default_row(for_species: Sequence[XrefMetadata]) -> XrefMetadata:
     """Return the newest release of the source flagged to answer symbols for the species.
 
-    **No fallback to a species' only source**, which is where this parts company with
-    :func:`_default_row`: a publisher that carries no symbol does not begin carrying them
-    by being the only one prepared, and answering from it would hand back a gene list with
-    no matches where the honest answer is that nothing here matches symbols for that
+    **This does not default to a species' only source**, which is where it parts company
+    with :func:`_default_row`: a publisher that carries no symbol does not begin carrying
+    them by being the only one prepared, and answering from it would hand back a gene list
+    with no matches where the honest answer is that nothing here matches symbols for that
     species yet.
     """
     flagged = [record for record in for_species if record.symbol_default]
@@ -508,7 +508,8 @@ def _symbol_default_row(for_species: Sequence[XrefMetadata]) -> XrefMetadata:
         raise NoXrefSetError(
             f"no xref source answers symbols for {for_species[0].species!r}: the ones "
             f"prepared for it are {listed}, and none of their rows is flagged to answer a "
-            f"symbol question. Name the source you want, or flag one in the curated xref "
-            f"metadata table's 'symbol_default' column."
+            f"symbol question. Name the source you want, or curate rows of your own and "
+            f"pass them as lookup_xref(..., table=rows) — the shipped table lives inside "
+            f"the installed package rather than in your project."
         )
     return [record for record in for_species if record.source == flagged[-1].source][-1]

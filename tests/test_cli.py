@@ -1981,6 +1981,19 @@ class TestXrefCommand:
         assert _json.loads(defaulted.stdout) == _json.loads(named.stdout)
         assert lookup_xref(_XREF_SPECIES).default is True
 
+    def test_the_defaulted_answer_is_the_one_the_api_renders(self, xref_release: FakeFetch) -> None:
+        # Which default an unnamed source is filled in with is the API's decision, named by
+        # handing it the namespace the flags carried — so the command and the Python call
+        # cannot resolve differently. The symbol namespace is the case that matters and
+        # `TestMatchSymbolsCommand` asserts it; this is the same claim for every other one.
+        result = runner.invoke(app, ["xref", _XREF_SPECIES, "--to-stems", ENTREZ, "7157", "--json"])
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet.for_namespace(_XREF_SPECIES, ENTREZ).to_stems(["7157"], ENTREZ).as_json()
+        )
+
     def test_a_source_no_set_exists_for_exits_one_naming_the_ones_that_do(
         self, xref_release: FakeFetch
     ) -> None:
@@ -2426,6 +2439,27 @@ class TestMatchSymbolsCommand:
         assert result.exit_code == 0
         assert result.stdout.splitlines() == [f"{_BMAL1_STEM}\t{_APPROVED_SYMBOL}"]
         assert f"{HGNC_ARCHIVE} {_HGNC_RELEASE}" in result.stderr
+
+    def test_the_labelling_direction_is_the_call_the_api_makes_for_it(
+        self, symbol_sources: FakeFetch
+    ) -> None:
+        # The command holds no logic the API does not: it hands the namespace it was given
+        # to the constructor that fills the question's default in, and renders. It once
+        # chose the opener itself, which made this exact Python call raise where the shell
+        # answered — two code paths for one question, which is what this asserts is gone.
+        # The mouse stem is asked of the human set on purpose: it resolves to nothing, so
+        # the two renderings have to agree about what was missed as well as what was found.
+        asked = [_BMAL1_STEM, _TRP53_STEM]
+
+        result = runner.invoke(
+            app, ["xref", _XREF_SPECIES, "--from-stems", SYMBOL, *asked, "--json"]
+        )
+
+        assert result.exit_code == 0
+        assert (
+            _json.loads(result.stdout)
+            == XrefSet.for_namespace(_XREF_SPECIES, SYMBOL).from_stems(asked, SYMBOL).as_json()
+        )
 
     def test_the_progress_display_is_suppressed_under_json(self, symbol_sources: FakeFetch) -> None:
         _match_symbols(_APPROVED_SYMBOL, "--json")

@@ -80,13 +80,18 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   whose 25 MB cross-reference file publishes **no human symbol at all**, and its symbols from `hgnc`;
   mouse's and worm's from `alliance_bgi`, a third source again. So `genome match-symbols "Homo
   sapiens" ARNTL` and `genome xref "Homo sapiens" --from-stems symbol ENSG00000133794` answer on the
-  first try, where both previously exited `1` telling you what to pass. The fill-in is one API call,
-  `XrefSet.for_symbols(species)` — the ordinary constructor with the question named — so the shell
-  and `import genome` still resolve it in one place. **A named source is never swapped and a built
-  set never borrows**: `XrefSet("Homo sapiens")` still matches no symbol and raises, because it holds
-  one publisher's bytes and answering from another's is the merge that one query reading exactly one
-  set forbids (ADR-0017). That message now names *this species'* source and `for_symbols`, rather
-  than every source that publishes symbols for anybody.
+  first try, where both previously exited `1` telling you what to pass. **The fill-in is the API's
+  and the shell decides none of it**: `XrefSet.for_symbols(species)` is the ordinary constructor with
+  the question named, and `XrefSet.for_namespace(species, namespace)` is that same fill-in for a
+  caller holding a namespace rather than a verb — which is what a caller who read one off a flag
+  holds, so `genome xref` hands its `--from-stems` namespace straight over. One code path, so the
+  shell and `import genome` cannot resolve the default differently. **A named source is never swapped
+  and a built set never borrows**: `XrefSet("Homo sapiens")` still matches no symbol and raises,
+  because it holds one publisher's bytes and answering from another's is the merge that one query
+  reading exactly one set forbids (ADR-0017). **Both** symbol questions — matching a symbol, and
+  labelling a stem with one — miss on such a set with that same message, and it names *this species'*
+  source and `for_symbols`, rather than every source that publishes symbols for anybody, or, as the
+  labelling direction did, nowhere at all.
 - **The two directions are deliberately not mirror images.** Away from the hub,
   `from_stems(stems, "symbol")` gives the authority's **single current approved symbol** — this is
   labelling a figure axis, and it is one-to-one by the authority's own construction. Toward it,
