@@ -126,17 +126,21 @@ def gene_id_stem(gene_id: str) -> str:
 
 
 def normalise_id(xref_id: str, namespace: str) -> str:
-    """Return ``xref_id`` in ``namespace``'s canonical spelling, version dropped.
+    r"""Return ``xref_id`` in ``namespace``'s canonical spelling, version dropped.
 
-    The one door every identifier comes through, a publisher's and a caller's alike. Three
+    The one door every identifier comes through, a publisher's and a caller's alike. Four
     things happen, in this order: surrounding whitespace goes; every CURIE prefix the
     namespace is published under is stripped, repeatedly, case-insensitively; the version
-    suffix goes (:func:`gene_id_stem`); and the namespace's own canonical prefix goes back
-    on. So ``HGNC:1100``, ``hgnc:1100`` and ``1100`` are one identifier, and
-    ``ENSEMBL:ENSG00000141510.18`` and ``ENSG00000141510`` are another.
+    suffix goes (:func:`gene_id_stem`) **and whitespace goes again**; and the namespace's
+    own canonical prefix goes back on. So ``HGNC:1100``, ``hgnc:1100`` and ``1100`` are one
+    identifier, and ``ENSEMBL:ENSG00000141510.18`` and ``ENSG00000141510`` are another.
 
     Idempotent, which is the property that matters: the same id read from a file and typed
     by a caller must land on the same string, or the join returns nothing and says nothing.
+    The second strip is what makes that true rather than nearly true — a version separator
+    hides trailing whitespace behind it, so ``"7157\r."`` stems to ``"7157\r"`` on the
+    first pass and only reaches ``"7157"`` on the second, and two spellings of one id that
+    settle on different strings after a different number of passes join to nothing.
 
     Parameters
     ----------
@@ -166,6 +170,8 @@ def normalise_id(xref_id: str, namespace: str) -> str:
     'P38398'
     >>> normalise_id("  ENSEMBL:ENSG00000141510.18  ", "ensembl")
     'ENSG00000141510'
+    >>> normalise_id("7157\r.", "entrez")
+    '7157'
     """
     body = xref_id.strip()
     aliases = _NAMESPACE_ALIASES.get(namespace, frozenset())
@@ -174,5 +180,7 @@ def normalise_id(xref_id: str, namespace: str) -> str:
         if found is None or found.group(1).lower() not in aliases:
             break
         body = body[found.end() :]
-    body = gene_id_stem(body)
+    # Stripped again after the version goes: the separator hides trailing whitespace behind
+    # it, and an id that only settles on its second pass is not one spelling but two.
+    body = gene_id_stem(body).strip()
     return f"{NAMESPACE_PREFIX.get(namespace, '')}{body}" if body else ""

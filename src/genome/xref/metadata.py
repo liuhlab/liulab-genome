@@ -350,7 +350,12 @@ def lookup_xref(
         The **Xref source**. Omitted, the species' **Default xref source** answers.
     release : str, optional
         The **Release**. Omitted, the newest the table lists for that source answers —
-        which is the last row, the table being in release order.
+        which is the last row, the table being in release order. Named, it is honoured
+        whether or not a source was named too: a release asked for against the default
+        source either answers with that release or raises naming the ones that source has,
+        and is never quietly swapped for another. Sources number their releases
+        independently and the numbers do not correspond, so one source's release string is
+        not a release another source has.
     table : sequence of XrefMetadata, optional
         The rows to read; the shipped table when omitted. A caller curating rows of their
         own hands them over here, and nothing is installed by passing them.
@@ -372,6 +377,8 @@ def lookup_xref(
     '9.0.0'
     >>> lookup_xref("Homo sapiens", "alliance", "9.0.0").ncbi_taxid
     9606
+    >>> lookup_xref("Homo sapiens", release="9.0.0").source
+    'alliance'
     >>> try:
     ...     lookup_xref("Homo sapiens", "alliance", "1.0")
     ... except NoXrefSetError as error:
@@ -389,8 +396,12 @@ def lookup_xref(
             f"species with no Ensembl presence has no hub to hang a namespace off and is "
             f"unanswerable here by design (ADR-0017)."
         )
-    if source is None:
-        return _default_row(for_species, species=species)
+    # The default source still has to honour a named release. Resolving the source first
+    # and then falling through to the release check keeps one path: naming a release
+    # without a source must answer with *that* release or say which ones exist, never
+    # quietly with another — two sources numbering their releases differently is exactly
+    # where a silently substituted release stops being reproducible.
+    source = _default_row(for_species, species=species).source if source is None else source
     for_source = [record for record in for_species if record.source == source]
     if not for_source:
         listed = ", ".join(xref_sources(species, table=rows))

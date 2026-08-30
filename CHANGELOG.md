@@ -524,6 +524,22 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   alignment, so a long motif that embeds a shorter one can rank the shorter one above itself, which
   both of the 31- and 33-column CTCF matrices do with the 15-column `MA0139.2` inside them.
 
+### Fixed
+
+- **A release named without a source is honoured instead of quietly ignored.** `lookup_xref` — and
+  so `XrefSet` — returned the default source's newest release as soon as no source was named, never
+  consulting the release asked for. Harmless while every species listed exactly one release, and
+  wrong the moment a second source arrives with a numbering of its own: a caller pinning a release
+  would have been handed another one, under a release string saying they had not been, which is the
+  whole of what pinning is for. It now answers with that release or raises naming the ones the
+  default source actually has.
+- **`normalise_id` is idempotent, including where whitespace hides behind a version separator.**
+  Stripping ran before the version was dropped, so `"7157\r."` stemmed to `"7157\r"` on the first
+  pass and only reached `"7157"` on the second — two spellings of one id settling on different
+  strings, which joins to nothing and says nothing about it. The suite's own hypothesis property
+  found it, and it was a flaky-CI landmine besides: it passed until a machine's example database
+  happened to find the case. Whitespace now goes on both sides of the version drop.
+
 ## [2026.8.0] - 2026-08-17
 
 The first tagged release, and it is the whole package: everything below is what `genome` is, not what
