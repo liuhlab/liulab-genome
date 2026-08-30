@@ -672,7 +672,7 @@ class ResolvedStems:
 
     :meth:`~genome.xref.xref.XrefSet.to_stems`'s answer — the hop *toward* the hub. Every
     field before :attr:`resolved` says what produced it, because one publisher's
-    assertions are not another's: NCBI and Ensembl agree on 57.5% of human gene-level
+    assertions are not another's: NCBI and Ensembl agree on 57.6% of human gene-level
     (GeneID, ENSG) pairs, so an answer that did not name its **Xref source** and
     **Release** would be unreproducible a year later. A query reads exactly one set
     (ADR-0017), which is why the source is one field here rather than a column on every

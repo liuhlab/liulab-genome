@@ -890,7 +890,7 @@ def xref(
         "--source",
         help="Answer from this xref source rather than the species' default one. Which "
         "publisher answers is a scientific choice and not a detail: NCBI and Ensembl "
-        "agree on 57.5% of human gene-level (GeneID, ENSG) pairs.",
+        "agree on 57.6% of human gene-level (GeneID, ENSG) pairs.",
     ),
     json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
 ) -> None:

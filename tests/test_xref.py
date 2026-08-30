@@ -288,6 +288,15 @@ class TestNormaliseId:
     def test_a_namespace_it_does_not_know_still_drops_the_version(self) -> None:
         assert normalise_id("SOMETHING.3", "not-a-namespace") == "SOMETHING"
 
+    @pytest.mark.parametrize("spelled", ["7157\r.", "7157 . 2", "7157\t.", " 7157 . "])
+    def test_whitespace_hidden_behind_the_version_separator_goes_on_the_first_pass(
+        self, spelled: str
+    ) -> None:
+        # Stripping before stemming leaves it behind, so the id only settled on its second
+        # pass — and two spellings of one id that settle after a different number of passes
+        # join to nothing and say nothing about it.
+        assert normalise_id(spelled, ENTREZ) == "7157"
+
     @given(st.text(), st.sampled_from(NAMESPACES))
     def test_it_is_idempotent(self, identifier: str, namespace: str) -> None:
         once = normalise_id(identifier, namespace)
@@ -303,24 +312,29 @@ class TestXrefTable:
     def test_the_three_species_ship_with_alliance_as_the_default(self) -> None:
         assert xref_species() == ("Homo sapiens", "Mus musculus", "Caenorhabditis elegans")
         for species in xref_species():
-            assert xref_sources(species) == (ALLIANCE,)
+            assert ALLIANCE in xref_sources(species)
             assert xref_releases(species, ALLIANCE) == (RELEASE,)
             assert lookup_xref(species).source == ALLIANCE
             assert lookup_xref(species).default is True
 
-    def test_every_row_pins_a_publisher_a_version_a_url_and_a_checksum(self) -> None:
-        for row in xref_table():
+    def test_every_alliance_row_pins_a_publisher_a_version_a_url_and_a_checksum(self) -> None:
+        rows = [row for row in xref_table() if row.source == ALLIANCE]
+        assert len(rows) == len(xref_species())
+        for row in rows:
             assert row.publisher == "Alliance of Genome Resources"
             assert row.version == RELEASE
             assert row.url.startswith("https://download.alliancegenome.org/")
+            assert row.pubmed_id == 38552170
+
+    def test_every_row_of_every_source_pins_an_unpacked_md5(self) -> None:
+        for row in xref_table():
             algorithm, _, digest = row.source_checksum.partition(":")
             assert algorithm == "md5"
             assert len(digest) == 32
             assert set(digest) <= set("0123456789abcdef")
-            assert row.pubmed_id == 38552170
 
     def test_the_taxids_are_the_ones_the_publishers_file_uses(self) -> None:
-        assert {row.species: row.ncbi_taxid for row in xref_table()} == {
+        assert {row.species: row.ncbi_taxid for row in xref_table() if row.source == ALLIANCE} == {
             "Homo sapiens": 9606,
             "Mus musculus": 10090,
             "Caenorhabditis elegans": 6239,
@@ -349,6 +363,30 @@ class TestXrefTable:
             replace(lookup_xref("Homo sapiens"), release="9.0.0"),
         )
         assert lookup_xref("Homo sapiens", ALLIANCE, table=rows).release == "9.0.0"
+
+    def test_a_release_named_without_a_source_is_honoured(self) -> None:
+        # Built here rather than read off the shipped table, so this says what `lookup_xref`
+        # does rather than what today's rows happen to make it do.
+        rows = (
+            replace(lookup_xref("Homo sapiens"), source=ALLIANCE, release="9.0.0", default=True),
+            replace(lookup_xref("Homo sapiens"), source="ensembl", release="116", default=False),
+        )
+        answered = lookup_xref("Homo sapiens", release="9.0.0", table=rows)
+        assert (answered.source, answered.release) == (ALLIANCE, "9.0.0")
+
+    def test_a_release_the_default_source_does_not_have_raises_rather_than_substituting(
+        self,
+    ) -> None:
+        # `116` belongs to the other source. Answering it with 9.0.0 would hand back bytes
+        # nobody asked for, under a release string that says they did — which is the whole
+        # of what pinning is for.
+        rows = (
+            replace(lookup_xref("Homo sapiens"), source=ALLIANCE, release="9.0.0", default=True),
+            replace(lookup_xref("Homo sapiens"), source="ensembl", release="116", default=False),
+        )
+        with pytest.raises(NoXrefSetError) as raised:
+            lookup_xref("Homo sapiens", release="116", table=rows)
+        assert "9.0.0" in str(raised.value)
 
     def test_a_species_with_two_sources_and_no_default_names_them_both(self) -> None:
         rows = (

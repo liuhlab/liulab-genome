@@ -12,6 +12,12 @@ one foreign **Namespace** directly into another, and nothing merges two publishe
 query reads exactly one set, so two sources that disagree are two answers rather than a
 contradiction to resolve.
 
+Two sources ship, and they are **not equals**. :data:`~genome.xref.alliance.ALLIANCE` is
+the **Default xref source** for all three species; :data:`~genome.xref.ensembl.ENSEMBL_TSV`
+is selectable and pins its own numbered **Release**, and its mapping fans out to 72 stems
+for one GeneID where the other's is near-one-to-one. Which one answers is a scientific
+choice — read :class:`~genome.xref.xref.XrefSet`'s ``source`` parameter before making it.
+
 Putting an answer into your own annotation's gene ids is the call that already existed,
 :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which is why the hub is the
 **Gene id stem**: what comes out of here goes straight in there.
@@ -29,6 +35,12 @@ Examples
 from genome.io.registration import xref_data_dir
 from genome.io.results import ResolvedStems, ResolvedXrefIds
 from genome.xref.alliance import ALLIANCE, AllianceFileError
+from genome.xref.ensembl import ENSEMBL_TSV, EnsemblTsvFileError
+from genome.xref.evidence import (
+    EmptyEvidenceFilterError,
+    EvidenceNotRecordedError,
+    normalise_evidence,
+)
 from genome.xref.ids import (
     ENSEMBL,
     ENTREZ,
@@ -62,6 +74,7 @@ from genome.xref.xref import (
 __all__ = [
     "ALLIANCE",
     "ENSEMBL",
+    "ENSEMBL_TSV",
     "ENTREZ",
     "HGNC",
     "MGI",
@@ -69,6 +82,9 @@ __all__ = [
     "UNIPROT",
     "WORMBASE",
     "AllianceFileError",
+    "EmptyEvidenceFilterError",
+    "EnsemblTsvFileError",
+    "EvidenceNotRecordedError",
     "NamespaceNotCarriedError",
     "NoXrefSetError",
     "ResolvedStems",
@@ -79,6 +95,7 @@ __all__ = [
     "XrefTableError",
     "gene_id_stem",
     "lookup_xref",
+    "normalise_evidence",
     "normalise_id",
     "xref_data_dir",
     "xref_prepare_command",

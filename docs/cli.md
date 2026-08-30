@@ -314,7 +314,7 @@ holds and this release does not is the one thing a hand-rolled join drops silent
 `--source NAME` picks the xref source; omitting it answers from the species' default one, so
 everyone in the lab reaches for the same one without discussing it. It is a default and not
 a recommendation — naming a source is how the scientific choice gets made deliberately, and
-NCBI and Ensembl agree on only 57.5% of human gene-level (GeneID, ENSG) pairs. Every answer
+NCBI and Ensembl agree on only 57.6% of human gene-level (GeneID, ENSG) pairs. Every answer
 names the source and release that produced it either way, so a result is reproducible a year
 later.
 

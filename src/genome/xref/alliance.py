@@ -67,6 +67,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
+from genome.xref.evidence import EvidenceNotRecordedError
 from genome.xref.ids import ENSEMBL, ENTREZ, HGNC, MGI, UNIPROT, WORMBASE, normalise_id
 
 #: What this **Xref source** is called, in the curated table, on every answer and in the
@@ -127,7 +128,11 @@ class AllianceFileError(ValueError):
 
 
 def read_alliance(
-    lines: Iterable[str], *, ncbi_taxid: int, origin: str
+    lines: Iterable[str],
+    *,
+    ncbi_taxid: int,
+    origin: str,
+    evidence: tuple[str, ...] = (),
 ) -> tuple[tuple[str, str, str], ...]:
     r"""Read the Alliance cross-reference file into one species' ``(namespace, id, stem)``.
 
@@ -151,6 +156,10 @@ def read_alliance(
     origin : str
         Where the lines came from; named in every message, since a shape change here is
         fixed by editing this reader.
+    evidence : tuple of str, optional
+        Must be empty. **This file grades nothing** — a row is a gene, a cross-reference, a
+        URL, a page and a taxon, with no column that says how the link was arrived at — so
+        a filter cannot be honoured and is refused rather than ignored.
 
     Returns
     -------
@@ -163,6 +172,8 @@ def read_alliance(
     AllianceFileError
         If the header is missing or re-spelled, a data row has the wrong number of fields,
         or a ``GeneID`` carries a prefix no species authority claims.
+    genome.xref.evidence.EvidenceNotRecordedError
+        If ``evidence`` names anything at all.
 
     Examples
     --------
@@ -178,6 +189,15 @@ def read_alliance(
     >>> read_alliance(rows, ncbi_taxid=9606, origin="example")
     (('ensembl', 'ENSG00000141510', 'ENSG00000141510'), ('entrez', '7157', 'ENSG00000141510'), ('hgnc', 'HGNC:11998', 'ENSG00000141510'))
     """
+    if evidence:
+        raise EvidenceNotRecordedError(
+            f"the {ALLIANCE} cross-reference file records no evidence type, so the filter "
+            f"{'/'.join(evidence)} cannot be applied to it: a row carries a gene, a "
+            f"cross-reference, a URL, a page and a taxon, and nothing that grades how the "
+            f"link was arrived at. Construct the set without an evidence filter, or name a "
+            f"source whose file records one — the ensembl per-species TSV grades every row, "
+            f"though every row of its human and mouse releases is graded the same way."
+        )
     taxon = f"{TAXON_PREFIX}{ncbi_taxid}"
     seen_header = False
     # One entry per gene of this species: the stems its ENSEMBL rows name, and every other

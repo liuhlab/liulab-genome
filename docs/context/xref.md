@@ -9,13 +9,14 @@ motif subtree rather than inside the assembly tree.
 
 Nothing here decides which identifiers name the same gene. Every pair travels with the **Xref
 source** that asserted it, so two publishers who disagree are two answers rather than a
-contradiction to resolve: NCBI and Ensembl agree on 57.5% of human gene-level (GeneID, ENSG) pairs,
+contradiction to resolve: NCBI and Ensembl agree on 57.6% of human gene-level (GeneID, ENSG) pairs,
 which makes the choice of publisher nearly half the answer.
 
 **Xref set**, **Xref source**, **Default xref source** and **Namespace** are built: `genome.xref`
-answers for human, mouse and worm off the Alliance of Genome Resources. **Symbol match** is still
-*(decided, not built — ADR-0018)* in the sense the context map describes — use the word, do not call
-the API it describes.
+answers for human, mouse and worm off the Alliance of Genome Resources, and for human and mouse off
+Ensembl's per-species TSV dumps as well — a second source, selectable and pinned to its own numbered
+**Release**, never merged with the first. **Symbol match** is still *(decided, not built —
+ADR-0018)* in the sense the context map describes — use the word, do not call the API it describes.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker** and the
 rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id stem**, the hub every entry
@@ -47,7 +48,11 @@ shipped metadata table beside a reader rather than a branch in code, so adding o
 publisher is eligible only if it keeps dated releases at stable URLs (ADR-0018): the Alliance of
 Genome Resources, Ensembl's per-species dumps, HGNC's quarterly archive and WormBase qualify, while
 NCBI Gene, UniProt idmapping and MGI are rebuilt daily and overwritten in place, so a checksum
-shipped in the wheel would be wrong within a day.
+shipped in the wheel would be wrong within a day. Two sources are not two grades of one thing and
+neither is a fallback for the other: they number their releases differently, carry different
+**Namespace**s, and some grade each assertion where others grade none — a filter on that grading is
+therefore a capability of the source, and one no row of a release satisfies raises rather than
+building a set that can only answer nothing.
 _Avoid_: provider, vendor, database, resource; authority on its own — a species authority is one
 source among several and the word does not say which; and **Source** unqualified, which the
 [Assembly](./assembly.md) context already owns for where an assembly's bytes came from

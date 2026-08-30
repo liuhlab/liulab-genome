@@ -13,16 +13,19 @@ eligible only if its old releases stay retrievable at stable URLs: a checksum th
 in the wheel must still match a year later, and a publisher that overwrites its file in
 place — or keeps no archive of the release the row names — breaks that.
 
-``source_checksum`` is over the publisher's **unpacked** bytes (ADR-0006), which is what
-Alliance itself publishes: its ``md5Sum`` is the digest of the TSV *inside* the gzip, so
-hashing the ``.tsv.gz`` as it arrives mismatches every time. The set stored on disk carries
-a second digest of its own, since what is stored is a per-species slice rather than these
-bytes.
+``source_checksum`` is over the publisher's **unpacked** bytes (ADR-0006), and **which
+bytes a publisher's own checksum covers is not a convention any two of them share**:
+Alliance's ``md5Sum`` is the digest of the TSV *inside* the gzip, so hashing the
+``.tsv.gz`` as it arrives mismatches every time, while Ensembl's ``CHECKSUMS`` is a BSD
+``sum`` over the served ``.gz`` — 16 bits, and no integrity check for a 6 MB file. Check
+which before pinning a new row; the attribution beside this table records each publisher's
+own value and what it covers. The set stored on disk carries a second digest of its own,
+since what is stored is a per-species slice rather than these bytes.
 
 ``default`` marks the **Default xref source** for a species — the one a caller who names
 none is answered by, so everyone in the lab reaches for the same one without discussing
 it. It is a default and not a recommendation: naming a source is how the scientific choice
-gets made deliberately, and NCBI and Ensembl agree on only 57.5% of human gene-level
+gets made deliberately, and NCBI and Ensembl agree on only 57.6% of human gene-level
 (GeneID, ENSG) pairs, so the choice determines nearly half the answer.
 
 **Rows for one ``(species, source)`` are listed oldest release first**, and the last is
@@ -40,8 +43,8 @@ True
 ('alliance', 'Alliance of Genome Resources')
 >>> row.source_checksum.startswith("md5:")
 True
->>> len({record.source for record in xref_table()})
-1
+>>> sorted({record.source for record in xref_table()})
+['alliance', 'ensembl']
 """
 
 from __future__ import annotations
@@ -233,7 +236,7 @@ def xref_table() -> tuple[XrefMetadata, ...]:
     Examples
     --------
     >>> sorted({record.release for record in xref_table()})
-    ['9.0.0']
+    ['116', '9.0.0']
     """
     resource = files("genome").joinpath(XREF_METADATA_RESOURCE)
     with resource.open("r", encoding="utf-8") as handle:
@@ -283,6 +286,8 @@ def xref_sources(species: str, *, table: Sequence[XrefMetadata] | None = None) -
     Examples
     --------
     >>> xref_sources("Mus musculus")
+    ('alliance', 'ensembl')
+    >>> xref_sources("Caenorhabditis elegans")
     ('alliance',)
     >>> xref_sources("Danio rerio")
     ()
@@ -350,7 +355,11 @@ def lookup_xref(
         The **Xref source**. Omitted, the species' **Default xref source** answers.
     release : str, optional
         The **Release**. Omitted, the newest the table lists for that source answers —
-        which is the last row, the table being in release order.
+        which is the last row, the table being in release order. Named, it is honoured
+        whether or not a source was named too: a release asked for against the default
+        source either answers with that release or raises naming the ones that source has,
+        and is never quietly swapped for another. Each source numbers its own releases and
+        they do not correspond, so ``"116"`` is not a release the default source has.
     table : sequence of XrefMetadata, optional
         The rows to read; the shipped table when omitted. A caller curating rows of their
         own hands them over here, and nothing is installed by passing them.
@@ -372,6 +381,8 @@ def lookup_xref(
     '9.0.0'
     >>> lookup_xref("Homo sapiens", "alliance", "9.0.0").ncbi_taxid
     9606
+    >>> lookup_xref("Homo sapiens", release="9.0.0").source
+    'alliance'
     >>> try:
     ...     lookup_xref("Homo sapiens", "alliance", "1.0")
     ... except NoXrefSetError as error:
@@ -389,8 +400,12 @@ def lookup_xref(
             f"species with no Ensembl presence has no hub to hang a namespace off and is "
             f"unanswerable here by design (ADR-0017)."
         )
-    if source is None:
-        return _default_row(for_species, species=species)
+    # The default source still has to honour a named release. Resolving the source first
+    # and then falling through to the release check keeps one path: naming a release
+    # without a source must answer with *that* release or say which ones exist, never
+    # quietly with another — two sources numbering their releases differently is exactly
+    # where a silently substituted release stops being reproducible.
+    source = _default_row(for_species, species=species).source if source is None else source
     for_source = [record for record in for_species if record.source == source]
     if not for_source:
         listed = ", ".join(xref_sources(species, table=rows))

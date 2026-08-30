@@ -225,3 +225,44 @@ What each is in the set *for*:
 
 None of this is prose to be trusted: `tests/test_homology.py` asserts every row of the table above
 against the committed bytes.
+
+## `xref/ensembl_entrez_*_tiny.tsv.gz` — the second source's rows
+
+Cut from Ensembl release 116's per-species dumps,
+`Homo_sapiens.GRCh38.116.entrez.tsv.gz` and `Mus_musculus.GRCm39.116.entrez.tsv.gz`, under each
+file's own header. Verbatim: nothing edited, nothing synthesised, every column kept.
+
+**Whole closures rather than sampled rows.** Each fixture is every row the release has that touches
+a chosen set of GeneIDs, closed under the (GeneID ↔ stem) relation — so if a GeneID is here, every
+stem it names is here, and if a stem is here, every GeneID naming it is here. A fan-out counted on
+the fixture is therefore the fan-out the release asserts, not an artefact of where the sample
+stopped. 151 human rows against the publisher's 1.2 million; 75 mouse rows.
+
+| Fixture | Rows | What it is here for |
+|---|---|---|
+| human | 151 | 149 `EntrezGene` rows, **every one `DEPENDENT` and not one `DIRECT`** — the empty-filter trap on real bytes, which is release 116's whole shape in miniature (552,633 rows, zero direct) |
+| human | | GeneID **`79166` naming 72 stems** — the fan-out, and the id the two sources disagree about |
+| human | | Stem **`ENSG00000173213` named by four GeneIDs** — the fan-out running the other way, which is what makes `from_stems` many-valued |
+| human | | GeneID `4661` naming two stems, and `7157` (`TP53`) naming one — the ordinary cases beside the extreme ones |
+| human | | Two `EntrezGene_trans_name` rows carrying `KU-MEL-3-201` and `BMS1P4-202` in the `xref` column — **transcript names, not GeneIDs**, and `MISC` rather than `DEPENDENT`, so a reader that did not split on `db_name` would key the Entrez namespace by transcript labels |
+| mouse | 75 | The same shape at a second species: 71 rows all `DEPENDENT`, GeneID `100040298` naming three stems, stem `ENSMUSG00000047675` named by two, four `MISC` transcript-name rows, and `22059` (`Trp53`) naming `ENSMUSG00000059552` — which the Alliance fixture also carries |
+
+## `xref/alliance_genecrossreference_disagreeing.tsv.gz` — one gene, two publishers
+
+All eight rows Alliance release 9.0.0 has for `HGNC:15497`, under the file's own comment block and
+header, copied verbatim. It exists so that one test can construct **two `XrefSet`s over one species
+and ask both about one id**: Entrez GeneID `79166` names **two** stems here — `ENSG00000170858` and
+`ENSG00000293273` — and **seventy-two** in Ensembl release 116. Neither answer is merged into the
+other and each names its own source (ADR-0017).
+
+The existing 14-gene Alliance fixture cannot show this. Every human id it carries — `672`, `4661`,
+`7157`, `8086` — Ensembl 116 agrees with exactly, so a disagreement had to be cut from a gene it
+does not hold rather than manufactured in one it does.
+
+The same eight rows also carry, incidentally and for real, two traps the reader already handles: the
+`NCBI_Gene:79166` pair listed **twice** under two different pages, and an `RGD:` cross-reference on a
+*human* row.
+
+None of this is prose to be trusted: `TestFixtureBytes` in `tests/test_xref_ensembl.py` asserts the
+header, the evidence types, the transcript-name rows and both fan-outs against the committed bytes,
+and the module's constants pin what each slice comes to.

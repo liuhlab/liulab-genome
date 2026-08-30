@@ -48,7 +48,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import shlex
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
@@ -68,6 +68,8 @@ from genome.io.registration import xref_data_dir
 from genome.io.results import ResolvedStems, ResolvedXrefIds
 from genome.tf.gene.census import species_slug
 from genome.xref.alliance import ALLIANCE, read_alliance
+from genome.xref.ensembl import ENSEMBL_TSV, read_ensembl
+from genome.xref.evidence import normalise_evidence
 from genome.xref.ids import ENSEMBL, NAMESPACES, normalise_id
 from genome.xref.metadata import NoXrefSetError, XrefMetadata, lookup_xref
 
@@ -100,15 +102,28 @@ class XrefReader(Protocol):
     """
 
     def __call__(
-        self, lines: Iterable[str], *, ncbi_taxid: int, origin: str
+        self,
+        lines: Iterable[str],
+        *,
+        ncbi_taxid: int,
+        origin: str,
+        evidence: tuple[str, ...] = (),
     ) -> tuple[tuple[str, str, str], ...]:
-        """Return this species' triples, sorted and unique, from ``lines``."""
+        """Return this species' triples, sorted and unique, from ``lines``.
+
+        ``evidence`` is the grading filter, empty for none. Whether a source records a
+        grading at all is the reader's own fact — a file with no such column meets a filter
+        with :class:`~genome.xref.evidence.EvidenceNotRecordedError` rather than ignoring
+        it, since a filter silently dropped is a quality claim nobody made.
+        """
         ...
 
 
 #: Every **Xref source** with a reader, keyed by the name its curated rows use. Adding one
 #: is a module and an entry here; nothing else in this file changes.
-_READERS: Mapping[str, XrefReader] = MappingProxyType({ALLIANCE: read_alliance})
+_READERS: Mapping[str, XrefReader] = MappingProxyType(
+    {ALLIANCE: read_alliance, ENSEMBL_TSV: read_ensembl}
+)
 
 
 class NamespaceNotCarriedError(LookupError):
@@ -164,12 +179,17 @@ class XrefTableError(ValueError):
     """
 
 
-def xref_set_dir(species: str, source: str, release: str) -> Path:
+def xref_set_dir(species: str, source: str, release: str, *, evidence: Sequence[str] = ()) -> Path:
     """Return the directory one **Xref set** is prepared in, whether or not it exists.
 
     ``<liulab_data>/xref/<source>/<release>/<species slug>/``. Source and release above
     species, so two releases of one publisher sit side by side and neither is *the* xref
     directory — holding two releases at once is the whole point of pinning one.
+
+    A set built under an evidence filter is a **different set** and gets a directory of its
+    own beside the unfiltered one, since a filter that changes which rows are read changes
+    what the stored slice holds. Two callers who named the same types in different orders
+    land on one directory, the filter being sorted on the way in.
 
     Parameters
     ----------
@@ -179,6 +199,9 @@ def xref_set_dir(species: str, source: str, release: str) -> Path:
         The **Xref source**.
     release : str
         The pinned **Release**.
+    evidence : sequence of str, optional
+        The evidence filter the set was built under, as
+        :func:`~genome.xref.evidence.normalise_evidence` spells it. Empty for none.
 
     Returns
     -------
@@ -191,9 +214,16 @@ def xref_set_dir(species: str, source: str, release: str) -> Path:
     >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
     >>> xref_set_dir("Homo sapiens", "alliance", "9.0.0")
     PosixPath('/scratch/liulab/xref/alliance/9.0.0/homo_sapiens')
+    >>> xref_set_dir("Homo sapiens", "ensembl", "116", evidence=("DEPENDENT",))
+    PosixPath('/scratch/liulab/xref/ensembl/116/homo_sapiens.evidence-dependent')
     >>> del os.environ["LIULAB_DATA"]
     """
-    return xref_data_dir() / source / release / species_slug(species)
+    return xref_data_dir() / source / release / f"{species_slug(species)}{_suffix(evidence)}"
+
+
+def _suffix(evidence: Sequence[str]) -> str:
+    """Return what an evidence filter adds to a set's directory name, or nothing."""
+    return f".evidence-{'-'.join(kind.lower() for kind in evidence)}" if evidence else ""
 
 
 def xref_slice_name(species: str) -> str:
@@ -217,11 +247,15 @@ def xref_slice_name(species: str) -> str:
     return f"{species_slug(species)}{SLICE_SUFFIX}"
 
 
-def xref_prepare_command(species: str, source: str, release: str) -> str:
+def xref_prepare_command(
+    species: str, source: str, release: str, *, evidence: Sequence[str] = ()
+) -> str:
     r"""Return the call that prepares one **Xref set**, for an error message to quote.
 
     One spelling of it, so a renamed entry point is renamed once. Quoted by every error
-    here that a caller repairs by fetching the set on a machine with internet.
+    here that a caller repairs by fetching the set on a machine with internet — which is
+    why an evidence filter travels in it: repairing a filtered set by preparing the
+    unfiltered one would leave the caller exactly where they started.
 
     Parameters
     ----------
@@ -231,6 +265,8 @@ def xref_prepare_command(species: str, source: str, release: str) -> str:
         The **Xref source**.
     release : str
         The pinned **Release**.
+    evidence : sequence of str, optional
+        The evidence filter the set was built under. Omitted from the command when empty.
 
     Returns
     -------
@@ -241,8 +277,15 @@ def xref_prepare_command(species: str, source: str, release: str) -> str:
     --------
     >>> xref_prepare_command("Homo sapiens", "alliance", "9.0.0")
     'python -c "from genome.xref import XrefSet; XrefSet(\'Homo sapiens\', \'alliance\', \'9.0.0\')"'
+    >>> "evidence=('DEPENDENT',)" in xref_prepare_command(
+    ...     "Homo sapiens", "ensembl", "116", evidence=("DEPENDENT",)
+    ... )
+    True
     """
-    call = f"from genome.xref import XrefSet; XrefSet({species!r}, {source!r}, {release!r})"
+    filtered = f", evidence={tuple(evidence)!r}" if evidence else ""
+    call = (
+        f"from genome.xref import XrefSet; XrefSet({species!r}, {source!r}, {release!r}{filtered})"
+    )
     return f'python -c "{call}"'
 
 
@@ -331,8 +374,29 @@ class XrefSet:
         is a default and not a recommendation: naming one is how the scientific choice gets
         made deliberately, and two publishers disagreeing are two answers rather than one
         merged one.
+
+        **The sources are not equals, and the choice is nearly half the answer.** Measured
+        on human release 116 against NCBI's own file, Ensembl and NCBI agree on only
+        **57.6%** of the gene-level (GeneID, ENSG) pairs they assert between them. The
+        cause is method rather than release skew: NCBI's mapping is a sequence match at a
+        published overlap threshold and is all but one-to-one, while **Ensembl's fans out
+        to 72 stems for one GeneID** (``79166``) **and 208 GeneIDs for one stem**
+        (``ENSG00000278233``). Ask ``ensembl`` for an id and expect a wider answer than
+        ``alliance`` gives for the same one; the width is the publisher's assertion, and
+        nothing here narrows it or reconciles the two.
     release : str, optional
-        The pinned **Release**. Omitted, the newest the curated table lists.
+        The pinned **Release**. Omitted, the newest the curated table lists. Each source
+        pins its own numbering and they do not correspond — ``9.0.0`` is Alliance's and
+        ``116`` is Ensembl's.
+    evidence : str or iterable of str, optional
+        Keep only the rows the publisher graded with one of these ``info_type``s, or
+        ``None`` for every row. A capability of the source rather than of every set: a
+        publisher whose file grades nothing raises
+        :class:`~genome.xref.evidence.EvidenceNotRecordedError` rather than ignoring the
+        filter. **A filter that keeps nothing raises too**, because every human
+        ``EntrezGene`` row Ensembl release 116 publishes is ``DEPENDENT`` and not one is
+        ``DIRECT``, so the intuitive quality filter empties the set rather than narrowing
+        it. A filtered set is prepared beside the unfiltered one and never over it.
     cache_dir : str or pathlib.Path, optional
         The directory to prepare in, overriding :func:`xref_set_dir`. The directory itself,
         not a root to file under.
@@ -347,10 +411,16 @@ class XrefSet:
         The **Xref source** whose assertions this carries.
     release : str
         The pinned **Release**.
+    evidence : tuple of str
+        The evidence filter this set was built under, empty for none.
     path : pathlib.Path
         The stored slice these mappings were read from — a plain gzipped TSV.
     source_url : str
         Where the publisher's own file was fetched from.
+    provenance : genome.xref.metadata.XrefMetadata
+        The curated row this set actually resolved to, defaults filled in — who published
+        it, which release, and the paper to cite. Read off the set rather than looked up
+        again, so what is cited is what answered.
     namespaces : tuple of str
         The **Namespace**s this set actually carries, read off the slice rather than
         declared, in :data:`~genome.xref.ids.NAMESPACES` order. One that is not here raises
@@ -364,6 +434,10 @@ class XrefSet:
         If the set is not on disk and could not be fetched.
     XrefTableError
         If the publisher's file or the stored slice is not the shape it must be.
+    genome.xref.evidence.EvidenceNotRecordedError
+        If an evidence filter is named and this source's file grades nothing.
+    genome.xref.evidence.EmptyEvidenceFilterError
+        If an evidence filter is named and it keeps none of the release's rows.
     genome.io.completion.RegistrationMismatchError
         If the **Completion marker** disagrees with what is on disk, either about the
         slice's size or about its checksum — both mean unfinished rather than present.
@@ -378,6 +452,8 @@ class XrefSet:
     {'7157': ('ENSG00000141510',)}
     >>> human.from_stems(["ENSG00000141510.18"], "hgnc").resolved  # doctest: +SKIP
     {'ENSG00000141510.18': ('HGNC:11998',)}
+    >>> print(human.provenance.attribution())                      # doctest: +SKIP
+    Alliance of Genome Resources 9.0.0 (PMID 38552170) — https://download.alliancegenome.org/...
     """
 
     def __init__(
@@ -386,6 +462,7 @@ class XrefSet:
         source: str | None = None,
         release: str | None = None,
         *,
+        evidence: str | Iterable[str] | None = None,
         cache_dir: str | Path | None = None,
         progressbar: bool = True,
     ) -> None:
@@ -394,13 +471,21 @@ class XrefSet:
         self.source = row.source
         self.release = row.release
         self.source_url = row.url
+        self.provenance = row
+        self.evidence = normalise_evidence(evidence)
         directory = (
             Path(cache_dir).expanduser()
             if cache_dir is not None
-            else xref_set_dir(row.species, row.source, row.release)
+            else xref_set_dir(row.species, row.source, row.release, evidence=self.evidence)
         )
         self.path = directory / xref_slice_name(row.species)
-        record = _prepare(row, directory=directory, path=self.path, progressbar=progressbar)
+        record = _prepare(
+            row,
+            directory=directory,
+            path=self.path,
+            evidence=self.evidence,
+            progressbar=progressbar,
+        )
         triples, digest = _read_slice(self.path)
         if record.sha256 != digest:
             raise RegistrationMismatchError(
@@ -408,7 +493,7 @@ class XrefSet:
                 f"the slice on disk is not the one that was prepared. Something rewrote it "
                 f"after the record was written; nothing here can be trusted as complete. "
                 f"Re-prepare it with `rm -rf {shlex.quote(str(directory))} && "
-                f"{xref_prepare_command(row.species, row.source, row.release)}`."
+                f"{xref_prepare_command(*_names(row), evidence=self.evidence)}`."
             )
         self._to_stems, self._from_stems = _index(triples)
         self.namespaces: tuple[str, ...] = tuple(
@@ -426,10 +511,15 @@ class XrefSet:
         return len(self._from_stems[ENSEMBL])
 
     def __repr__(self) -> str:
-        """Return which set this is and how many stems it holds."""
+        """Return which set this is and how many stems it holds.
+
+        The evidence filter appears only when there is one, so a filtered set never reads
+        as the unfiltered set it is not.
+        """
+        filtered = f", evidence={self.evidence!r}" if self.evidence else ""
         return (
             f"XrefSet(species={self.species!r}, source={self.source!r}, "
-            f"release={self.release!r}, stems={len(self)})"
+            f"release={self.release!r}{filtered}, stems={len(self)})"
         )
 
     def to_stems(self, ids: Iterable[str], namespace: str) -> ResolvedStems:
@@ -552,8 +642,18 @@ class XrefSet:
         return wanted
 
 
+def _names(row: XrefMetadata) -> tuple[str, str, str]:
+    """Return the three strings that name one set, for a command to be built from."""
+    return row.species, row.source, row.release
+
+
 def _prepare(
-    row: XrefMetadata, *, directory: Path, path: Path, progressbar: bool
+    row: XrefMetadata,
+    *,
+    directory: Path,
+    path: Path,
+    evidence: tuple[str, ...],
+    progressbar: bool,
 ) -> CompletionRecord:
     """Return the finished set's record, fetching and slicing it once if it is not there.
 
@@ -563,12 +663,16 @@ def _prepare(
     marker** is written last, after the file it claims, and the working area is emptied
     once it is — so the set is finished or it is not, and a run killed anywhere in between
     leaves a directory that reads as unfinished rather than as present.
+
+    An evidence filter is applied by the reader, as the publisher's rows go past, and a
+    filter that keeps nothing raises there — before anything is written, so a set that
+    could only answer nothing is never left on disk to be re-read as present.
     """
     existing = check_registration(
         directory,
         repair=(
             f"rm -rf {shlex.quote(str(directory))} && "
-            f"{xref_prepare_command(row.species, row.source, row.release)}"
+            f"{xref_prepare_command(*_names(row), evidence=evidence)}"
         ),
     )
     if existing is not None:
@@ -576,10 +680,13 @@ def _prepare(
     reader = _reader(row)
     clear_work_dir(directory)
     work = work_dir(directory)
-    fetched = _fetch(row, work=work, progressbar=progressbar)
+    fetched = _fetch(row, work=work, evidence=evidence, progressbar=progressbar)
     digest = hashlib.new(_algorithm(row))
     triples = reader(
-        _unpacked_lines(fetched, digest), ncbi_taxid=row.ncbi_taxid, origin=str(fetched)
+        _unpacked_lines(fetched, digest),
+        ncbi_taxid=row.ncbi_taxid,
+        origin=str(fetched),
+        evidence=evidence,
     )
     _check_source_checksum(row, digest.hexdigest(), path=fetched)
     if not triples:
@@ -596,7 +703,7 @@ def _prepare(
     record = build_record(
         directory,
         kind=XREF_KIND,
-        name=f"{row.source}/{row.release}/{species_slug(row.species)}",
+        name=f"{row.source}/{row.release}/{species_slug(row.species)}{_suffix(evidence)}",
         files=[path],
         source_url=row.url,
         sha256=sha256,
@@ -611,6 +718,7 @@ def _prepare(
             # stored here is a derived slice, so `sha256` above — this slice's own digest —
             # is what the set is held to, and this says which bytes it was cut from.
             "source_checksum": row.source_checksum,
+            "evidence": list(evidence),
             "namespaces": sorted({namespace for namespace, _id, _stem in triples}),
             "rows": len(triples),
         },
@@ -632,7 +740,7 @@ def _reader(row: XrefMetadata) -> XrefReader:
     return reader
 
 
-def _fetch(row: XrefMetadata, *, work: Path, progressbar: bool) -> Path:
+def _fetch(row: XrefMetadata, *, work: Path, evidence: tuple[str, ...], progressbar: bool) -> Path:
     """Download the publisher's file into the working area, or say what to do instead.
 
     Nothing is verified here, and ``known_hash`` is deliberately not passed. **The checksum
@@ -650,7 +758,7 @@ def _fetch(row: XrefMetadata, *, work: Path, progressbar: bool) -> Path:
             f"here and {row.url} could not be fetched: {error}. Nothing else in this "
             f"package needs the network, so this is the one step that does. Prepare it on a "
             f"machine with internet — a login node, since the lab's compute nodes have "
-            f"none — with `{xref_prepare_command(row.species, row.source, row.release)}`."
+            f"none — with `{xref_prepare_command(*_names(row), evidence=evidence)}`."
         ) from error
 
 

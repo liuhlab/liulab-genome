@@ -53,6 +53,36 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   **Orthology is served and never consumed** (ADR-0019): no table this package publishes is derived
   through homology, held structurally — nothing outside `genome.homology` may import it, which a test
   asserts by reading every module's source.
+
+- **Ensembl is a second Xref source, selectable and pinned to a release of its own — and it is not
+  the equal of the first.** `XrefSet("Homo sapiens", "ensembl", "116")` answers off Ensembl's
+  per-species TSV dumps for human and mouse, pinned to release **116** — the release the lab's
+  registered `gencode_v50` corresponds to — independently of Alliance's `9.0.0`, which stays the
+  **Default xref source**. Adding it was what the design promised: a reader module, one entry in the
+  reader table and two rows in the shipped metadata table. **Two publishers are two answers and
+  nothing merges them** (ADR-0017): Entrez GeneID `79166` names **two** stems in Alliance 9.0.0 and
+  **seventy-two** in Ensembl 116, each answer carrying the source and release that produced it, and
+  the narrower one is never widened nor the wider one voted down. **The fan-out is stated where the
+  source is chosen** rather than in a note — in the constructor's `source` parameter, in the
+  reader's own module and in the shipped attribution — because it is the reason to choose
+  deliberately: the two publishers agree on only **57.6%** of human gene-level (GeneID, ENSG) pairs,
+  NCBI's mapping being a sequence match at a published overlap threshold and near-one-to-one where
+  Ensembl's reaches 72 stems for one GeneID and **208 GeneIDs for one stem**. **The intuitive
+  quality filter raises rather than answering nothing**: every human `EntrezGene` row release 116
+  publishes carries `info_type=DEPENDENT` and **not one** carries `DIRECT` — 552,633 rows, zero
+  direct, and mouse the same at 358,853 — so `evidence="DIRECT"` empties the set rather than
+  narrowing it, and is met with an error naming what the release actually carries. The filter is a
+  real capability and not only a guard: it selects which of the publisher's rows are read, a
+  filtered set is prepared beside the unfiltered one rather than over it, and a source whose file
+  grades nothing refuses a filter instead of ignoring it. Two conventions that cannot be assumed
+  from one another are now recorded side by side: Alliance publishes an md5 of the **unpacked** TSV,
+  Ensembl a BSD `sum` of the **served** `.gz` — 16 bits, and no integrity check for a 6 MB file — so
+  the rows pin a digest of the unpacked bytes and the attribution records Ensembl's own value and
+  what it covers. No worm row, and not by oversight: Ensembl files *C. elegans* under Ensembl
+  Genomes' numbering, so release-116's worm directory holds a file stamped **63**, and worm is
+  answered by the Alliance where the hop is the identity.
+- **An `XrefSet` carries the curated row it actually resolved to**, as `provenance`, so what is
+  cited is what answered rather than what a second lookup would resolve the defaults to today.
 - **Which genes are transcription factors, answered by a published census that ships in the
   wheel.** `genome.tf.gene` is the gene half of the TF context, keyed by gene where the motif half
   is keyed by motif. Name an assembly and `Genome.tf_gene_list()` answers with the genes one census
@@ -266,7 +296,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   than calls**: nothing shipped here is keyed by a foreign **Namespace**, and no list this package
   publishes is derived through homology. **Four records settle what the design decided.** ADR-0017:
   the hub is the **Gene id stem**, a query reads exactly one **Xref set**, and nothing composes two
-  hops or merges two publishers — NCBI and Ensembl agree on only 57.5% of human gene-level (GeneID,
+  hops or merges two publishers — NCBI and Ensembl agree on only 57.6% of human gene-level (GeneID,
   ENSG) pairs, so a merged table would decide nearly half its rows by a rule nobody published.
   ADR-0018: only a publisher keeping dated releases at stable URLs is eligible, and its bytes are
   downloaded rather than shipped, at two costs stated rather than smoothed over — neither set
@@ -606,6 +636,22 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   exception is documented rather than papered over: TOMTOM's p-value rewards a short dense
   alignment, so a long motif that embeds a shorter one can rank the shorter one above itself, which
   both of the 31- and 33-column CTCF matrices do with the 15-column `MA0139.2` inside them.
+
+### Fixed
+
+- **A release named without a source is honoured instead of quietly ignored.** `lookup_xref` — and
+  so `XrefSet` — returned the default source's newest release as soon as no source was named, never
+  consulting the release asked for. Harmless while every species listed exactly one release, and
+  wrong the moment a second source arrives with a numbering of its own: a caller pinning a release
+  would have been handed another one, under a release string saying they had not been, which is the
+  whole of what pinning is for. It now answers with that release or raises naming the ones the
+  default source actually has.
+- **`normalise_id` is idempotent, including where whitespace hides behind a version separator.**
+  Stripping ran before the version was dropped, so `"7157\r."` stemmed to `"7157\r"` on the first
+  pass and only reached `"7157"` on the second — two spellings of one id settling on different
+  strings, which joins to nothing and says nothing about it. The suite's own hypothesis property
+  found it, and it was a flaky-CI landmine besides: it passed until a machine's example database
+  happened to find the case. Whitespace now goes on both sides of the version drop.
 
 ## [2026.8.0] - 2026-08-17
 
