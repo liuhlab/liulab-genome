@@ -63,8 +63,8 @@ from genome.homology import (
     resolve_homologs,
 )
 from genome.io import fetch as fetch_mod
+from genome.io.annotation import AnnotationRegistry
 from genome.io.completion import RECORD_NAME, UnfinishedRegistrationError, read_record
-from genome.io.gtf import AnnotationRegistry
 from genome.io.registration import AssemblyDir
 
 from .conftest import FakeFetch

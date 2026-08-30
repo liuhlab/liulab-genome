@@ -246,7 +246,7 @@ class VersionedGeneIdError(ValueError):
     ``gencode_v50lift37``, and the census reached one verdict for the stem. Answering a
     versioned id would therefore answer for the stem — which names a gene the caller did
     not — so it is refused, in the same spirit as
-    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which answers a stem with
+    :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids`, which answers a stem with
     *every* gene id it names and never picks one.
 
     The message names the stem to pass instead.
@@ -820,7 +820,7 @@ def motif_links(
     may name more than one gene id in one **Annotation**, so answering ``ENSG00000182378.14``
     would answer for a stem that also names ``ENSG00000182378.14_PAR_Y``, and this package
     never picks a gene the caller did not name (see
-    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which crosses that gap in
+    :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids`, which crosses that gap in
     the other direction). Pass the stem, and the error says which one.
 
     **The species is passed and never inferred.** A table is named by a species and a

@@ -28,7 +28,7 @@ class STAR(Aligner):
     A STAR index is splice-junction-aware: it is built against one gene
     annotation, so each annotation gets its own *genomeDir*. The bound GTF key
     selects that annotation (its path resolved via
-    :meth:`~genome.io.gtf.AnnotationRegistry.path`) and names the index directory
+    :meth:`~genome.io.annotation.registry.AnnotationRegistry.path`) and names the index directory
     ``star_<gtf_key>``. STAR's index is the *genomeDir* directory itself, so
     :attr:`index_path` returns :attr:`index_dir`.
 
@@ -38,7 +38,7 @@ class STAR(Aligner):
         The genome whose reference FASTA will be indexed.
     gtf : str
         Name of a GTF annotation registered on ``genome`` (see
-        :meth:`~genome.io.gtf.AnnotationRegistry.register_path`).
+        :meth:`~genome.io.annotation.registry.AnnotationRegistry.register_path`).
     tool : genome.external.ExternalTool, optional
         As :class:`~genome.aligner.aligner.Aligner`.
     """
@@ -84,7 +84,7 @@ class STAR(Aligner):
         ``overwrite=True``; a directory holding index files that no record
         vouches for raises rather than being silently rebuilt. The annotation GTF
         is resolved from the bound ``gtf`` key via
-        :meth:`~genome.io.gtf.AnnotationRegistry.path` and passed to STAR as
+        :meth:`~genome.io.annotation.registry.AnnotationRegistry.path` and passed to STAR as
         ``--sjdbGTFfile`` for splice-junction-aware indexing.
 
         Only the most commonly tuned options are named below. Any other STAR

@@ -22,7 +22,7 @@ import pytest
 
 from genome.io import download as download_module
 from genome.io import fetch as fetch_module
-from genome.io import gtf as gtf_module
+from genome.io.annotation import registration as annotation_module
 
 from .test_source import _module_level_imports
 
@@ -78,7 +78,9 @@ def test_the_fetch_step_imports_nothing_from_its_own_package() -> None:
     assert own == set()
 
 
-@pytest.mark.parametrize("module", [download_module, gtf_module], ids=["download", "gtf"])
+@pytest.mark.parametrize(
+    "module", [download_module, annotation_module], ids=["download", "annotation"]
+)
 def test_every_caller_reaches_the_fetch_through_the_module(
     module: ModuleType,
 ) -> None:

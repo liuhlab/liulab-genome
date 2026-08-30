@@ -61,11 +61,11 @@ nothing, and no contributors at all means no annotation rather than an empty one
 component naming an annotation nobody registered, or carrying several with no default,
 **raises before a byte is written**, naming what closes the gap. The price, paid
 knowingly, is that every chimera build now pays a ``gffutils`` database build.
-:func:`~genome.io.gtf.register_merged_gtf` does the writing; what is decided here is which
+:func:`~genome.io.annotation.registration.register_merged_gtf` does the writing; what is decided here is which
 annotation each component contributes and what the result is called. The name is the
 contributing annotations' names joined, so a rebuild whose contributors changed writes a
 different one — and the build that owns the merged annotation owns the superseded one too,
-which :func:`~genome.io.gtf.discard_merged_annotation` removes, since two derived
+which :func:`~genome.io.annotation.registration.discard_merged_annotation` removes, since two derived
 annotations side by side leave the chimera with no default at all.
 
 Examples
@@ -102,6 +102,12 @@ from genome.chimera import (
     derive_separator,
     suffixed,
 )
+from genome.io.annotation.registration import (
+    GtfAnnotation,
+    MergeSource,
+    discard_merged_annotation,
+    register_merged_gtf,
+)
 from genome.io.completion import RegistrationError, read_record
 from genome.io.components import (
     ChimeraDetails,
@@ -111,12 +117,6 @@ from genome.io.components import (
     read_chimera_details,
 )
 from genome.io.fasta import GenomeFiles, prepare_fasta, read_chrom_sizes
-from genome.io.gtf import (
-    GtfAnnotation,
-    MergeSource,
-    discard_merged_annotation,
-    register_merged_gtf,
-)
 from genome.io.registration import AssemblyDir, AssemblyRegistration, liulab_data_dir
 from genome.io.source import is_prepared
 
@@ -359,7 +359,7 @@ class ChimeraBuilder(AssemblyRegistration):
         genome.chimera.ChimeraNamingError
             If a component's FASTA carries a header that names no sequence, so there is
             nothing for the suffix to ride on.
-        genome.io.gtf.AnnotationNotRegisteredError
+        genome.io.annotation.registry.AnnotationNotRegisteredError
             If a component's **Default annotation** names something nobody registered on
             this machine. Raised before anything is written, and the message names the
             command that registers it.
@@ -376,7 +376,7 @@ class ChimeraBuilder(AssemblyRegistration):
             If the built ``chrom.sizes`` is not the concatenation the components
             predict. Nothing vouches for the directory in that case — the record is
             written after this check, never before.
-        genome.io.gtf.ChromosomeMismatchError
+        genome.io.annotation.registration.ChromosomeMismatchError
             If a merged seqname is not one the built FASTA carries — the two halves of
             the build disagreeing, which nothing else would catch.
         genome.external.ToolNotFoundError

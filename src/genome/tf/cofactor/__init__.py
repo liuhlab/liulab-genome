@@ -7,7 +7,7 @@ keyed the same way, by **Gene id stem**. One **Cofactor table** per species ship
 the package — :mod:`genome.tf.cofactor.table` reads them — and every classification
 travels with the publisher that reached it.
 :mod:`genome.tf.cofactor.annotation` puts one into a registered **Annotation**'s own gene
-ids, crossing :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids` exactly as the
+ids, crossing :meth:`~genome.io.annotation.registry.AnnotationRegistry.resolve_gene_ids` exactly as the
 census half does and adding nothing to the registry to do it.
 
 **Human membership is this package's own** and is the one thing here that is: the human

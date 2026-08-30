@@ -1,8 +1,8 @@
 # Annotation
 
-What a set of gene models is once an **Assembly** owns it. This context covers `io/gtf.py` and the
-registry a **Genome** keeps over it: a GTF is filed under one assembly, given a name, and addressed
-by that name forever after.
+What a set of gene models is once an **Assembly** owns it. This context covers `io/annotation/*`
+and the registry a **Genome** keeps over it: a GTF is filed under one assembly, given a name, and
+addressed by that name forever after.
 
 Words every context shares — **Assembly**, **Genome**, **Chromosome**, **0-based half-open** and the
 rest — are defined once in the repo-root `CONTEXT-MAP.md`.

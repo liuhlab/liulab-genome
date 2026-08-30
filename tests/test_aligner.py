@@ -95,7 +95,7 @@ def _make_genome(
 
     ``gtfs`` maps annotation name -> GTF text; each is written to ``tmp_path`` and
     exposed through an ``annotations`` registry stand-in whose ``path`` matches
-    :meth:`~genome.io.gtf.AnnotationRegistry.path`. ``default_gtf`` is the first of
+    :meth:`~genome.io.annotation.registry.AnnotationRegistry.path`. ``default_gtf`` is the first of
     them, as a genome with one registered annotation and no table flag would have it.
 
     ``chrom_sizes`` replaces the single-chromosome default, which is what lets a

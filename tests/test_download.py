@@ -883,7 +883,8 @@ class TestTheJsonKeysAndTheirOrder:
 
     def test_a_registered_assembly_is_a_record_plus_what_a_record_does_not_hold(self) -> None:
         # The same shape a registered annotation serializes in, deliberately: a record
-        # plus the two facts a record does not hold about itself. test_gtf pins that half.
+        # plus the two facts a record does not hold about itself. The annotation tests
+        # pin that half.
         registered = RegisteredAssembly(
             assembly="hg38",
             directory=Path("/data/genome/hg38"),
@@ -966,12 +967,15 @@ def test_a_registered_assembly_is_carried_whole_and_not_copied_out() -> None:
 
 
 def test_downloading_an_assembly_imports_nothing_that_registers_an_annotation() -> None:
-    # The assembly half of the guard test_gtf holds for the annotation half, and the
-    # reason the leaf both used to reach through could retire: what registering an
+    # The assembly half of the guard tests/annotation holds for the annotation half, and
+    # the reason the leaf both used to reach through could retire: what registering an
     # assembly answers with lives here and what registering an annotation answers with
-    # lives in `io.gtf`, and neither module imports the other. Were this edge to open,
-    # the two would be one module by another route and the cycle `io.chimera` closes
-    # through `io.gtf` would come back with it.
-    forbidden = {"genome.io.gtf", "genome.genome"}
+    # lives in `io.annotation`, and neither imports the other. Were this edge to open, the
+    # two would be one module by another route and the cycle `io.chimera` closes through
+    # the annotation package would come back with it. A prefix for that half, since every
+    # module of it is out of bounds and a new one must not arrive unnoticed.
+    forbidden = {"genome.genome"}
+    reached = _module_level_imports(download_mod)
 
-    assert _module_level_imports(download_mod) & forbidden == set()
+    assert reached & forbidden == set()
+    assert {name for name in reached if name.startswith("genome.io.annotation")} == set()

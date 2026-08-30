@@ -30,9 +30,9 @@ substitute for *module*.
 - [Assembly](./docs/context/assembly.md) — covers `genome.py`, `metadata.py`, `external.py`,
   `chimera.py`, `io/{source,components,fetch,chimera,download,registration,fasta,twobit,utils}.py`:
   which reference this is, where its files live, and how a locus becomes bases
-- [Annotation](./docs/context/annotation.md) — covers `io/gtf.py`, `gene_list.py` and the GTF
-  registry on `Genome`: what a GTF declares over one assembly, the name it is addressed by, and
-  which of its genes are in a category
+- [Annotation](./docs/context/annotation.md) — covers `io/annotation/*`, `gene_list.py` and the
+  GTF registry on `Genome`: what a GTF declares over one assembly, the name it is addressed by,
+  and which of its genes are in a category
 - [Index](./docs/context/index.md) — covers `aligner/*`: what one external mapper needs built before
   it can map, and how a finished build is told from an abandoned one
 - [Motif](./docs/context/motif.md) — covers `tf/motif/*`: what a transcription factor recognises,

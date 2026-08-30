@@ -27,6 +27,7 @@ from genome import (
     Region,
 )
 from genome.gene_list import curated_gene_list
+from genome.io.annotation import AnnotationNotRegisteredError, annotation_dir, register_gtf
 from genome.io.completion import (
     RegistrationMismatchError,
     UnfinishedRegistrationError,
@@ -35,7 +36,6 @@ from genome.io.completion import (
 )
 from genome.io.download import register_assembly
 from genome.io.fasta import prepare_fasta
-from genome.io.gtf import AnnotationNotRegisteredError, annotation_dir, register_gtf
 from genome.metadata import (
     METADATA_FIELDS,
     AnnotationMetadata,
@@ -519,7 +519,8 @@ class TestGeneCategories:
     """``Genome.gene_list`` / ``.gene_lists`` — the everyday way to a category's genes.
 
     Both delegate to the registry, so what is asserted here is that they reach it and
-    that the answer arrives whole; what the answer *is* belongs to test_gtf. The shipped
+    that the answer arrives whole; what the answer *is* belongs to the annotation tests. The
+    shipped
     curated list answers, so the categories are read off it rather than named.
     """
 

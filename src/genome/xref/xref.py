@@ -417,7 +417,7 @@ class ResolvedStems:
     every row.
 
     **A foreign id naming two stems answers with both**, and nothing picks one — the same
-    guarantee :class:`~genome.io.gtf.ResolvedGeneIds` gives for a stem naming two gene ids.
+    guarantee :class:`~genome.io.annotation.stems.ResolvedGeneIds` gives for a stem naming two gene ids.
     **What named nothing rides back** in :attr:`unresolved` rather than shortening the
     answer.
 

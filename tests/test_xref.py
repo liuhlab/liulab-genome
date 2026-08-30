@@ -37,13 +37,13 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from genome.io import fetch as fetch_mod
+from genome.io.annotation.stems import _gene_id_stem as annotation_gene_id_stem
 from genome.io.completion import (
     RECORD_NAME,
     RegistrationMismatchError,
     UnfinishedRegistrationError,
     read_record,
 )
-from genome.io.gtf import _gene_id_stem as annotation_gene_id_stem
 from genome.io.prepared import PreparedChecksumError
 from genome.xref import (
     ALLIANCE,

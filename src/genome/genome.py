@@ -32,11 +32,11 @@ import pandas as pd
 
 from genome.aligner.mixin import AlignerMixin
 from genome.chimera import ChimeraNamingError, split_suffixed
+from genome.io.annotation import AnnotationRegistry, GeneList
 from genome.io.chimera import ChimeraBuilder
 from genome.io.components import ChimeraDetails, read_chimera_details
 from genome.io.download import UCSCGenomeDownloader
 from genome.io.fasta import GenomeFiles, read_chrom_sizes
-from genome.io.gtf import AnnotationRegistry, GeneList
 from genome.io.registration import AssemblyDir
 from genome.io.twobit import TwoBit
 from genome.metadata import AssemblyMetadata, assembly_metadata
@@ -235,7 +235,7 @@ class Genome(AlignerMixin, MotifScanMixin):
             If fewer than two components are given, a component repeats, a component's
             name is not alphanumeric, a component is itself a chimera, or a component's
             FASTA carries a header that names no sequence for the suffix to ride on.
-        genome.io.gtf.AnnotationNotRegisteredError
+        genome.io.annotation.registry.AnnotationNotRegisteredError
             If a component's default annotation is named but not registered here; the
             message names the command that registers it.
         genome.io.chimera.AmbiguousDefaultAnnotationError
@@ -244,7 +244,7 @@ class Genome(AlignerMixin, MotifScanMixin):
         genome.io.completion.RegistrationError
             If the chimera's directory holds a build that cannot be trusted as finished,
             or the FASTA just built does not carry the sequences its components predict.
-        genome.io.gtf.ChromosomeMismatchError
+        genome.io.annotation.registration.ChromosomeMismatchError
             If the merged annotation names a sequence the built FASTA does not carry.
         genome.external.ToolNotFoundError
             If ``samtools``, ``faToTwoBit`` or ``twoBitInfo`` are not on ``PATH``.
@@ -325,14 +325,14 @@ class Genome(AlignerMixin, MotifScanMixin):
 
         Returns
         -------
-        genome.io.gtf.GeneList
+        genome.io.annotation.registry.GeneList
             The category, its gene ids, and what contributed them.
 
         Raises
         ------
         ValueError
             If ``annotation`` is omitted and this genome has no **Default annotation**.
-        genome.io.gtf.AnnotationNotRegisteredError
+        genome.io.annotation.registry.AnnotationNotRegisteredError
             If that annotation is not registered here.
         genome.gene_list.NoGeneCategoriesError
             If no curated gene list ships for it.
@@ -365,14 +365,14 @@ class Genome(AlignerMixin, MotifScanMixin):
 
         Returns
         -------
-        tuple of genome.io.gtf.GeneList
+        tuple of genome.io.annotation.registry.GeneList
             One entry per declared category. Never empty.
 
         Raises
         ------
         ValueError
             If ``annotation`` is omitted and this genome has no **Default annotation**.
-        genome.io.gtf.AnnotationNotRegisteredError
+        genome.io.annotation.registry.AnnotationNotRegisteredError
             If that annotation is not registered here.
         genome.gene_list.NoGeneCategoriesError
             If no curated gene list ships for it.
@@ -423,9 +423,9 @@ class Genome(AlignerMixin, MotifScanMixin):
             If no census ships for that species; the message names the ones that do.
         ValueError
             If ``annotation`` is omitted and this genome has no **Default annotation**.
-        genome.io.gtf.AnnotationNotRegisteredError
+        genome.io.annotation.registry.AnnotationNotRegisteredError
             If that annotation is not registered here.
-        genome.io.gtf.NoGeneFeaturesError
+        genome.io.annotation.stems.NoGeneFeaturesError
             If its database holds no gene at all.
 
         Examples
@@ -479,9 +479,9 @@ class Genome(AlignerMixin, MotifScanMixin):
             do.
         ValueError
             If ``annotation`` is omitted and this genome has no **Default annotation**.
-        genome.io.gtf.AnnotationNotRegisteredError
+        genome.io.annotation.registry.AnnotationNotRegisteredError
             If that annotation is not registered here.
-        genome.io.gtf.NoGeneFeaturesError
+        genome.io.annotation.stems.NoGeneFeaturesError
             If its database holds no gene at all.
 
         Examples
@@ -509,7 +509,7 @@ class Genome(AlignerMixin, MotifScanMixin):
 
         Raises
         ------
-        genome.io.gtf.AnnotationNotRegisteredError
+        genome.io.annotation.registry.AnnotationNotRegisteredError
             If the default annotation is not registered here.
 
         Examples

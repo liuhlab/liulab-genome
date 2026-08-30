@@ -95,7 +95,7 @@ def merged_annotation_name(annotations: Sequence[str]) -> str:
     components, and written down in its own record besides. And it is not asked to carry
     *which* components contributed — a chimera with a component that contributes nothing
     spells the same name a different subset would — which is why
-    :func:`~genome.io.gtf.register_merged_gtf` adopts nothing from disk and writes the
+    :func:`~genome.io.annotation.registration.register_merged_gtf` adopts nothing from disk and writes the
     annotation every time it runs.
 
     Parameters

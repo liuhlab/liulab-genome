@@ -35,8 +35,8 @@ class AlignerMixin:
         ----------
         gtf : str, optional
             Name of a GTF annotation registered on this genome (see
-            :meth:`~genome.io.gtf.AnnotationRegistry.register_path`). Its path is
-            resolved via :meth:`~genome.io.gtf.AnnotationRegistry.path` and passed to
+            :meth:`~genome.io.annotation.registry.AnnotationRegistry.register_path`). Its path is
+            resolved via :meth:`~genome.io.annotation.registry.AnnotationRegistry.path` and passed to
             STAR; the index is written to a per-annotation directory
             ``index/star_<gtf>/``, so different annotations build independent indexes.
             Omitted, this genome's **Default annotation**

@@ -21,10 +21,14 @@ import pytest
 from genome import Genome
 from genome.chimera import split_suffixed
 from genome.io import fetch as fetch_mod
-from genome.io import gtf as gtf_mod
+from genome.io.annotation import (
+    AnnotationNotRegisteredError,
+    ChromosomeMismatchError,
+    annotation_dir,
+)
+from genome.io.annotation import registration as registration_mod
 from genome.io.chimera import AmbiguousDefaultAnnotationError, read_chimera_details
 from genome.io.completion import read_record
-from genome.io.gtf import AnnotationNotRegisteredError, ChromosomeMismatchError, annotation_dir
 from genome.io.utils import sha256_file
 
 from .conftest import (
@@ -415,7 +419,9 @@ def test_a_misspelled_merge_is_refused_before_registration_and_nothing_is_ever_f
     components = [chimera_component(name, with_annotation=True) for name in ("tinyCe", "tinySc")]
     with pytest.MonkeyPatch.context() as scoped:
         scoped.setattr(
-            gtf_mod, "suffixed", lambda chromosome, component, separator: f"{chromosome}__wrong"
+            registration_mod,
+            "suffixed",
+            lambda chromosome, component, separator: f"{chromosome}__wrong",
         )
         with pytest.raises(ChromosomeMismatchError, match="wrong"):
             Genome.chimera(*components)
