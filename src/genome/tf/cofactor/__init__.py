@@ -34,6 +34,7 @@ Examples
 AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Caenorhabditis_elegans_Cof
 """
 
+from genome.metadata import species_slug
 from genome.tf.cofactor.table import (
     ANIMALTFDB,
     BOTH,
@@ -56,7 +57,6 @@ from genome.tf.cofactor.table import (
     cofactor_species,
     cofactor_table,
     parse_cofactor_table,
-    species_slug,
 )
 
 __all__ = [

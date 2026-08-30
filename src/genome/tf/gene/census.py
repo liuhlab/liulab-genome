@@ -81,6 +81,12 @@ from typing import Any
 
 import pandas as pd
 
+# Re-exported rather than defined here. Naming a file after a species is a convention
+# every shipped-data directory in this package shares and none of them owns, so it lives
+# beside the curated tables the species is read from — `genome.metadata`, which every
+# context may read. Kept importable from here because this is where it used to be.
+from genome.metadata import species_slug
+
 #: Directory inside the package holding one **TF gene table** per species, plus the
 #: provenance table beside them.
 CENSUS_SUBDIR = "data/tf_gene"
@@ -493,37 +499,6 @@ def tf_gene_table(species: str) -> TFGeneTable | None:
         provenance=provenance,
         origin=origin,
     )
-
-
-def species_slug(species: str) -> str:
-    """Return the file-name spelling of ``species``.
-
-    Lower case, with each run of anything that is not a letter or a digit collapsed
-    to one underscore. It is the one place the assembly metadata table's spelling of
-    a species and a census's file name are reconciled, so neither has to be written
-    the other's way.
-
-    Parameters
-    ----------
-    species : str
-        A species name, in any spelling.
-
-    Returns
-    -------
-    str
-        Its slug.
-
-    Examples
-    --------
-    >>> species_slug("Homo sapiens")
-    'homo_sapiens'
-    >>> species_slug("Escherichia coli HT115")
-    'escherichia_coli_ht115'
-    >>> species_slug("homo_sapiens")
-    'homo_sapiens'
-    """
-    kept = "".join(character if character.isalnum() else " " for character in species.lower())
-    return "_".join(kept.split())
 
 
 def _read_metadata(text: str, *, origin: str) -> tuple[CensusProvenance, ...]:

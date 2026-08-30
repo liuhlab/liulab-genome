@@ -74,8 +74,9 @@ from types import MappingProxyType
 
 import pandas as pd
 
+from genome.metadata import species_slug
 from genome.tf.cofactor import BOTH, SOURCES, UNIFORM_COLUMNS, CofactorTable, cofactor_table
-from genome.tf.gene import FALSE_CELL, TRUE_CELL, TFGeneTable, species_slug, tf_gene_table
+from genome.tf.gene import FALSE_CELL, TRUE_CELL, TFGeneTable, tf_gene_table
 from genome.tf.motif.jaspar import DEFAULT_RELEASE, DEFAULT_TAX_GROUP
 
 #: Directory inside the package holding one **Motif link** table per species per

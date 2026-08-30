@@ -174,6 +174,7 @@ from genome.metadata import (
     assembly_metadata,
     list_annotation_metadata,
     lookup_annotation,
+    species_slug,
 )
 from genome.tf.cofactor import UNIFORM_COLUMNS as COFACTOR_UNIFORM_COLUMNS
 from genome.tf.cofactor import (
@@ -188,7 +189,6 @@ from genome.tf.gene import (
     TFGeneTable,
     census_metadata,
     census_species,
-    species_slug,
     tf_gene_table,
 )
 
