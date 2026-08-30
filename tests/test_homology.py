@@ -997,6 +997,10 @@ def test_nothing_this_package_publishes_is_derived_through_homology() -> None:
     Python. Nothing it prints outlives the process, and no list that ships in the wheel
     passes through it. Every other module keeps the ban whole — a reader of this list
     should be able to say, of any name added to it, which table it could not build.
+
+    The whole tree is walked rather than its top level, so an import deferred into a
+    function body or hidden under ``TYPE_CHECKING`` is caught too — a ban that only the
+    laziest evasion defeats is not a structural guarantee.
     """
     package = Path(__file__).resolve().parents[1] / "src" / "genome"
     served = {package / "cli.py"}
@@ -1004,7 +1008,7 @@ def test_nothing_this_package_publishes_is_derived_through_homology() -> None:
     for path in sorted(package.rglob("*.py")):
         if path.parent.name == "homology" or path in served:
             continue
-        for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Import):
                 names = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
