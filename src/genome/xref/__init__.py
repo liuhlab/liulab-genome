@@ -40,7 +40,7 @@ out of another's bytes, so ``XrefSet("Homo sapiens")`` matches no symbol at all 
 naming the source that does.
 
 Putting an answer into your own annotation's gene ids is the call that already existed,
-:meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which is why the hub is the
+:meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids`, which is why the hub is the
 **Gene id stem**: what comes out of here goes straight in there.
 
 Examples
@@ -53,8 +53,6 @@ Examples
 ['ENSG00000141510']
 """
 
-from genome.io.registration import xref_data_dir
-from genome.io.results import ResolvedStems, ResolvedSymbols, ResolvedXrefIds, SymbolMatch
 from genome.xref.alliance import ALLIANCE, AllianceFileError
 from genome.xref.bgi import ALLIANCE_BGI, BgiFileError
 from genome.xref.ensembl import ENSEMBL_TSV, EnsemblTsvFileError
@@ -96,9 +94,14 @@ from genome.xref.symbols import (
 )
 from genome.xref.xref import (
     NamespaceNotCarriedError,
+    ResolvedStems,
+    ResolvedSymbols,
+    ResolvedXrefIds,
+    SymbolMatch,
     XrefSet,
     XrefSetNotDownloadedError,
     XrefTableError,
+    xref_data_dir,
     xref_prepare_command,
     xref_set_dir,
     xref_slice_name,

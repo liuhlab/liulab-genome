@@ -118,7 +118,7 @@ def gene_id_stem(gene_id: str) -> str:
     Everything before the first ``.``, and the whole id when it carries none, which is what
     makes an unversioned id its own stem. The **Annotation** half of this package reduces a
     GTF's gene ids by the same rule, which is what lets a stem answered here be handed
-    straight to :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`.
+    straight to :meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids`.
 
     Idempotent: the stem of a stem is that stem.
 

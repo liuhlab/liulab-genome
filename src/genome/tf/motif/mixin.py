@@ -1,4 +1,4 @@
-"""Mixin giving a :class:`~genome.genome.Genome` one scan over **Region**s.
+"""Mixin giving a :class:`~genome.assembly.genome.Genome` one scan over **Region**s.
 
 **The one place region-local positions become Chromosome coordinates.** Scanning a
 fetched **Region** answers in the frame of the bases that were handed to the engine,
@@ -8,7 +8,7 @@ the hit strand as well. That arithmetic is written once, here, rather than in ev
 notebook that ever scanned a peak set — it is where the off-by-ones live.
 
 The dependency runs **Genome to motif and never back**: this module names
-:class:`~genome.genome.Genome` under type checking alone, so a **Motif set** stays usable
+:class:`~genome.assembly.genome.Genome` under type checking alone, so a **Motif set** stays usable
 with no genome open and a motif goes on belonging to no **Assembly**. The scan itself is
 the one every other entry point takes, called once with every region's bases
 (:meth:`~genome.tf.motif.motif.MotifSet.scan_sequences`) — so the **Hit table** that comes
@@ -40,12 +40,12 @@ import pandas as pd
 from genome.region import Region
 from genome.tf.motif.motif import DEFAULT_THRESHOLD
 from genome.tf.motif.scan import HIT_DTYPES, HIT_PROVENANCE
-from genome.tf.motif.workers import DEFAULT_WORKERS
+from genome.workers import DEFAULT_WORKERS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the dependency runs one way
     from pathlib import Path
 
-    from genome.genome import Genome
+    from genome.assembly.genome import Genome
     from genome.tf.motif.background import BackgroundArg
     from genome.tf.motif.motif import MotifSet
 
@@ -80,7 +80,7 @@ class MotifScanMixin:
         """Scan **Region**s of this genome and return the **Hit table**, in its coordinates.
 
         Each region's bases are fetched exactly as
-        :meth:`~genome.genome.Genome.fetch_sequence` returns them — reverse-complemented
+        :meth:`~genome.assembly.genome.Genome.fetch_sequence` returns them — reverse-complemented
         for a ``-`` region — scanned in one call, and the hits lifted into the assembly's
         frame. ``sequence_name`` carries the **Chromosome** name as *this assembly* spells
         it, since a region whose chromosome the assembly does not carry raises rather than
@@ -134,7 +134,7 @@ class MotifScanMixin:
             How many processes to shard the scan across — see
             :meth:`~genome.tf.motif.motif.MotifSet.scan_sequences`. **One by default**, as
             everywhere in the library; ``None`` resolves the count with
-            :func:`~genome.tf.motif.workers.resolve_workers`, which is what an allocation
+            :func:`~genome.workers.resolve_workers`, which is what an allocation
             on a cluster is read by. Regions are distributed whole, so **more than one
             produces the identical table**, lifted coordinates included.
         output : None

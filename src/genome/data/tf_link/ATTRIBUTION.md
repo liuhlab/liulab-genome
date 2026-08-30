@@ -37,7 +37,7 @@ Three profiles stay unlinked, each correctly: `MA0149.1 EWSR1-FLI1` is an oncoge
 gene; `MA2503.1 Banp` is not in AnimalTFDB; and **`MA0611.3 Dux` is not a rename** — JASPAR's `Dux`
 is UniProt A1JVI8, **MGI:3703875**, AnimalTFDB's `Duxf3` is ENSMUSG00000075046, **MGI:1921649**, and
 two MGI accessions are two genes, so an alias row would assert an identity MGI denies. That question
-is closed, and `tests/test_tf_link.py` pins it.
+is closed, and `tests/tf/test_tf_link.py` pins it.
 
 ## Rebuilding, and what no test proves
 
@@ -45,5 +45,5 @@ is closed, and `tests/test_tf_link.py` pins it.
 lives outside the wheel, fails loudly when JASPAR re-spells a table or a column, and writes
 byte-stable output, so a re-release is a re-run and a reviewable diff. **No test proves a shipped
 table still matches JASPAR, and none can**: regenerating one needs a download and CI has no network,
-the limitation ADR-0011 already accepts. The counts above are pinned in `tests/test_tf_link.py`,
+the limitation ADR-0011 already accepts. The counts above are pinned in `tests/tf/test_tf_link.py`,
 turning silent drift into a loud failure — the most that is available.

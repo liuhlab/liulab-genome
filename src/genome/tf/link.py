@@ -64,7 +64,6 @@ Examples
 
 from __future__ import annotations
 
-import gzip
 import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -74,9 +73,19 @@ from types import MappingProxyType
 
 import pandas as pd
 
-from genome.metadata import species_slug
+# ``VALUE_SEPARATOR`` is re-exported rather than defined here: how a cell spells two values
+# is a convention every **Shipped table** in this package shares and none of them owns, so it
+# lives with the reader that holds every such table to it. Kept importable from here, and
+# from :mod:`genome.tf`, because this is where it used to be.
+from genome.shipped import (
+    TRUE_CELL,
+    VALUE_SEPARATOR,
+    ShippedTable,
+    ShippedTableError,
+    species_slug,
+)
 from genome.tf.cofactor import BOTH, SOURCES, UNIFORM_COLUMNS, CofactorTable, cofactor_table
-from genome.tf.gene import FALSE_CELL, TRUE_CELL, TFGeneTable, tf_gene_table
+from genome.tf.gene import TFGeneTable, tf_gene_table
 from genome.tf.motif.jaspar import DEFAULT_RELEASE, DEFAULT_TAX_GROUP
 
 #: Directory inside the package holding one **Motif link** table per species per
@@ -123,14 +132,14 @@ LINK_COLUMNS: tuple[str, ...] = (
 #: ``complex`` otherwise, so a heterodimer matrix is never read as a monomer's.
 MONOMER, COMPLEX = "monomer", "complex"
 
-#: What separates one value from the next inside a cell — a complex's partners, and a
-#: profile's tax ids. A semicolon and never a tab: the file carries no quoting.
-VALUE_SEPARATOR = ";"
-
 #: The shape of a versioned gene id, tried only after a **Gene id stem** and a symbol
 #: have both been looked for. Lambert's census carries clone-style symbols — ``AC023509.3``
 #: is one — so a name of this shape is a symbol first and a versioned id second.
 _VERSIONED_GENE_ID = re.compile(r"(?P<stem>[^.]+)\.\d+\w*")
+
+#: What repairs a broken table, and the half of every shared refusal that is this table's own.
+#: A table is one species and one **Release**, so the repair says which of each to regenerate.
+_REPAIR = "re-run scripts/build_tf_links.py for that species and release"
 
 #: Where a **Cofactor table** keeps the flag and the publisher, among the uniform columns
 #: every such table leads with. Read off that tuple rather than written down again, so the
@@ -140,7 +149,7 @@ _COFACTOR_FLAG = UNIFORM_COLUMNS.index("is_cofactor")
 _COFACTOR_SOURCE = UNIFORM_COLUMNS.index("source")
 
 
-class MotifLinkTableError(ValueError):
+class MotifLinkTableError(ShippedTableError):
     r"""A shipped **Motif link** table cannot be read, so it is not allowed to answer.
 
     A **packaging defect** and not a caller error: these files ship inside the package and
@@ -243,7 +252,7 @@ class VersionedGeneIdError(ValueError):
     ``gencode_v50lift37``, and the census reached one verdict for the stem. Answering a
     versioned id would therefore answer for the stem — which names a gene the caller did
     not — so it is refused, in the same spirit as
-    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which answers a stem with
+    :meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids`, which answers a stem with
     *every* gene id it names and never picks one.
 
     The message names the stem to pass instead.
@@ -618,6 +627,30 @@ class MotifLinkTable:
         )
 
 
+#: One **Motif link** table as a **Shipped table**, one per species per **Release**. It
+#: names **no key**, and that is the declaration doing its job: a gene has as many rows here
+#: as JASPAR has profiles for it, so the duplicate-key refusal every other table wants would
+#: reject every table that ships. The six columns that name the gene, the profile and where
+#: the row came from are required; the rest are checked below, where their meaning is.
+#: ``scripts/build_tf_links.py`` writes a table through this same declaration, so the file it
+#: produces is held to what this module will hold it to before it reaches disk.
+LINK_FORMAT = ShippedTable(
+    resource=f"{LINK_SUBDIR}/{{slug}}.{RELEASE_PREFIX}{{release}}{LINK_SUFFIX}",
+    columns=LINK_COLUMNS,
+    noun="link table",
+    repair=_REPAIR,
+    error=MotifLinkTableError,
+    unit="link",
+    absence="no motif answers for any of these genes",
+    required=("release", "species", "gene_id_stem", "symbol", "motif_id", "motif_name"),
+    flags=("is_cross_species",),
+    because=(
+        "Every link names the gene it answers for, the profile that answers, and the release "
+        "and species it was built from"
+    ),
+)
+
+
 @cache
 def shipped_link_tables() -> tuple[tuple[str, str], ...]:
     """Return every **Motif link** table that ships, as ``(species slug, release)``.
@@ -702,13 +735,8 @@ def motif_link_table(
     slug = species_slug(species)
     if tax_group != LINK_TAX_GROUP or (slug, release) not in shipped_link_tables():
         return None
-    resource = files("genome").joinpath(
-        LINK_SUBDIR, f"{slug}.{RELEASE_PREFIX}{release}{LINK_SUFFIX}"
-    )
-    origin = str(resource)
-    table = parse_motif_link_table(
-        gzip.decompress(resource.read_bytes()).decode("utf-8"), source=origin
-    )
+    origin = LINK_FORMAT.origin(slug=slug, release=release)
+    table = parse_motif_link_table(LINK_FORMAT.text(slug=slug, release=release), source=origin)
     if species_slug(table.species) != slug or table.release != release:
         raise MotifLinkTableError(
             f"{origin} is named for {slug!r} and release {release!r} and its rows say "
@@ -766,34 +794,10 @@ def parse_motif_link_table(text: str, *, source: str) -> MotifLinkTable:
     >>> table.species, table.release, table.links[0].motif_name
     ('Homo sapiens', '2026', 'TP53')
     """
-    lines = text.split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
-    if not lines:
-        raise MotifLinkTableError(
-            f"{source} is empty. A link table carries a header and at least one link; absence "
-            f"is spelled by shipping no file at all, and an empty one is the second spelling of "
-            f"it that would read as *no motif answers for any of these genes*. Re-run "
-            f"scripts/build_tf_links.py for that species and release, or remove the file."
-        )
-    header = tuple(lines[0].split("\t"))
-    if header != LINK_COLUMNS:
-        raise MotifLinkTableError(
-            f"{source} carries the columns {list(header)} where every link table carries "
-            f"{list(LINK_COLUMNS)}. Identical headers are what let two tables concatenate into "
-            f"one frame — re-run scripts/build_tf_links.py, which writes them."
-        )
     links = tuple(
-        _read_link(line, number, source=source)
-        for number, line in enumerate(lines[1:], start=2)
-        if line
+        _read_link(row, number, source=source)
+        for number, row in enumerate(LINK_FORMAT.parse(text, origin=source).mappings(), start=2)
     )
-    if not links:
-        raise MotifLinkTableError(
-            f"{source} declares columns and no links. A table linking nothing says no more than "
-            f"an absent file does — re-run scripts/build_tf_links.py for that species and "
-            f"release, or remove the file."
-        )
     return MotifLinkTable(
         species=_one_value(links, "species", source=source),
         release=_one_value(links, "release", source=source),
@@ -824,7 +828,7 @@ def motif_links(
     may name more than one gene id in one **Annotation**, so answering ``ENSG00000182378.14``
     would answer for a stem that also names ``ENSG00000182378.14_PAR_Y``, and this package
     never picks a gene the caller did not name (see
-    :meth:`~genome.io.gtf.AnnotationRegistry.resolve_gene_ids`, which crosses that gap in
+    :meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids`, which crosses that gap in
     the other direction). Pass the stem, and the error says which one.
 
     **The species is passed and never inferred.** A table is named by a species and a
@@ -914,24 +918,8 @@ def _nothing_ships(species: str, release: str, tax_group: str) -> str:
     )
 
 
-def _read_link(line: str, number: int, *, source: str) -> MotifLink:
-    """Read one link's row, holding every cell to what a shipped table promises."""
-    cells = line.split("\t")
-    if len(cells) != len(LINK_COLUMNS):
-        raise MotifLinkTableError(
-            f"{source} line {number} holds {len(cells)} cells where the header declares "
-            f"{len(LINK_COLUMNS)}. A link table is a plain TSV with no quoting, so a cell "
-            f"carrying a tab is a defect in the generator rather than something to parse "
-            f"around — re-run scripts/build_tf_links.py."
-        )
-    row = dict(zip(LINK_COLUMNS, cells, strict=True))
-    for column in ("release", "species", "gene_id_stem", "symbol", "motif_id", "motif_name"):
-        if not row[column]:
-            raise MotifLinkTableError(
-                f"{source} line {number} leaves the {column!r} column blank. Every link names "
-                f"the gene it answers for, the profile that answers, and the release and "
-                f"species it was built from — re-run scripts/build_tf_links.py."
-            )
+def _read_link(row: Mapping[str, str], number: int, *, source: str) -> MotifLink:
+    """Read one link's row, holding what only a link means to what a shipped table promises."""
     if row["role"] not in (MONOMER, COMPLEX):
         raise MotifLinkTableError(
             f"{source} line {number} spells its role {row['role']!r}, and a link is {MONOMER!r} "
@@ -946,13 +934,6 @@ def _read_link(line: str, number: int, *, source: str) -> MotifLink:
             f"complex names at least one partner and a monomer names none — a complex with none "
             f"beside it is the monomer reading with a label on it. Re-run "
             f"scripts/build_tf_links.py."
-        )
-    if row["is_cross_species"] not in (TRUE_CELL, FALSE_CELL):
-        raise MotifLinkTableError(
-            f"{source} line {number} spells its cross-species flag "
-            f"{row['is_cross_species']!r}, and a flag is spelled {TRUE_CELL!r} or "
-            f"{FALSE_CELL!r}, as a census spells its own. That flag is the only thing a caller "
-            f"needing species-matched profiles can filter on — re-run scripts/build_tf_links.py."
         )
     return MotifLink(
         release=row["release"],

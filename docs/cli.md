@@ -15,6 +15,44 @@ $ genome version --json
 {"version": "2026.6.0"}
 ```
 
+## The command tree
+
+Three commands belong to no topic — `version`, `revcomp` and `doctor` — and everything
+else hangs off a sub-app named for the package it ships from, so the tree says what the
+declaration order used to only hint at:
+
+| sub-app | commands |
+|---|---|
+| `genome assembly` | `register`, `verify`, `table-row` |
+| `genome annotation` | `register`, `register-gtf`, `list`, `gene-list`, `gene-categories` |
+| `genome tf` | `gene-list`, `cofactor-list` |
+| `genome xref` | `ids`, `symbols` |
+| `genome homology` | `links` |
+| `genome motif` | `scan` |
+
+`homology` rather than `orthology` because a sub-app is named for the module it ships
+from, and `motif` hangs off the root rather than off `tf` because a motif belongs to no
+assembly and a motif set is usable with no genome open.
+
+**The flat spelling each of these replaced still runs for one release** — `genome
+tf-gene-list` and the thirteen like it — hidden from `genome --help` and printing a
+deprecation notice on stderr, so `--json` on stdout still parses for a script that has not
+moved yet. They are removed in the release after this one, so move now.
+
+## `genome revcomp <sequence>`
+
+Reverse-complement a DNA sequence. Case is preserved; a character outside the `DNA`
+alphabet exits `2` naming it. The alphabet is the type's own — `DNA.ALPHABET`, read at the
+boundary rather than spelled again here — so the [`outside_alphabet`](sequences.md#construction)
+you would call yourself is the check this command applies.
+
+```console
+$ genome revcomp ATCG
+CGAT
+$ genome revcomp aTcG --json
+{"input": "aTcG", "reverse_complement": "CgAt"}
+```
+
 ## `genome doctor`
 
 Report which native tools are on `PATH`, and at what versions. Exits `1` naming the
@@ -31,12 +69,12 @@ twoBitInfo: installed; reports no version
 STAR and chromap are not checked here: they are optional, and each one checks for itself
 when you ask it to build an index.
 
-## `genome register <assembly>`
+## `genome assembly register <assembly>`
 
 Prepare an assembly on disk — fetch, verify, index, record — and print where it landed.
 
 ```console
-$ genome register sacCer3
+$ genome assembly register sacCer3
 registered sacCer3 in /data/liulab_data/genome/sacCer3
   source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/sacCer3.fa.gz
   sha256  6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3
@@ -53,10 +91,10 @@ Running it again on a registered assembly downloads nothing.
 A directory that cannot be trusted exits `1` naming the file and the repair:
 
 ```console
-$ genome register sacCer3
+$ genome assembly register sacCer3
 error: /data/liulab_data/genome/sacCer3 disagrees with its .completion.json:
 sacCer3.2bit: recorded 3145728 bytes, found 0. Something changed these files after
-they were registered. Re-register it with `genome register sacCer3 --force`.
+they were registered. Re-register it with `genome assembly register sacCer3 --force`.
 ```
 
 `--force` keeps an unpacked FASTA whose checksum still matches and rebuilds only the
@@ -70,7 +108,7 @@ An assembly named after two or more registered assemblies, sorted and joined by 
 annotation included, and nothing is downloaded.
 
 ```console
-$ genome register ce11_ecHT115
+$ genome assembly register ce11_ecHT115
 registered ce11_ecHT115 in /data/liulab_data/genome/ce11_ecHT115
   components  ce11, ecHT115
   sha256  0f3d6d5e…
@@ -82,13 +120,48 @@ There is no flag for listing the parts — the name carries them. A component th
 has not prepared exits `1` naming the command that prepares it, and components typed in
 the wrong order exit `1` naming the canonical spelling.
 
-## `genome register-annotation <assembly> <name>`
+## `genome assembly verify <assembly>`
+
+Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is
+the deliberate full-file re-check; registering and reopening go by size alone. Exits `1`
+on a mismatch.
+
+```console
+$ genome assembly verify sacCer3
+/data/liulab_data/genome/sacCer3/sacCer3.fa: sha256 6ff72f07… matches the digest pinned for it
+
+$ genome assembly verify sacCer3 --fasta /tmp/from-a-colleague.fa
+error: sha256 mismatch for /tmp/from-a-colleague.fa: expected 6ff72f07…, got 9316629b….
+```
+
+`--fasta` checks any file against the official row — useful for a copy you were handed,
+before you build anything on it.
+
+A chimera is also checked against its components: the closing line reads `unchanged` or,
+where a digest was missing on one side, `unknown`. A component that is no longer the one
+the chimera was built from exits `1`.
+
+## `genome assembly table-row <assembly>`
+
+Download an assembly, unpack it, hash the unpacked FASTA, and print the line to paste
+into the shipped metadata table — how the checksum column gets filled in. A checksum the
+table already pins is reported, never enforced.
+
+```bash
+$ genome assembly table-row sacCer3
+sacCer3	Saccharomyces cerevisiae	sacCer3	R64-1-1	GCF_000146045.2	559292	https://…/sacCer3.fa.gz	6ff72f07…
+```
+
+A chimera exits `1` before anything is downloaded: its row carries the name and nothing
+else, so there is no row here to compute. Check one with `genome assembly verify` instead.
+
+## `genome annotation register <assembly> <name>`
 
 Register one of the annotations the table lists for an assembly: fetch, check the
 checksum and the chromosome names, build the gffutils database, record it.
 
 ```console
-$ genome register-annotation sacCer3 ensgene_v101
+$ genome annotation register sacCer3 ensgene_v101
 registered ensgene_v101 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/ensgene_v101
   source  https://hgdownload.soe.ucsc.edu/goldenPath/sacCer3/bigZips/genes/sacCer3.ensGene.gtf.gz
   sha256  d3f33fbf97deef26e2495f709f1c5bb2e2e1bf1ce71fb80758c2c9de42ad7026
@@ -96,13 +169,13 @@ registered ensgene_v101 for sacCer3 in /data/liulab_data/genome/sacCer3/gtf/ensg
   chromosomes checked — every name the GTF uses is one the assembly carries
 ```
 
-## `genome register-gtf <assembly> <path> <name>`
+## `genome annotation register-gtf <assembly> <path> <name>`
 
 The same, for a GTF the table does not list. Nothing is downloaded and no checksum is
 compared against; `<name>` is what addresses it from then on. A `.gz` is decompressed.
 
 ```console
-$ genome register-gtf sacCer3 ~/annotations/sacCer3.WS298.gtf wormbase_ws298
+$ genome annotation register-gtf sacCer3 ~/annotations/sacCer3.WS298.gtf wormbase_ws298
 ```
 
 Both registration commands share these options:
@@ -117,31 +190,31 @@ The last line of the output always says whether the chromosome names were checke
 if not, why: because you stood the check down, or because the assembly is not registered
 yet and there was no `chrom.sizes` to check against. Only the second is worth acting on.
 
-## `genome annotations <assembly>`
+## `genome annotation list <assembly>`
 
 What the table offers against what is registered here. Downloads and prepares nothing, so
 it works for an assembly you have never registered.
 
 ```console
-$ genome annotations hg38
+$ genome annotation list hg38
 annotations for hg38 in /data/liulab_data/genome/hg38
   gencode_v50  offered, not registered  GENCODE v50
   mine         registered, not offered
-default: gencode_v50 — not registered here; register it with `genome register-annotation hg38 gencode_v50`
+default: gencode_v50 — not registered here; register it with `genome annotation register hg38 gencode_v50`
 ```
 
 An annotation that is here but cannot be trusted reads as `broken`, with the problem and
 the repair on the line below. Exit stays `0` — one broken annotation never hides the
 others.
 
-## `genome gene-list <assembly> <category>`
+## `genome annotation gene-list <assembly> <category>`
 
 Print the gene ids an annotation puts in one [gene category](genome.md#which-genes-are-in-a-category),
 one per line. Only the ids go to stdout, so the output pipes; the heading and the
 per-source attribution go to stderr.
 
 ```console
-$ genome gene-list ce11 rRNA > rrna.txt
+$ genome annotation gene-list ce11 rRNA > rrna.txt
 rRNA for ce11 / wormbase_ws298
   wormbase_ws298  20
 ```
@@ -150,7 +223,7 @@ rRNA for ce11 / wormbase_ws298
 one. `--json` carries the same answer with the sources kept apart:
 
 ```console
-$ genome gene-list ce11_ecHT115 rRNA --json
+$ genome annotation gene-list ce11_ecHT115 rRNA --json
 {"assembly": "ce11_ecHT115", "annotation": "wormbase_ws298+refseq_rs_2025_06_26",
  "category": "rRNA", "gene_ids": ["WBGene00004512", …], "sources": [{"component": "ce11", …}]}
 ```
@@ -159,21 +232,21 @@ Exits `1` when the annotation is not registered here, when no curated gene list 
 it, and when it declares categories but not this one — three different facts, each with
 its own message. None of them prints an empty list of genes.
 
-## `genome gene-categories <assembly>`
+## `genome annotation gene-categories <assembly>`
 
 Which categories that annotation declares, and how many genes are in each — what
-`genome gene-list` may be asked for. A merged annotation shows the per-component split.
+`genome annotation gene-list` may be asked for. A merged annotation shows the per-component split.
 
 ```console
-$ genome gene-categories ce11_ecHT115
+$ genome annotation gene-categories ce11_ecHT115
 categories for ce11_ecHT115 / wormbase_ws298+refseq_rs_2025_06_26
   rRNA  39  (ce11: 23, ecHT115: 16)
 ```
 
 `--json` emits every category with its gene ids and its sources — the same answer
-`genome gene-list` gives for one of them, for all of them at once.
+`genome annotation gene-list` gives for one of them, for all of them at once.
 
-## `genome tf-gene-list <assembly>`
+## `genome tf gene-list <assembly>`
 
 Print the gene ids a published census judges transcription factors, one per line — Lambert
 et al. 2018 for human, AnimalTFDB 4.0 for mouse, chosen by the species the assembly's own
@@ -181,7 +254,7 @@ metadata row names and never by anything you pass. Only the ids go to stdout, so
 output pipes; the heading and the census's attribution go to stderr.
 
 ```console
-$ genome tf-gene-list hg38 > tf_genes.txt
+$ genome tf gene-list hg38 > tf_genes.txt
 TF genes for hg38 / gencode_v50 (Homo sapiens)
   Lambert et al. 2018 v_1.01 (PMID 29425488) — https://humantfs.ccbr.utoronto.ca/download/v_1.01/DatabaseExtract_v_1.01.csv
 ```
@@ -203,7 +276,7 @@ under their own publishers' vocabularies, which are not crosswalked — group by
 family, the provenance to cite, and the stems that resolved to nothing.
 
 ```console
-$ genome tf-gene-list hg38 --json
+$ genome tf gene-list hg38 --json
 {"assembly": "hg38", "annotation": "gencode_v50", "species": "Homo sapiens",
  "provenance": {"publisher": "Lambert et al. 2018", "version": "v_1.01", "pubmed_id": 29425488, …},
  "genes": [{"gene_id_stem": "ENSG00000137203", "gene_ids": ["ENSG00000137203.12"],
@@ -225,21 +298,21 @@ Exits `1` when the annotation is not registered here, when no census ships for t
 assembly's species, and when nothing says what species the assembly is — three different
 facts, each with its own message. None of them prints an empty list of genes.
 
-## `genome tf-cofactor-list <assembly>`
+## `genome tf cofactor-list <assembly>`
 
 Print the gene ids a publisher lists as transcription cofactors, one per line — the other
-half of the machinery, shaped exactly like `genome tf-gene-list`. A cofactor is a chromatin
+half of the machinery, shaped exactly like `genome tf gene-list`. A cofactor is a chromatin
 remodeller, a histone-modifying enzyme, a Mediator subunit: it recognises no sequence of its
 own, so no scan will ever find it, but which genes are cofactors is published. The table is
 chosen by the species the assembly's own metadata row names, never by anything you pass.
 
 ```console
-$ genome tf-cofactor-list mm39 > cofactors.txt
+$ genome tf cofactor-list mm39 > cofactors.txt
 TF cofactors for mm39 / gencode_vM39 (Mus musculus)
   AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Mus_musculus_Cof
 ```
 
-A third stderr line closes the account as `genome tf-gene-list`'s does: how many cofactors
+A third stderr line closes the account as `genome tf gene-list`'s does: how many cofactors
 and gene ids those came to, and how many gene id stems this annotation carries no gene for.
 Each of the mouse table's 970 stems is either a gene on stdout or on that count, never
 quietly dropped.
@@ -250,7 +323,7 @@ publisher's own classification, one provenance entry per publisher to cite, and 
 that resolved to nothing.
 
 ```console
-$ genome tf-cofactor-list mm39 --json
+$ genome tf cofactor-list mm39 --json
 {"assembly": "mm39", "annotation": "gencode_vM39", "species": "Mus musculus",
  "provenance": {"species": "Mus musculus", "ncbi_taxid": 10090, …,
                 "sources": [{"publisher": "AnimalTFDB", "version": "4.0", "pubmed_id": 36268869, …}]},
@@ -267,7 +340,7 @@ each entry's `source` says who listed the gene — `both` there is agreement tha
 a cofactor and nothing about how either publisher classified it. The vocabularies are not
 crosswalked: group by `animaltfdb_category` within one publisher, never across two.
 
-`genome tf-cofactor-list ce11` answers while `genome tf-gene-list ce11` exits `1`. AnimalTFDB
+`genome tf cofactor-list ce11` answers while `genome tf gene-list ce11` exits `1`. AnimalTFDB
 assessed worm cofactors and no publisher has released a worm TF census — the publishers'
 shape, not a defect here.
 
@@ -276,7 +349,7 @@ assembly's species — the message names the species that have one — and when 
 what species the assembly is. Three different facts, each with its own message. None of them
 prints an empty list of genes.
 
-## `genome xref <species> <ids>...`
+## `genome xref ids <species> <ids>...`
 
 Convert identifiers to and from gene id stems against one published xref set — the way a
 column of Entrez GeneIDs from a GEO series, UniProt accessions from a mass-spec run or HGNC
@@ -292,7 +365,7 @@ it belongs to, so `HGNC:11998` asked the wrong way answers *nothing found* rathe
 quietly turning around.
 
 ```console
-$ genome xref "Homo sapiens" --to-stems hgnc HGNC:11998 HGNC:13666 HGNC:10041 > stems.tsv
+$ genome xref ids "Homo sapiens" --to-stems hgnc HGNC:11998 HGNC:13666 HGNC:10041 > stems.tsv
 hgnc ids -> gene id stems for Homo sapiens (alliance 9.0.0)
   source  https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz
   2 resolved, 3 gene id stems, 1 this release names none for
@@ -324,7 +397,7 @@ them rather than by the identifier default, which for human carries none.
 ids that named nothing under `unresolved`.
 
 ```console
-$ genome xref "Homo sapiens" --from-stems uniprot ENSG00000141510.18 ENSG00000288541 --json
+$ genome xref ids "Homo sapiens" --from-stems uniprot ENSG00000141510.18 ENSG00000288541 --json
 {"species": "Homo sapiens", "source": "alliance", "release": "9.0.0", "namespace": "uniprot",
  "resolved": {"ENSG00000141510.18": ["P04637"]}, "unresolved": ["ENSG00000288541"],
  "xref_ids": ["P04637"]}
@@ -342,7 +415,7 @@ which is what a figure axis wants, and reaches the source that carries symbols �
 human, `alliance_bgi` for mouse and worm — without your naming it. Toward stems is not its
 mirror: a symbol also matches spellings the authority has retired, answers with every gene
 any of them names, and carries which kind matched — so it is
-[`genome match-symbols`](#genome-match-symbols-species-symbols) that answers it, and
+[`genome xref symbols`](#genome-xref-symbols-species-symbols) that answers it, and
 `--to-stems symbol` exits `2` naming that command. The `--to-stems` help lists the namespaces
 it does convert and no longer offers the one it refuses.
 
@@ -354,7 +427,7 @@ fetched (the message names the call to make on a login node), when the namespace
 the set carries (the message names the ones it does, and for `symbol` the source that does
 carry them), and when a directory holds a set an interrupted download left unfinished.
 
-## `genome match-symbols <species> <symbols>...`
+## `genome xref symbols <species> <symbols>...`
 
 Print the genes each gene symbol names, and which kind of spelling matched — the way a gene
 list copied out of a paper becomes usable without first finding its ids, and without the join
@@ -362,7 +435,7 @@ that silently drops every row spelling its gene the way the authority used to. N
 named and no genome is opened: a symbol is a name and not a place.
 
 ```console
-$ genome match-symbols "Homo sapiens" ARNTL ADCY3 Brca1 > genes.tsv
+$ genome xref symbols "Homo sapiens" ARNTL ADCY3 Brca1 > genes.tsv
 gene symbols -> gene id stems for Homo sapiens (hgnc 2026-07-07)
   source   https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt
   columns  asked, symbol, gene_id_stem, kind
@@ -377,7 +450,7 @@ Brca1
 ```
 
 **A symbol is matched, never converted**, which is why this is a command rather than a third
-direction of `genome xref`. Approved, previous *and* alias spellings are matched, every gene
+direction of `genome xref ids`. Approved, previous *and* alias spellings are matched, every gene
 id stem any of them names comes back, and each match says which kind of spelling it was.
 `ARNTL` is a spelling HGNC retired and reaches `BMAL1` anyway: of EpiFactors v2.0's 801 human
 rows, **31 spell their gene that way**, and an approved-only match drops exactly those.
@@ -399,7 +472,7 @@ working. `--case-insensitive` folds both sides and still answers with **every** 
 rather than picking one.
 
 ```console
-$ genome match-symbols "Homo sapiens" brca1 --case-insensitive --json
+$ genome xref symbols "Homo sapiens" brca1 --case-insensitive --json
 {"species": "Homo sapiens", "source": "hgnc", "release": "2026-07-07",
  "case_insensitive": true, "kinds": ["approved", "previous", "alias"], "limits": null,
  "resolved": {"brca1": [{"symbol": "BRCA1", "gene_id_stem": "ENSG00000012048",
@@ -416,7 +489,7 @@ without which *this gene is not in the release* and *this source does not publis
 spelling you used* would both be silence.
 
 ```console
-$ genome match-symbols "Mus musculus" Arntl
+$ genome xref symbols "Mus musculus" Arntl
 gene symbols -> gene id stems for Mus musculus (alliance_bgi 9.0.0)
   source   https://download.alliancegenome.org/9.0.0/BGI/MGI/1.0.2.5_BGI_MGI_0.json.gz
   columns  asked, symbol, gene_id_stem, kind
@@ -445,7 +518,7 @@ message names the one that does), when the set is not here and cannot be fetched
 names the call to make on a login node), and when a directory holds a set an interrupted
 download left unfinished.
 
-## `genome homologs <species> <other-species> <stems>...`
+## `genome homology links <species> <other-species> <stems>...`
 
 Print the genes of another species a gene id stem's gene is homologous to, on Ensembl
 Compara's own gene trees — the way a hit carries across species without leaving the package
@@ -456,7 +529,7 @@ a release, not to a build. Any pairing among human, mouse and worm answers, eith
 round, off one prepared file per pair.
 
 ```console
-$ genome homologs "Homo sapiens" "Caenorhabditis elegans" \
+$ genome homology links "Homo sapiens" "Caenorhabditis elegans" \
       ENSG00000152670 ENSG00000177479 ENSG00000000000 > homologs.tsv
 Homo sapiens -> Caenorhabditis elegans orthologs (Ensembl Compara 116)
   source   Ensembl Compara release 116 (PMID 26896847) — https://ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/homo_sapiens/Compara.116.protein_default.homologies.tsv.gz
@@ -504,7 +577,7 @@ was asked either way.
 keyed by the stems asked about, with the ones that named nothing under `unresolved`.
 
 ```console
-$ genome homologs "Mus musculus" "Homo sapiens" ENSMUSG00000074698 --json
+$ genome homology links "Mus musculus" "Homo sapiens" ENSMUSG00000074698 --json
 {"species": "Mus musculus", "other_species": "Homo sapiens", "release": "116",
  "resolved": {"ENSMUSG00000074698": [
    {"gene_id_stem": "ENSMUSG00000074698", "homolog_gene_id_stem": "ENSG00000101266",
@@ -530,63 +603,14 @@ none of its rows — Compara's per-species dumps are a de-duplicated partition a
 level and the assignment moves between releases, so that is an error naming the other file
 rather than an empty answer that would read as *these species share no homologs*.
 
-## `genome verify <assembly>`
-
-Re-read a FASTA and check its sha256 against the digest pinned for the assembly. This is
-the deliberate full-file re-check; registering and reopening go by size alone. Exits `1`
-on a mismatch.
-
-```console
-$ genome verify sacCer3
-/data/liulab_data/genome/sacCer3/sacCer3.fa: sha256 6ff72f07… matches the digest pinned for it
-
-$ genome verify sacCer3 --fasta /tmp/from-a-colleague.fa
-error: sha256 mismatch for /tmp/from-a-colleague.fa: expected 6ff72f07…, got 9316629b….
-```
-
-`--fasta` checks any file against the official row — useful for a copy you were handed,
-before you build anything on it.
-
-A chimera is also checked against its components: the closing line reads `unchanged` or,
-where a digest was missing on one side, `unknown`. A component that is no longer the one
-the chimera was built from exits `1`.
-
-## `genome revcomp <sequence>`
-
-Reverse-complement a DNA sequence. Case is preserved; a character outside the `DNA`
-alphabet exits `2` naming it. The alphabet is the type's own — `DNA.ALPHABET`, read at the
-boundary rather than spelled again here — so the [`outside_alphabet`](sequences.md#construction)
-you would call yourself is the check this command applies.
-
-```console
-$ genome revcomp ATCG
-CGAT
-$ genome revcomp aTcG --json
-{"input": "aTcG", "reverse_complement": "CgAt"}
-```
-
-## `genome table-row <assembly>`
-
-Download an assembly, unpack it, hash the unpacked FASTA, and print the line to paste
-into the shipped metadata table — how the checksum column gets filled in. A checksum the
-table already pins is reported, never enforced.
-
-```bash
-$ genome table-row sacCer3
-sacCer3	Saccharomyces cerevisiae	sacCer3	R64-1-1	GCF_000146045.2	559292	https://…/sacCer3.fa.gz	6ff72f07…
-```
-
-A chimera exits `1` before anything is downloaded: its row carries the name and nothing
-else, so there is no row here to compute. Check one with `genome verify` instead.
-
-## `genome motif-scan <fasta> <output>`
+## `genome motif scan <fasta> <output>`
 
 Scan a FASTA with a JASPAR release, write the hits to Parquet, and print a summary of the
 run. The batch case — a shell script, a scheduler job — and the only motif command there
 is: listing, plotting and comparing motifs are notebook work.
 
 ```console
-$ genome motif-scan peaks.fa hits.parquet --release 2024 --tax-group all
+$ genome motif scan peaks.fa hits.parquet --release 2024 --tax-group all
 scanned 41255 sequences with 2338 motifs from JASPAR 2024 all
   background  0.293, 0.207, 0.207, 0.293
   threshold   0.0001
@@ -600,7 +624,7 @@ corrupted by table data and a pipeline can consume the one while a downstream st
 the other:
 
 ```console
-$ genome motif-scan peaks.fa hits.parquet --release 2024 --tax-group all --json
+$ genome motif scan peaks.fa hits.parquet --release 2024 --tax-group all --json
 {"release": "2024", "tax_group": "all", "motifs_scanned": 2338,
  "motifs_skipped": ["MA0261.1", "MA2355.1", …], "background": [0.293, 0.207, 0.207, 0.293],
  "threshold": 0.0001, "sequences_scanned": 41255, "hits_written": 2841193,
@@ -640,7 +664,8 @@ serially and produces the identical table.
 **Prepare the release from a login node.** Naming a release prepares it, and the first
 time that is a download. The lab's CPU cluster compute nodes have no internet, so run this
 once on a login node before submitting a job that needs it; every run afterwards reads the
-cached file out of `<LIULAB_DATA>/motif/jaspar/`, shared by every project on the machine.
+prepared release out of `<LIULAB_DATA>/motif/jaspar/<release>/<tax group>/`, shared by every
+project on the machine.
 
 Exits `1` when the FASTA is not there or is not FASTA, when the release or tax group is
 not one this package prepares, when the threshold is not a p-value in `(0, 1)`, when the

@@ -48,7 +48,7 @@ from typing import Any
 import MOODS.tools
 import numpy as np
 
-from genome.io.registration import motif_data_dir
+from genome.tf.motif.jaspar import motif_data_dir
 
 #: Where the cache lives under the **Data dir**'s ``motif/`` tree. Its own directory rather
 #: than a file, so an entry can be deleted one at a time and the whole cache with an ``rm``

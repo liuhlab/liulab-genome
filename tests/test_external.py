@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 import genome.external as external
+from genome.assembly.fasta import PREPARATION_TOOLS
 from genome.external import (
     NO_VERSION_REPORTED,
     REQUIRED_TOOLS,
@@ -31,7 +32,6 @@ from genome.external import (
     doctor,
     is_fresh,
 )
-from genome.io.fasta import PREPARATION_TOOLS
 
 from .conftest import StubBinary
 

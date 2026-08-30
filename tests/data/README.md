@@ -60,7 +60,7 @@ several values in one annotation, separated by `; `, and two carry a comma *insi
 Splitting on the comma corrupts about fifty records per release and fails nothing while doing it,
 which is what these four are here to catch.
 
-None of this is prose to be trusted either: `tests/test_jaspar.py` asserts every row of the table —
+None of this is prose to be trusted either: `tests/tf/test_jaspar.py` asserts every row of the table —
 each id, name, length and tax group, each multi-valued and each blank annotation, the fractional
 counts, the two below-minimum lengths and the long record's flank bits — against the committed
 bytes.
@@ -71,7 +71,7 @@ bytes.
 as UCSC published it; this file is two 600-base windows of `tiny.fa` — `chrI:1-600` as `plantedI`
 and `chrII:1-600` as `plantedII`, 1-based inclusive — with **three consensus words written over 39
 of those 1 200 bases**. A scan needs a site it knows the answer for, and yeast does not oblige on
-demand. Every base outside the three intervals below is `sacCer3`'s, and `tests/test_scan.py`
+demand. Every base outside the three intervals below is `sacCer3`'s, and `tests/tf/test_scan.py`
 asserts exactly that: it puts the source bases back over the three intervals and gets `tiny.fa`'s
 own windows out again.
 
@@ -99,7 +99,7 @@ The motifs are the ones `tiny_jaspar_transfac.txt` already holds, so this file a
 That fixture's two below-minimum records, `MA2355.1` and `MA0261.1`, are why nothing needed to be
 planted to test the length floor: they can never be scanned, and every scan names them.
 
-None of this is prose to be trusted: `tests/test_scan.py` asserts every row of the table above
+None of this is prose to be trusted: `tests/tf/test_scan.py` asserts every row of the table above
 against the committed bytes — the two record names and their headers, the 600-base lengths, each
 planted word at its offset, that the reverse word really is the forward one flipped, the bounds of
 the masked window, the 60-base wrap, and the `sacCer3` backbone underneath all of it.
@@ -146,7 +146,7 @@ departure from the source bytes is the first **200 bases of `tinyCe`'s `I`**, lo
 in for the repeat masking a real assembly carries — the bases are `sacCer3`'s, only their case is
 this repo's.
 
-None of this is prose to be trusted: `tests/test_chimera_fixtures.py` asserts every slice, length,
+None of this is prose to be trusted: `tests/assembly/test_chimera_fixtures.py` asserts every slice, length,
 wrap width and masked stretch against the committed bytes, and `CHIMERA_COMPONENTS` in
 `tests/conftest.py` is the same table as data, with a `chimera_component` fixture that registers one
 as an assembly.
@@ -187,7 +187,7 @@ Two things the fixture deliberately does **not** show, because the publisher's f
   nothing from the full file: the duplication is on `(GeneID, GlobalCrossReferenceID, TaxonID)`,
   where 2,659,704 rows reduce to 1,811,267 distinct.
 
-None of this is prose to be trusted: `TestFixtureBytes` in `tests/test_xref.py` asserts the header,
+None of this is prose to be trusted: `TestFixtureBytes` in `tests/xref/test_xref.py` asserts the header,
 the three taxa, the duplication's shape, the hub-less gene and the worm symbol row against the
 committed bytes, and `FIXTURE_SLICES` pins what each species' slice comes to.
 ## `homology/` — the Compara homology dumps
@@ -227,7 +227,7 @@ What each is in the set *for*:
 - **Compara's own null spelling**, `NULL`, and its flag spellings `1`, `0` and `NULL` — the
   high-confidence flag is set on the ortholog rows and null on every paralogy row.
 
-None of this is prose to be trusted: `tests/test_homology.py` asserts every row of the table above
+None of this is prose to be trusted: `tests/homology/test_homology.py` asserts every row of the table above
 against the committed bytes.
 
 ## `xref/ensembl_entrez_*_tiny.tsv.gz` — the second source's rows
@@ -267,7 +267,7 @@ The same eight rows also carry, incidentally and for real, two traps the reader 
 `NCBI_Gene:79166` pair listed **twice** under two different pages, and an `RGD:` cross-reference on a
 *human* row.
 
-None of this is prose to be trusted: `TestFixtureBytes` in `tests/test_xref_ensembl.py` asserts the
+None of this is prose to be trusted: `TestFixtureBytes` in `tests/xref/test_xref_ensembl.py` asserts the
 header, the evidence types, the transcript-name rows and both fan-outs against the committed bytes,
 and the module's constants pin what each slice comes to.
 
@@ -311,6 +311,6 @@ The worm file's own header states `"release" : "WS298"` — WormBase's final rel
 lab has registered. `downloads.wormbase.org` answers **403** to an automated client, so this copy,
 served by the Alliance at a pinned path with a published md5, is how those bytes are reachable.
 
-None of this is prose to be trusted: `TestFixtureBytes` in `tests/test_xref_symbols.py` asserts the
+None of this is prose to be trusted: `TestFixtureBytes` in `tests/xref/test_xref_symbols.py` asserts the
 column count, the quoted multi-valued cell, the hub-less row and the WS298 header against the
 committed bytes, and the module's constants pin what each slice comes to.

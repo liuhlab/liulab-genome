@@ -1,10 +1,9 @@
 # Assembly
 
-What an assembly is on disk, and what it costs to make it so. This context covers `genome.py`,
-`metadata.py`, `external.py`, `chimera.py` and
-`io/{source,components,fetch,download,chimera,registration,fasta,twobit,utils}.py`: a
-name becomes a directory of prepared files, everything in that directory is derivable from one FASTA,
-and nothing is derived twice.
+What an assembly is on disk, and what it costs to make it so. This context covers
+`assembly/{genome,metadata,source,components,download,chimera,chimera_build,registration,fasta,twobit}.py`
+and `external.py`: a name becomes a directory of prepared files, everything in that directory is
+derivable from one FASTA, and nothing is derived twice.
 
 Words every context shares — **Assembly**, **Genome**, **Chromosome**, **Region**, **Data dir** and
 the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
@@ -52,7 +51,7 @@ _Avoid_: fetcher, client, mirror, provider
 
 **Source**:
 Where an assembly's **FASTA** comes from, resolved from the name alone before anything is fetched
-(`src/genome/io/source.py`) into one of three kinds: a URL — the one its **Assembly metadata** row
+(`src/genome/assembly/source.py`) into one of three kinds: a URL — the one its **Assembly metadata** row
 pins, else the golden path derived from the name — the local path or URL handed to
 `Genome(path_or_url=...)`, or a recipe, *these components*, which is what makes a **Chimera** an
 assembly rather than a type of its own (ADR-0008). *Pinning* or *naming* a source means UCSC is

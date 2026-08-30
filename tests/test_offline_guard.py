@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 import requests
 
-from genome.io import fetch as fetch_mod
-from genome.io.download import UCSCGenomeDownloader
+from genome.assembly.download import UCSCGenomeDownloader
+from genome.store import fetch as fetch_mod
 
 from .conftest import NetworkAccessError
 

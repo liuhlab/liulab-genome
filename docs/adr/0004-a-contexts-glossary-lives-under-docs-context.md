@@ -5,3 +5,8 @@ Annotation is one file inside `io/`, and Assembly straddles the root and `io/` a
 co-location, the obvious move, would buy one context and cost an unconditional rule. The glossaries
 sit together under `docs/context/` instead, a tree excluded from the built site like `adr/` and
 `research/`. What it costs: no glossary sits beside the code it describes.
+
+**Status.** The premise is gone and the decision stands: every context now maps to a
+directory, `io/` having retired into `assembly/`, `annotation/` and `store/`. Co-location would
+buy little now — the glossaries are read together, and TF still straddles three places — so they
+stay under `docs/context/`.

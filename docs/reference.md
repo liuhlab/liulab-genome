@@ -5,13 +5,13 @@
     [Sequences](sequences.md) and [CLI](cli.md) — are the primary documentation; reach
     for this one for a signature or a parameter you already know you want.
 
-## `genome.genome`
+## `genome.assembly.genome`
 
-::: genome.genome
+::: genome.assembly.genome
 
-## `genome.chimera`
+## `genome.assembly.chimera`
 
-::: genome.chimera
+::: genome.assembly.chimera
 
 ## `genome.region`
 
@@ -37,21 +37,49 @@
 
 ::: genome.aligner.chromap
 
-## `genome.metadata`
+## `genome.shipped`
 
-::: genome.metadata
+::: genome.shipped
 
-## `genome.gene_list`
+## `genome.shipped_writer`
 
-::: genome.gene_list
+::: genome.shipped_writer
+
+## `genome.assembly.metadata`
+
+::: genome.assembly.metadata
+
+## `genome.annotation.metadata`
+
+::: genome.annotation.metadata
+
+## `genome.annotation.curated`
+
+::: genome.annotation.curated
+
+## `genome.workers`
+
+::: genome.workers
 
 ## `genome.tf.gene.census`
 
 ::: genome.tf.gene.census
 
+## `genome.tf.gene.annotation`
+
+::: genome.tf.gene.annotation
+
 ## `genome.tf.cofactor.table`
 
 ::: genome.tf.cofactor.table
+
+## `genome.tf.cofactor.annotation`
+
+::: genome.tf.cofactor.annotation
+
+## `genome.tf.species`
+
+::: genome.tf.species
 
 ## `genome.tf.motif.motif`
 
@@ -72,10 +100,6 @@
 ## `genome.tf.motif.scan`
 
 ::: genome.tf.motif.scan
-
-## `genome.tf.motif.workers`
-
-::: genome.tf.motif.workers
 
 ## `genome.tf.motif.parallel`
 
@@ -149,49 +173,69 @@
 
 ::: genome.external
 
-## `genome.io.source`
+## `genome.assembly.source`
 
-::: genome.io.source
+::: genome.assembly.source
 
-## `genome.io.components`
+## `genome.assembly.components`
 
-::: genome.io.components
+::: genome.assembly.components
 
-## `genome.io.fetch`
+## `genome.store.fetch`
 
-::: genome.io.fetch
+::: genome.store.fetch
 
-## `genome.io.download`
+## `genome.assembly.download`
 
-::: genome.io.download
+::: genome.assembly.download
 
-## `genome.io.fasta`
+## `genome.assembly.fasta`
 
-::: genome.io.fasta
+::: genome.assembly.fasta
 
-## `genome.io.gtf`
+## `genome.annotation.registration`
 
-::: genome.io.gtf
+::: genome.annotation.registration
 
-## `genome.io.results`
+## `genome.annotation.registry`
 
-::: genome.io.results
+::: genome.annotation.registry
 
-## `genome.io.twobit`
+## `genome.annotation.stems`
 
-::: genome.io.twobit
+::: genome.annotation.stems
 
-## `genome.io.completion`
+## `genome.annotation.database`
 
-::: genome.io.completion
+::: genome.annotation.database
 
-## `genome.io.registration`
+## `genome.assembly.twobit`
 
-::: genome.io.registration
+::: genome.assembly.twobit
 
-## `genome.io.chimera`
+## `genome.store.completion`
 
-::: genome.io.chimera
+::: genome.store.completion
+
+## `genome.assembly.registration`
+
+::: genome.assembly.registration
+
+## `genome.store.data_dir`
+
+::: genome.store.data_dir
+
+## `genome.store.prepared`
+
+::: genome.store.prepared
+
+## `genome.store.checksum`
+
+::: genome.store.checksum
+
+## `genome.assembly.chimera_build`
+
+::: genome.assembly.chimera_build
 
 ## `genome.cli`
 

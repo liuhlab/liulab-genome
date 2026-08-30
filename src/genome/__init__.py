@@ -2,18 +2,20 @@
 
 from importlib.metadata import PackageNotFoundError, version
 
-from genome.gene_list import GeneCategoryNotDeclaredError, NoGeneCategoriesError
-from genome.genome import Genome
-from genome.io.gtf import (
+from genome.annotation import (
+    AnnotationMetadata,
     AnnotationRegistry,
-    NoCofactorTableError,
-    NoTFCensusError,
-    UnknownSpeciesError,
+    GeneCategoryNotDeclaredError,
+    GeneList,
+    NoGeneCategoriesError,
 )
-from genome.io.results import GeneList, TFCofactorList, TFGeneList
-from genome.metadata import AnnotationMetadata, AssemblyMetadata
+from genome.assembly.genome import Genome
+from genome.assembly.metadata import AssemblyMetadata
 from genome.region import Region
 from genome.seq import DNA, RNA, Protein
+from genome.tf.cofactor import NoCofactorTableError, TFCofactorList
+from genome.tf.gene import NoTFCensusError, TFGeneList
+from genome.tf.species import UnknownSpeciesError
 
 try:
     __version__ = version("liulab-genome")

@@ -31,7 +31,7 @@ class Chromap(Aligner):
 
     Parameters
     ----------
-    genome : genome.genome.Genome
+    genome : genome.assembly.genome.Genome
         The genome whose reference FASTA will be indexed.
     tool : genome.external.ExternalTool, optional
         As :class:`~genome.aligner.aligner.Aligner`.
@@ -95,7 +95,7 @@ class Chromap(Aligner):
 
         Raises
         ------
-        genome.io.completion.RegistrationError
+        genome.store.completion.RegistrationError
             If the index directory holds files without a record, a record that
             disagrees with them, or a record pinning a different assembly digest
             than the one registered now. Pass ``overwrite=True`` to rebuild.

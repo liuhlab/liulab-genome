@@ -6,6 +6,9 @@ this one answers whether it is a **Transcription cofactor** and of what class. I
 keyed the same way, by **Gene id stem**. One **Cofactor table** per species ships inside
 the package — :mod:`genome.tf.cofactor.table` reads them — and every classification
 travels with the publisher that reached it.
+:mod:`genome.tf.cofactor.annotation` puts one into a registered **Annotation**'s own gene
+ids, crossing :meth:`~genome.annotation.registry.AnnotationRegistry.resolve_gene_ids` exactly as the
+census half does and adding nothing to the registry to do it.
 
 **Human membership is this package's own** and is the one thing here that is: the human
 table is the union of two publishers' lists, 1,466 genes that neither of them publishes
@@ -34,12 +37,21 @@ Examples
 AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Caenorhabditis_elegans_Cof
 """
 
-from genome.metadata import species_slug
+from genome.shipped import species_slug
+from genome.tf.cofactor.annotation import (
+    TFCofactor,
+    TFCofactorList,
+    resolve_tf_cofactors,
+    tf_cofactor_list,
+)
 from genome.tf.cofactor.table import (
     ANIMALTFDB,
     BOTH,
     CITED_SOURCES,
+    COFACTOR_FORMAT,
+    COFACTOR_METADATA_FORMAT,
     COFACTOR_METADATA_RESOURCE,
+    COFACTOR_SOURCE_METADATA_FORMAT,
     COFACTOR_SOURCE_METADATA_RESOURCE,
     COFACTOR_SUBDIR,
     COFACTOR_SUFFIX,
@@ -58,12 +70,16 @@ from genome.tf.cofactor.table import (
     cofactor_table,
     parse_cofactor_table,
 )
+from genome.tf.species import NoCofactorTableError
 
 __all__ = [
     "ANIMALTFDB",
     "BOTH",
     "CITED_SOURCES",
+    "COFACTOR_FORMAT",
+    "COFACTOR_METADATA_FORMAT",
     "COFACTOR_METADATA_RESOURCE",
+    "COFACTOR_SOURCE_METADATA_FORMAT",
     "COFACTOR_SOURCE_METADATA_RESOURCE",
     "COFACTOR_SUBDIR",
     "COFACTOR_SUFFIX",
@@ -77,9 +93,14 @@ __all__ = [
     "CofactorSource",
     "CofactorTable",
     "CofactorTableError",
+    "NoCofactorTableError",
+    "TFCofactor",
+    "TFCofactorList",
     "cofactor_metadata",
     "cofactor_species",
     "cofactor_table",
     "parse_cofactor_table",
+    "resolve_tf_cofactors",
     "species_slug",
+    "tf_cofactor_list",
 ]

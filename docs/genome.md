@@ -38,7 +38,7 @@ Genome("mm39", cache_dir="/data/ref")
 ```
 
 Preparing a large assembly takes a while, so it is often worth doing once from a shell
-before a pipeline runs: `genome register hg38`. See the [CLI](cli.md).
+before a pipeline runs: `genome assembly register hg38`. See the [CLI](cli.md).
 
 ### Using your own FASTA
 
@@ -147,7 +147,7 @@ sacCer3.default_gtf                            # the annotation used when you na
 ```
 
 `registered` and `offered` answer different questions: what this machine has, and what
-the lab supports. `genome annotations <assembly>` prints one against the other.
+the lab supports. `genome annotation list <assembly>` prints one against the other.
 
 The registry is deliberately not a list. It settles a four-way state — registered,
 broken, offered, nothing — so there is no `len()`, no `in` and no iterating over it:
@@ -425,15 +425,16 @@ region's hits are flipped back into that frame for you — the off-by-one this m
 to own. `background=` and `workers=` are forwarded to the scan underneath it; an output
 path is not, because a scan that streams to Parquet hands back a path and a path holds no
 coordinates to lift. For that — the whole-genome case — scan the sequences themselves with
-`jaspar.scan_fasta(path, output=...)`, or [`genome motif-scan`](cli.md#genome-motif-scan-fasta-output)
+`jaspar.scan_fasta(path, output=...)`, or [`genome motif scan`](cli.md#genome-motif-scan-fasta-output)
 from a shell.
 
 !!! warning "Prepare the release from a login node"
     Constructing a `JasparDatabase` downloads the release the first time. **The lab's CPU
     cluster compute nodes have no internet**, so that first construction fails on one: do
-    it once from a login node — `genome motif-scan`, or `JasparDatabase(...)` in Python —
-    and every job afterwards reads the cached file out of `<LIULAB_DATA>/motif/jaspar/`,
-    which every project on the machine shares.
+    it once from a login node — `genome motif scan`, or `JasparDatabase(...)` in Python —
+    and every job afterwards reads the prepared release out of
+    `<LIULAB_DATA>/motif/jaspar/<release>/<tax group>/`, which every project on the machine
+    shares.
 
 ## Chimera assemblies
 
@@ -448,8 +449,8 @@ chimera.assembly              # 'ce11_ecHT115'
 
 The name is the component names sorted and joined by `_`, so you never choose it and
 either order builds and reopens the same `ce11_ecHT115`. From a shell, naming it is
-building it — `genome register ce11_ecHT115`. Nothing is downloaded: every component has
-to be registered here already.
+building it — `genome assembly register ce11_ecHT115`. Nothing is downloaded: every
+component has to be registered here already.
 
 Every chromosome carries the component it came from, `<chromosome>__<component>`, and a
 **bare name does not resolve**:
@@ -478,8 +479,8 @@ chimera.build_star_index(threads=8)   # against that merged annotation
 ```
 
 Its name is what went into it, so it changes when a component's default annotation does.
-Rebuilding — `Genome.chimera(..., force=True)`, or `genome register <name> --force` —
-registers the new one and **removes the one it replaces**, so a chimera never ends up
+Rebuilding — `Genome.chimera(..., force=True)`, or `genome assembly register <name>
+--force` — registers the new one and **removes the one it replaces**, so a chimera never ends up
 carrying two merged annotations with no default between them. An annotation you registered
 by hand is never touched.
 
@@ -514,7 +515,7 @@ than being rebuilt quietly:
 Genome("hg38")
 # RegistrationMismatchError: /data/genome/hg38 disagrees with its .completion.json:
 # hg38.2bit: recorded 841756144 bytes, found 0. Something changed these files after they
-# were registered. Re-register it with `genome register hg38 --force`.
+# were registered. Re-register it with `genome assembly register hg38 --force`.
 ```
 
 Every such message names its own repair, and the repair is always the same shape:
@@ -526,5 +527,5 @@ An empty or absent directory is not this: that is a fresh registration and proce
 normally. A broken *annotation* never blocks opening the genome; it is reported instead,
 in `annotations.broken`, each entry carrying the command that repairs it.
 
-To re-check integrity when nothing has raised but you suspect a problem, `genome verify
-<assembly>` re-reads the FASTA and re-computes its digest.
+To re-check integrity when nothing has raised but you suspect a problem, `genome assembly
+verify <assembly>` re-reads the FASTA and re-computes its digest.

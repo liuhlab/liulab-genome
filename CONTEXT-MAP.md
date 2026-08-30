@@ -4,9 +4,9 @@
 query — a locus into bases, a GTF into a registered annotation, a FASTA into an aligner index. Its
 vocabulary splits by bounded context: each file below is the glossary for one part of the source
 tree, and the shared kernel at the bottom holds the words every context uses. The glossaries live
-under `docs/context/`, not beside the code — only four of the eight map cleanly onto a directory,
-and TF straddles `tf/gene/`, `tf/cofactor/` and a module beside them, so co-locating them would put
-four in arbitrary places. Rules live in `CLAUDE.md`; this map and the eight files it lists are a
+under `docs/context/`, not beside the code — they are read together, and TF straddles `tf/gene/`,
+`tf/cofactor/` and two modules beside them, so co-locating them would put that one somewhere
+arbitrary (ADR-0004). Rules live in `CLAUDE.md`; this map and the eight files it lists are a
 glossary and nothing else.
 
 **Use these words.** When your output names a domain concept — an issue title, a refactor proposal,
@@ -27,30 +27,29 @@ substitute for *module*.
 
 - [Sequence](./docs/context/sequence.md) — covers `seq.py`: bases as a typed string, and the
   transforms that keep the type
-- [Assembly](./docs/context/assembly.md) — covers `genome.py`, `metadata.py`, `external.py`,
-  `chimera.py`, `io/{source,components,fetch,chimera,download,registration,fasta,twobit,utils}.py`:
-  which reference this is, where its files live, and how a locus becomes bases
-- [Annotation](./docs/context/annotation.md) — covers `io/gtf.py`, `gene_list.py` and the GTF
-  registry on `Genome`: what a GTF declares over one assembly, the name it is addressed by, and
-  which of its genes are in a category
+- [Assembly](./docs/context/assembly.md) — covers `assembly/*` and `external.py`: which reference
+  this is, where its files live, and how a locus becomes bases
+- [Annotation](./docs/context/annotation.md) — covers `annotation/*` and the GTF registry on
+  `Genome`: what a GTF declares over one assembly, the name it is addressed by, and which of its
+  genes are in a category
 - [Index](./docs/context/index.md) — covers `aligner/*`: what one external mapper needs built before
   it can map, and how a finished build is told from an abandoned one
 - [Motif](./docs/context/motif.md) — covers `tf/motif/*`: what a transcription factor recognises,
   stored as counts and belonging to no assembly, and where a scan says it occurs
-- [TF](./docs/context/tf.md) — covers `tf/gene/*`, `tf/cofactor/*` and `tf/link.py`: which genes a
-  published census judges transcription factors and which a publisher lists as cofactors of
-  transcription, in a registered annotation's own gene ids, and which motifs answer for them
+- [TF](./docs/context/tf.md) — covers `tf/gene/*`, `tf/cofactor/*`, `tf/link.py` and
+  `tf/species.py`: which genes a published census judges transcription factors and which a
+  publisher lists as cofactors of transcription, in a registered annotation's own gene ids, and
+  which motifs answer for them
 - [Xref](./docs/context/xref.md) — covers `xref/*`: which foreign identifiers name a gene and which
   genes a foreign identifier names, on one named publisher's assertions at one pinned release, with
   no genome open
 - [Orthology](./docs/context/orthology.md) — covers `homology/*`: which genes in another species a
   gene is homologous to, and how many-to-many the publisher's own gene tree says that is
 
-`io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
-It is the return types the API hands back and the CLI renders, so it carries the vocabulary of
-whichever context asked.
-
-`cli.py` is covered by no context — the map covers what carries domain vocabulary, not the whole tree.
+`cli.py` and `store/*` are covered by no context — the first is a thin client over what the
+packages export, the second is the **Data dir** root, the fetch step, the **Completion marker**,
+checksumming and the **Prepared set** pipeline, which belong to no context and are reached by all of
+them. The map covers what carries domain vocabulary, not the whole tree.
 
 ## Relationships
 
@@ -97,11 +96,10 @@ whichever context asked.
   **Xref set** is how an Entrez, HGNC or UniProt column reaches them — the gap that let two UniProt
   entry names ship in the human census unnoticed. One way only: nothing shipped here is keyed by a
   foreign **Namespace**, and the xref half reads no census.
-- **Xref ↔ Motif**: shape shared, and nothing else. Both a **Motif set** and an **Xref set** belong
-  to no **Assembly**, live outside the assembly tree under the **Data dir**, are pinned to a
-  **Release** and are prepared by construction — the same object, learned once. Neither imports the
-  other, and a **Motif name** is never fed to a **Symbol match**: it labels a matrix and names no
-  gene.
+- **Xref ↔ Motif**: shape shared, and nothing else. A **Motif set** and an **Xref set** are both
+  **Prepared set**s, so the shape is one thing learned once and one module prepares both. Neither
+  imports the other, and a **Motif name** is never fed to a **Symbol match**: it labels a matrix and
+  names no gene.
 - **Orthology → Annotation**: the same one existing call the Xref edge uses, `resolve_gene_ids`,
   against the same registry, unchanged. A **Homology type** crosses it untouched and a **Dropped
   partner** count says what the crossing removed, so a link that only looks one-to-one in your
@@ -121,7 +119,7 @@ whichever context asked.
 
 ## Shared kernel
 
-Eleven words every context uses. Anything defined here is not redefined in a context file.
+Thirteen words every context uses. Anything defined here is not redefined in a context file.
 
 **Assembly**:
 The identity of one reference — a free-form **local** key that names its directory under the **Data
@@ -183,7 +181,7 @@ _Avoid_: base id — that already names a **Motif id** with its version dropped,
 gene id (the versioned thing this is a stem *of*), ENSG (one publisher's spelling)
 
 **Data dir**:
-The root of all lab reference data, read from `$LIULAB_DATA` (`src/genome/io/registration.py`). Most
+The root of all lab reference data, read from `$LIULAB_DATA` (`src/genome/store/data_dir.py`). Most
 of it is the assembly tree at `genome/`, under which each **Assembly** owns exactly one directory,
 and that per-assembly directory is the layout most other contexts file into — annotations at
 `gtf/<name>/`, indexes at `index/<name>/`. Not all of it: data belonging to no assembly is a sibling
@@ -202,6 +200,19 @@ answer to *is this finished* and the only answer to *how was this made*.
 _Avoid_: flag, success flag, sentinel, stamp, lock file; and never an output file's mere existence,
 which is what this word exists to distrust
 
+**Prepared set**:
+Files pinned to a **Release**, belonging to no **Assembly**, filed beside the assembly tree
+under the **Data dir**, and prepared by constructing the object that answers from them.
+Three contexts own one each — a **Motif set**, an **Xref set**, a **Homology set** — and
+preparing one is a single pipeline (`src/genome/store/prepared.py`): a source declares a URL, a
+checksum and how to slice or parse what arrives, and the module owns the working area, the
+fetch, the digest, the **Completion marker** and the one sentence that sends a caller to a
+login node. Fetching is the only step in this package that needs the network, so a set is
+prepared once where there is internet and every job afterwards reads it.
+_Avoid_: cache, download, dataset, resource; "the JASPAR download" or "the xref files",
+which name one instance and hide that the three are one thing; and **Data dir**, which is
+the root they are filed under rather than any one of them
+
 **External tool**:
 A binary the package shells out to instead of reimplementing — resolved on `PATH`, version-detected
 before use, and failing with the exact command that installs it. One module, `external.py`, serves
@@ -210,3 +221,14 @@ chromap an **Index** is built with. Whether a tool's output is captured or strea
 not a second implementation.
 _Avoid_: dependency, native dependency (that is the packaging view), subprocess, backend, wrapper,
 bare "binary"
+
+**Shipped table**:
+A small tab-separated file that ships inside the wheel, is read whole and validated as it is read,
+and is repaired by re-running a build script rather than by anything a caller can do — the curated
+**Assembly metadata**, **Annotation metadata** and **Xref source** tables, the provenance tables
+beside each shipped-data directory, the censuses, the **Cofactor table**s and the **Motif link**
+tables. One module reads every one of them (`src/genome/shipped.py`), and a table declares itself
+to it: resource path, columns, row type, and the command that repairs it. Bulk ships gzipped and
+small metadata plain.
+_Avoid_: data file, curated table, packaged data, resource; and never the shipped **Gene list**
+JSON, which is keyed by **Registered name** and nested rather than tabular
