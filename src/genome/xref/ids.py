@@ -54,18 +54,38 @@ UNIPROT = "uniprot"
 #: set** carries the one its own species has and raises for the other two.
 HGNC, MGI, WORMBASE = "hgnc", "mgi", "wormbase"
 
+#: The gene symbol — what a paper's supplementary table actually holds. A **Namespace**
+#: like the rest and answered unlike the rest: away from the hub it is the authority's one
+#: current approved spelling, and toward the hub it is
+#: :meth:`~genome.xref.xref.XrefSet.match_symbols` rather than the ordinary verb, because a
+#: symbol matches previous and alias spellings too and each match carries which kind it
+#: was. See :mod:`genome.xref.symbols`.
+SYMBOL = "symbol"
+
 #: Every **Namespace** this package knows how to spell, in the order an answer lists them.
 #: A **Namespace** an **Xref source** does not carry raises naming the ones it does, and
 #: what a set carries is read off the set rather than from here — this is the vocabulary,
 #: not a promise about any one source.
-NAMESPACES: tuple[str, ...] = (ENSEMBL, ENTREZ, UNIPROT, HGNC, MGI, WORMBASE)
+NAMESPACES: tuple[str, ...] = (ENSEMBL, ENTREZ, UNIPROT, HGNC, MGI, WORMBASE, SYMBOL)
 
 #: The prefix each **Namespace**'s canonical spelling carries — the way a practitioner
 #: writes the id, not the way a CURIE would. HGNC's and MGI's ids are written with theirs
-#: and nobody writes them without; the other four are written bare and nobody writes them
+#: and nobody writes them without; the other five are written bare and nobody writes them
 #: with. There is no rule behind this, only usage, which is why it is a table.
+#:
+#: :data:`SYMBOL` is here for completeness and is never reached: a symbol goes through
+#: :func:`~genome.xref.symbols.normalise_symbol` instead, since :func:`gene_id_stem` would
+#: cut ``Y110A7A.10`` down to a spelling WormBase gives no gene.
 NAMESPACE_PREFIX: Mapping[str, str] = MappingProxyType(
-    {ENSEMBL: "", ENTREZ: "", UNIPROT: "", HGNC: "HGNC:", MGI: "MGI:", WORMBASE: ""}
+    {
+        ENSEMBL: "",
+        ENTREZ: "",
+        UNIPROT: "",
+        HGNC: "HGNC:",
+        MGI: "MGI:",
+        WORMBASE: "",
+        SYMBOL: "",
+    }
 )
 
 #: What separates an id from its version, everywhere in this package. The annotation half

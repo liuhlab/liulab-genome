@@ -332,6 +332,15 @@ There is no third direction: Entrez to HGNC is two calls and the join is yours, 
 the hop visible in your pipeline rather than invisible in ours. `genome.xref.XrefSet` in the
 [API reference](reference.md) is the same two verbs from Python, on one code path with this.
 
+**`--from-stems symbol` labels; `--to-stems symbol` refuses and says why.** Against a source
+that carries symbols — `hgnc` for human, `alliance_bgi` for mouse and worm — `--from-stems
+symbol` gives the authority's single current approved spelling for each stem, which is what
+a figure axis wants. The other way round is not its mirror: a symbol also matches spellings
+the authority has retired, and answering here on approved ones alone would drop exactly the
+gene lists this exists for, so it exits `1` naming `XrefSet.match_symbols` in Python. Match
+symbols from a shell by writing that one call, or by asking `--from-stems symbol` of the
+stems you already hold.
+
 Naming a species prepares its set, which the first time is a download — so run it once on a
 login node before submitting a job that needs it, as the lab's compute nodes have no
 internet. Exits `1` when no set exists for the species (the message names the ones that do),

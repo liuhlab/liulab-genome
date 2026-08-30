@@ -7,13 +7,22 @@ and fetches nothing. The set belongs to no **Assembly** and opens no **Genome** 
 identifier is a name and not a place — so it is filed beside the assembly tree rather than
 inside it, the way a **Motif set** already is.
 
-**Two verbs and only two**, to the hub and from it (ADR-0017). :meth:`XrefSet.to_stems`
-turns foreign ids into **Gene id stem**s, :meth:`XrefSet.from_stems` turns stems back into
-foreign ids, and there is no third verb that turns an Entrez id into an HGNC id in one
-call: a caller wanting that makes both calls and owns the join, which keeps the hop visible
-in their code rather than invisible in ours. A query reads exactly one set, so the **Xref
-source** is a property of the whole answer rather than a column on any row, and two
-publishers are two answers rather than one merged one.
+**Two directions and only two**, to the hub and from it (ADR-0017).
+:meth:`XrefSet.to_stems` turns foreign ids into **Gene id stem**s,
+:meth:`XrefSet.from_stems` turns stems back into foreign ids, and there is no verb that
+turns an Entrez id into an HGNC id in one call: a caller wanting that makes both calls and
+owns the join, which keeps the hop visible in their code rather than invisible in ours. A
+query reads exactly one set, so the **Xref source** is a property of the whole answer
+rather than a column on any row, and two publishers are two answers rather than one merged
+one.
+
+**A symbol travels one of those directions under its own verb**, because the two are not
+mirror images. Away from the hub a stem yields the authority's single current approved
+symbol through :meth:`XrefSet.from_stems`, which is labelling a plot. Toward it,
+:meth:`XrefSet.match_symbols` matches approved, previous and alias spellings, answers with
+every stem any of them names and says which kind each match was —
+:meth:`XrefSet.to_stems` refuses the symbol **Namespace** rather than answering it on
+approved spellings alone, which would drop the 31 EpiFactors rows this exists for.
 
 **The stored form is a plain gzipped TSV** — three columns, ``namespace``, ``xref_id`` and
 ``gene_id_stem``, sorted and unique — so a collaborator who does not use Python reads it in
@@ -65,13 +74,23 @@ from genome.io.completion import (
     write_record,
 )
 from genome.io.registration import xref_data_dir
-from genome.io.results import ResolvedStems, ResolvedXrefIds
+from genome.io.results import ResolvedStems, ResolvedSymbols, ResolvedXrefIds, SymbolMatch
 from genome.tf.gene.census import species_slug
 from genome.xref.alliance import ALLIANCE, read_alliance
+from genome.xref.bgi import ALLIANCE_BGI, BGI_SYMBOL_LIMIT, read_bgi
 from genome.xref.ensembl import ENSEMBL_TSV, read_ensembl
 from genome.xref.evidence import normalise_evidence
-from genome.xref.ids import ENSEMBL, NAMESPACES, normalise_id
+from genome.xref.hgnc import HGNC_ARCHIVE, HGNC_SYMBOL_LIMIT, read_hgnc
+from genome.xref.ids import ENSEMBL, NAMESPACES, SYMBOL, normalise_id
 from genome.xref.metadata import NoXrefSetError, XrefMetadata, lookup_xref
+from genome.xref.symbols import (
+    KIND_NAMESPACES,
+    SYMBOL_KINDS,
+    SYMBOL_NAMESPACES,
+    SymbolDirectionError,
+    fold_symbol,
+    normalise_symbol,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typeshed's name for a live hash object
     from hashlib import _Hash as Hash
@@ -85,6 +104,15 @@ XREF_KIND = "xref"
 #: source** and the **Release** are *not* columns — they are properties of the whole set,
 #: which is what makes merging two publishers into one file inexpressible (ADR-0017).
 SLICE_COLUMNS: tuple[str, ...] = ("namespace", "xref_id", "gene_id_stem")
+
+#: Every value the slice's ``namespace`` column may hold: the **Namespace**s a caller may
+#: name, plus the two stored spellings that carry a **Symbol match**'s kind
+#: (:data:`~genome.xref.symbols.KIND_NAMESPACES`). A kind is written into this column
+#: rather than into a fourth one, because a column saying *what sort of row this is* is the
+#: level discriminator this design refuses everywhere else.
+STORED_NAMESPACES: tuple[str, ...] = NAMESPACES + tuple(
+    namespace for namespace in SYMBOL_NAMESPACES if namespace not in NAMESPACES
+)
 
 #: What one stored slice is called, after the species slug. Gzipped, because it is bulk;
 #: plain TSV inside, because a collaborator reads it in R.
@@ -122,7 +150,22 @@ class XrefReader(Protocol):
 #: Every **Xref source** with a reader, keyed by the name its curated rows use. Adding one
 #: is a module and an entry here; nothing else in this file changes.
 _READERS: Mapping[str, XrefReader] = MappingProxyType(
-    {ALLIANCE: read_alliance, ENSEMBL_TSV: read_ensembl}
+    {
+        ALLIANCE: read_alliance,
+        ENSEMBL_TSV: read_ensembl,
+        HGNC_ARCHIVE: read_hgnc,
+        ALLIANCE_BGI: read_bgi,
+    }
+)
+
+#: What each **Xref source** that carries symbols cannot match, and why — ``None`` for one
+#: that publishes all three kinds. Read onto every answer :meth:`XrefSet.match_symbols`
+#: gives, so the explanation is part of the behaviour rather than a comment: *this gene is
+#: not in the release* and *this source does not publish the spelling you used* are
+#: different answers and must not both be silence. A source absent from here carries no
+#: symbols at all and says so through :class:`NamespaceNotCarriedError`.
+_SYMBOL_LIMITS: Mapping[str, str | None] = MappingProxyType(
+    {HGNC_ARCHIVE: HGNC_SYMBOL_LIMIT, ALLIANCE_BGI: BGI_SYMBOL_LIMIT}
 )
 
 
@@ -341,11 +384,11 @@ def parse_slice(text: str, *, origin: str) -> tuple[tuple[str, str, str], ...]:
                 f"is {len(SLICE_COLUMNS)} non-empty tab-separated fields. Delete the file "
                 f"and construct the set again."
             )
-        if fields[0] not in NAMESPACES:
+        if fields[0] not in STORED_NAMESPACES:
             raise XrefTableError(
                 f"{origin} line {number} names the namespace {fields[0]!r}, and the ones "
-                f"this package knows are {', '.join(NAMESPACES)}. Delete the file and "
-                f"construct the set again."
+                f"this package knows are {', '.join(STORED_NAMESPACES)}. Delete the file "
+                f"and construct the set again."
             )
         triples.append((fields[0], fields[1], fields[2]))
     return tuple(triples)
@@ -359,10 +402,12 @@ class XrefSet:
     written under :func:`xref_set_dir`, and every construction after re-reads what is there
     and fetches nothing. It answers with no genome open and belongs to no assembly.
 
-    It answers two questions and only two — :meth:`to_stems` and :meth:`from_stems` — and
-    never converts one foreign **Namespace** directly into another. Gene level only: a
-    gene, a transcript and a protein have different keys and different sources and are
-    three objects rather than one table with a level column.
+    It answers two questions and only two — :meth:`to_stems` and :meth:`from_stems`, with
+    :meth:`match_symbols` the first of them asked about a symbol, where the answer carries
+    the kind of spelling that matched — and never converts one foreign **Namespace**
+    directly into another. Gene level only: a gene, a transcript and a protein have
+    different keys and different sources and are three objects rather than one table with a
+    level column.
 
     Parameters
     ----------
@@ -425,6 +470,15 @@ class XrefSet:
         The **Namespace**s this set actually carries, read off the slice rather than
         declared, in :data:`~genome.xref.ids.NAMESPACES` order. One that is not here raises
         rather than answering nothing.
+    symbol_kinds : tuple of str
+        Which kinds of **Symbol match** this set can make — ``approved``, ``previous``,
+        ``alias`` — read off the slice the same way, and empty for a source that carries no
+        symbols at all.
+    symbol_limits : str or None
+        Why the kinds not in :attr:`symbol_kinds` are missing, or ``None`` when all three
+        are there or none is. It rides back on every :meth:`match_symbols` answer, because
+        *this gene is not in the release* and *this source does not publish the spelling
+        you used* are different answers and must not both be silence.
 
     Raises
     ------
@@ -499,6 +553,13 @@ class XrefSet:
         self.namespaces: tuple[str, ...] = tuple(
             namespace for namespace in NAMESPACES if namespace in self._to_stems
         )
+        self.symbol_kinds: tuple[str, ...] = tuple(
+            kind for kind in SYMBOL_KINDS if KIND_NAMESPACES[kind] in self._to_stems
+        )
+        self.symbol_limits: str | None = (
+            _SYMBOL_LIMITS.get(self.source) if self.symbol_kinds else None
+        )
+        self._exact, self._folded = _symbol_index(self._to_stems)
 
     def __len__(self) -> int:
         """Return how many **Gene id stem**s this set carries.
@@ -561,6 +622,11 @@ class XrefSet:
         ------
         NamespaceNotCarriedError
             If this set carries no such namespace. The message names the ones it does.
+        genome.xref.symbols.SymbolDirectionError
+            If the namespace is the symbol one. A symbol is not answered like an id — it
+            matches previous and alias spellings too, and each match carries which kind it
+            was — so the message names :meth:`match_symbols` rather than answering here on
+            approved spellings alone.
 
         Examples
         --------
@@ -568,6 +634,17 @@ class XrefSet:
         >>> human.to_stems(["7157", "999999999"], "entrez")        # doctest: +SKIP
         ResolvedStems(species='Homo sapiens', ...)
         """
+        if namespace.strip().lower() == SYMBOL:
+            raise SymbolDirectionError(
+                f"a {SYMBOL!r} namespace is not asked toward the hub with to_stems: it "
+                f"would match this release's approved spellings and nothing else, so a "
+                f"table spelling a gene the way the authority used to would come back "
+                f"unresolved rather than matched — which is what happens to 31 of "
+                f"EpiFactors' 801 rows. Call match_symbols(symbols) instead, which matches "
+                f"approved, previous and alias spellings and says on each match which kind "
+                f"it was. The other direction, from_stems(stems, {SYMBOL!r}), is the "
+                f"labelling one and is answered here."
+            )
         checked = self._checked(namespace)
         index = self._to_stems[checked]
         asked = tuple(dict.fromkeys(ids))
@@ -629,10 +706,84 @@ class XrefSet:
             unresolved=tuple(key for key in asked if not found[key]),
         )
 
+    def match_symbols(
+        self, symbols: Iterable[str], *, case_insensitive: bool = False
+    ) -> ResolvedSymbols:
+        """Return every gene this release says each symbol names, and how each matched.
+
+        The hop toward the hub from the one **Namespace** answered unlike the rest, and
+        deliberately **not** :meth:`from_stems`'s mirror. A symbol is matched against
+        approved, previous **and** alias spellings, answers with every **Gene id stem** any
+        of them names, and each hit says which kind of spelling it was — so ambiguity is
+        the return type and not an edge case. ``ADCY3`` is HGNC's approved symbol for one
+        gene and a symbol it retired from another, and both come back.
+
+        **Exact by default.** The species is fixed by the set, so ``Brca1`` asked of a human
+        set is a mouse spelling asked of the wrong authority and matches nothing rather than
+        half-working. ``case_insensitive=True`` folds both sides and **still answers with
+        every gene matched** rather than picking one.
+
+        **What this source could not have matched rides back on the answer**, in
+        :attr:`~genome.io.results.ResolvedSymbols.kinds` and
+        :attr:`~genome.io.results.ResolvedSymbols.limits`: mouse and worm match approved
+        spellings only, their authorities' typed previous and alias spellings belonging to
+        publishers that cannot be pinned or cannot be fetched (ADR-0018), and an answer that
+        did not say so would look exactly like a gene that is not in the release.
+
+        Parameters
+        ----------
+        symbols : iterable of str
+            The symbols, in the order they should come back. Surrounding whitespace goes;
+            case does not, unless ``case_insensitive`` is set. Repeats are asked once, on
+            the caller's own spelling, so the answer still zips against their table.
+        case_insensitive : bool, default False
+            Fold case on both sides — the caller's spelling and the authority's.
+
+        Returns
+        -------
+        genome.io.results.ResolvedSymbols
+            The symbols that matched, mapped to every match each made, and the symbols that
+            matched nothing — with the species, source and release that answered, which
+            kinds it could match and why the others are missing.
+
+        Raises
+        ------
+        NamespaceNotCarriedError
+            If this set carries no symbols at all. The message names the sources that do.
+
+        Examples
+        --------
+        >>> human = XrefSet("Homo sapiens", "hgnc")                # doctest: +SKIP
+        >>> human.match_symbols(["ARNTL"]).resolved["ARNTL"]       # doctest: +SKIP
+        (SymbolMatch(symbol='ARNTL', gene_id_stem='ENSG00000133794', kind='previous'),)
+        """
+        if not self.symbol_kinds:
+            carried = ", ".join(sorted(_SYMBOL_LIMITS))
+            raise NamespaceNotCarriedError(
+                f"the {self.source} {self.release} set for {self.species!r} carries no "
+                f"{SYMBOL!r} namespace: it carries {', '.join(self.namespaces)}. The "
+                f"sources that publish symbols are {carried} — construct the set naming "
+                f"one of those, or ask in a namespace this one carries."
+            )
+        index = self._folded if case_insensitive else self._exact
+        key = fold_symbol if case_insensitive else normalise_symbol
+        asked = tuple(dict.fromkeys(symbols))
+        found = {symbol: index.get(key(symbol), ()) for symbol in asked}
+        return ResolvedSymbols(
+            species=self.species,
+            source=self.source,
+            release=self.release,
+            case_insensitive=case_insensitive,
+            kinds=self.symbol_kinds,
+            limits=self.symbol_limits,
+            resolved={symbol: matches for symbol, matches in found.items() if matches},
+            unresolved=tuple(symbol for symbol in asked if not found[symbol]),
+        )
+
     def _checked(self, namespace: str) -> str:
         """Return ``namespace`` if this set carries it, else say which ones it does."""
         wanted = namespace.strip().lower()
-        if wanted not in self._to_stems:
+        if wanted not in self.namespaces:
             raise NamespaceNotCarriedError(
                 f"the {self.source} {self.release} set for {self.species!r} carries no "
                 f"{namespace!r} namespace: it carries {', '.join(self.namespaces)}. Ask in "
@@ -720,6 +871,11 @@ def _prepare(
             "source_checksum": row.source_checksum,
             "evidence": list(evidence),
             "namespaces": sorted({namespace for namespace, _id, _stem in triples}),
+            "symbol_kinds": [
+                kind
+                for kind in SYMBOL_KINDS
+                if KIND_NAMESPACES[kind] in {namespace for namespace, _id, _stem in triples}
+            ],
             "rows": len(triples),
         },
     )
@@ -856,6 +1012,35 @@ def _index(
     return (
         {namespace: _Index(index) for namespace, index in to_stems.items()},
         {namespace: _Index(index) for namespace, index in from_stems.items()},
+    )
+
+
+def _symbol_index(
+    to_stems: Mapping[str, _Index],
+) -> tuple[dict[str, tuple[SymbolMatch, ...]], dict[str, tuple[SymbolMatch, ...]]]:
+    """Return the exact and the case-folded symbol lookups, matches in kind order.
+
+    Both are built from the three stored symbol **Namespace**s in one pass, and both hold
+    the same matches: folding is a property of the *lookup* and never of what was stored,
+    so the insensitive path answers with every gene matched rather than a folded set having
+    quietly merged two spellings into one entry on the way in.
+
+    Empty for a set whose source carries no symbols, which costs such a set nothing.
+    """
+    exact: dict[str, list[SymbolMatch]] = {}
+    folded: dict[str, list[SymbolMatch]] = {}
+    for kind in SYMBOL_KINDS:
+        index = to_stems.get(KIND_NAMESPACES[kind])
+        if index is None:
+            continue
+        for spelling in index:
+            for stem in index[spelling]:
+                match = SymbolMatch(symbol=spelling, gene_id_stem=stem, kind=kind)
+                exact.setdefault(spelling, []).append(match)
+                folded.setdefault(fold_symbol(spelling), []).append(match)
+    return (
+        {key: tuple(matches) for key, matches in exact.items()},
+        {key: tuple(matches) for key, matches in folded.items()},
     )
 
 

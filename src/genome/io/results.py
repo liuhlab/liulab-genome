@@ -25,6 +25,9 @@ rules, because a caller who has read one answer has read both. :class:`ResolvedS
 :class:`ResolvedXrefIds` are the two directions of an **Xref set**'s hop, and they are
 :class:`ResolvedGeneIds`'s shape again with one difference: what produced the answer is a
 publisher and a **Release** rather than an assembly and an annotation.
+:class:`ResolvedSymbols` is the third direction of that hop and the one that is not a
+mirror of the other two: a symbol matches approved, previous and alias spellings, so each
+hit is a :class:`SymbolMatch` carrying the kind it matched rather than a bare string.
 
 **An answer knows how it reads.** :attr:`AnnotationStatusRow.state` and
 :attr:`AnnotationStatus.default_summary` are here rather than in the surface printing them,
@@ -844,6 +847,161 @@ class ResolvedXrefIds:
             "resolved": {stem: list(ids) for stem, ids in self.resolved.items()},
             "unresolved": list(self.unresolved),
             "xref_ids": self.xref_ids,
+        }
+
+
+@dataclass(frozen=True)
+class SymbolMatch:
+    """One hit of a gene symbol against an **Xref set**, and which spelling matched it.
+
+    The kind rides on the match rather than being filtered away on the way out, because a
+    table that spells a gene the way it was spelled five years ago is otherwise dropped
+    without a word — the failure that would have hit 31 of EpiFactors' 801 rows.
+
+    Attributes
+    ----------
+    symbol : str
+        The **authority's own** spelling that matched, which is not always the one asked
+        about: on the case-insensitive path ``brca1`` matches and this says ``BRCA1``.
+    gene_id_stem : str
+        The **Gene id stem** that spelling names.
+    kind : str
+        ``approved``, ``previous`` or ``alias`` — see :mod:`genome.xref.symbols`.
+
+    Examples
+    --------
+    >>> match = SymbolMatch(symbol="ARNTL", gene_id_stem="ENSG00000133794", kind="previous")
+    >>> match.as_json()
+    {'symbol': 'ARNTL', 'gene_id_stem': 'ENSG00000133794', 'kind': 'previous'}
+    """
+
+    symbol: str
+    gene_id_stem: str
+    kind: str
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this match as ``--json`` serializes it, in field order.
+
+        Returns
+        -------
+        dict
+            ``symbol``, ``gene_id_stem`` and ``kind``.
+        """
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ResolvedSymbols:
+    """The genes one **Xref set** says each gene symbol names, and how each one matched.
+
+    :meth:`~genome.xref.xref.XrefSet.match_symbols`'s answer — the hop *toward* the hub
+    from the one **Namespace** that is not answered like an identifier.
+    :class:`ResolvedStems`'s shape in every respect a caller relies on — ask order, no
+    empty resolved value, what named nothing riding back — with one difference: a value is
+    a tuple of :class:`SymbolMatch` rather than of stems, because **ambiguity is the return
+    type here and not an edge case**. A symbol naming several genes answers with all of
+    them and nothing picks one, and each says whether it matched an approved, a previous or
+    an alias spelling so the caller can judge the ambiguity themselves.
+
+    **What the set could not have matched is on the answer too.** :attr:`kinds` says which
+    kinds of spelling this **Xref source** publishes and :attr:`limits` says why the others
+    are missing, so *this gene is not in the release* and *this source cannot match the way
+    you spelled it* are distinguishable rather than both being silence.
+
+    Attributes
+    ----------
+    species : str
+        The species this set is for, as the curated metadata table spells it.
+    source : str
+        The **Xref source** whose assertions these are.
+    release : str
+        The pinned **Release** of that source.
+    case_insensitive : bool
+        Whether case was ignored. ``False`` is the default: the species is fixed by the
+        set, so a mouse-cased spelling asked of a human set is the wrong authority's and
+        matches nothing rather than half-working.
+    kinds : tuple of str
+        The kinds of **Symbol match** this set could make, in
+        :data:`~genome.xref.symbols.SYMBOL_KINDS` order.
+    limits : str or None
+        Why the kinds not in :attr:`kinds` are missing, or ``None`` when all three are
+        there.
+    resolved : mapping of str to tuple of SymbolMatch
+        Every symbol that matched at least one gene, in the order they were asked about,
+        to every match it made — approved first, then previous, then alias, and by stem
+        within a kind. No value is ever an empty tuple.
+    unresolved : tuple of str
+        The symbols this release matched nothing for, in the order they were asked about.
+
+    Examples
+    --------
+    >>> answer = ResolvedSymbols(
+    ...     species="Homo sapiens",
+    ...     source="hgnc",
+    ...     release="2026-07-07",
+    ...     case_insensitive=False,
+    ...     kinds=("approved", "previous", "alias"),
+    ...     limits=None,
+    ...     resolved={
+    ...         "ADCY3": (
+    ...             SymbolMatch("ADCY3", "ENSG00000138031", "approved"),
+    ...             SymbolMatch("ADCY3", "ENSG00000155897", "previous"),
+    ...         )
+    ...     },
+    ...     unresolved=("Brca1",),
+    ... )
+    >>> answer.gene_id_stems
+    ['ENSG00000138031', 'ENSG00000155897']
+    >>> answer.as_json()["resolved"]["ADCY3"][1]["kind"]
+    'previous'
+    """
+
+    species: str
+    source: str
+    release: str
+    case_insensitive: bool
+    kinds: tuple[str, ...]
+    limits: str | None
+    resolved: Mapping[str, tuple[SymbolMatch, ...]]
+    unresolved: tuple[str, ...]
+
+    @property
+    def gene_id_stems(self) -> list[str]:
+        """Every stem matched, ask order and then match order — a fresh list each call.
+
+        **Every** stem, not one per symbol, and it may repeat: one gene answering a symbol
+        on both an approved and an alias spelling contributes two matches and so two
+        entries. Flattening loses the two things this answer exists to carry — which
+        symbol named which gene, and which kind of spelling each match was on — so a
+        reader who takes this list has thrown away the means of judging the ambiguity.
+        :attr:`resolved` is what keeps both.
+        """
+        return [match.gene_id_stem for matches in self.resolved.values() for match in matches]
+
+    def as_json(self) -> dict[str, Any]:
+        """Return this answer as ``--json`` serializes it.
+
+        Returns
+        -------
+        dict
+            ``species``, ``source``, ``release``, ``case_insensitive``, ``kinds`` and
+            ``limits``, ``resolved`` as a mapping of symbol to a list of match objects,
+            ``unresolved`` as a list, and the flattened ``gene_id_stems`` — written out
+            beside the mapping it is read from for the reason :attr:`gene_id_stems` gives.
+        """
+        return {
+            "species": self.species,
+            "source": self.source,
+            "release": self.release,
+            "case_insensitive": self.case_insensitive,
+            "kinds": list(self.kinds),
+            "limits": self.limits,
+            "resolved": {
+                asked: [match.as_json() for match in matches]
+                for asked, matches in self.resolved.items()
+            },
+            "unresolved": list(self.unresolved),
+            "gene_id_stems": self.gene_id_stems,
         }
 
 

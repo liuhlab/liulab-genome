@@ -42,7 +42,7 @@ substitute for *module*.
   transcription, in a registered annotation's own gene ids, and which motifs answer for them
 - [Xref](./docs/context/xref.md) — covers `xref/*`: which foreign identifiers name a gene and which
   genes a foreign identifier names, on one named publisher's assertions at one pinned release, with
-  no genome open. **Symbol match** alone is still _(decided, not built — ADR-0018)_
+  no genome open
 - [Orthology](./docs/context/orthology.md) — covers `homology/*` _(decided, not built — ADR-0019,
   ADR-0020)_: which genes in another species a gene is homologous to, and how many-to-many the
   publisher's own gene tree says that is

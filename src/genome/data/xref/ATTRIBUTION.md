@@ -180,6 +180,144 @@ numbering: release-116's worm directory holds `Caenorhabditis_elegans.WBcel235.6
 "116" would name a file that does not exist. Worm is answered by the Alliance, where the hop is the
 identity function, and no worm row is invented here to make the table look symmetrical.
 
+## HGNC — `hgnc`, the quarterly archive file of 2026-07-07
+
+Seal RL, Braschi B, Gray K, McClay J, Tweedie S, Bruford EA. **Genenames.org: the HGNC and PGNC
+resources in 2026.** *Nucleic Acids Research* 54(D1):D1098-D1107, 2026. PMID 41287213.
+doi:10.1093/nar/gkaf1229 — the quarterly archive file dated **2026-07-07**, from
+<https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt>.
+
+Human only, and the **only source here that publishes previous and alias spellings typed**. That is
+what it is for: the other three carry ids, and the two that carry symbols at all carry the current
+one. HGNC's `prev_symbol` and `alias_symbol` columns say which kind a spelling is, so a **Symbol
+match** can say it too rather than this package guessing.
+
+**The failure it prevents, measured on this repo's own shipped data.** Of EpiFactors v2.0's 801
+human rows, all 801 carry an HGNC id and all 801 resolve — and **31 still spell the gene by a symbol
+HGNC has retired**: `ARNTL` for `BMAL1`, `C11orf30` for `EMSY`, `ACINUS` for `ACIN1`. A symbol join
+that knows approved spellings only mis-keys or drops exactly those 31, and says nothing while doing
+it. The same measurement is recorded beside the cofactor table it was made on.
+
+**How the release was pinned, and why not from a date.** The archive's file names are dated and the
+dates are **irregular** — `2024-07-02`, `2025-01-06`, `2025-10-07`, and both `2026-07-03` and
+`2026-07-07` in one quarter — so a URL assembled from *the first of the quarter* is a 404 about half
+the time. The pin names a file read out of the bucket's own listing:
+`https://storage.googleapis.com/storage/v1/b/public-download-files/o?prefix=hgnc/archive/archive/quarterly/tsv`,
+which returned **27 quarterly snapshots** back to `hgnc_complete_set_2020-07-01.txt` when this row
+was written. Old files stay live, which is what makes HGNC eligible (ADR-0018).
+
+**The path has a doubled segment, and the remembered one is dead.**
+`ftp.ebi.ac.uk/pub/databases/genenames/hgnc/tsv/hgnc_complete_set.txt` is a live 404, and so is the
+`…/new/tsv/…` variant. HGNC serves from a Google Cloud Storage bucket whose archive path repeats
+itself — `…/hgnc/archive/archive/quarterly/tsv/…`. Both `archive` segments are real.
+
+**The published checksum covers the served bytes, which here are also the unpacked ones.** The file
+is plain text and not gzipped, so the bucket listing's own `md5Hash` —
+`cd41d33955722de9ac0e14a2557ef5fc` for 16,913,890 bytes, verified against the download — is the
+digest of exactly what this table's one convention pins (ADR-0006). The two conventions that sit
+side by side in this directory coincide for once; **do not carry that across** to a source whose
+file is compressed, where the Alliance's md5 is of the unpacked bytes and Ensembl's `sum` is of the
+served ones.
+
+### The schema has drifted, so the reader parses by header name
+
+The header row is **52 columns** wide in `hgnc_complete_set_2020-07-01.txt` and **54** in
+`…_2023-01-01.txt` and every file since. A reader indexing by position reads the wrong column on the
+older snapshots and reports nothing wrong, so this one finds its seven columns by name — `hgnc_id`,
+`symbol`, `prev_symbol`, `alias_symbol`, `ensembl_gene_id`, `entrez_id`, `uniprot_ids` — and raises
+naming the missing one if the publisher renames it. Reordering or adding a column cannot change the
+answer, and a named test reverses the whole header to prove it.
+
+**A multi-valued cell is quoted and pipe-separated; a single value is bare.** `alias_symbol` reads
+`"MOP3|JAP3|PASD3|bHLHe5|ARNTL1"` with the quotes in the file, and `AC3` without them. Splitting
+before stripping the quotes keys the namespace by `"MOP3` and `ARNTL1"`, which nobody types.
+
+| Species | Rows | With a hub | Namespaces carried |
+|---|---|---|---|
+| *Homo sapiens* | 45,019 | 42,337 | Ensembl, Entrez, UniProt, HGNC, symbol (approved, previous, alias) |
+
+**2,682 rows carry no `ensembl_gene_id`** — mostly pseudogenes and non-coding RNAs Ensembl does not
+carry — and a row with no hub has nothing to hang a namespace off, so it appears in no slice. That
+is the same silence the Alliance reader keeps for a gene listed with no `ENSEMBL:` cross-reference.
+
+## The Alliance's per-species gene submissions — `alliance_bgi`, release 9.0.0
+
+Alliance of Genome Resources Consortium. **Updates to the Alliance of Genome Resources central
+infrastructure.** *Genetics* 227(1), 2024. PMID 38552170. doi:10.1093/genetics/iyae049 — the
+`BGI` (Basic Gene Information) submissions of release **9.0.0**, from
+<https://download.alliancegenome.org/9.0.0/BGI/MGI/1.0.2.5_BGI_MGI_0.json.gz> and
+<https://download.alliancegenome.org/8.3.0/BGI/WB/1.0.2.5_BGI_WB_4.json.gz>.
+
+**Each file is a species authority's own submission**, and the row records who curated it as well as
+who serves it: MGI's states `"release": "MGI 6.27 2026-04-21"` in its own header and WormBase's
+states `"release": "WS298"`. Cite the Alliance, whose file it is; the `publisher` column names both.
+
+**It is here because neither authority can be pinned or fetched directly.** MGI keeps no dated
+archive — its `downloads/reports/` has one `archive/` subdirectory and that holds only `iphone/`,
+and `MGI_Gene_Model_Coord.rpt` opens with a column header and no build or date stamp — so MGI is not
+an eligible **Xref source** (ADR-0018). `downloads.wormbase.org` answers **403 to plain `curl`**,
+the release directories and not only the blog, measured from two networks on two days. The Alliance
+holds a dated, immutable, checksummed copy of both submissions, and is in any case the ongoing
+publisher for *C. elegans* now that WS298 is WormBase's final release.
+
+**The worm file's path names 8.3.0 and its release is 9.0.0**, which is the same wrinkle the
+cross-reference file has one directory up: the Alliance re-serves an unchanged submission under a
+later release rather than rebuilding it, and its file-management API lists 9.0.0 among that file's
+`releaseVersions`. A URL assembled from the release number alone would 404. Read the `s3Url` from
+`https://fms.alliancegenome.org/api/datafile/by/<release>/BGI/<MGI|WB>?latest=true`.
+
+**The published md5 is of the unpacked JSON**, as the cross-reference file's is of the unpacked TSV
+and unlike Ensembl's. Verified by decompressing both and hashing:
+
+| Submission | Served bytes | md5 of the `.gz` | md5 of the unpacked JSON — **what the row pins** |
+|---|---|---|---|
+| MGI | 6,754,968 | `39c0fe0a8db6aa3009dd2109f0127fa8` | `a834098c9505ec7fb4a0151480a90734` |
+| WB | 5,265,513 | `d7064a579923b3ee0e8cdbf00b1b0a6f` | `4a45ce6beb26dd0dc8c053e5b2e1a835` |
+
+The second column of each row is the file-management API's `md5Sum`, matched only after `gzip -d`.
+
+### Approved spellings only, and that is a decision
+
+Each record carries one `symbol` and one `synonyms` list, and **the list is undifferentiated**.
+WormBase's `daf-16` record files `daf-17` — a name the gene genuinely went by — in the same list as
+the sequence names `R13H8.1` and `CELE_R13H8.1`, and nothing in the file says which is which.
+Reading them would mean labelling each one `previous` or `alias` on this package's own authority,
+which is the claim it never makes (ADR-0017). So this source publishes `approved` alone, and every
+answer it produces carries the sentence saying so — the explanation is behaviour rather than a
+comment, because a spelling MGI retired otherwise comes back unresolved and looks exactly like a
+gene that is absent.
+
+| Species | Records | With a hub | With a symbol | Namespaces carried |
+|---|---|---|---|---|
+| *Mus musculus* | 90,776 | 77,476 | **all 90,776** | Ensembl, Entrez, UniProt, MGI, symbol (approved) |
+| *Caenorhabditis elegans* | 48,769 | 46,926 | **all 48,769** | Ensembl, Entrez, UniProt, WormBase, symbol (approved) |
+
+**Every record carries a symbol and not every record carries a hub**, which is the shape that makes
+this source worth having: the authority names each of its genes, and the join to Ensembl is where
+the losses are. Worm's 46,926 hubs are the same 46,926 the cross-reference file reports, and mouse's
+77,476 are within six of its 77,482 — two files, two submissions, one authority, agreeing.
+
+### The file is JSON, and it is read a record at a time
+
+One object with a `metaData` header and a `data` array. The mouse submission unpacks to 72 MB and
+the worm one to 74 MB, so neither is decoded whole: the reader finds the array and peels one gene
+object off the front of a small rolling buffer. That also makes the two publishers' two different
+pretty-printers — two-space for MGI, three-space for WormBase — a non-issue, both being JSON.
+
+### Where a symbol is stored, and under what name
+
+A prepared set is the same plain gzipped TSV every other source writes, and the **kind of spelling**
+is a value in its `namespace` column: `symbol`, `previous_symbol`, `alias_symbol`. A fourth column
+saying *what sort of row this is* would be the level discriminator this design refuses everywhere
+else, and the three spellings read for themselves in a shell:
+
+```
+zcat homo_sapiens.xref_table.tsv.gz | awk -F'\t' '$1=="previous_symbol"'
+```
+
+Only `symbol` is a **Namespace** a caller may name — a previous and an alias spelling are the same
+identifier system with a different standing, not systems of their own.
+
 ## Adding a source
 
 A row here plus a reader in `genome/xref/`, and nothing else. The row must pin a release that stays

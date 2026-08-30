@@ -109,6 +109,10 @@
 
 ::: genome.xref.evidence
 
+## `genome.xref.symbols`
+
+::: genome.xref.symbols
+
 ## `genome.xref.alliance`
 
 ::: genome.xref.alliance
@@ -116,6 +120,14 @@
 ## `genome.xref.ensembl`
 
 ::: genome.xref.ensembl
+
+## `genome.xref.hgnc`
+
+::: genome.xref.hgnc
+
+## `genome.xref.bgi`
+
+::: genome.xref.bgi
 
 ## `genome.xref.xref`
 

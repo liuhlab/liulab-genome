@@ -18,6 +18,8 @@ that survey reported, the difference is stated at the point it occurs.
 | `GENECROSSREFERENCE_COMBINED_11.tsv.gz` | `download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/` | 25,776,975 | md5 `f8bbb8156c75d2d2a5279b24d914de4a` |
 | `hgnc_complete_set_2026-07-07.txt` | `storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/` | 16,913,890 | md5 `cd41d33955722de9ac0e14a2557ef5fc` |
 | `gencode.v50.metadata.EntrezGene.gz` | `ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_50/` | 2,235,757 | md5 `959aa97f7dd5c17aafd4fccc0d718f45` |
+| `1.0.2.5_BGI_MGI_0.json.gz` | `download.alliancegenome.org/9.0.0/BGI/MGI/` | 6,754,968 | md5 `39c0fe0a8db6aa3009dd2109f0127fa8`; unpacked `a834098c9505ec7fb4a0151480a90734`, **the publisher's own** |
+| `1.0.2.5_BGI_WB_4.json.gz` | `download.alliancegenome.org/8.3.0/BGI/WB/` | 5,265,513 | md5 `d7064a579923b3ee0e8cdbf00b1b0a6f`; unpacked `4a45ce6beb26dd0dc8c053e5b2e1a835`, **the publisher's own** |
 
 `gene2ensembl.gz` carried `Last-Modified: Sat, 29 Aug 2026 08:05:04 GMT` — the morning of this
 measurement. That is the caveat on section 1 and the evidence for section 3, and it is why the NCBI
@@ -190,7 +192,63 @@ transcript id** — `metadata.EntrezGene` is (transcript id, Entrez Gene id), `m
 (transcript id, symbol, HGNC id), `metadata.RefSeq` and `metadata.SwissProt` likewise. There is no
 gene-level metadata file; reading one at gene level requires a join the file does not carry.
 
-## 8. What this note could not verify
+## 8. Which of the pinnable sources carries a gene symbol, and of what kind
+
+Added while building symbol matching, on the same day and the same files. Every count below is over
+the whole published file, not a sample.
+
+| Source | Carries a symbol? | Typed? |
+|---|---|---|
+| **HGNC quarterly archive** | yes, human only | **yes** — `symbol`, `prev_symbol` and `alias_symbol` are three columns |
+| **Alliance `GENECROSSREFERENCE_COMBINED`** | **worm only** | n/a |
+| **Alliance `BGI` per-species submissions** | yes, every contributing database | **no** — one `symbol` and one undifferentiated `synonyms` list |
+| **Ensembl per-species TSV dumps** | no | — |
+
+**The Alliance cross-reference file carries no human or mouse symbol at all.** Counted over all
+2,659,704 rows, grouped by taxon and cross-reference prefix: worm's `WB:`-prefixed rows include
+47,156 under the page `gene/spell` whose value is a symbol (`WB:WBGene00000001 → WB:aap-1`), and
+every human `HGNC:`-prefixed row (44,569) and every mouse `MGI:`-prefixed row (246,330 across six
+pages) carries the gene's own id and never a name. So this file cannot supply mouse symbols, and
+the earlier assumption that it could was wrong.
+
+**`GENE_TSV_COMBINED` would have supplied all three species and is not pinnable.**
+`9.0.0/downloads/GENE_TSV_COMBINED.tsv.gz` (54 MB) is one row per gene over nine species with
+`GeneSymbol`, `GeneSynonyms` and `GeneCrossReferences` columns — and the same path under `8.3.0/`
+and `7.4.0/` **404s**, and `fms.alliancegenome.org/api/datafile/by/GENE/COMBINED` errors. It is a
+website download rather than a file-management artifact, so it fails the eligibility bar (ADR-0018).
+
+**The `BGI` submissions do pin, and their md5 covers the unpacked bytes.** The file-management API
+answers `by/9.0.0/BGI/MGI` and `by/9.0.0/BGI/WB` with a versioned `s3Path`, an `md5Sum` and the
+releases each belongs to. Worm's is `8.3.0/BGI/WB/1.0.2.5_BGI_WB_4.json.gz` re-served under 9.0.0
+and 9.1.0 — the same re-serving the cross-reference file does — so a URL built from the release
+number alone 404s. Verified by decompressing and hashing:
+
+| Submission | Served | Unpacked | md5 of served | md5 of unpacked — **matches the API's `md5Sum`** |
+|---|---|---|---|---|
+| MGI | 6,754,968 | 71,819,688 | `39c0fe0a8db6aa3009dd2109f0127fa8` | `a834098c9505ec7fb4a0151480a90734` |
+| WB | 5,265,513 | 74,123,056 | `d7064a579923b3ee0e8cdbf00b1b0a6f` | `4a45ce6beb26dd0dc8c053e5b2e1a835` |
+
+| Submission | Own `release` | Records | With an `ENSEMBL:` cross-reference | With a symbol |
+|---|---|---|---|---|
+| MGI | `MGI 6.27 2026-04-21` | 90,776 | 77,476 | **all 90,776** |
+| WB | `WS298` | 48,769 | 46,926 | **all 48,769** |
+
+Worm's 46,926 hubs are exactly the 46,926 section 5 counts in the cross-reference file, and mouse's
+77,476 are within six of that file's 77,482 — two Alliance products, one authority each, agreeing.
+
+**`downloads.wormbase.org` 403s from a second network too.** Re-probed from GPU71FM as well as
+locally, on `releases/WS298/` and on `ftp.wormbase.org/pub/wormbase/releases/WS298/…`, with and
+without a browser `User-Agent`: 403 every time. Section 6's finding holds, and it is why worm's
+symbols are read from the Alliance's copy of WormBase's own submission rather than from WormBase.
+
+**HGNC's archive listing, re-read.** 27 quarterly `hgnc_complete_set_*` files from `2020-07-01` to
+`2026-07-07`, and the dates are irregular enough that a URL built from *the first of the quarter* is
+wrong about half the time: `2024-07-02`, `2025-01-06`, `2025-10-07`, `2026-01-06`, and **both**
+`2026-04-01` and `2026-04-07`, **both** `2026-07-03` and `2026-07-07`. Each file is also served
+under a `.tsv` name with the identical md5. The file is plain text, so the bucket's `md5Hash` is
+both the served and the unpacked digest — a coincidence of this source and not a convention.
+
+## 9. What this note could not verify
 
 - **HCOP.** Neither `ftp.ebi.ac.uk/pub/databases/genenames/hcop/…` nor any `hgnc/hcop` prefix in the
   HGNC bucket returns a file; the bucket listing for that prefix is empty. So the bulk files are not
