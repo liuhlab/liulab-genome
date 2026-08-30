@@ -368,3 +368,18 @@ def test_an_answer_imports_nothing_that_produces_one() -> None:
     forbidden = {"genome.io.gtf", "genome.io.download", "genome.io.chimera", "genome.genome"}
 
     assert _module_level_imports(results_module) & forbidden == set()
+
+
+def test_an_answer_imports_nothing_that_ships_a_table() -> None:
+    # The same seam on the other side. A **TF gene list** and a **TF cofactor list** used
+    # to live here, and the two import lines that fed them pulled in the census reader,
+    # the cofactor reader, the motif link table and the whole motif tree behind it — so
+    # opening any assembly as a `Genome` loaded sixteen `genome.tf` modules to answer a
+    # question about a registration. Those answers moved to the halves that read the
+    # shipped files; this asserts the edge cannot grow back. A prefix rather than a fixed
+    # set, so a module added under `genome.tf` cannot arrive here unnoticed.
+    reached = {
+        name for name in _module_level_imports(results_module) if name.startswith("genome.tf")
+    }
+
+    assert reached == set()

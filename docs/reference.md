@@ -49,9 +49,21 @@
 
 ::: genome.tf.gene.census
 
+## `genome.tf.gene.annotation`
+
+::: genome.tf.gene.annotation
+
 ## `genome.tf.cofactor.table`
 
 ::: genome.tf.cofactor.table
+
+## `genome.tf.cofactor.annotation`
+
+::: genome.tf.cofactor.annotation
+
+## `genome.tf.species`
+
+::: genome.tf.species
 
 ## `genome.tf.motif.motif`
 

@@ -10,6 +10,25 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **The TF context moved out of the Annotation module, and the registry kept one seam.**
+  `AnnotationRegistry.resolve_gene_ids` is now the only identifier surface `genome.io.gtf` exposes:
+  it answers *which gene ids does this **Gene id stem** name here* and knows nothing about what it
+  is handed a list of. Roughly 900 lines of TF code moved out from behind it — `TFGene`,
+  `TFGeneList`, `NoTFCensusError` and the census plumbing to the new `genome.tf.gene.annotation`;
+  `TFCofactor`, `TFCofactorList`, `NoCofactorTableError` and the table plumbing to
+  `genome.tf.cofactor.annotation`; and `UnknownSpeciesError`, shared by both halves, to
+  `genome.tf.species`. `genome.io.gtf` and `genome.io.results` now import nothing under
+  `genome.tf`, held by a guard apiece: those two import lines used to pull in sixteen `genome.tf`
+  modules — both shipped-table readers, the motif link table and the whole motif tree down to the
+  scan, its worker pool and its Parquet sink — so opening any assembly as a `Genome` loaded all of
+  it. **Nothing a caller can see changed.** `import genome` still yields `TFGeneList`,
+  `TFCofactorList`, `NoCofactorTableError`, `NoTFCensusError` and `UnknownSpeciesError` under those
+  names and `genome.__all__` is untouched; `Genome.tf_gene_list()` and `Genome.tf_cofactor_list()`
+  answer as before and now delegate into `genome.tf` rather than into the registry; `genome
+  tf-gene-list` and `genome tf-cofactor-list` keep their stdout, their stderr attribution lines,
+  their `--json` records and their exit codes. Adding a second bio topic that wants an annotation's
+  own gene ids is now one directory under `src/genome/` rather than an edit to four modules, three
+  of which have no stake in it.
 - **CI no longer recompiles memelite's JIT on every run, and the suite is a third of its size.**
   The `test` lane's largest single item was not a test: `memelite`'s scan and compare engines are
   `@numba.njit(cache=True)`, numba writes that cache inside the pixi env, and `setup-pixi` saves

@@ -5,8 +5,8 @@ query — a locus into bases, a GTF into a registered annotation, a FASTA into a
 vocabulary splits by bounded context: each file below is the glossary for one part of the source
 tree, and the shared kernel at the bottom holds the words every context uses. The glossaries live
 under `docs/context/`, not beside the code — only four of the eight map cleanly onto a directory,
-and TF straddles `tf/gene/`, `tf/cofactor/` and a module beside them, so co-locating them would put
-four in arbitrary places. Rules live in `CLAUDE.md`; this map and the eight files it lists are a
+and TF straddles `tf/gene/`, `tf/cofactor/` and two modules beside them, so co-locating them would
+put four in arbitrary places. Rules live in `CLAUDE.md`; this map and the eight files it lists are a
 glossary and nothing else.
 
 **Use these words.** When your output names a domain concept — an issue title, a refactor proposal,
@@ -37,9 +37,10 @@ substitute for *module*.
   it can map, and how a finished build is told from an abandoned one
 - [Motif](./docs/context/motif.md) — covers `tf/motif/*`: what a transcription factor recognises,
   stored as counts and belonging to no assembly, and where a scan says it occurs
-- [TF](./docs/context/tf.md) — covers `tf/gene/*`, `tf/cofactor/*` and `tf/link.py`: which genes a
-  published census judges transcription factors and which a publisher lists as cofactors of
-  transcription, in a registered annotation's own gene ids, and which motifs answer for them
+- [TF](./docs/context/tf.md) — covers `tf/gene/*`, `tf/cofactor/*`, `tf/link.py` and
+  `tf/species.py`: which genes a published census judges transcription factors and which a
+  publisher lists as cofactors of transcription, in a registered annotation's own gene ids, and
+  which motifs answer for them
 - [Xref](./docs/context/xref.md) — covers `xref/*`: which foreign identifiers name a gene and which
   genes a foreign identifier names, on one named publisher's assertions at one pinned release, with
   no genome open
@@ -48,7 +49,9 @@ substitute for *module*.
 
 `io/results.py` sits in Assembly and Annotation both: what a registration answers with, for either.
 It is the return types the API hands back and the CLI renders, so it carries the vocabulary of
-whichever context asked.
+whichever context asked. What a *shipped table* answers with is not there: a **TF gene list** and a
+**TF cofactor list** live with the halves that read those files, so the vocabulary of one publisher's
+columns stays inside the context that owns it.
 
 `cli.py` is covered by no context — the map covers what carries domain vocabulary, not the whole tree.
 
