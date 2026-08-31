@@ -79,6 +79,15 @@ class ToolNotFoundError(RuntimeError):
 
     The message is the tool's :meth:`ExternalTool.install_instructions`, so the next
     action is in the exception rather than somewhere the caller has to go and look.
+
+    Examples
+    --------
+    >>> from genome import ToolNotFoundError
+    >>> try:
+    ...     raise ToolNotFoundError("samtools is not on PATH. Install `samtools`.")
+    ... except ToolNotFoundError as missing:
+    ...     print(missing)
+    samtools is not on PATH. Install `samtools`.
     """
 
 

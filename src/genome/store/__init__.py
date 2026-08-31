@@ -26,8 +26,8 @@ suite's offline guard exists to prevent.
 
 **The exception classes below are the one exemption, because nothing patches one.** They
 are re-exported so a caller can name in an ``except`` what this package hands them — a
-genome directory that disagrees with its record, a prepared set that was never downloaded
-— rather than importing from a module the API reference declares free to move. The
+**Assembly dir** that disagrees with its record, a **Prepared set** nothing has
+prepared yet — rather than importing from a module the API reference declares free to move. The
 exemption is theirs alone: a function or a non-exception class added to ``__all__``
 re-opens the hole the paragraph above closes.
 

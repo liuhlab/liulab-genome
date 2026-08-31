@@ -59,6 +59,15 @@ class RegistrationError(RuntimeError):
     states a caller can tell apart by looking at the directory. Every one of them names
     the command that repairs it, because a caller who cannot act on the message is left
     guessing.
+
+    Examples
+    --------
+    >>> from genome.store import RegistrationError
+    >>> try:
+    ...     raise RegistrationError("sacCer3: register it again with `--force`.")
+    ... except RegistrationError as broken:
+    ...     print(broken)
+    sacCer3: register it again with `--force`.
     """
 
 
@@ -69,6 +78,12 @@ class UnfinishedRegistrationError(RegistrationError):
     whose record was never written, or the wreckage of one killed half-way, and
     nothing on disk distinguishes them. An **absent or empty** directory is not this —
     that is a fresh registration and proceeds normally.
+
+    Examples
+    --------
+    >>> from genome.store import RegistrationError, UnfinishedRegistrationError
+    >>> isinstance(UnfinishedRegistrationError("files, but no record"), RegistrationError)
+    True
     """
 
 
@@ -78,6 +93,15 @@ class RegistrationMismatchError(RegistrationError):
     Raised rather than rebuilt: a file that was deleted or truncated after
     registration is a fact worth surfacing, and guessing which of the two is right
     risks silently wrong results.
+
+    Examples
+    --------
+    >>> from genome.store import RegistrationError, RegistrationMismatchError
+    >>> try:
+    ...     raise RegistrationMismatchError("sacCer3.2bit: recorded 3039745, found 0")
+    ... except RegistrationError as broken:  # the parent catches this and the unfinished state
+    ...     print(broken)
+    sacCer3.2bit: recorded 3039745, found 0
     """
 
 

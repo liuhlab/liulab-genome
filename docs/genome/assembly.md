@@ -212,18 +212,18 @@ is neither of those: that is a fresh registration and proceeds normally.
 To branch on it rather than read it, both import from `genome.store`:
 
 ```python
-from genome.store import RegistrationError
+from genome.store import RegistrationMismatchError, UnfinishedRegistrationError
 
 try:
     yeast = Genome("sacCer3")
-except RegistrationError as broken:
-    print(broken)   # the message names the exact `--force` command to run
+except RegistrationMismatchError as changed:
+    print(changed)      # files changed under a good record; re-register with --force
+except UnfinishedRegistrationError as partial:
+    print(partial)      # a build that never finished; the same repair applies
 ```
 
-`RegistrationError` is the parent of both, so catching it catches either. Catch
-`RegistrationMismatchError` or `UnfinishedRegistrationError` by name when the two want
-different handling — files that changed under a good record, against a build that never
-finished.
+Both messages name the exact command to run. To treat the two the same, catch their
+parent instead — `from genome.store import RegistrationError` covers either.
 
 To re-check integrity when nothing has raised but you suspect a problem, `genome assembly
 verify sacCer3` re-reads the whole FASTA and recomputes its digest:
