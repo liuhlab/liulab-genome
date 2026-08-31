@@ -45,17 +45,18 @@ plugins:
         python:
           paths: [src]
           options:
-            # A docstring cites a decision by record number, which is right for the
-            # reader of the source and resolves nowhere for the reader of this page —
-            # the record tree is excluded below. This renders the citation as a link to
-            # the record on GitHub, so both readers are served and no record becomes a
-            # page here. A number naming no record fails the build.
+            # A docstring cites a decision by record number, which is right for the reader
+            # of the source and wrong for the reader of this page — the record tree is
+            # excluded below, so the number names a file they cannot open. This removes the
+            # citation from what is rendered here; the docstring in `src/` keeps it.
             extensions:
-              - scripts/mkdocs_record_links.py:RecordLinks:
-                  records: docs/adr
-                  base_url: https://github.com/liuhlab/liulab-genome/blob/main
+              - scripts/mkdocs_record_citations.py:StripRecordCitations
             docstring_style: numpy
-            show_source: true
+            # A source listing is published verbatim, so griffe's rewrite cannot reach the
+            # citations inside one and thirty-five numbers rode onto this page that way.
+            # Stripping them would publish a listing disagreeing with the file it names, so
+            # the listings go instead: the source is one click away on GitHub.
+            show_source: false
             show_root_heading: true
             show_root_full_path: false
             show_signature_annotations: true

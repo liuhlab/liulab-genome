@@ -256,8 +256,9 @@ def resolve_homologs(
         # Both causes in one count. A **Dropped partner** is a partner the answer no
         # longer names, and the definition does not care which step removed it — so what
         # a Homology type filter dropped before the crossing is added to what the
-        # annotation dropped during it, rather than being replaced by it. ADR-0020 turns
-        # on the count being reported, not on the label being corrected.
+        # annotation dropped during it, rather than being replaced by it. The publisher's
+        # label is never recomputed (ADR-0020): what matters is the count being reported,
+        # not the label being corrected.
         dropped_partners=tuple(sorted(set(answer.dropped_partners) | set(crossed.unresolved))),
         # A fact about the set the answer came from, not about the crossing, and the
         # module documentation says it rides on every answer. A crossing is an answer.

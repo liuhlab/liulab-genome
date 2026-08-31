@@ -833,8 +833,9 @@ def motif_links(
 
     **The species is passed and never inferred.** A table is named by a species and a
     release, and a **Gene id stem**'s prefix is not a claim about which species it belongs
-    to — deriving one from the other is the guess ADR-0003 exists to forbid. A caller
-    holding an assembly has its species already, in the assembly's own metadata row.
+    to — deriving one from the other is the guess a local assembly key exists to forbid
+    (ADR-0003). A caller holding an assembly has its species already, in the assembly's
+    own metadata row.
 
     **The census is asked first, and the order is what keeps this correct.** A gene the
     census assessed is answered whatever else is known about it — the 151 human genes that
