@@ -88,6 +88,11 @@ pytest = "*"
 pytest-cov = "*"
 pytest-xdist = "*"
 hypothesis = "*"
+# The suite tests `scripts/mkdocs_record_links.py`, which is a griffe extension, so the
+# lane that runs the suite needs griffe. It arrives with the docs feature too; naming it
+# here is what keeps the record-link tests in the unit lane rather than skipping themselves
+# green in it, which is the one thing the two-lane split exists to prevent.
+griffe = "*"
 
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
@@ -160,7 +165,7 @@ register-kernel = "python -m ipykernel install --user --name liulab-genome --dis
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "scripts"]
 target-version = "py312"
 extend-exclude = [".pixi", "site", "build", "dist"]
 
@@ -198,6 +203,13 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.pyright]
 include = ["src", "tests"]
+# `scripts/` is build tooling, not the wheel, so it is resolved but not checked — the same
+# footing `show_numba_cache_key.py` has always had. What makes it resolvable is the
+# extension test importing it by name, the way mkdocs loads it. `src` is listed beside it
+# because naming any extra path replaces the default root: without it `genome` resolves
+# from the installed wheel instead of from source, and every test that reaches for a
+# module-private name is reported as importing a private name.
+extraPaths = ["src", "scripts"]
 exclude = ["**/__pycache__", "**/.pixi"]
 venvPath = ".pixi/envs"
 venv = "default"
@@ -214,6 +226,10 @@ testpaths = ["tests"]
 # xdist worker imports at startup, though no test here is async. Nothing else installed
 # is dead weight — pytest-cov, xdist and hypothesis are all load-bearing.
 addopts = ["-ra", "--strict-markers", "--strict-config", "-p", "no:anyio"]
+# `scripts/` holds the one build-time module the suite tests: the griffe extension that
+# makes a record number on the reference page resolve. It is not part of the wheel, so it
+# does not belong in `src/`, and it is not a test, so it does not belong in `tests/`.
+pythonpath = ["scripts"]
 xfail_strict = true
 filterwarnings = ["error"]
 markers = [

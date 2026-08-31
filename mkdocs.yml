@@ -45,6 +45,15 @@ plugins:
         python:
           paths: [src]
           options:
+            # A docstring cites a decision by record number, which is right for the
+            # reader of the source and resolves nowhere for the reader of this page —
+            # the record tree is excluded below. This renders the citation as a link to
+            # the record on GitHub, so both readers are served and no record becomes a
+            # page here. A number naming no record fails the build.
+            extensions:
+              - scripts/mkdocs_record_links.py:RecordLinks:
+                  records: docs/adr
+                  base_url: https://github.com/liuhlab/liulab-genome/blob/main
             docstring_style: numpy
             show_source: true
             show_root_heading: true
