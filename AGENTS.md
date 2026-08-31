@@ -75,8 +75,30 @@ mechanises it.**
   silently when a row is inserted. Held at review; no guard test.
 - **Docs are hand-authored Markdown** under [`docs/`](docs/) (MkDocs Material) — the prose page is
   primary, `mkdocstrings` secondary — and stale committed docs are broken code. `docs/adr/`,
-  `docs/context/` and `docs/research/` are agent-facing and excluded from the built site.
+  `docs/agents/`, `docs/context/` and `docs/research/` are agent-facing and excluded from the
+  built site.
 - **Versioning: CalVer `YYYY.MM.MICRO`, from the git tag.** A tag is a release; never hand-edit a
   version. Update the Unreleased section of `CHANGELOG.md`.
 - **Git.** Small, single-purpose PRs — one issue, one focused diff. Conventional Commits. Green CI is
   necessary, never sufficient.
+
+## Agent skills
+
+Configuration the engineering skills read before they act. Each file is the contract; this
+section points at it and restates none of it.
+
+### Issue tracker
+
+GitHub issues on `liuhlab/liulab-genome`, driven by `gh`. See
+[`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name. See
+[`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Multi-context, and not in the shape the default assumes: `CONTEXT-MAP.md` and eight glossaries
+under `docs/context/`, against one `docs/adr/`. There is no `CONTEXT.md` and its absence is not
+a gap. See [`docs/agents/domain.md`](docs/agents/domain.md).

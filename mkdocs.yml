@@ -89,6 +89,7 @@ validation:
 # so an unexcluded file here would fail the build for not being in the nav.
 exclude_docs: |
   adr/
+  agents/
   context/
   research/
 
