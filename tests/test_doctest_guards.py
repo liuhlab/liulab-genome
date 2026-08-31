@@ -2,10 +2,8 @@
 
 A doctest item collected from ``src/`` is a test, and it gets the same two promises every
 other test in the lane gets — it reaches no network, and it sees a **Data dir** of its own
-— or it is the hole in them. Neither promise is free here: a conftest's fixtures reach the
-directory it sits in and nothing above, so for as long as both guards lived under
-``tests/`` they had no reach over ``src/`` at all. ``conftest.py`` at the repository root
-is what gives them that reach, and this is what proves it.
+— or it is the hole in them. The root ``conftest.py`` is what gives the guards that reach
+and says why; this is what proves they have it.
 
 **A structural assertion would not.** That the root conftest exists, or that it names
 :mod:`tests._guards`, says nothing about whether a guard is *in force* where it matters.

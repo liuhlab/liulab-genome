@@ -65,7 +65,12 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   live in `tests/_guards.py`, loaded by a root `conftest.py` sitting above both trees, and a test
   runs a throwaway example in a pytest of its own to prove the reach rather than assert the shape
   of a file. The examples carrying `+SKIP` still execute nothing; whether an example nothing runs
-  meets the bar is a separate question and is not answered here.
+  meets the bar is a separate question and is not answered here. **One suite-wide change came
+  with the load**: hypothesis's default 200 ms deadline is a per-test wall-clock budget, and in
+  a ten-worker lane where several modules spawn process pools of their own it reads the
+  scheduler rather than the code — it fired three times in sixteen runs once the examples were
+  collected, and never in eight without them. It is now off for the suite, which is the same
+  answer this repository already gave when it declined to assert such a budget itself.
 
 - **The built site carries no architecture-decision-record numbers.** A record number is a
   citation between agents: it resolves for anyone reading the source, because the record tree is

@@ -127,7 +127,7 @@ class PreparedChecksumError(ValueError):
 
 
 def login_node_help(command: str) -> str:
-    """Return the sentence that sends a caller to a login node, quoting ``command``.
+    """Return the message that sends a caller to a login node, quoting ``command``.
 
     Written once and quoted by every **Prepared set**'s own not-downloaded error, because
     the fact is one fact: fetching is the only step in this package that needs the network
@@ -142,15 +142,15 @@ def login_node_help(command: str) -> str:
     Returns
     -------
     str
-        One sentence. It quotes ``command`` part-way through and ends on where the set is
-        read from once that command has prepared it.
+        Two sentences: what needs the network, then where to run ``command`` — quoted —
+        and where the set is read from once it has.
 
     Examples
     --------
-    >>> sentence = login_node_help("genome xref --help")
-    >>> "`genome xref --help`" in sentence
+    >>> message = login_node_help("genome xref --help")
+    >>> "`genome xref --help`" in message
     True
-    >>> sentence.endswith("shared by every project on the machine.")
+    >>> message.endswith("shared by every project on the machine.")
     True
     """
     return (

@@ -65,9 +65,10 @@ mechanises it.**
 - **Docstrings: NumPy structure is mechanised** — ruff selects `D` with the numpy convention — so the
   bar is what ruff cannot check. At least one runnable example on a public object, and *runnable* is
   mechanised too: the unit lane runs every example, so one that drifts from the code fails the build.
-  An example that cannot run offline carries `# doctest: +SKIP` **on every line of it** — a trailing
-  comment that is prose reads exactly like a directive and is not one, which is how the only line
-  that would download a genome ended up the only line not skipped. A subclass docstring describes
+  A line that cannot run offline carries `# doctest: +SKIP` **itself**: a directive does not carry
+  to the line below it, and a trailing comment that is prose reads exactly like one and is not.
+  Together that is how the only line in the package that would download a genome ended up the only
+  line not skipped. Lines that do run stay unskipped beside it — most such blocks are mixed. A subclass docstring describes
   only what differs from what it overrides, never the shared prose again. A short one-liner is enough
   for a small `_helper`.
 - **Errors are actionable:** say what was wrong and what the caller should do, with a specific

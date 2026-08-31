@@ -1,8 +1,8 @@
 """Shared fixtures for the test suite.
 
 The two autouse guards are **not** here: they are in :mod:`tests._guards`, loaded as a
-plugin by the root ``conftest.py`` so that they also reach the docstring examples
-collected from ``src/``. Everything in this file is shared by tests and only by tests.
+plugin by the root ``conftest.py``, which says why. Everything in this file is shared by
+tests and only by tests.
 """
 
 from __future__ import annotations
@@ -28,12 +28,12 @@ from ._guards import install_network_guard
 
 # Hypothesis measures a deadline in wall-clock time, and this lane runs ten workers deep
 # with several modules spawning process pools of their own — so what the default 200 ms
-# deadline reads here is the scheduler, not the code. Measured on this suite: one
-# `scan_regions` example took 300.30 ms and 11.79 ms on the re-run hypothesis does to check
-# it, which it reports as an *unreliable* test rather than a slow one. Off for the whole
-# suite rather than per test, since which test is unlucky is decided by scheduling and not
-# by anything about the test. What a genuinely slow test costs stays visible: the CI lane
-# prints `--durations=10` on every run.
+# deadline reads here is the scheduler and not the code, which is the same reason a per-test
+# wall-clock budget was declined outright:
+# docs/research/test-suite-cost-and-parallelism-2026-08-30.md, where the rate is measured.
+# Off for the whole suite rather than per test, since which test is unlucky is decided by
+# scheduling and not by anything about the test. What a genuinely slow test costs stays
+# visible: the CI lane prints `--durations=10` on every run.
 settings.register_profile("suite", deadline=None)
 settings.load_profile("suite")
 

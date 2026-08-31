@@ -230,8 +230,7 @@ reportMissingTypeStubs = "none"
 # until they were collected nothing executed a single one, so the "at least one runnable
 # example" bar in AGENTS.md was held by review alone and three examples had drifted from
 # the code they document. They run in the unit lane, behind the same two autouse guards
-# every other test in it runs behind; `conftest.py` at the root is what gives those guards
-# the reach, since a conftest under `tests/` has none over `src/`.
+# every other test in it runs behind; see the root `conftest.py` for what that took.
 testpaths = ["tests", "src/genome"]
 # `-p no:anyio`: anyio arrives transitively and registers a `pytest11` entry point every
 # xdist worker imports at startup, though no test here is async. Nothing else installed

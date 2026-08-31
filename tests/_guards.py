@@ -2,12 +2,9 @@
 
 Both are autouse and neither can be opted out of, which is what makes "no test ever
 reaches the network" and "no test ever writes into the lab's reference data" guarantees
-rather than habits. They live here rather than in ``tests/conftest.py`` because a
-conftest's fixtures reach the directory it sits in and nothing above it, and the
-docstring examples are collected from ``src/`` — outside that tree. ``conftest.py`` at
-the repository root loads this module as a plugin, which is what gives the pair the reach
-the promise claims. Nothing else moved: the rest of the suite's fixtures are shared by
-tests and only by tests, and stay where they were.
+rather than habits. They are a module rather than a conftest so that the root
+``conftest.py`` can load them as a plugin; why that matters is written there. Nothing
+else moved: the rest of the suite's fixtures are shared by tests and only by tests.
 
 ``install_network_guard`` is separate from the fixture that applies it so that work done
 *outside* a test — a session-scoped fixture preparing a genome — can be held to the same
