@@ -209,6 +209,22 @@ A directory holding files but no record is a run that was interrupted, and raise
 `UnfinishedRegistrationError`, which names the same repair. An empty or absent directory
 is neither of those: that is a fresh registration and proceeds normally.
 
+To branch on it rather than read it, both import from `genome.store`:
+
+```python
+from genome.store import RegistrationError
+
+try:
+    yeast = Genome("sacCer3")
+except RegistrationError as broken:
+    print(broken)   # the message names the exact `--force` command to run
+```
+
+`RegistrationError` is the parent of both, so catching it catches either. Catch
+`RegistrationMismatchError` or `UnfinishedRegistrationError` by name when the two want
+different handling — files that changed under a good record, against a build that never
+finished.
+
 To re-check integrity when nothing has raised but you suspect a problem, `genome assembly
 verify sacCer3` re-reads the whole FASTA and recomputes its digest:
 

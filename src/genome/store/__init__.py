@@ -17,9 +17,40 @@ annotations, motifs or genes. Each is here because every context needs it and no
 **Nothing here imports from** :mod:`genome.assembly` **or** :mod:`genome.annotation`, which
 is what makes this a place both of them can reach without reaching each other.
 
-This file re-exports nothing on purpose. Every caller inside and outside the package holds
-a *module* — ``from genome.store import fetch``, ``from genome.store.completion import
-CompletionRecord`` — and the fetch step's one patch point depends on that: a name
-re-exported here is a second reference that ``monkeypatch.setattr`` on the module would
-never reach, which is exactly the bug the suite's offline guard exists to prevent.
+**This file re-exports no callable on purpose, and the fetch step is why.** Every caller
+inside and outside the package holds a *module* — ``from genome.store import fetch``,
+``from genome.store.completion import CompletionRecord`` — and the fetch step's one patch
+point depends on that: a callable re-exported here is a second reference that
+``monkeypatch.setattr`` on the module would never reach, which is exactly the bug the
+suite's offline guard exists to prevent.
+
+**The exception classes below are the one exemption, because nothing patches one.** They
+are re-exported so a caller can name in an ``except`` what this package hands them — a
+genome directory that disagrees with its record, a prepared set that was never downloaded
+— rather than importing from a module the API reference declares free to move. The
+exemption is theirs alone: a function or a non-exception class added to ``__all__``
+re-opens the hole the paragraph above closes.
+
+Examples
+--------
+>>> from genome.store import RegistrationMismatchError
+>>> issubclass(RegistrationMismatchError, RuntimeError)
+True
 """
+
+from genome.store.checksum import ChecksumMismatchError
+from genome.store.completion import (
+    RegistrationError,
+    RegistrationMismatchError,
+    UnfinishedRegistrationError,
+)
+from genome.store.prepared import PreparedChecksumError, PreparedSetNotDownloadedError
+
+__all__ = [
+    "ChecksumMismatchError",
+    "PreparedChecksumError",
+    "PreparedSetNotDownloadedError",
+    "RegistrationError",
+    "RegistrationMismatchError",
+    "UnfinishedRegistrationError",
+]

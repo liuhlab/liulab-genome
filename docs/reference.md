@@ -22,6 +22,7 @@ move or disappear between releases.
 | `genome.annotation` | Registering a GTF and asking an annotation for gene ids |
 | `genome.assembly` | The assembly table, the files on disk, and chimera naming |
 | `genome.homology` | Ensembl Compara ortholog sets |
+| `genome.store` | The errors a genome directory or a downloaded set raises |
 | `genome.tf` | The shipped table linking transcription factors to motifs |
 | `genome.tf.motif` | JASPAR matrices, scanning, and reading hit files |
 | `genome.xref` | Identifier conversion and symbol matching |
@@ -43,6 +44,10 @@ move or disappear between releases.
       show_root_full_path: true
 
 ::: genome.homology
+    options:
+      show_root_full_path: true
+
+::: genome.store
     options:
       show_root_full_path: true
 
