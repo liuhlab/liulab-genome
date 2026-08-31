@@ -6,8 +6,8 @@ records the publisher, which per-species file of that release holds the pair, th
 fetch and the publisher's own md5 for those bytes — so naming a pair is enough to prepare
 it, exactly as **Annotation metadata** makes naming an annotation enough to register one.
 No homology data ships here: this table is provenance, and a **Homology set** is
-downloaded (ADR-0018's stance on pinnable sources is what makes a shipped checksum still
-right a year later).
+downloaded. Requiring dated releases at stable URLs (ADR-0018) is what makes a shipped
+checksum still right a year later.
 
 **The holding species is a measurement, not an assumption.** Compara's per-species files
 are a de-duplicated partition at the pair level, and which file a pair lands in is

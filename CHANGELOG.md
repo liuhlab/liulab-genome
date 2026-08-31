@@ -47,14 +47,20 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
-- **A record number on the API reference page now resolves.** Docstrings cite architecture
-  decisions by number, which is right for someone reading the source — the records are in the
-  repository beside it — and resolved nowhere for someone reading the built site, which excludes
-  the record tree on purpose. Seventy-six citations were in that position. The reference page now
-  renders each one as a link to that record on GitHub, so neither reader loses anything: the
-  source keeps the bare number, and no record becomes a page on this site. A docstring citing a
-  number no record carries fails the docs build and the test suite. `genome.__doc__` and the
-  "Source code in ..." listings are untouched, so what a listing shows is still what the file says.
+- **The built site carries no architecture-decision-record numbers.** A record number is a
+  citation between agents: it resolves for anyone reading the source, because the record tree is
+  in the repository beside it, and for nobody reading the site, which excludes that tree on
+  purpose. One hundred and eleven numbers were published on the API reference page — seventy-six
+  rendered from docstrings, thirty-five inside "Source code in ..." listings. Docstrings keep
+  citing records, and `mkdocstrings` now drops the citation as it renders; source listings are no
+  longer published, since a listing with the numbers stripped out would disagree with the file it
+  names. `genome.__doc__` and `help()` are untouched. Two guards hold it: a record is cited as a
+  trailing parenthetical — `(ADR-0006)` — which the test suite checks so the removal is total,
+  and `pixi run docs-build` fails if a number reaches the built site by any route.
+
+- **The API reference no longer embeds source listings.** Use the source links on GitHub. The
+  page still carries every signature, argument type and attribute exactly as the code declares
+  them, which is what it is for.
 
 - **User-facing messages no longer cite architecture-decision-record numbers.** Nine exception
   messages, one CLI command's `--help`, and the `limits` string that rides on a *successful*

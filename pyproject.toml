@@ -88,10 +88,10 @@ pytest = "*"
 pytest-cov = "*"
 pytest-xdist = "*"
 hypothesis = "*"
-# The suite tests `scripts/mkdocs_record_links.py`, which is a griffe extension, so the
+# The suite tests `scripts/mkdocs_record_citations.py`, which is a griffe extension, so the
 # lane that runs the suite needs griffe. It arrives with the docs feature too; naming it
-# here is what keeps the record-link tests in the unit lane rather than skipping themselves
-# green in it, which is the one thing the two-lane split exists to prevent.
+# here is what keeps those tests in the unit lane rather than skipping themselves green in
+# it, which is the one thing the two-lane split exists to prevent.
 griffe = "*"
 
 [tool.pixi.feature.dev.dependencies]
@@ -157,7 +157,9 @@ check = { cmd = "bash scripts/check.sh lint fmt-check typecheck test", depends-o
 
 build      = "python -m build"
 docs       = "mkdocs serve"
-docs-build = "mkdocs build --strict"
+# Two commands, not two tasks: a number reaching the site is a docs-build failure, and
+# `pixi run docs-build` has to fail locally exactly where CI does.
+docs-build = "mkdocs build --strict && bash scripts/check_site_has_no_record_numbers.sh"
 # Idempotent. Re-run after recreating the env — the kernelspec path changes.
 register-kernel = "python -m ipykernel install --user --name liulab-genome --display-name \"Python (liulab-genome dev)\""
 
@@ -227,8 +229,8 @@ testpaths = ["tests"]
 # is dead weight — pytest-cov, xdist and hypothesis are all load-bearing.
 addopts = ["-ra", "--strict-markers", "--strict-config", "-p", "no:anyio"]
 # `scripts/` holds the one build-time module the suite tests: the griffe extension that
-# makes a record number on the reference page resolve. It is not part of the wheel, so it
-# does not belong in `src/`, and it is not a test, so it does not belong in `tests/`.
+# keeps record numbers off the reference page. It is not part of the wheel, so it does not
+# belong in `src/`, and it is not a test, so it does not belong in `tests/`.
 pythonpath = ["scripts"]
 xfail_strict = true
 filterwarnings = ["error"]

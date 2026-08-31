@@ -368,9 +368,10 @@ def _suffix_pattern(separator: str = "__") -> str:
     Not a second way to split a name: :func:`split_suffixed` is the one this package
     performs, and this has no caller in it. What is *published* to something that cannot
     import this module — an awk field split, an R ``sub``, a shell one-liner — is the
-    literal string the Assembly glossary carries, under the spelling ADR-0009 fixes. This
-    generates that same string from the separator, so a chimera whose components forced a
-    longer run has a pattern too, and so that a test can hold the published regex and the
+    literal string the Assembly glossary carries, under the spelling unconditional
+    suffixing fixes (ADR-0009). This generates that same string from the separator, so a
+    chimera whose components forced a longer run has a pattern too, and so that a test can
+    hold the published regex and the
     split together on any name at all. That test is what it is here for.
 
     Greedy on the left, so the split falls at the last separator run. **Anchored

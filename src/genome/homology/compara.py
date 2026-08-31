@@ -966,9 +966,9 @@ class HomologySet:
         **Orthologs are the default and paralogs come back only on request**, so the common
         question stays the easy one. A **Paralogy link** is kept in the set and marked by
         its own **Homology type** rather than excluded, which is what keeps *not an
-        ortholog* distinguishable from *absent* — the stance ADR-0013 takes for a
-        **Cross-species link**. Release 116 publishes none for these pairs; see this
-        module's own documentation for the count.
+        ortholog* distinguishable from *absent* — the same stance taken for a
+        **Cross-species link** (ADR-0013). Release 116 publishes none for these pairs; see
+        this module's own documentation for the count.
 
         Whatever a filter removed is counted in :attr:`~HomologyAnswer.dropped_partners`
         rather than silently gone, and the **Homology type** on a link that survived is

@@ -772,9 +772,10 @@ class Genome(AlignerMixin, MotifScanMixin):
         Two messages, because a chimera has one more thing to say. A bare name that this
         chimera carries under one or more suffixed spellings is not merely unknown — it is
         the name of a real sequence, spelled the way a component spells it — and the
-        refusal that ADR-0009 accepted the cost of is only bearable if it hands back the
-        spellings that do resolve. Every other unknown name, on a chimera or not, gets the
-        general message, which names a few sequences and where the rest are.
+        refusal that unconditional suffixing accepted the cost of (ADR-0009) is only
+        bearable if it hands back the spellings that do resolve. Every other unknown name,
+        on a chimera or not, gets the general message, which names a few sequences and
+        where the rest are.
 
         A :class:`ValueError` in both cases: it is the type this raises today and the one
         callers catch.

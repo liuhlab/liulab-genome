@@ -20,7 +20,7 @@ divided by it again, so the log-odds arithmetic has exactly one implementation a
 ``score`` column is in the same unit as **Information content**.
 
 **Sequence is upper-cased before it is scanned**, so **Soft-masking** changes no answer and
-there is no argument that would make it change one — ADR-0012. The engine's own alphabet
+there is no argument that would make it change one (ADR-0012). The engine's own alphabet
 happens to fold case as well; the promise is this module's rather than the engine's, which
 is why the call is made here.
 
