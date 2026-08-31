@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Protocol
 
 import pytest
+from hypothesis import settings
 
 from genome import Genome
 from genome.assembly.fasta import PREPARATION_TOOLS
@@ -24,6 +25,17 @@ from genome.external import ExternalTool, clear_version_cache
 from genome.store import fetch as fetch_mod
 
 from ._guards import install_network_guard
+
+# Hypothesis measures a deadline in wall-clock time, and this lane runs ten workers deep
+# with several modules spawning process pools of their own — so what the default 200 ms
+# deadline reads here is the scheduler, not the code. Measured on this suite: one
+# `scan_regions` example took 300.30 ms and 11.79 ms on the re-run hypothesis does to check
+# it, which it reports as an *unreliable* test rather than a slow one. Off for the whole
+# suite rather than per test, since which test is unlucky is decided by scheduling and not
+# by anything about the test. What a genuinely slow test costs stays visible: the CI lane
+# prints `--durations=10` on every run.
+settings.register_profile("suite", deadline=None)
+settings.load_profile("suite")
 
 #: Committed fixture files — small, subsampled real sacCer3 bytes. See tests/data/README.md.
 DATA_DIR = Path(__file__).parent / "data"

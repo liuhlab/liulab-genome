@@ -47,6 +47,26 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **The package's docstring examples now run, in the unit lane.** `AGENTS.md` asks for at least
+  one runnable example on every public object and the package carries over twelve hundred of them;
+  nothing executed a single one, so the bar was held by review alone. `pytest` now collects
+  `src/genome` with `--doctest-modules`, `ELLIPSIS` set at config level, which puts every example
+  in `pixi run check` and in CI beside the tests it already runs. Three examples had drifted and
+  are fixed. `genome.store.prepared.login_node_help` promised in its `Returns` prose and asserted
+  in its example a sentence ending in the quoted command; the command moved mid-sentence and
+  neither followed. The two `UCSCGenomeDownloader` examples each had a line whose trailing text
+  read as a `# doctest: +SKIP` directive and was prose — so the one line that would fetch a genome
+  from UCSC was the one line *not* skipped, harmless only because the line above it had been
+  skipped into a `NameError`. **The suite's two autouse guards were given reach over `src/` first,
+  and proven, before either directive was repaired.** A conftest's fixtures reach the directory it
+  sits in and nothing above, so a doctest item collected from `src/` ran behind neither the
+  offline guard nor the per-test **Data dir** — and repairing the directive while that was true
+  would have turned a latent hazard into a live multi-gigabyte download from CI. Both guards now
+  live in `tests/_guards.py`, loaded by a root `conftest.py` sitting above both trees, and a test
+  runs a throwaway example in a pytest of its own to prove the reach rather than assert the shape
+  of a file. The examples carrying `+SKIP` still execute nothing; whether an example nothing runs
+  meets the bar is a separate question and is not answered here.
+
 - **The built site carries no architecture-decision-record numbers.** A record number is a
   citation between agents: it resolves for anyone reading the source, because the record tree is
   in the repository beside it, and for nobody reading the site, which excludes that tree on

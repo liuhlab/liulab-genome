@@ -63,9 +63,13 @@ mechanises it.**
   `tests/aligner/test_aligner.py`, which applies the marker and the skip under one name. Never the skip alone — that test would sit in
   the unit lane and skip itself green, which is what the split exists to end.
 - **Docstrings: NumPy structure is mechanised** — ruff selects `D` with the numpy convention — so the
-  bar is what ruff cannot check. At least one runnable example on a public object. A subclass
-  docstring describes only what differs from what it overrides, never the shared prose again. A short
-  one-liner is enough for a small `_helper`.
+  bar is what ruff cannot check. At least one runnable example on a public object, and *runnable* is
+  mechanised too: the unit lane runs every example, so one that drifts from the code fails the build.
+  An example that cannot run offline carries `# doctest: +SKIP` **on every line of it** — a trailing
+  comment that is prose reads exactly like a directive and is not one, which is how the only line
+  that would download a genome ended up the only line not skipped. A subclass docstring describes
+  only what differs from what it overrides, never the shared prose again. A short one-liner is enough
+  for a small `_helper`.
 - **Errors are actionable:** say what was wrong and what the caller should do, with a specific
   exception type, never a bare `Exception`.
 - **Side effects live at each context's own edge** — `assembly/`, `annotation/`, `store/`,

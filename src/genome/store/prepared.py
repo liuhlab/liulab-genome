@@ -142,11 +142,15 @@ def login_node_help(command: str) -> str:
     Returns
     -------
     str
-        One sentence, ending in the quoted command.
+        One sentence. It quotes ``command`` part-way through and ends on where the set is
+        read from once that command has prepared it.
 
     Examples
     --------
-    >>> login_node_help("genome xref --help").endswith("`genome xref --help`.")
+    >>> sentence = login_node_help("genome xref --help")
+    >>> "`genome xref --help`" in sentence
+    True
+    >>> sentence.endswith("shared by every project on the machine.")
     True
     """
     return (
