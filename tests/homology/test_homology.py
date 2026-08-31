@@ -28,7 +28,6 @@ The unit lane, unmarked: nothing here needs a binary.
 
 from __future__ import annotations
 
-import ast
 import gzip
 import json
 from dataclasses import replace
@@ -67,6 +66,7 @@ from genome.homology import (
 from genome.store import fetch as fetch_mod
 from genome.store.completion import RECORD_NAME, UnfinishedRegistrationError, read_record
 
+from .._sources import PACKAGE, imports_any
 from ..conftest import FakeFetch
 
 #: Which committed subsample stands in for which species' published dump.
@@ -129,9 +129,6 @@ ABSENT = "ENSG00000000000"
 #: A mouse stem no fixture mentions, standing in for a partner a filter removed before an
 #: answer ever reached an annotation. Sorts before every mouse stem the fixtures carry.
 ABSENT_PARTNER = "ENSMUSG00000000001"
-
-#: The package's own source tree, which the structural bans at the foot of this file read.
-PACKAGE = Path(__file__).resolve().parents[2] / "src" / "genome"
 
 
 def _row(species: str, other: str) -> HomologyMetadata:
@@ -900,24 +897,6 @@ class TestRefusals:
 # ---------------------------------------------------------------------------
 
 
-def _imported_modules(path: Path) -> set[str]:
-    """Return every module ``path`` names in an import, read off its source.
-
-    The whole tree of the file is walked rather than its top level, so an import deferred
-    into a function body or hidden under ``TYPE_CHECKING`` counts too — a ban that only
-    the laziest evasion defeats is not a structural guarantee. Read rather than observed,
-    since importing a module loads its package and ``sys.modules`` would then say more
-    than any one module asked for.
-    """
-    found: set[str] = set()
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.Import):
-            found.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            found.add(node.module or "")
-    return found
-
-
 def test_nothing_this_package_publishes_is_derived_through_homology() -> None:
     """No module outside ``genome.homology`` may import it, so no shipped table can use it.
 
@@ -940,7 +919,7 @@ def test_nothing_this_package_publishes_is_derived_through_homology() -> None:
         for path in PACKAGE.rglob("*.py")
         if path.parent.name != "homology"
         and path not in served
-        and any(name.startswith("genome.homology") for name in _imported_modules(path))
+        and imports_any(path, ["genome.homology"])
     )
     assert offenders == []
 
@@ -963,7 +942,7 @@ def test_neither_cross_species_context_imports_the_tf_half(context: str) -> None
     offenders = sorted(
         str(path.relative_to(PACKAGE))
         for path in (PACKAGE / context).rglob("*.py")
-        if any(name.startswith("genome.tf") for name in _imported_modules(path))
+        if imports_any(path, ["genome.tf"])
     )
     assert offenders == []
 
