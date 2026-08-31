@@ -46,9 +46,12 @@ later question off the record in hand instead of by opening the directory again.
 
 Examples
 --------
+Skipped from the fetch onward, since it downloads a genome: one call decompresses, verifies
+and prepares it too.
+
 >>> from genome.assembly.download import UCSCGenomeDownloader
 >>> dl = UCSCGenomeDownloader("hg38")            # doctest: +SKIP
->>> files = dl.fetch_genome()                    # download + decompress + verify + prepare
+>>> files = dl.fetch_genome()                    # doctest: +SKIP
 >>> files.chrom_sizes.name                       # doctest: +SKIP
 'hg38.chrom.sizes'
 """
@@ -667,8 +670,10 @@ class UCSCGenomeDownloader(AssemblyRegistration):
 
         Examples
         --------
+        Skipped, since it downloads a genome: the one call decompresses and prepares it too.
+
         >>> dl = UCSCGenomeDownloader("hg38")         # doctest: +SKIP
-        >>> files = dl.fetch_genome()                 # download + decompress + prepare
+        >>> files = dl.fetch_genome()                 # doctest: +SKIP
         >>> files.fai.name, files.twobit.name, files.chrom_sizes.name   # doctest: +SKIP
         ('hg38.fa.fai', 'hg38.2bit', 'hg38.chrom.sizes')
         """

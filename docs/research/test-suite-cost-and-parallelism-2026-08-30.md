@@ -256,6 +256,44 @@ The fixed floor, for reference: spinning up workers and collecting without runni
 `--maxprocesses 10` rather than a bare `-n 10`: on a 4-core CI runner `auto` finds four and the cap
 does not bind, so the number is a ceiling for a big box, never a floor for a small one.
 
+## What the docstring examples cost, and the deadline they surfaced
+
+Measured 2026-08-31, same box and same method, when `--doctest-modules` was turned on over
+`src/genome` and 468 doctest items joined the unit lane.
+
+**The lane's wall did not move.** Eight runs each way on one tree, `pixi run test` reporting:
+
+| | items collected | wall |
+|---|---|---|
+| without the examples | 1090 | 8.76 – 9.33 s |
+| with them | 1560 | 8.75 – 9.34 s |
+
+Which is what the bimodal-`load` finding above predicts: the wall of a parallel lane is set by its
+longest indivisible item, and 1,283 examples spread over ten workers add none. Serially they are
+2.46 s. So the "every example on the critical path of CI" concern prices out at nothing — but
+*total work at any instant* went up by 43%, and that is not free.
+
+**What the added contention surfaced is hypothesis's deadline** — the per-test wall-clock budget
+this document already declined to assert, arriving by default at 200 ms rather than by choice.
+`test_a_lifted_hit_maps_back_to_where_the_scan_found_it` took 300.30 ms on one run and 11.79 ms on
+the immediate re-run hypothesis does to check, which it then reports as an *unreliable* test rather
+than a slow one:
+
+| tree | runs | occurrences |
+|---|---|---|
+| examples collected | 16 | 3 |
+| examples not collected | 8 | 0 |
+| examples collected, deadline off | 12 | 0 |
+
+Same tree, same commit, the collection the only difference — so the items are what did it, and the
+test is not what changed. This is the bimodal-`load` finding again in a different costume: a
+wall-clock number taken on a ten-worker box where several modules spawn process pools of their own
+reports the scheduler, not the code. Turned off for the suite, in one place, as a registered
+hypothesis profile — which test is unlucky is decided by scheduling and not by anything about the
+test, so per-test suppression would be a list that grows by luck. `--durations=10` in every CI log
+still shows what a genuinely slow test costs, which is the same reason a hand-maintained `slow`
+marker was declined.
+
 ## What was not adopted
 
 - **A `slow` marker.** A hand-maintained list keyed on a number that changes whenever you optimise.

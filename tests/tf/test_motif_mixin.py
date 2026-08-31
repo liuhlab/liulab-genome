@@ -52,8 +52,9 @@ from genome.tf.motif import (
 )
 from genome.tf.motif import mixin as mixin_module
 
+from .._guards import install_network_guard
 from ..assembly.test_source import _module_level_imports
-from ..conftest import DATA_DIR, install_network_guard
+from ..conftest import DATA_DIR
 
 # Every test here spawns its own worker processes. Under `--dist=loadgroup` that pins
 # them to ONE xdist worker, so they run one at a time rather than eight of them forking

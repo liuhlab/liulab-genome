@@ -204,7 +204,9 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 # ============================== pyright ==============================
 
 [tool.pyright]
-include = ["src", "tests"]
+# `conftest.py` at the root is three lines of plugin wiring, and it is named explicitly
+# because naming a directory does not reach a file beside it.
+include = ["src", "tests", "conftest.py"]
 # `scripts/` is build tooling, not the wheel, so it is resolved but not checked — the same
 # footing `show_numba_cache_key.py` has always had. What makes it resolvable is the
 # extension test importing it by name, the way mkdocs loads it. `src` is listed beside it
@@ -223,11 +225,24 @@ reportMissingTypeStubs = "none"
 # ============================== pytest ==============================
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# `src/genome` is here so the package's docstring examples are collected and run. They are
+# the largest body of assertions in the repository — over twelve hundred of them — and
+# until they were collected nothing executed a single one, so the "at least one runnable
+# example" bar in AGENTS.md was held by review alone and three examples had drifted from
+# the code they document. They run in the unit lane, behind the same two autouse guards
+# every other test in it runs behind; see the root `conftest.py` for what that took.
+testpaths = ["tests", "src/genome"]
 # `-p no:anyio`: anyio arrives transitively and registers a `pytest11` entry point every
 # xdist worker imports at startup, though no test here is async. Nothing else installed
 # is dead weight — pytest-cov, xdist and hypothesis are all load-bearing.
-addopts = ["-ra", "--strict-markers", "--strict-config", "-p", "no:anyio"]
+#
+# `--doctest-modules` cannot be aimed at one testpath, so it also collects the handful of
+# examples in the suite's own shared helpers. They pass, and an example there is worth the
+# same as one in `src/` — but `src/` is what it is here for.
+addopts = ["-ra", "--strict-markers", "--strict-config", "-p", "no:anyio", "--doctest-modules"]
+# Set at config level rather than per example: only a handful of the package's examples
+# carry an inline `+ELLIPSIS` today, so this is the shape they are already written in.
+doctest_optionflags = ["ELLIPSIS"]
 # `scripts/` holds the one build-time module the suite tests: the griffe extension that
 # keeps record numbers off the reference page. It is not part of the wheel, so it does not
 # belong in `src/`, and it is not a test, so it does not belong in `tests/`.
