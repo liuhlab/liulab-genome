@@ -1044,6 +1044,10 @@ def assembly_table_row(
     never leaves an unregistered FASTA among that assembly's own files, and re-running it
     reuses what is already there.
 
+    A **Chimera** is **refused before anything is fetched**, because it has no work here to
+    do: its row pins nothing, so there is no digest to compute and no source to record, and
+    the refusal describes that row rather than printing it (ADR-0008).
+
     Parameters
     ----------
     assembly : str
@@ -1062,10 +1066,6 @@ def assembly_table_row(
         :func:`dataclasses.asdict` of it to
         :func:`~genome.assembly.metadata.format_table_row` for the line to paste into
         ``data/assembly_metadata.tsv``.
-
-    A **Chimera** is **refused before anything is fetched**, because it has no work here to
-    do: its row pins nothing, so there is no digest to compute and no source to record, and
-    the refusal describes that row rather than printing it (ADR-0008).
 
     Raises
     ------

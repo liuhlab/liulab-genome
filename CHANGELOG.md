@@ -47,6 +47,15 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **A record number on the API reference page now resolves.** Docstrings cite architecture
+  decisions by number, which is right for someone reading the source — the records are in the
+  repository beside it — and resolved nowhere for someone reading the built site, which excludes
+  the record tree on purpose. Seventy-six citations were in that position. The reference page now
+  renders each one as a link to that record on GitHub, so neither reader loses anything: the
+  source keeps the bare number, and no record becomes a page on this site. A docstring citing a
+  number no record carries fails the docs build and the test suite. `genome.__doc__` and the
+  "Source code in ..." listings are untouched, so what a listing shows is still what the file says.
+
 - **User-facing messages no longer cite architecture-decision-record numbers.** Nine exception
   messages, one CLI command's `--help`, and the `limits` string that rides on a *successful*
   symbol match dropped a trailing `(ADR-00xx)`. The records live in a tree kept out of the built

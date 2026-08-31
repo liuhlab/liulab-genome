@@ -76,7 +76,9 @@ mechanises it.**
 - **Docs are hand-authored Markdown** under [`docs/`](docs/) (MkDocs Material) — the prose page is
   primary, `mkdocstrings` secondary — and stale committed docs are broken code. `docs/adr/`,
   `docs/agents/`, `docs/context/` and `docs/research/` are agent-facing and excluded from the
-  built site.
+  built site. **Keep citing records by number in a docstring**: the reference page renders each
+  citation as a link to that record in the repository, so the site reader gets somewhere to go
+  without a record becoming a page here. A number naming no record fails the build.
 - **Versioning: CalVer `YYYY.MM.MICRO`, from the git tag.** A tag is a release; never hand-edit a
   version. Update the Unreleased section of `CHANGELOG.md`.
 - **Git.** Small, single-purpose PRs — one issue, one focused diff. Conventional Commits. Green CI is
