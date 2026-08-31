@@ -20,7 +20,7 @@ the package it ships from:
 
 | Group | Commands |
 |---|---|
-| `genome assembly` | `register`, `verify`, `table-row` |
+| `genome assembly` | `register`, `list`, `verify`, `table-row` |
 | `genome annotation` | `register`, `register-gtf`, `list`, `gene-list`, `gene-categories` |
 | `genome tf` | `gene-list`, `cofactor-list` |
 | `genome xref` | `ids`, `symbols` |

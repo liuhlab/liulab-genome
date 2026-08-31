@@ -17,18 +17,39 @@ Reading bases out of a prepared assembly is on [Sequences and regions](sequences
 ## Which assemblies you can name
 
 The shipped metadata table lists eight assemblies. Each row pins the URL its FASTA comes
-from and the sha256 that download is checked against.
+from and the sha256 that download is checked against. `genome assembly list` prints them
+beside what this machine already holds, and downloads nothing to do it:
 
-```python
-from genome.assembly import assembly_table
-
-[row.assembly_name for row in assembly_table()]
-# ['hg38', 'hg19', 'mm39', 'mm10', 'sacCer3', 'ce11', 'ecHT115', 'ce11_ecHT115']
+```console
+$ genome assembly list
+assemblies in /Users/hanqing/liulab_data/genome
+  hg38          offered, not registered  Homo sapiens GRCh38
+  hg19          offered, not registered  Homo sapiens GRCh37
+  mm39          offered, not registered  Mus musculus GRCm39
+  mm10          offered, not registered  Mus musculus GRCm38
+  sacCer3       registered               Saccharomyces cerevisiae R64-1-1
+  ce11          registered               Caenorhabditis elegans WBcel235
+  ecHT115       offered, not registered  Escherichia coli HT115 ASM435494v1
+  ce11_ecHT115  offered, not registered
+registered here: 2 — prepare another with `genome assembly register <name>`, or re-check one with `genome assembly verify <name>`
+an assembly the table does not list registers too, from the UCSC golden path — with no pinned checksum behind it
 ```
 
-`ce11_ecHT115` is a chimera, concatenated from two of the others rather than downloaded.
-`lookup_assembly` reads one row by name and returns `None` for a name the table does not
-carry:
+`registered` means a record on this machine vouches for the four files. A directory in the
+tree with no record beside it reads as `here, not registered` — nothing vouches for what
+is in it — and one prepared under a name no row lists reads as `registered, not offered`.
+Whether a registration's files are still what the record claims is a separate question, and
+[`genome assembly verify`](#preparing-an-assembly) is what answers it.
+
+What the listing treats as an assembly is the layout's own rule: one directory per
+assembly, named for it, directly under `<LIULAB_DATA>/genome/`. So a directory there counts
+unless its name begins with a dot, and a file there counts for nothing. Whether a directory
+that counts is registered is then its record's business and never its name's.
+
+The same report is `assembly_status()` from Python, and `assembly_table()` is the table by
+itself. `ce11_ecHT115` is a chimera, concatenated from two of the others rather than
+downloaded. `lookup_assembly` reads one row by name and returns `None` for a name the table
+does not carry:
 
 ```python
 from genome.assembly import lookup_assembly

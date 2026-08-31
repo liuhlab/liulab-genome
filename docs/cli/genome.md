@@ -1,8 +1,9 @@
 # CLI: genome commands
 
-Eight commands in two groups: one prepares a reference on this machine, the other registers
-annotations against it and reads what they carry. Both take an assembly name as their first
-argument.
+Nine commands in two groups: one prepares a reference on this machine, the other registers
+annotations against it and reads what they carry. Every one of them takes an assembly name
+as its first argument, except `assembly list`, which is the command that tells you what to
+put there.
 
 ```console
 $ genome assembly register sacCer3
@@ -20,11 +21,32 @@ codes and the split between stdout and stderr are on the [CLI overview](index.md
 
 ## genome assembly
 
-`register` prepares an assembly and prints where it landed, as above. `verify` re-reads the
+`register` prepares an assembly and prints where it landed, as above. `list` is what to run
+before it: the assemblies the metadata table offers, set against the ones already prepared
+on this machine, downloading nothing to answer. `verify` re-reads the
 FASTA and recomputes its sha256, which is the full-file check; registering and reopening go
 by size and are instant. `table-row` downloads an assembly and prints the line to paste into
 the shipped metadata table, which is how a new assembly gets a pinned checksum.
 [Assembly](../genome/assembly.md) says what the four files hold and what a chimera is.
+
+```console
+$ genome assembly list
+assemblies in /Users/hanqing/liulab_data/genome
+  hg38          offered, not registered  Homo sapiens GRCh38
+  hg19          offered, not registered  Homo sapiens GRCh37
+  mm39          offered, not registered  Mus musculus GRCm39
+  mm10          offered, not registered  Mus musculus GRCm38
+  sacCer3       registered               Saccharomyces cerevisiae R64-1-1
+  ce11          registered               Caenorhabditis elegans WBcel235
+  ecHT115       offered, not registered  Escherichia coli HT115 ASM435494v1
+  ce11_ecHT115  offered, not registered
+registered here: 2 — prepare another with `genome assembly register <name>`, or re-check one with `genome assembly verify <name>`
+an assembly the table does not list registers too, from the UCSC golden path — with no pinned checksum behind it
+```
+
+A name no row lists reads as `registered, not offered`, and a directory in the tree with no
+registration record beside it reads as `here, not registered`. Neither is an error, and
+neither costs the exit code.
 
 ```console
 $ genome assembly verify sacCer3
@@ -36,7 +58,7 @@ off its record. A directory whose files changed after they were registered exits
 instead. **`--force` is the repair**, and it keeps whatever is provably good: a FASTA whose
 checksum still matches is reused and only the derived files are rebuilt.
 
-The three commands, with every argument and option:
+The four commands, with every argument and option:
 
 ::: mkdocs-typer2
     :module: genome.assembly.cli

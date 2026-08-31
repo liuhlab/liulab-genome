@@ -10,6 +10,24 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **`genome assembly list`, and the `assembly_status()` behind it.** The CLI could not answer
+  the first question a new user has. `genome assembly register` is the first command anyone
+  runs and nothing said what to put after it; the only way to find out was to import
+  `genome.assembly` and read the table. The new command prints the eight assemblies the
+  metadata table offers **set against the ones prepared on this machine**, and names
+  `genome assembly register <name>` and `genome assembly verify <name>` as the next actions.
+  It downloads, prepares and builds nothing, and exits `0` on a machine holding none of them.
+  **The second half is what nothing in the package could ask before**: `is_prepared` answered
+  for one name a caller already held, and nothing enumerated the tree — so an assembly
+  registered from the UCSC golden path, which is a legitimate registration with no row behind
+  it, was invisible. Such a name now reads as `registered, not offered`, and a directory in
+  the tree with no record beside it reads as `here, not registered` rather than being reported
+  as absent or as an assembly. `assembly_status`, `AssemblyStatus`, `AssemblyStatusRow` and
+  `is_prepared` are exported from `genome.assembly`; the row's `state` is derived from its
+  booleans and stays out of the `--json` payload, as the annotation report's does. Integrity
+  is deliberately not asked here — `genome assembly verify` owns it, and asking it cheaply
+  would report *unchecked* in the words of *checked*.
+
 - **Twelve error types the package raises are now importable.** Every exception class this
   package can hand a caller resolves from a public name, so catching one no longer means
   importing from a module the API reference declares free to move between releases.

@@ -114,7 +114,7 @@ class TestTheCommandTree:
             assert name in offered
 
     def test_each_sub_app_offers_the_commands_that_moved_under_it(self) -> None:
-        assert set(help_text("assembly").split()) >= {"register", "verify", "table-row"}
+        assert set(help_text("assembly").split()) >= {"register", "list", "verify", "table-row"}
         assert set(help_text("annotation").split()) >= {
             "register",
             "register-gtf",

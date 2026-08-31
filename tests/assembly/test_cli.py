@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from genome.assembly import assembly_status, metadata
 from genome.assembly import download as download_mod
-from genome.assembly import metadata
 from genome.assembly.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.assembly.metadata import AssemblyMetadata
 from genome.cli import app
@@ -213,6 +213,61 @@ class TestRegisterResolvesTheName(_OfflineTinyFasta):
         assert lost.exit_code == 1
         assert "`genome assembly register hg38`" in output(lost)
         assert "`genome assembly register mm10`" in output(lost)
+
+
+class TestList(_OfflineTinyFasta):
+    """``genome assembly list`` — what the table offers, set against what this tree holds.
+
+    The shipped table answers here rather than one stood up for the test: reporting it is
+    half of what the command is for. ``tiny`` is the assembly registered, which no shipped
+    row lists, so it exercises the other half — a registration the table knows nothing
+    about is still a registration, and this is the only command that says so.
+    """
+
+    def test_nothing_registered_lists_the_table_and_names_what_to_run_next(
+        self, liulab_data: Path
+    ) -> None:
+        result = runner.invoke(app, ["assembly", "list"])
+        assert result.exit_code == 0
+        assert str(liulab_data / "genome") in result.stdout
+        assert "hg38" in result.stdout
+        assert "Homo sapiens" in result.stdout
+        assert "offered, not registered" in result.stdout
+        assert "genome assembly register <name>" in result.stdout
+        # The escape hatch nothing else in the CLI mentions: the table is not an allow-list.
+        assert "golden path" in result.stdout
+        assert "no pinned checksum" in result.stdout
+        # A state nothing is in earns no sentence about it.
+        assert "here, not registered" not in result.stdout
+        # Nothing was prepared to answer the question — the tree is not even there.
+        assert not (liulab_data / "genome").exists()
+
+    def test_what_is_here_is_set_against_the_table_and_json_is_the_api_answer(
+        self, liulab_data: Path
+    ) -> None:
+        assert runner.invoke(app, ["assembly", "register", "tiny"]).exit_code == 0
+        # A directory nobody registered: neither absent nor trustworthy, and the case
+        # asking after one name by itself never meets.
+        (liulab_data / "genome" / "half_built").mkdir(parents=True)
+
+        result = runner.invoke(app, ["assembly", "list"])
+        assert result.exit_code == 0
+        assert "tiny" in result.stdout
+        assert "registered, not offered" in result.stdout
+        assert "half_built" in result.stdout
+        assert "here, not registered" in result.stdout
+        # One registration is what makes re-checking one worth naming.
+        assert "genome assembly verify <name>" in result.stdout
+        assert "genome assembly register <name> --force" in result.stdout
+
+        json_result = runner.invoke(app, ["assembly", "list", "--json"])
+        assert json_result.exit_code == 0
+        assert _json.loads(json_result.stdout) == assembly_status().as_json()
+        rows = {row["assembly_name"]: row for row in _json.loads(json_result.stdout)["assemblies"]}
+        assert (rows["tiny"]["registered"], rows["tiny"]["offered"]) == (True, False)
+        assert (rows["half_built"]["registered"], rows["half_built"]["present"]) == (False, True)
+        assert rows["hg38"]["sha256"] is not None
+        assert "state" not in rows["hg38"]
 
 
 class TestVerify(_OfflineTinyFasta):
