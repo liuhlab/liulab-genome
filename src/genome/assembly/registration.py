@@ -78,6 +78,29 @@ INDEXES_SUBDIR = "index"
 _FOREIGN_SUBDIRS = frozenset({ANNOTATIONS_SUBDIR, INDEXES_SUBDIR})
 
 
+def assembly_root_dir() -> Path:
+    """Return the directory the assembly tree begins at — one subdirectory per **Assembly**.
+
+    Where :func:`assembly_data_dir` files each assembly, said once so that the tree can be
+    *read* as well as written into: an answer to *which assemblies are prepared here* has
+    no name to resolve against and needs the root itself.
+
+    Returns
+    -------
+    pathlib.Path
+        ``<liulab_data>/genome``. Nothing is created by asking, and it need not exist.
+
+    Examples
+    --------
+    >>> import os
+    >>> os.environ["LIULAB_DATA"] = "/scratch/liulab"
+    >>> assembly_root_dir()
+    PosixPath('/scratch/liulab/genome')
+    >>> del os.environ["LIULAB_DATA"]
+    """
+    return liulab_data_dir() / ASSEMBLIES_SUBDIR
+
+
 def assembly_data_dir(assembly: str) -> Path:
     """Return the directory holding all reference files for ``assembly``.
 
@@ -102,7 +125,7 @@ def assembly_data_dir(assembly: str) -> Path:
     PosixPath('/scratch/liulab/genome/hg38')
     >>> del os.environ["LIULAB_DATA"]
     """
-    return liulab_data_dir() / ASSEMBLIES_SUBDIR / assembly
+    return assembly_root_dir() / assembly
 
 
 def assembly_repair_command(assembly: str, source: str | Path | None = None) -> str:
@@ -248,6 +271,24 @@ class AssemblyDir:
     def read_record(self) -> CompletionRecord | None:
         """Return this assembly's completion record, or ``None`` when it has none."""
         return read_record(self.path)
+
+    @property
+    def is_registered(self) -> bool:
+        """Whether a record here vouches for this assembly — the one spelling of that rule.
+
+        By record alone: a directory holding files but no record is *not* registered,
+        because nothing vouches for them, and nothing is read but the record itself. That
+        is what :func:`~genome.assembly.source.is_prepared` asks of a name, and what
+        listing the tree asks of every directory in it, so the two cannot answer
+        differently. Whether the files a record claims are still what it claims is a
+        separate and more expensive question — ``genome assembly verify`` owns it.
+
+        Examples
+        --------
+        >>> AssemblyDir.locate("hg38", "/tmp/definitely-not-a-build").is_registered
+        False
+        """
+        return self.read_record() is not None
 
     @property
     def annotations_root(self) -> Path:

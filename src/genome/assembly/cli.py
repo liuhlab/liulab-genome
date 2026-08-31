@@ -1,4 +1,4 @@
-"""The ``genome assembly`` sub-app — prepare a reference on disk, and check what landed.
+"""The ``genome assembly`` sub-app — prepare a reference on disk, see it, and check it.
 
 A thin Typer wrapper over :mod:`genome.assembly`: it translates arguments, dispatches to
 the by-name module functions and chooses an output format. It ships from this package so
@@ -8,7 +8,7 @@ Examples
 --------
 >>> from genome.assembly.cli import app
 >>> [command.name for command in app.registered_commands]
-['register', 'verify', 'table-row']
+['register', 'list', 'verify', 'table-row']
 """
 
 from __future__ import annotations
@@ -22,8 +22,10 @@ from genome.assembly import COMPONENTS_UNCHANGED as _COMPONENTS_UNCHANGED
 from genome.assembly import COMPONENTS_UNKNOWN as _COMPONENTS_UNKNOWN
 from genome.assembly import EXPECTED_FROM_RECORD as _EXPECTED_FROM_RECORD
 from genome.assembly import EXPECTED_FROM_TABLE as _EXPECTED_FROM_TABLE
+from genome.assembly import AssemblyStatusRow as _AssemblyStatusRow
 from genome.assembly import ChimeraDetails as _ChimeraDetails
 from genome.assembly import VerifiedAssembly as _VerifiedAssembly
+from genome.assembly import assembly_status as _assembly_status
 from genome.assembly import assembly_table_row as _assembly_table_row
 from genome.assembly import format_table_row as _format_table_row
 from genome.assembly import register_assembly as _register_assembly
@@ -67,6 +69,16 @@ _COMPONENT_SENTENCES: dict[str, str] = {
         "compared; this is unproven rather than a pass"
     ),
 }
+
+#: The escape hatch the listing closes with, in the one place the words live. Fixed text
+#: rather than a property of the report, since it reads nothing off it: the metadata table
+#: is a cross-reference and never an allow-list, so any UCSC assembly name registers from
+#: the golden path. What such a registration does not get is a pinned digest, which is the
+#: fact a reader choosing between a listed assembly and an unlisted one needs.
+_UNLISTED_SENTENCE = (
+    "an assembly the table does not list registers too, from the UCSC golden path — with "
+    "no pinned checksum behind it"
+)
 
 app = typer.Typer(
     help="Prepare an assembly on disk, check one, and compute its metadata row.",
@@ -155,6 +167,64 @@ def _merged_annotation_summary(details: _ChimeraDetails) -> str:
             "merged rather than an empty one registered"
         )
     return f"annotation  {merged} — the components' own, merged and registered by this build"
+
+
+# Named for what it does rather than for the command it serves, which would shadow the
+# builtin ``list`` this module's own annotations are written in terms of.
+@app.command("list")
+def list_assemblies(
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """List the assemblies the metadata table offers against the ones prepared here.
+
+    Two questions, two answers, side by side: which assemblies the lab pins a source and
+    a checksum for, and which are actually prepared on this machine — including ones no
+    row lists, which is what a registration from the UCSC golden path is. It takes no
+    assembly name, since neither half has one to scope it.
+
+    A directory in the assembly tree with no registration record beside it reads as
+    `here, not registered`: nothing vouches for what is in it, and reading it as an
+    assembly would be a claim this command has not checked. Registering it again from
+    scratch with `--force` is what makes it trustworthy.
+
+    **Whether a registration is still intact is not asked here.** That is `genome assembly
+    verify`, which re-reads the FASTA and recomputes its digest; doing it cheaply enough
+    to belong on this command would report *unchecked* in the words of *checked*. This one
+    reads the table, the directory names and one small record each, so it stays instant.
+
+    Nothing is downloaded, prepared or built to answer, and exit is `0` on a machine where
+    nothing is registered — which is a fresh install's ordinary state, and is printed as
+    such rather than as an error.
+    """
+    status = _assembly_status()
+
+    if json:
+        typer.echo(_json.dumps(status.as_json()))
+        return
+
+    rows = status.assemblies
+    typer.echo(f"assemblies in {status.directory}")
+    # Every fact below the heading comes off the report: which state a row is in, what the
+    # table knows about it, and the closing lines. What is left here is the drawing — the
+    # column widths, and dropping a column the table has nothing in.
+    name_width = max((len(row.assembly_name) for row in rows), default=0)
+    state_width = max((len(row.state) for row in rows), default=0)
+    for row in rows:
+        line = f"  {row.assembly_name:<{name_width}}  {row.state:<{state_width}}  {_names_of(row)}"
+        typer.echo(line.rstrip())
+    typer.echo(status.summary)
+    if status.unregistered_note is not None:
+        typer.echo(status.unregistered_note)
+    typer.echo(_UNLISTED_SENTENCE)
+
+
+def _names_of(row: _AssemblyStatusRow) -> str:
+    """Return the table's names for one row — what a reader chooses between assemblies by.
+
+    Whatever of the species and the NCBI name that row carries, since a row the table does
+    not list carries neither and a **Chimera**'s row carries only its name.
+    """
+    return " ".join(part for part in (row.species, row.ncbi_name) if part)
 
 
 @app.command("verify")

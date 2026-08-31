@@ -87,13 +87,23 @@ annotations and indexes go with it, for when the shared root is full or slow.
 Yeast is the quickest thing to try this on. Its FASTA is 3.8 MB compressed, and the whole
 walkthrough below finishes in about a minute.
 
-The shipped metadata table lists eight assemblies, `sacCer3` among them:
+`genome assembly list` is the first thing to run. It names the eight assemblies the
+shipped metadata table lists, `sacCer3` among them, and says which are already prepared on
+this machine — including any this table does not list. It downloads nothing:
 
-```python
-from genome.assembly import assembly_table
-
-[row.assembly_name for row in assembly_table()]
-# ['hg38', 'hg19', 'mm39', 'mm10', 'sacCer3', 'ce11', 'ecHT115', 'ce11_ecHT115']
+```console
+$ genome assembly list
+assemblies in /Users/hanqing/liulab_data/genome
+  hg38          offered, not registered  Homo sapiens GRCh38
+  hg19          offered, not registered  Homo sapiens GRCh37
+  mm39          offered, not registered  Mus musculus GRCm39
+  mm10          offered, not registered  Mus musculus GRCm38
+  sacCer3       registered               Saccharomyces cerevisiae R64-1-1
+  ce11          registered               Caenorhabditis elegans WBcel235
+  ecHT115       offered, not registered  Escherichia coli HT115 ASM435494v1
+  ce11_ecHT115  offered, not registered
+registered here: 2 — prepare another with `genome assembly register <name>`, or re-check one with `genome assembly verify <name>`
+an assembly the table does not list registers too, from the UCSC golden path — with no pinned checksum behind it
 ```
 
 A listed assembly is pinned to a source URL and a checksum. Any other UCSC name registers

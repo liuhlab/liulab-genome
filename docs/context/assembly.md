@@ -1,7 +1,7 @@
 # Assembly
 
 What an assembly is on disk, and what it costs to make it so. This context covers
-`assembly/{genome,metadata,source,components,download,chimera,chimera_build,registration,fasta,twobit}.py`
+`assembly/{genome,metadata,source,components,download,chimera,chimera_build,registration,status,fasta,twobit}.py`
 and `external.py`: a name becomes a directory of prepared files, everything in that directory is
 derivable from one FASTA, and nothing is derived twice.
 

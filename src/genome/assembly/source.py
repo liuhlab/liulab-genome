@@ -34,8 +34,7 @@ from pathlib import Path
 from genome.assembly.chimera import ChimeraNamingError, derive_name, split_name
 from genome.assembly.components import ChimeraDetails
 from genome.assembly.metadata import AssemblyMetadata, lookup_assembly
-from genome.assembly.registration import AssemblyDir, assembly_data_dir
-from genome.store.completion import read_record
+from genome.assembly.registration import AssemblyDir
 
 
 @dataclass(frozen=True)
@@ -154,6 +153,11 @@ def is_prepared(assembly: str) -> bool:
     component is addressed by the key it was registered under. A directory holding files
     but no record is *not* prepared — nothing vouches for it.
 
+    The rule itself is :attr:`~genome.assembly.registration.AssemblyDir.is_registered`,
+    asked of the directory the layout puts this name in. This is that question by name,
+    which is what a caller holding a name rather than a directory asks, and what
+    :func:`~genome.assembly.status.assembly_status` reports for every name at once.
+
     Parameters
     ----------
     assembly : str
@@ -169,7 +173,7 @@ def is_prepared(assembly: str) -> bool:
     >>> is_prepared("definitely-not-an-assembly")
     False
     """
-    return read_record(assembly_data_dir(assembly)) is not None
+    return AssemblyDir.locate(assembly).is_registered
 
 
 def _could_be_a_component(assembly: str) -> bool:

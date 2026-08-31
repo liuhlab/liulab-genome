@@ -9,6 +9,8 @@ a FASTA, derives a companion file or decides where an assembly's directory is.
   :mod:`~genome.assembly.download` gets them; :mod:`~genome.assembly.registration` is the
   half of registering that has nothing to do with where they came from — the **Assembly
   dir** layout, the staging, the **Completion marker**.
+- :mod:`~genome.assembly.status` reads that layout back: which assemblies the curated
+  table offers, and which of them — plus which names it does not list — are prepared here.
 - :mod:`~genome.assembly.fasta` derives the companions with **External tool**s and
   :mod:`~genome.assembly.twobit` reads bases back out of the ``.2bit``.
 - :mod:`~genome.assembly.chimera` is the naming rules a **Chimera** obeys and
@@ -75,6 +77,8 @@ from genome.assembly.registration import (
     assembly_data_dir,
     assembly_repair_command,
 )
+from genome.assembly.source import is_prepared
+from genome.assembly.status import AssemblyStatus, AssemblyStatusRow, assembly_status
 from genome.assembly.twobit import TwoBit
 
 __all__ = [
@@ -87,6 +91,8 @@ __all__ = [
     "AssemblyDir",
     "AssemblyMetadata",
     "AssemblyRegistration",
+    "AssemblyStatus",
+    "AssemblyStatusRow",
     "ChimeraDetails",
     "ChimeraNamingError",
     "ComponentDetails",
@@ -98,11 +104,13 @@ __all__ = [
     "assembly_data_dir",
     "assembly_metadata",
     "assembly_repair_command",
+    "assembly_status",
     "assembly_table",
     "assembly_table_row",
     "components_status",
     "derive_name",
     "format_table_row",
+    "is_prepared",
     "lookup_assembly",
     "prepare_fasta",
     "read_chimera_details",
