@@ -16,7 +16,6 @@ The unit lane, unmarked: nothing here needs a binary.
 
 from __future__ import annotations
 
-import ast
 import gzip
 import hashlib
 import json
@@ -26,7 +25,6 @@ from typing import Any
 
 import pytest
 
-import genome
 from genome.homology.compara import homology_data_dir
 from genome.store import fetch as fetch_mod
 from genome.store import prepared as prepared_mod
@@ -52,6 +50,7 @@ from genome.store.prepared import (
 from genome.tf.motif.jaspar import motif_data_dir
 from genome.xref.xref import xref_data_dir
 
+from .._sources import PACKAGE, imports_any, sources
 from ..conftest import FakeFetch
 
 # ---------------------------------------------------------------------------
@@ -377,19 +376,8 @@ def test_no_module_in_the_store_imports_a_context() -> None:
     # be importing that one through it, and the package that exists to belong to nobody
     # would belong to whichever context got there first. Read off the source at any depth,
     # since a deferred import is still an import.
-    store = Path(genome.__file__).parent / "store"
     forbidden = ("genome.assembly", "genome.annotation")
-    offenders: list[str] = []
-    for path in sorted(store.rglob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            names: list[str] = []
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module is not None:
-                names = [node.module]
-            if any(name.startswith(banned) for name in names for banned in forbidden):
-                offenders.append(path.name)
-                break
+    offenders = [path.name for path in sources(PACKAGE / "store") if imports_any(path, forbidden)]
 
     assert offenders == []
 

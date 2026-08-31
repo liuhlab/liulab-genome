@@ -54,6 +54,7 @@ from genome.store.completion import (
     work_dir,
 )
 
+from .._sources import imports_any, sources
 from ..assembly.test_source import _module_level_imports
 from ..conftest import FakeFetch
 from .conftest import (
@@ -929,22 +930,14 @@ _ANNOTATION_MODULES = (
 def _files_importing(package_root: Path, library: str) -> list[str]:
     """Every file under ``package_root`` whose source imports ``library``, at any depth.
 
-    Read rather than observed, and *not* restricted to module-level statements: a deferred
-    import is still an import of the library, and hiding one inside a function is exactly
-    how a dependency that is meant to sit behind one adapter gets a second entrance.
+    Named relative to the package's parent, so a failure reads as ``genome/store/fetch.py``
+    rather than as an absolute path nobody can compare against the ban.
     """
-    found: list[str] = []
-    for path in sorted(package_root.rglob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text())):
-            names = []
-            if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module is not None:
-                names = [node.module]
-            if any(name == library or name.startswith(f"{library}.") for name in names):
-                found.append(path.relative_to(package_root.parent).as_posix())
-                break
-    return found
+    return [
+        path.relative_to(package_root.parent).as_posix()
+        for path in sources(package_root)
+        if imports_any(path, [library])
+    ]
 
 
 def test_registering_an_annotation_imports_nothing_that_downloads_an_assembly() -> None:

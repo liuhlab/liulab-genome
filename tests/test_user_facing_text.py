@@ -34,22 +34,17 @@ from a shipped table, or interpolated from a value read off disk, is outside it.
 from __future__ import annotations
 
 import ast
-import inspect
 import re
 from collections.abc import Callable, Iterator
-from pathlib import Path
 
 import typer
 
-import genome
 from genome.cli import app
+
+from ._sources import PACKAGE, parse, sources
 
 #: What a reader outside this repository cannot resolve.
 RECORD_NUMBER = re.compile(r"ADR-\d{4}")
-
-#: The package's sources, found from the installed module rather than from this file's
-#: own path, so the guard walks what is imported and not a tree that happens to sit here.
-SRC = Path(inspect.getfile(genome)).parent
 
 
 def _docstring_node_ids(tree: ast.Module) -> set[int]:
@@ -73,13 +68,12 @@ def _docstring_node_ids(tree: ast.Module) -> set[int]:
     return ids
 
 
-def runtime_record_citation_lines(source: str) -> list[int]:
-    """Return the line of every string literal in ``source`` that cites a record and is not a docstring.
+def runtime_record_citation_lines(tree: ast.Module) -> list[int]:
+    """Return the line of every string literal in ``tree`` that cites a record and is not a docstring.
 
     A comment is not a string literal and never reaches this: `ast` drops comments, which
     is exactly the discrimination wanted rather than an accident worth working around.
     """
-    tree = ast.parse(source)
     docstrings = _docstring_node_ids(tree)
     return [
         node.lineno
@@ -120,14 +114,10 @@ def _help_texts(
 
 def test_no_message_this_package_can_print_cites_a_record_number() -> None:
     """A string literal that is not a docstring is text a user can be handed."""
-    sources = sorted(SRC.rglob("*.py"))
-    # A guard that walked nothing would pass, and would keep passing. Say so here rather
-    # than let an empty walk read as a clean package.
-    assert sources, f"no package sources found under {SRC}, so nothing was checked"
     offenders = [
-        f"{path.relative_to(SRC.parent)}:{line}"
-        for path in sources
-        for line in runtime_record_citation_lines(path.read_text(encoding="utf-8"))
+        f"{path.relative_to(PACKAGE.parent)}:{line}"
+        for path in sources()
+        for line in runtime_record_citation_lines(parse(path))
     ]
     assert not offenders, (
         "these strings can be printed to a user and cite a record they cannot look up; "
@@ -162,4 +152,4 @@ def helper() -> str:
     # A comment citing ADR-0001.
     return "a message citing ADR-0001"
 '''
-    assert runtime_record_citation_lines(source) == [7]
+    assert runtime_record_citation_lines(ast.parse(source)) == [7]
