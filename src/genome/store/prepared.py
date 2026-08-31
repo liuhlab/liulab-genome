@@ -598,5 +598,5 @@ def _check_checksum(source: PreparedSource, digest: Hash | None, *, path: Path) 
         f"{checksum.covers} bytes. A truncated download is not a smaller release, and preparing "
         f"from it would answer with silently less than the release holds. Prepare it again with "
         f"`{source.repair}`. If {source.url} has genuinely been re-published under the same "
-        f"name, that source cannot be pinned and does not belong in a curated table (ADR-0018)."
+        f"name, that source cannot be pinned and does not belong in a curated table."
     )

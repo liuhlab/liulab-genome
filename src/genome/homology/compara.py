@@ -525,7 +525,7 @@ def check_species(species: str) -> str:
     raise UnknownHomologySpeciesError(
         f"no Homology set for {species!r}: this package prepares {', '.join(known)}. Nothing "
         f"here answers a cross-species question about another species rather than answering "
-        f"it with a translated guess (ADR-0019) — ask about one of those, or add a row to "
+        f"it with a translated guess — ask about one of those, or add a row to "
         f"data/homology/homology_metadata.tsv measured against the release you want."
     )
 

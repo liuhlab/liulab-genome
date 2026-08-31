@@ -348,7 +348,7 @@ def match_symbols(
     **What this source could not have matched is printed too.** Only HGNC publishes previous
     and alias spellings typed; mouse and worm match current approved symbols alone, their
     authorities' typed spellings belonging to publishers that cannot be pinned or cannot be
-    fetched (ADR-0018). So the answer says which kinds it could match and why the others are
+    fetched. So the answer says which kinds it could match and why the others are
     missing — without which *this gene is not in the release* and *this source does not
     publish the spelling you used* would both be silence.
 

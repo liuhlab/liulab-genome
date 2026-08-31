@@ -1101,7 +1101,7 @@ def assembly_table_row(
             f"carrying the name and nothing else: no source URL, because nothing is "
             f"fetched, and no sha256, because a chimera's bytes are derived by this package "
             f"from components that are themselves pinned, and pinning them again would turn "
-            f"our own concatenation into a contract that fails on every disk (ADR-0008). "
+            f"our own concatenation into a contract that fails on every disk. "
             f"Build it with `genome assembly register {assembly}` and check it with "
             f"`genome assembly verify {assembly}`, which compares the components rather "
             f"than a pin."

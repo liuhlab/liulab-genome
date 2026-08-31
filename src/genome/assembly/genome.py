@@ -785,7 +785,7 @@ class Genome(AlignerMixin, MotifScanMixin):
             return ValueError(
                 f"unknown chromosome {chrom!r}; {self.assembly} is a chimera, and every "
                 f"chromosome name in one carries the component it came from, so a bare "
-                f"name never resolves (ADR-0009). It carries {chrom!r} as: {listed}. Ask "
+                f"name never resolves. It carries {chrom!r} as: {listed}. Ask "
                 f"for the one you meant."
             )
         known = ", ".join(str(name) for name in list(self._chrom_sizes.index)[:5])

@@ -1326,7 +1326,7 @@ class XrefSet:
             f"{namespace!r} namespace: it carries {', '.join(self.namespaces)}. "
             f"{_symbol_source_hint(self.species)} This set is not asked on another "
             f"publisher's behalf — two publishers are two answers and one query reads "
-            f"exactly one set (ADR-0017)."
+            f"exactly one set."
         )
 
 

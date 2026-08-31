@@ -259,17 +259,19 @@ def test_a_bare_chromosome_name_names_every_resolving_spelling_or_falls_back_lik
 
     # `chrZ` is carried by no component: a chimera has one more thing to say only about a
     # bare name it actually carries, so this gets the same general message any assembly
-    # would, with no mention of ADR-0009.
+    # would, saying nothing about being a chimera. `is a chimera` is what discriminates
+    # the two messages — the chimera-specific one opens with it and the general one never
+    # says it — so swapping the two messages fails here as well as on `match` above.
     with pytest.raises(ValueError, match="known sequences include") as unknown:
         chimera["chrZ:0-5"]
-    assert "ADR-0009" not in str(unknown.value)
+    assert "is a chimera" not in str(unknown.value)
 
     # And a plain assembly — not a chimera at all — has no suffixed spelling to offer for
     # a name it does not carry, so nothing here changes for it either.
     worm = chimera_component("tinyCe")
     with pytest.raises(ValueError, match="known sequences include") as plain:
         worm["III:0-100"]  # a real tinySc chromosome, unknown to tinyCe
-    assert "ADR-0009" not in str(plain.value)
+    assert "is a chimera" not in str(plain.value)
 
 
 def test_two_components_that_collide_get_four_distinct_names_and_escalation_lengthens_the_run(
