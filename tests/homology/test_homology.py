@@ -871,8 +871,15 @@ class TestRefusals:
         from genome.homology import metadata as metadata_mod
 
         kept = tuple(row for row in homology_table() if "Mus musculus" not in row.pair)
+        # `homology_species` is cached and derives from the table, so dropping mouse's rows
+        # would drop mouse from the prepared species too — and then the refusal under test
+        # is never reached, because an unknown *species* is refused first. Pinning it to
+        # the real answer is what makes "both species are prepared" above true rather than
+        # merely intended: read it before the table is patched, and hold it there.
+        prepared = homology_species()
         monkeypatch.setattr(metadata_mod, "homology_metadata", lambda *_a, **_k: None)
         monkeypatch.setattr(metadata_mod, "homology_table", lambda: kept)
+        monkeypatch.setattr(metadata_mod, "homology_species", lambda: prepared)
 
         with pytest.raises(NoHomologyPairError, match="Caenorhabditis elegans/Homo sapiens"):
             HomologySet("Homo sapiens", "Mus musculus", progressbar=False)
