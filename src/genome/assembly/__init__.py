@@ -21,7 +21,11 @@ a FASTA, derives a companion file or decides where an assembly's directory is.
 :mod:`genome.annotation`, which reaches back here for the **Assembly dir** — so importing
 either of them from this file would make ``import genome.annotation`` run the whole
 open-a-genome stack through a package it is halfway through importing. ``Genome`` is
-exported from :mod:`genome` itself, which is where a caller holds it anyway.
+exported from :mod:`genome` itself, which is where a caller holds it anyway, and so is
+:class:`~genome.assembly.chimera_build.AmbiguousDefaultAnnotationError` — the one error
+the chimera build raises. It is public at the root because of this import edge, not
+because it belongs to this context any less than
+:class:`~genome.assembly.chimera.ChimeraNamingError` beside it.
 
 Examples
 --------

@@ -8,6 +8,25 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ## [Unreleased]
 
+### Added
+
+- **Twelve error types the package raises are now importable.** Every exception class this
+  package can hand a caller resolves from a public name, so catching one no longer means
+  importing from a module the API reference declares free to move between releases.
+  `ToolNotFoundError`, `ShippedTableError`, `MetadataRowError`, `AmbiguousDefaultAnnotationError`,
+  `CuratedGeneListError` and `GeneListAssemblyMismatchError` come from `genome`; the last two
+  also from `genome.annotation`; and `RegistrationError`, `RegistrationMismatchError`,
+  `UnfinishedRegistrationError`, `ChecksumMismatchError`, `PreparedSetNotDownloadedError` and
+  `PreparedChecksumError` from `genome.store`, which is now rendered on the API reference page.
+  **Two of these change what a caller can express**, rather than only where they import from:
+  `ShippedTableError` and `PreparedSetNotDownloadedError` are the parents of eight error types
+  that were already public, so `except ShippedTableError` to catch any broken shipped table, and
+  `except PreparedSetNotDownloadedError` to catch any set that was never downloaded, could not
+  be written before and now can. A guard test holds the invariant rather than the list: an
+  exception class added anywhere in the package with no public name fails the suite.
+  `genome.store` re-exports these six and stays closed to callables, which is what keeps the
+  suite's offline guard able to patch the fetch step on the module.
+
 ### Changed
 
 - **BREAKING — the CLI grows a sub-app per topic, and fourteen commands are renamed.** `genome

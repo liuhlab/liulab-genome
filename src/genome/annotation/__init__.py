@@ -51,7 +51,9 @@ Examples
 """
 
 from genome.annotation.curated import (
+    CuratedGeneListError,
     GeneCategoryNotDeclaredError,
+    GeneListAssemblyMismatchError,
     NoGeneCategoriesError,
 )
 from genome.annotation.metadata import AnnotationMetadata
@@ -101,8 +103,10 @@ __all__ = [
     "AnnotationStatusRow",
     "BrokenAnnotation",
     "ChromosomeMismatchError",
+    "CuratedGeneListError",
     "GeneCategoryNotDeclaredError",
     "GeneList",
+    "GeneListAssemblyMismatchError",
     "GeneListSource",
     "GtfAnnotation",
     "MergeSource",
