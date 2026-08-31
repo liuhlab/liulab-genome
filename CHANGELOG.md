@@ -29,6 +29,18 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **User-facing messages no longer cite architecture-decision-record numbers.** Nine exception
+  messages, one CLI command's `--help`, and the `limits` string that rides on a *successful*
+  symbol match dropped a trailing `(ADR-00xx)`. The records live in a tree kept out of the built
+  site on purpose, so the number resolved nowhere a reader could reach; every message still says
+  in words what the record decided, and still names the same next action. **The `limits` change is
+  the one a caller may be reading**: it is not an error path — `XrefSet.for_symbols(...)`
+  `.match_symbols(...).limits`, the `"limits"` key of `as_json()`, and what `genome xref symbols`
+  echoes to stderr on every mouse or worm run all carry it, so code matching that string exactly
+  needs updating. A guard test holds the invariant rather than the list: a record number in any
+  string this package can print, or in any CLI command's docstring, fails the suite. Comments and
+  the docstrings of ordinary objects keep their citations, which are between agents and stay.
+
 - **BREAKING — the CLI grows a sub-app per topic, and fourteen commands are renamed.** `genome
   register` is `genome assembly register`, `genome tf-gene-list` is `genome tf gene-list`, `genome
   xref` is `genome xref ids`, `genome match-symbols` is `genome xref symbols`, `genome homologs` is

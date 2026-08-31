@@ -661,7 +661,7 @@ def _check_not_nested(components: Sequence[Genome]) -> None:
             raise ChimeraNamingError(
                 f"component {component.assembly!r} is itself a chimera, of "
                 f"{', '.join(nested)}; a component is always a canonical assembly, so "
-                f"nesting is forbidden by the model rather than deferred (ADR-0008). "
+                f"nesting is forbidden by the model rather than deferred. "
                 f"List those components alongside the others instead."
             )
 

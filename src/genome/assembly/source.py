@@ -271,7 +271,7 @@ def resolve_source(
             f"nothing is registered as {assembly_dir.assembly!r} in {assembly_dir.path}, and "
             f"it is not how a chimera of {', '.join(candidates)} is spelled: a chimera's name "
             f"is its components sorted, so that one set of components means one "
-            f"directory whatever order they are typed in (ADR-0008). Build it with "
+            f"directory whatever order they are typed in. Build it with "
             f"`genome assembly register {canonical}`."
         )
     return ComponentSource(candidates)

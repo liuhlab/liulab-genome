@@ -99,7 +99,7 @@ BGI_SYMBOL_LIMIT = (
     "former name daf-17 in the same list — so matching on it would put a kind on a claim no "
     "publisher made. The typed previous and alias spellings belong to the species "
     "authorities themselves: MGI for mouse, which keeps no dated archive and is therefore "
-    "not an eligible xref source (ADR-0018), and WormBase for worm, whose download host "
+    "not an eligible xref source, and WormBase for worm, whose download host "
     "answers 403 to an automated client. Human has all three kinds, from the hgnc source."
 )
 

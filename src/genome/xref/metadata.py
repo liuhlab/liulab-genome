@@ -443,7 +443,7 @@ def lookup_xref(
             f"no xref set for {species!r}: this package prepares one for {listed}. Ask for "
             f"one of those, or convert the ids you hold with the publisher's own file — a "
             f"species with no Ensembl presence has no hub to hang a namespace off and is "
-            f"unanswerable here by design (ADR-0017)."
+            f"unanswerable here by design."
         )
     # The default source still has to honour a named release. Resolving the source first
     # and then falling through to the release check keeps one path: naming a release
@@ -500,7 +500,7 @@ def _default_row(for_species: Sequence[XrefMetadata], *, species: str) -> XrefMe
         raise NoXrefSetError(
             f"no default xref source for {for_species[0].species!r}, which has more than "
             f"one: {listed}. Name the source you want — which publisher answers is a "
-            f"scientific choice and is not made for you here (ADR-0017)."
+            f"scientific choice and is not made for you here."
         )
     source = chosen[-1].source
     return [record for record in for_species if record.source == source][-1]
