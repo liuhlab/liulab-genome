@@ -17,7 +17,7 @@ import requests
 from genome.assembly.download import UCSCGenomeDownloader
 from genome.store import fetch as fetch_mod
 
-from .conftest import NetworkAccessError
+from ._guards import NetworkAccessError
 
 #: A real URL, so a guard that failed to fire would be visible as a live download.
 _URL = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz"

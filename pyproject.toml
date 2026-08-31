@@ -204,7 +204,9 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 # ============================== pyright ==============================
 
 [tool.pyright]
-include = ["src", "tests"]
+# `conftest.py` at the root is three lines of plugin wiring, and it is named explicitly
+# because naming a directory does not reach a file beside it.
+include = ["src", "tests", "conftest.py"]
 # `scripts/` is build tooling, not the wheel, so it is resolved but not checked — the same
 # footing `show_numba_cache_key.py` has always had. What makes it resolvable is the
 # extension test importing it by name, the way mkdocs loads it. `src` is listed beside it
