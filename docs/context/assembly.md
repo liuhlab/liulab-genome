@@ -16,16 +16,13 @@ the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
 The curated TSV row cross-referencing one **Assembly** across three naming authorities:
 `assembly_name`, `species`, `ucsc_name`, `ncbi_name`, `ncbi_assembly_id`, `ncbi_taxid` — and, where
 the lab has pinned them, the **Source** that assembly's **FASTA** is fetched from and the sha256 of
-the *unpacked* FASTA that source yields, checked after decompression rather than over the archive.
-Both may be blank: an unpinned checksum is unverified rather than wrong. So may `ucsc_name` — the
-lab supports references UCSC has never carried, and those have no name in that namespace at all. A
-cross-reference and never
-an allow-list — an assembly absent from the table is perfectly legal, and a complete record handed to
-`Genome(...)` replaces the row wholesale, every field or none. One column is neither a
-cross-reference nor a pin: `intron_length_cap` is the longest gap a spliced aligner should take for
-an intron on this assembly, with `intron_length_cap_rationale` saying why that number and not
-another — set by hand for a consumer to apply, never derived from an annotation, never read here,
-and blank wherever nobody has chosen one (ADR-0010).
+the *unpacked* FASTA that source yields. Both may be blank: an unpinned checksum is unverified
+rather than wrong. So may `ucsc_name` — the lab supports references UCSC has never carried. A
+cross-reference and never an allow-list — an assembly absent from the table is perfectly legal, and
+a complete record handed to `Genome(...)` replaces the row wholesale, every field or none. One
+column is neither a cross-reference nor a pin: `intron_length_cap` is the longest gap a spliced
+aligner should take for an intron on this assembly, set by hand for a consumer to apply and never
+read here, with `intron_length_cap_rationale` saying why that number (ADR-0010).
 *Avoid*: registry, catalog, database, manifest — each implies the table decides what exists; and
 `intron_length_cap` as the assembly's longest intron — it is a bound someone chose, not a length
 anyone measured
@@ -68,17 +65,14 @@ An **Assembly** whose **FASTA** is concatenated from two or more prepared canoni
 instead of fetched — its **Component**s, never repeated and never themselves chimeras. Its identity
 is that component set rather than the order it arrived in, so the name derives by sorting the
 component names and joining them with `_` and is never overridable (ADR-0008), and every chromosome
-is suffixed `<chromosome>__<component>` unconditionally (ADR-0009), read back by
-`^(?P<chromosome>.+)__(?P<component>[A-Za-z0-9]+)$` with the chimera's own recorded separator
-substituted for `__` whenever a component forced a longer run, which `Genome.separator` reports.
-`Genome.components` is the single test of whether an assembly is one, answering `None` when it is
-not, and `Genome.component_annotations` says which annotation each component contributed to the
-merge, or `None` for one that contributed none. Its sequences are laid out **one contiguous block
-per component, components in the sorted order the name spells and each component's own declared
-order inside its block** — a published contract, not an artefact of how the concatenation happens to
-run, because a consumer that filters one component's sequences back out of an alignment header
-recovers a single-assembly header only while it holds, and a different order would hand that
-consumer a silently wrong header rather than a failure.
+is suffixed `<chromosome>__<component>` unconditionally, by the chimera's own recorded separator
+wherever a component forced a longer run (ADR-0009). `Genome.components` is the single test of
+whether an assembly is one, answering `None` when it is not, and `Genome.component_annotations` says
+which annotation each component contributed to the merge. Its sequences are laid out **one
+contiguous block per component, components in the sorted order the name spells and each component's
+own declared order inside its block** — a published contract rather than an artefact of how the
+concatenation runs, because a consumer filters one component's sequences back out of an alignment
+header only while it holds.
 *Avoid*: hybrid, combined genome, merged genome, multi-species reference; and "concatenated FASTA",
 which names the bytes rather than the assembly they belong to
 

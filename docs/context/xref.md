@@ -46,17 +46,13 @@ which says neither whose nor from when
 **Xref source**:
 The publisher whose assertions one **Xref set** carries — named on every answer, and a row in a
 shipped metadata table beside a reader rather than a branch in code, so adding one is data. A
-publisher is eligible only if it keeps dated releases at stable URLs (ADR-0018): the Alliance of
-Genome Resources, Ensembl's per-species dumps, HGNC's quarterly archive and WormBase qualify, while
-NCBI Gene, UniProt idmapping and MGI are rebuilt daily and overwritten in place, so a checksum
-shipped in the wheel would be wrong within a day. Pinnable is not the same as reachable: WormBase's
-own download host answers 403 to an automated client, so its assertions are carried through the copy
-the Alliance serves of WormBase's own submission — the same bytes, at a URL a script can fetch.
-Two sources are not two grades of one thing and
-neither is a fallback for the other: they number their releases differently, carry different
-**Namespace**s, and some grade each assertion where others grade none — a filter on that grading is
-therefore a capability of the source, and one no row of a release satisfies raises rather than
-building a set that can only answer nothing.
+publisher is eligible only if it keeps dated releases at stable URLs, which is what admits the
+Alliance of Genome Resources, Ensembl's per-species dumps, HGNC's quarterly archive and WormBase and
+excludes NCBI Gene, UniProt idmapping and MGI (ADR-0018).
+Two sources are not two grades of one thing and neither is a fallback for the other: they number
+their releases differently, carry different **Namespace**s, and some grade each assertion where
+others grade none — a filter on that grading is therefore a capability of the source, and one no row
+of a release satisfies raises rather than building a set that can only answer nothing.
 _Avoid_: provider, vendor, database, resource; authority on its own — a species authority is one
 source among several and the word does not say which; and **Source** unqualified, which the
 [Assembly](./assembly.md) context already owns for where an assembly's bytes came from
@@ -66,12 +62,11 @@ Per species **and per question**, the **Xref source** a caller who names none is
 that everyone in the lab reaches for the same one without discussing it — exactly the job **Default
 annotation** already does. It is a default and not a recommendation: naming a source is how the
 scientific choice gets made deliberately, and this exists so that declining to make it is still
-reproducible rather than arbitrary. There are two questions and so two flags in the curated table
-(ADR-0021), because the publisher carrying a species' identifiers is usually not the one carrying
-its **Symbol match**es: human's identifiers default to the Alliance, which publishes no human symbol
-at all, and its symbols to HGNC. The question is named where the source is filled in and nowhere
-else — a set already built for one source is never answered from another's bytes, and one that
-carries no symbol raises naming the one that does.
+reproducible rather than arbitrary. Identifiers and **Symbol match**es are the two questions, and so
+two flags in the curated table, because the publisher carrying a species' identifiers is usually not
+the one carrying its symbols (ADR-0021). The question is named where the source is filled in and
+nowhere else — a set already built for one source is never answered from another's bytes, and one
+that carries no symbol raises naming the one that does.
 _Avoid_: preferred source, canonical source, best source, authoritative source — no such judgement
 is made here; primary and fallback, which imply a second source is tried when the first misses, and
 none is; and a second term for the symbol half — it is one idea with two flags, not two ideas
@@ -94,16 +89,12 @@ namespaced column names, which is what `genome.tf.cofactor` and a **Cofactor tab
 One hit of a gene symbol against an **Xref set**, carrying the kind of spelling that matched —
 `approved`, `previous` or `alias`. The kind rides on the match rather than being filtered away on
 the way out, and a symbol naming several genes answers with all of them, because ambiguity here is
-the return type and not an edge case: a table spelling a gene the way it was spelled five years ago
-is otherwise dropped without a word, which is what would have happened to 31 of 801 EpiFactors rows.
-Matching is exact by default and case-insensitive only when asked for, and the insensitive path
-still answers with every gene matched rather than picking one. Which kinds a set can match is the
-**Xref source**'s and never the species' — mouse and worm match approved spellings only, their
-authorities' typed spellings belonging to publishers that cannot be pinned or cannot be fetched
-(ADR-0018) — and why the others are missing rides back on the answer, since _this gene is absent_
-and _this source cannot match that spelling_ would otherwise both be silence. The reverse direction
-is not symmetric: from a stem the answer is the authority's single current approved symbol, which is
-labelling.
+the return type and not an edge case. Matching is exact by default and case-insensitive only when
+asked for, and the insensitive path still answers with every gene matched. Which kinds a set can
+match is the **Xref source**'s and never the species' (ADR-0018), and why a kind is missing rides
+back on the answer, since _this gene is absent_ and _this source cannot match that spelling_ would
+otherwise both be silence. The reverse direction is not symmetric: from a stem the answer is the
+authority's single current approved symbol, which is labelling.
 _Avoid_: gene name; HGNC symbol, which is one authority's spelling of a general idea; synonym — the
 authorities' own word is _alias_, and one idea gets one word; fuzzy match, which nothing here does;
 and **Motif name**, which labels a matrix and names no gene at all
