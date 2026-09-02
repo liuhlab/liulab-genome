@@ -31,8 +31,12 @@ coverage.xml
 .mypy_cache/
 .ruff_cache/
 
-# Docs build
+# Docs build. `.cache/` is mkdocs' download cache, which mkdocstrings fills with fetched
+# inventories. mkdocs writes a `.gitignore` holding `*` inside it, so it already hides itself —
+# named here anyway, because a rule markdownlint now delegates to should not live in a file a
+# dependency happens to generate.
 site/
+.cache/
 
 # Editors / OS
 .idea/
@@ -48,8 +52,11 @@ site/
 # Claude Code local settings (project-wide settings.json may be committed)
 .claude/settings.local.json
 
-# Codex agent local dir (installed skills / symlinks, not committed here)
-.codex/
+# Agent installer output, one directory per product. Anchored with a leading `/`: unanchored,
+# `.codex/` also hides any nested directory of that name, and nobody's clone needs another
+# machine's copy of either.
+/.codex/
+/.gemini/
 
 # playground contains manual test code
 playground/

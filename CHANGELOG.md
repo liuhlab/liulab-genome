@@ -45,6 +45,34 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   `genome.store` re-exports these six and stays closed to callables, which is what keeps the
   suite's offline guard able to patch the fetch step on the module.
 
+- **The lab's three static writing gates are here and runnable, and they gate nothing yet.** The
+  router states the writing rules in three separate places and nothing checked any of them, so a
+  document over its cap, a phrase the lab has ruled out, or an agent-facing tree nobody declared
+  was caught by a reviewer or by nobody. `pixi run vale`, `pixi run markdownlint` and
+  `pixi run conformance` come across from `liulab-repo-template` at `9c4f8ed` — the four
+  `styles/Lab/` rules, `.markdownlint-cli2.yaml` and `scripts/conformance.py` byte for byte,
+  `.vale.ini` rewritten around this repository's paths. **None of the three is a step of `check`
+  or of CI**, which is the whole reason they land first and alone: the tree fails vale with 5
+  errors and markdownlint with 966 across 40 files, and a gate that is red on the day it arrives
+  teaches nobody anything. Cleaning the prose, and then wiring the three in, are the commits after
+  this one. `pyproject.toml` gains `[tool.liulab.agent-docs]`, this repository's agent-facing set
+  spelled with its real paths: `AGENTS.md` and `docs/agents/` take the 1000-word document cap,
+  `docs/adr/` the tighter 400-word record cap, `docs/research/` none. **`CONTEXT-MAP.md` and
+  `docs/context/` take none either**, and that is a decision rather than an omission — a glossary
+  is capped per entry, because how long the file runs reports how many terms the domain happens to
+  have, which measures nothing about the writing (ADR-0024). Every `.vale.ini` section names every
+  rule, including the two it leaves off: vale's `*` matches `/`, so the sections overlap and the
+  per-rule settings pile up with the later section winning, and a rule left out of a section keeps
+  whatever an earlier one said instead of defaulting on. That is how a record tree ends up checked
+  by nothing with a green run to show for it, and conformance now fails if any of the six declared
+  keys loses its section. One rule is waived, `agent-docs-unpublished`: `mkdocs.yml` keeps the
+  record, agent, context and research trees out of the built site with `exclude_docs`, so the
+  `search: exclude: true` front matter that rule wants would sit inert on 48 files the site never
+  builds. The waiver names its reason, suppresses that one rule and nothing else, and prints on
+  every run including the green ones — so the day the site generator changes and the premise stops
+  holding, it is on screen rather than forgotten. `.gitignore` gains `.cache/` and `/.gemini/` and
+  anchors `.codex/`, which matters now that markdownlint hands it the whole exclusion list.
+
 ### Changed
 
 - **A missing type annotation now fails the gate, and the type checker is pinned exactly.** The

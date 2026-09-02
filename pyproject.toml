@@ -103,6 +103,11 @@ pyright = "==1.1.411"
 python-build = "*"
 hatch-vcs = "*"
 ipykernel = "*"   # backs a Jupyter kernel; see the register-kernel task
+# Exact: the jargon map and the grade-11 readability number were measured against this version.
+vale = "3.19.0.*"
+markdownlint-cli2 = "*"
+# For conformance, which parses mkdocs.yml with it.
+pyyaml = "*"
 
 [tool.pixi.feature.docs.dependencies]
 mkdocs-material = "*"
@@ -156,6 +161,17 @@ test-failed = "pytest --lf --new-first -x -q"
 # The four steps are not `depends-on`: pixi runs those sequentially, which is the thing
 # this replaces. The guard is one — a precondition answers before the gate spends anything.
 check = { cmd = "bash scripts/check.sh lint fmt-check typecheck test", depends-on = ["require-tools"] }
+
+# Declared and runnable, deliberately not steps of `check` and not in CI: the tree does not
+# pass vale or markdownlint yet, and a gate that is red on arrival teaches nothing. Wiring
+# them in is its own commit, after the prose is clean.
+#
+# `.`, never an absolute path: an absolute path matches no `.vale.ini` section and exits 0.
+# The globs stop vale walking trees it never lints — check.sh runs steps concurrently, and a
+# walk of .pixi/ races pytest writing __pycache__ there.
+vale        = "vale --glob='!{.pixi,site,dist,build}/**' ."
+markdownlint = "markdownlint-cli2"
+conformance = "python scripts/conformance.py"
 
 build      = "python -m build"
 docs       = "mkdocs serve"
@@ -274,3 +290,28 @@ exclude_also = [
     "if __name__ == .__main__.:",
     '\.\.\.',
 ]
+
+# ============================== liulab ==============================
+# Read by `scripts/conformance.py`; its docstring has the rules.
+
+# The declared agent-facing set. Keys are path prefixes matched against `git ls-files`, not
+# globs; a trailing `/` matches a directory. Values name the Vale Length rule, or `false`.
+# Each key is spelled verbatim inside exactly one `.vale.ini` section header, which is how
+# conformance pairs the two.
+#
+# `CONTEXT-MAP.md` and `docs/context/` take `false` because a glossary here is capped per
+# ENTRY, not per file: how long the file runs reports how many terms the domain has, which is
+# not a writing-quality signal (ADR-0024). The guard that measures an entry is local.
+[tool.liulab.agent-docs]
+"AGENTS.md" = "LengthDoc"
+"docs/agents/" = "LengthDoc"
+"docs/adr/" = "LengthAdr"
+"docs/research/" = false
+"CONTEXT-MAP.md" = false
+"docs/context/" = false
+
+# Keyed by rule name, value the reason. Per-rule, never per-file; no expiry; printed on every
+# run, green ones included, which is the visibility this needs on the day the premise stops
+# holding. `placeholder-rename` refuses to be waived.
+[tool.liulab.waived]
+agent-docs-unpublished = "mkdocs.yml's `exclude_docs` block keeps the record, agent, context and research trees out of the built site entirely, so the `search: exclude: true` front matter this rule asks for would be inert on files the site never builds"
