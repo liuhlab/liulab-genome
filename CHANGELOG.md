@@ -722,6 +722,19 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **CI runs one static task, and the docs deploy builds the way a laptop does.** The lint job
+  spelled out four steps. GitHub stops a job at its first failing step, so a ruff error hid
+  pyright's verdict and the site build. A new `check-static` task names the seven static steps
+  once, and the gate runner runs them at once. One run now reports everything to fix. The step
+  list also lived in two places that disagreed. The gate ran the tests and not the site build; CI
+  ran the site build and not the tests. `check` is now those seven steps plus the tests, so a
+  green gate and a green CI mean the same set passed. The docs workflow published through
+  `mkdocs gh-deploy`, which skipped the record-number check that `docs-build` pairs with the
+  build. So the one path that writes the public site was the only path not checked. It now builds
+  through the task and hands `./site` to `peaceiris/actions-gh-pages`, which still replaces the
+  branch whole. Four pinned actions move up: `checkout` to v7, `setup-pixi` to v0.10.2,
+  `upload-artifact` to v7 and `download-artifact` to v8.
+
 - **Every markdown file now reads the way markdownlint asks, bar the changelog's repeated release
   headings.** `markdownlint-cli2 --fix` did 937 of the 966 errors: table delimiter rows, emphasis
   markers, hard tabs. The rest were hand work — a language on sixteen bare fences, a research

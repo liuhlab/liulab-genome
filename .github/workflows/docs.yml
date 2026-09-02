@@ -13,7 +13,7 @@ name: Docs
 #      URL appears at Settings → Pages.
 #
 # The built site is a generated artifact — never edit `gh-pages` by hand, and
-# never merge it into main. `mkdocs gh-deploy --force` overwrites it wholesale.
+# never merge it into main. `force_orphan` below replaces it wholesale.
 
 on:
   push:
@@ -21,10 +21,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write # gh-deploy pushes the built site to the gh-pages branch
+  contents: write # the publish step force-pushes the built site to the gh-pages branch
 
 # Allow only one concurrent deployment, but don't cancel an in-progress one
-# (two gh-deploy force-pushes racing would clobber each other).
+# (two force-pushes racing would clobber each other, and a run killed between
+# the build and the push leaves `gh-pages` holding half a site).
 concurrency:
   group: gh-pages
   cancel-in-progress: false
@@ -34,16 +35,25 @@ jobs:
     name: Build & publish to gh-pages
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # mkdocs revision dates / hatch-vcs version need history
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           environments: docs
           locked: true
-      - name: Configure git identity for the gh-pages commit
-        run: |
-          git config user.name  'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-      - name: mkdocs gh-deploy --strict
-        run: pixi run -e docs mkdocs gh-deploy --strict --force
+      # Through the TASK, never a bare `mkdocs gh-deploy`. `docs-build` pairs the build
+      # with scripts/check_site_has_no_record_numbers.sh, and gh-deploy ran neither — so
+      # the rule keeping record numbers off the published site was enforced everywhere
+      # except on the one path that actually writes the public site. Writes `./site`;
+      # `--strict` lives in the task, so this and a laptop build the same way.
+      - name: pixi run docs-build
+        run: pixi run -e docs docs-build
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          publish_branch: gh-pages
+          # `gh-pages` holds built output and no history anyone reads: one commit,
+          # replaced whole each deploy. This is what `mkdocs gh-deploy --force` did.
+          force_orphan: true

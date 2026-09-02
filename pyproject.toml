@@ -158,13 +158,20 @@ test-cov    = "pytest --cov=genome --cov-report=term-missing"
 # Serial: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
 test-failed = "pytest --lf --new-first -x -q"
 
-# The four steps are not `depends-on`: pixi runs those sequentially, which is the thing
-# this replaces. The guard is one — a precondition answers before the gate spends anything.
-check = { cmd = "bash scripts/check.sh lint fmt-check typecheck test", depends-on = ["require-tools"] }
+# The static half of the gate: everything that needs no test environment, named ONCE so
+# `ci.yml` and a laptop cannot drift. Steps are arguments to one runner, which runs them
+# concurrently and prints every result — a workflow spelling them as separate steps reports
+# only the first failure, because GitHub stops a job there.
+check-static = "bash scripts/check.sh lint fmt-check typecheck vale markdownlint conformance docs-build"
 
-# Declared and runnable, deliberately not steps of `check` and not in CI: the tree does not
-# pass vale or markdownlint yet, and a gate that is red on arrival teaches nothing. Wiring
-# them in is its own commit, after the prose is clean.
+# The whole gate: the static steps plus the tests, so a green gate here and a green CI mean
+# the same set of checks passed. The static list is written out a SECOND time on purpose —
+# `depends-on = ["check-static"]` is how pixi runs things sequentially, which is exactly the
+# concurrency this runner was measured to buy. The one `depends-on` is the guard: a
+# precondition answers before the gate spends anything.
+check = { cmd = "bash scripts/check.sh lint fmt-check typecheck vale markdownlint conformance docs-build test", depends-on = ["require-tools"] }
+
+# Steps of both gates above, and runnable alone when one of them is what you are fixing.
 #
 # `.`, never an absolute path: an absolute path matches no `.vale.ini` section and exits 0.
 # The globs stop vale walking trees it never lints — check.sh runs steps concurrently, and a
