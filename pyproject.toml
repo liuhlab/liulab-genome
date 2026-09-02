@@ -92,6 +92,11 @@ hypothesis = "*"
 # here is what keeps those tests in the unit lane rather than skipping themselves green in
 # it, which is the one thing the two-lane split exists to prevent.
 griffe = "*"
+# Same reason as griffe above, one file along: the suite tests `scripts/conformance.py`, which
+# parses mkdocs.yml and every workflow with PyYAML. It arrives with the dev feature too, so the
+# `conformance` task has always had it — but the unit lane runs in `test`, where without this
+# line every conformance test errors on the import instead of running.
+pyyaml = "*"
 
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
@@ -157,6 +162,11 @@ require-tools    = "bash scripts/require_tools.sh"
 test-cov    = "pytest --cov=genome --cov-report=term-missing"
 # Serial: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
 test-failed = "pytest --lf --new-first -x -q"
+# The test lane's cache diagnostic, run in CI before anything reads the restored cache. A task
+# and not a command line in `ci.yml`, so what CI runs is what a laptop runs when the numbers in
+# a run stop making sense. Run it in the environment the lane uses — `pixi run -e test
+# numba-cache-key` — or it describes a process that is not the one compiling; the script says why.
+numba-cache-key = "python scripts/show_numba_cache_key.py"
 
 # The static half of the gate: everything that needs no test environment, named ONCE so
 # `ci.yml` and a laptop cannot drift. Steps are arguments to one runner, which runs them

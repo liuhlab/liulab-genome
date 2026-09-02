@@ -130,7 +130,7 @@ jobs:
       # merely unconfirmed; neither is visible in the cache step's own output, and they fail
       # by different amounts — see the script for which loss looks like which cause.
       - name: numba cache key
-        run: pixi run -e test python scripts/show_numba_cache_key.py
+        run: pixi run -e test numba-cache-key
       - name: pytest -m 'not aligner'
         run: pixi run -e test test -- --durations=10
 
