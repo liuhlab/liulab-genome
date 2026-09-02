@@ -186,7 +186,13 @@ shown otherwise.
 One near miss is worth recording as a different kind. Lowering a rule's threshold *in the working
 tree* to make it print its metric would have failed a concurrently running gate for a reason that
 gate could never have diagnosed — a measurement that does not lie itself but makes someone else's
-lie. Both repositories took the same precaution independently, measuring in an isolated copy.
+lie. Both repositories measured in an isolated copy instead, and neither did so because it had
+reasoned about the hazard. Recorded as luck, not as practice.
+
+The same honesty applies to the two-repository comparison above. It counts as a control only
+because the scratch setups and the methods of getting vale to print its metric were arrived at
+independently, without coordination. Had the method been agreed first, the result would have been
+two runs of one procedure and no evidence the procedure was sound.
 
 A fifth artefact of the same family is not a measurement at all. The comment above
 `conformance.py`'s loader states that it exits 2 when it cannot list tracked files. It exits 1,
