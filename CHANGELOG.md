@@ -47,6 +47,20 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **Python narrows to 3.13, so an install on 3.12 now fails rather than succeeding untested.**
+  `requires-python` floored at `>=3.12` while the lock held one interpreter, so no lane ever ran
+  the version the floor advertised. The two settings that looked like they held it — `ruff
+  target-version` and `pyright pythonVersion` — read source syntax and not a runtime, and the
+  failure a 3.12 user would actually hit is a 3.13-only behaviour in a dependency, which neither
+  can see. Both are **deleted rather than retargeted**: ruff derives its target from
+  `requires-python` and pyright takes its version from the environment's interpreter, so Python is
+  declared in exactly two places, `requires-python` and the pixi pin. The `Programming Language ::
+  Python :: 3.12` classifier is gone with them, which is what makes a 3.12 resolver refuse the
+  package instead of installing it. A 3.12 test lane was the alternative and stays the answer if a
+  consumer pinned to 3.12 turns up; it lost because nothing is known to need one and every bioconda
+  pin would have to resolve on a second interpreter (ADR-0025). No solved package changed — the
+  environment was already 3.13.
+
 - **The package's docstring examples now run, in the unit lane.** `AGENTS.md` asks for at least
   one runnable example on every public object and the package carries over twelve hundred of them;
   nothing executed a single one, so the bar was held by review alone. `pytest` now collects

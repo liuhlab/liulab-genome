@@ -47,9 +47,9 @@ mechanises it.**
 
 ## Working here
 
-- **Python support points at both ends of the range on purpose.** Tests run on 3.13 only; the 3.12
-  floor is held by `ruff target-version` and `pyright pythonVersion`, not by a test lane. Do not
-  narrow `requires-python` to match what is tested, and do not raise the language level to match it.
+- **Python is 3.13, declared in exactly two places** — `requires-python` and the pixi pin. Ruff's
+  target version and pyright's are derived from those, never declared: declaring either again is
+  how the language level and the runtime drift apart.
 - **Tests.** `pixi run check` is the gate — lint, fmt-check, typecheck, test, run concurrently.
   Write the test from the spec first, then implement until green. pytest, and hypothesis for parsers,
   coordinate conversions and sequence transforms: assert invariants over generated inputs —

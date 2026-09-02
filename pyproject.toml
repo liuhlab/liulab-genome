@@ -6,7 +6,7 @@ description = "Handling reference genome related tasks."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 authors = [{ name = "Liu Lab" }]
 keywords = ["bioinformatics", "genomics", "samtools", "bedtools"]
 classifiers = [
@@ -15,7 +15,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Typing :: Typed",
@@ -78,7 +77,8 @@ matplotlib-base = ">=3.9,<4"   # what logomaker depends on; the GUI backends go 
 xarray = ">=2025.1"
 pyarrow = ">=25.0.0,<26"   # the Parquet sink a scan too large to hold streams to
 
-# One Python on purpose; the 3.12 floor is ruff's and pyright's. See AGENTS.md.
+# One Python, and one of the two places it is declared; the other is `requires-python`.
+# Nothing derived from it — ruff's target, pyright's version — is declared. See AGENTS.md.
 [tool.pixi.feature.py313.dependencies]
 python = "3.13.*"
 
@@ -166,7 +166,6 @@ register-kernel = "python -m ipykernel install --user --name liulab-genome --dis
 [tool.ruff]
 line-length = 100
 src = ["src", "tests", "scripts"]
-target-version = "py312"
 extend-exclude = [".pixi", "site", "build", "dist"]
 
 [tool.ruff.lint]
@@ -215,7 +214,6 @@ extraPaths = ["src", "scripts"]
 exclude = ["**/__pycache__", "**/.pixi"]
 venvPath = ".pixi/envs"
 venv = "default"
-pythonVersion = "3.12"
 typeCheckingMode = "basic"
 useLibraryCodeForTypes = true
 reportMissingTypeStubs = "none"

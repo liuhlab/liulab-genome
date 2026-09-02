@@ -13061,7 +13061,7 @@ packages:
   - requests>=2.31
   - tqdm>=4
   - typer>=0.12
-  requires_python: '>=3.12'
+  requires_python: '>=3.13'
 - pypi: https://files.pythonhosted.org/packages/1e/d3/26bf1008eb3d2daa8ef4cacc7f3bfdc11818d111f7e2d0201bc6e3b49d45/annotated_doc-0.0.4-py3-none-any.whl
   name: annotated-doc
   version: 0.0.4
