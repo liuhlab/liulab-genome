@@ -95,7 +95,11 @@ griffe = "*"
 
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
-pyright = "*"
+# Exact, where everything else in this table floats. The language server an editor runs is this
+# same checker, so a version that drifts between the two is the editor and CI disagreeing about
+# one file; and a release of it would turn CI red on a commit that changed nothing. Bumping the
+# pin is a commit of its own, with whatever the new release newly reports fixed in it.
+pyright = "==1.1.411"
 python-build = "*"
 hatch-vcs = "*"
 ipykernel = "*"   # backs a Jupyter kernel; see the register-kernel task
@@ -214,7 +218,7 @@ extraPaths = ["src", "scripts"]
 exclude = ["**/__pycache__", "**/.pixi"]
 venvPath = ".pixi/envs"
 venv = "default"
-typeCheckingMode = "basic"
+typeCheckingMode = "standard"
 useLibraryCodeForTypes = true
 reportMissingTypeStubs = "none"
 
