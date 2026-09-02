@@ -55,9 +55,25 @@ metric:
 | `docs/agents/issue-tracker.md` | 562 | 340 | 40% |
 
 The widest gap is the file that is almost entirely inline code and shell invocations. The same
-comparison in `liulab-repo-template` came out around 20% on its own writing guide, so the effect is
-not particular to this repository — it is particular to the instrument. Anyone sizing headroom
-against these caps should ask the gate, not `wc`.
+comparison run independently in `liulab-repo-template`, on its own agent docs, spans further in the
+same order:
+
+| File | `wc -w` | vale | Gap |
+| --- | --- | --- | --- |
+| `docs/agents/triage-labels.md` | 111 | 39 | 65% |
+| `docs/agents/issue-tracker.md` | 270 | 122 | 55% |
+| `AGENTS.md` | 393 | 207 | 47% |
+| `docs/agents/writing.md` | 430 | 349 | 19% |
+| `docs/agents/domain.md` | 175 | 158 | 10% |
+
+Ten percent to sixty-five, ordered by markup density in both repositories: tables and command
+references at the top, prose at the bottom. The two `writing.md` files — the same document, adapted
+— measure 18% here and 19% there, which is the control: two sessions, two scratch setups, one
+result.
+
+So the effect is not particular to this repository. It is particular to the instrument, and it is
+worst on exactly the documents most likely to sit near a cap. Anyone sizing headroom against these
+caps should ask the gate, not `wc`.
 
 The 966 markdownlint errors were mostly one convention: 649 `MD060` table-column-style, 142 `MD049`
 emphasis-style, 130 `MD010` hard tabs. The linter's own fixer resolved 937 of them. The residue was
@@ -153,10 +169,24 @@ announced itself.
 | The same, fixed by using absolute include paths | Still scanned the config's own directory; the fix is a directory holding nothing but the config |
 | `pixi run vale <file>` in the template repository | Appended the filename to a task that already ended in `.`, grading all 18 files while reporting one |
 
-The shared shape is a tool that accepts a narrowing argument and silently widens it. The defence
-that would have caught all four is the same: predict the number before running, and treat
-"different inputs, identical outputs" or a suspiciously round zero as a tooling failure until shown
-otherwise.
+A fifth belongs with them, from the section above: `wc -w` used to size headroom against a cap that
+vale measures. Both repositories did it independently within hours, and it is the one that changed
+a plan — a file read as 297 words over a cap it was comfortably under is a document somebody splits
+for no reason.
+
+The shared shape is a tool that accepts a narrowing argument and silently widens it, or answers a
+neighbouring question convincingly. What made every one of them likely is that each instrument is
+the obvious one to reach for: `wc -w` for a word count, `pixi run <task> <file>` for one file,
+`pyright -p <config>` for a config. None is an exotic mistake.
+
+The defence that would have caught all of them is the same: predict the number before running, and
+treat "different inputs, identical outputs" or a suspiciously round zero as a tooling failure until
+shown otherwise.
+
+One near miss is worth recording as a different kind. Lowering a rule's threshold *in the working
+tree* to make it print its metric would have failed a concurrently running gate for a reason that
+gate could never have diagnosed — a measurement that does not lie itself but makes someone else's
+lie. Both repositories took the same precaution independently, measuring in an isolated copy.
 
 A fifth artefact of the same family is not a measurement at all. The comment above
 `conformance.py`'s loader states that it exits 2 when it cannot list tracked files. It exits 1,
