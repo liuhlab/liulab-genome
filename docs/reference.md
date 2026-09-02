@@ -11,12 +11,12 @@ with a genome; [Transcription factors](topics/transcription-factors.md),
 [Homology](topics/homology.md) for the tables the package ships; and
 [CLI overview](cli/index.md) for the shell. Come here once you know the name you want.
 
-Each section below is one package's public surface: what its `__init__.py` re-exports, and
+Each section below is one package's public API: what its `__init__.py` re-exports, and
 nothing else. A name you can only reach through a submodule path is internal, and it can
 move or disappear between releases.
 
 | Package | What it holds |
-|---|---|
+| --- | --- |
 | `genome` | `Genome`, `Region`, the sequence types, and the results the common calls return |
 | `genome.aligner` | The STAR and chromap index builders |
 | `genome.annotation` | Registering a GTF and asking an annotation for gene ids |

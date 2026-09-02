@@ -5,7 +5,7 @@ read sequence out of it, attach an annotation, then build the index an aligner w
 one of them starts from `Genome("<assembly>")`.
 
 | Page | What it answers |
-|---|---|
+| --- | --- |
 | [Assembly](assembly.md) | How a reference is prepared, and what files that leaves on disk. |
 | [Sequences and regions](sequences.md) | How to name a locus, and what a `DNA` object does for you. |
 | [Annotations](annotations.md) | How a GTF is registered, and how to ask it which genes it carries. |

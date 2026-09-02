@@ -20,7 +20,7 @@ Imperatives only. Each row cites the records that decided it **by number, never 
 moves between directories and its number does not; `—` means no record cites that rule today.
 
 | # | Rule | Records |
-|---|---|---|
+| --- | --- | --- |
 | R1 | **pixi only.** Never `pip`, `uv`, `conda`, `venv` or `poetry`. The manifest is `[tool.pixi.*]` in `pyproject.toml`; `pixi.lock` is committed; channels are `conda-forge` then `bioconda` and the order is priority. Never commit secrets or large data files. | ADR-0001 |
 | R2 | **Shell out, never reimplement.** `samtools`, `bedtools`, STAR and chromap are **External tool**s: locate on `PATH`, fail naming the install command. | — |
 | R3 | **Never read a whole genomic file into memory.** | — |
@@ -29,7 +29,7 @@ moves between directories and its number does not; `—` means no record cites t
 | R6 | **Default to private.** Only `__init__.py` re-exports and the CLI surface are public; promotion is a one-line refactor. | — |
 | R7 | **The CLI is a thin client.** Logic lives in the API so `import genome` and the CLI hit one code path; every command emits `--json`; non-zero exit on failure, with errors that name the next action. | — |
 | R8 | **A feature without tests is not done.** | — |
-| R9 | **Full type annotations on every public function and method.** pyright runs `basic`, so nothing catches a missing one. | — |
+| R9 | **Full type annotations on every public function and method.** pyright runs `standard`; a missing one is an error. | — |
 
 ## Where to read next
 
@@ -47,9 +47,9 @@ mechanises it.**
 
 ## Working here
 
-- **Python support points at both ends of the range on purpose.** Tests run on 3.13 only; the 3.12
-  floor is held by `ruff target-version` and `pyright pythonVersion`, not by a test lane. Do not
-  narrow `requires-python` to match what is tested, and do not raise the language level to match it.
+- **Python is 3.13, declared in exactly two places** — `requires-python` and the pixi pin. Ruff's
+  target version and pyright's are derived from those, never declared: declaring either again is
+  how the language level and the runtime drift apart.
 - **Tests.** `pixi run check` is the gate — lint, fmt-check, typecheck, test, run concurrently.
   Write the test from the spec first, then implement until green. pytest, and hypothesis for parsers,
   coordinate conversions and sequence transforms: assert invariants over generated inputs —

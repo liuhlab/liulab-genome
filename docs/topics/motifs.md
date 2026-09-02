@@ -134,7 +134,7 @@ and a path holds no coordinates to lift into the assembly's frame.
 Every scan in this package answers with the same table, one row per hit.
 
 | Column | What it holds |
-|---|---|
+| --- | --- |
 | `motif_id`, `motif_name` | Which motif matched. |
 | `sequence_name` | The chromosome or FASTA record the hit sits on. |
 | `start`, `end` | The bases the matrix scored, 0-based and half-open. |

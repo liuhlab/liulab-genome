@@ -11,7 +11,7 @@ re-measurement lands somewhere different, and it says so there.
 ## What was fetched
 
 | File | Retrieved from | Bytes | md5 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `Compara.116.protein_default.homologies.tsv.gz` (human) | `ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/homo_sapiens/` | 109,478,724 | `59857f48bbbdf6812999d58d7a24ccc4` ✓ |
 | the same, mouse | `…/homologies/mus_musculus/` | 111,917,367 | `8f9870f0f12ece5032f8e62117de9924` ✓ |
 | the same, worm | `…/homologies/caenorhabditis_elegans/` | 85,130,626 | `2d2b4ef12d7cb8acd84bd560f055daa0` ✓ |
@@ -34,7 +34,7 @@ decompress and still be wrong.
 Cross-species rows among the lab's three species, counted in each file:
 
 | File | Total rows | → human | → mouse | → worm |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | **human** | 3,878,214 | — | **0** | **23,982** |
 | **mouse** | 4,522,853 | **23,764** | — | **25,006** |
 | **worm** | 4,517,796 | **0** | **0** | — |
@@ -55,7 +55,7 @@ partial — so a zero count is a reliable signal that the rows are in the other 
 **Every cross-species row is an ortholog row.** In the human file, by type:
 
 | `homology_type` | Rows | Species |
-|---|---|---|
+| --- | --- | --- |
 | `ortholog_one2one` | 2,421,012 | cross-species |
 | `ortholog_one2many` | 885,783 | cross-species |
 | `ortholog_many2many` | 430,246 | cross-species |
@@ -73,7 +73,7 @@ human↔worm; the paralogs that arrive in these files are paralogs within one sp
 gene tree, and the denominator used throughout this section.
 
 | | vs mouse | vs worm |
-|---|---|---|
+| --- | --- | --- |
 | ortholog rows | 23,764 | 23,982 |
 | — `ortholog_one2one` | 16,335 | 2,764 |
 | — `ortholog_one2many` | 2,181 | 3,073 |
@@ -91,7 +91,7 @@ about it moved.
 **Both quality scores are null in every worm row.**
 
 | Pair | Rows | `goc_score` null | `wga_coverage` null |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | human↔mouse | 23,764 | 0 | 0 |
 | human↔worm | 23,982 | **23,982 (100%)** | **23,982 (100%)** |
 | mouse↔worm | 25,006 | **25,006 (100%)** | **25,006 (100%)** |
@@ -124,13 +124,13 @@ in which the human gene appears in exactly one pair and the mouse gene in exactl
 the source's native id space before mapping.
 
 | | Native pairs | Mapped pairs | Unmappable |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Compara | 23,764 | 23,764 | — (already Ensembl ids) |
 | NCBI | 17,096 | 18,746 | 191 rows (**1.1%**) |
 | Alliance | 24,592 | 29,177 | 259 rows (**1.1%**) |
 
 | | Pairs | Share |
-|---|---|---|
+| --- | --- | --- |
 | union of all asserted pairs | 32,772 | |
 | **claimed by exactly one source** | **10,249** | **31.3%** |
 | claimed by exactly two | 6,131 | 18.7% |
@@ -140,7 +140,7 @@ the source's native id space before mapping.
 | — unique to the Alliance | 6,676 of its 29,177 | |
 
 | Jaccard | whole sets | strict one-to-one | one-to-one, on genes all three cover |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Compara vs NCBI | 0.629 | 0.842 | 0.974 |
 | Compara vs Alliance | 0.620 | 0.833 | 0.982 |
 | NCBI vs Alliance | 0.636 | 0.907 | 0.968 |
@@ -157,7 +157,7 @@ recovered, so the two cannot be reconciled; what is above is the recipe stated i
 numbers it gives. The gap is method, and the method is sensitive — four defensible variants:
 
 | Variant | Exactly one source | One-to-one Jaccard |
-|---|---|---|
+| --- | --- | --- |
 | A: every Ensembl cross-reference kept (**above**) | 31.3% | 0.83–0.91 |
 | B: only genes with exactly one Ensembl cross-reference | 31.8% | 0.87–0.92 |
 | C: Alliance gated on `IsBestScore` and `IsBestRevScore` | 30.1% | 0.82–0.92 |
@@ -178,7 +178,7 @@ because one side carries no Ensembl cross-reference at all. Under variant B thos
 for `homo_sapiens`:
 
 | Release | homology file | `MD5SUM` | `CHECKSUMS` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 88, 89 | absent | — | — |
 | 90 | present | present | — |
 | 95, 99, 100, 105, 110, 111, 112 | present | — | — |

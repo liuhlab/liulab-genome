@@ -1,5 +1,5 @@
 name: Feature request
-description: Propose a new feature for liulab-genome — written tightly enough to hand to @claude.
+description: Propose a new feature for liulab-genome — written tightly enough to hand to an agent.
 title: "feat: "
 labels: ["feature"]
 body:

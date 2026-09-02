@@ -39,7 +39,7 @@ plasmids and carries **no** `NZ_CP…` accession. `GCF_004354945.1` / `ASM435494
 
 From `GCF_004354945.1_ASM435494v1_assembly_report.txt`:
 
-```
+```text
 # Assembly name:  ASM435494v1
 # Organism name:  Escherichia coli HT115 (E. coli)
 # Infraspecific name:  strain=HT115
@@ -60,7 +60,7 @@ From `GCF_004354945.1_ASM435494v1_assembly_report.txt`:
 Across all 87 rows of that report:
 
 | column | value, all 87 rows |
-|---|---|
+| --- | --- |
 | `Sequence-Role` | `unplaced-scaffold` |
 | `Assigned-Molecule` | `na` |
 | `Assigned-Molecule-Location/Type` | `na` |
@@ -74,7 +74,7 @@ report sum to 4,602,240 — the same total as the prepared `chrom.sizes`.
 
 The FASTA deflines carry the original SPAdes node names, e.g.
 
-```
+```text
 >NZ_SMTD01000010.1 Escherichia coli HT115 NODE_10_length_132761_cov_25.566785, whole genome shotgun sequence
 ```
 
@@ -89,104 +89,104 @@ lives only in the defline comment.
 This is byte-identical to columns 1–2 of `ecHT115.fa.fai` and to STAR's
 `chrNameLength.txt`, i.e. **`chrom.sizes` order is FASTA order** (verified by `diff`).
 
-```
-NZ_SMTD01000010.1	132761
-NZ_SMTD01000011.1	121051
-NZ_SMTD01000012.1	117739
-NZ_SMTD01000013.1	112487
-NZ_SMTD01000014.1	107747
-NZ_SMTD01000015.1	103890
-NZ_SMTD01000016.1	92981
-NZ_SMTD01000017.1	88592
-NZ_SMTD01000018.1	87159
-NZ_SMTD01000019.1	83572
-NZ_SMTD01000001.1	327216
-NZ_SMTD01000020.1	78749
-NZ_SMTD01000021.1	72745
-NZ_SMTD01000022.1	70023
-NZ_SMTD01000023.1	67479
-NZ_SMTD01000024.1	61547
-NZ_SMTD01000025.1	58548
-NZ_SMTD01000026.1	58531
-NZ_SMTD01000027.1	57161
-NZ_SMTD01000028.1	55003
-NZ_SMTD01000029.1	49636
-NZ_SMTD01000002.1	286405
-NZ_SMTD01000030.1	43952
-NZ_SMTD01000031.1	42626
-NZ_SMTD01000032.1	41423
-NZ_SMTD01000033.1	41013
-NZ_SMTD01000034.1	41006
-NZ_SMTD01000035.1	40308
-NZ_SMTD01000036.1	35465
-NZ_SMTD01000037.1	35284
-NZ_SMTD01000038.1	33817
-NZ_SMTD01000039.1	31727
-NZ_SMTD01000003.1	265311
-NZ_SMTD01000040.1	31564
-NZ_SMTD01000041.1	29560
-NZ_SMTD01000042.1	29519
-NZ_SMTD01000043.1	27807
-NZ_SMTD01000044.1	26598
-NZ_SMTD01000045.1	25380
-NZ_SMTD01000046.1	24131
-NZ_SMTD01000047.1	19551
-NZ_SMTD01000048.1	19279
-NZ_SMTD01000049.1	18754
-NZ_SMTD01000004.1	264659
-NZ_SMTD01000050.1	16037
-NZ_SMTD01000051.1	14204
-NZ_SMTD01000052.1	13923
-NZ_SMTD01000053.1	13222
-NZ_SMTD01000054.1	10583
-NZ_SMTD01000055.1	9367
-NZ_SMTD01000056.1	8230
-NZ_SMTD01000057.1	8199
-NZ_SMTD01000058.1	6804
-NZ_SMTD01000059.1	4367
-NZ_SMTD01000005.1	262082
-NZ_SMTD01000060.1	4267
-NZ_SMTD01000061.1	3317
-NZ_SMTD01000062.1	2970
-NZ_SMTD01000063.1	2729
-NZ_SMTD01000064.1	2447
-NZ_SMTD01000065.1	2277
-NZ_SMTD01000066.1	2258
-NZ_SMTD01000067.1	1894
-NZ_SMTD01000068.1	1742
-NZ_SMTD01000006.1	213735
-NZ_SMTD01000069.1	1735
-NZ_SMTD01000070.1	1711
-NZ_SMTD01000071.1	1708
-NZ_SMTD01000072.1	1708
-NZ_SMTD01000073.1	1344
-NZ_SMTD01000074.1	1283
-NZ_SMTD01000075.1	1255
-NZ_SMTD01000076.1	1179
-NZ_SMTD01000077.1	1124
-NZ_SMTD01000078.1	1061
-NZ_SMTD01000007.1	181795
-NZ_SMTD01000079.1	1058
-NZ_SMTD01000080.1	848
-NZ_SMTD01000081.1	754
-NZ_SMTD01000082.1	734
-NZ_SMTD01000083.1	651
-NZ_SMTD01000084.1	574
-NZ_SMTD01000085.1	569
-NZ_SMTD01000086.1	541
-NZ_SMTD01000087.1	533
-NZ_SMTD01000008.1	176290
-NZ_SMTD01000009.1	159375
+```text
+NZ_SMTD01000010.1 132761
+NZ_SMTD01000011.1 121051
+NZ_SMTD01000012.1 117739
+NZ_SMTD01000013.1 112487
+NZ_SMTD01000014.1 107747
+NZ_SMTD01000015.1 103890
+NZ_SMTD01000016.1 92981
+NZ_SMTD01000017.1 88592
+NZ_SMTD01000018.1 87159
+NZ_SMTD01000019.1 83572
+NZ_SMTD01000001.1 327216
+NZ_SMTD01000020.1 78749
+NZ_SMTD01000021.1 72745
+NZ_SMTD01000022.1 70023
+NZ_SMTD01000023.1 67479
+NZ_SMTD01000024.1 61547
+NZ_SMTD01000025.1 58548
+NZ_SMTD01000026.1 58531
+NZ_SMTD01000027.1 57161
+NZ_SMTD01000028.1 55003
+NZ_SMTD01000029.1 49636
+NZ_SMTD01000002.1 286405
+NZ_SMTD01000030.1 43952
+NZ_SMTD01000031.1 42626
+NZ_SMTD01000032.1 41423
+NZ_SMTD01000033.1 41013
+NZ_SMTD01000034.1 41006
+NZ_SMTD01000035.1 40308
+NZ_SMTD01000036.1 35465
+NZ_SMTD01000037.1 35284
+NZ_SMTD01000038.1 33817
+NZ_SMTD01000039.1 31727
+NZ_SMTD01000003.1 265311
+NZ_SMTD01000040.1 31564
+NZ_SMTD01000041.1 29560
+NZ_SMTD01000042.1 29519
+NZ_SMTD01000043.1 27807
+NZ_SMTD01000044.1 26598
+NZ_SMTD01000045.1 25380
+NZ_SMTD01000046.1 24131
+NZ_SMTD01000047.1 19551
+NZ_SMTD01000048.1 19279
+NZ_SMTD01000049.1 18754
+NZ_SMTD01000004.1 264659
+NZ_SMTD01000050.1 16037
+NZ_SMTD01000051.1 14204
+NZ_SMTD01000052.1 13923
+NZ_SMTD01000053.1 13222
+NZ_SMTD01000054.1 10583
+NZ_SMTD01000055.1 9367
+NZ_SMTD01000056.1 8230
+NZ_SMTD01000057.1 8199
+NZ_SMTD01000058.1 6804
+NZ_SMTD01000059.1 4367
+NZ_SMTD01000005.1 262082
+NZ_SMTD01000060.1 4267
+NZ_SMTD01000061.1 3317
+NZ_SMTD01000062.1 2970
+NZ_SMTD01000063.1 2729
+NZ_SMTD01000064.1 2447
+NZ_SMTD01000065.1 2277
+NZ_SMTD01000066.1 2258
+NZ_SMTD01000067.1 1894
+NZ_SMTD01000068.1 1742
+NZ_SMTD01000006.1 213735
+NZ_SMTD01000069.1 1735
+NZ_SMTD01000070.1 1711
+NZ_SMTD01000071.1 1708
+NZ_SMTD01000072.1 1708
+NZ_SMTD01000073.1 1344
+NZ_SMTD01000074.1 1283
+NZ_SMTD01000075.1 1255
+NZ_SMTD01000076.1 1179
+NZ_SMTD01000077.1 1124
+NZ_SMTD01000078.1 1061
+NZ_SMTD01000007.1 181795
+NZ_SMTD01000079.1 1058
+NZ_SMTD01000080.1 848
+NZ_SMTD01000081.1 754
+NZ_SMTD01000082.1 734
+NZ_SMTD01000083.1 651
+NZ_SMTD01000084.1 574
+NZ_SMTD01000085.1 569
+NZ_SMTD01000086.1 541
+NZ_SMTD01000087.1 533
+NZ_SMTD01000008.1 176290
+NZ_SMTD01000009.1 159375
 ```
 
 **That order is neither lexicographic nor size-sorted** — it is the order NCBI ships the
 `_genomic.fna.gz` in, and the package preserves it end to end. Two sequences share a
 length (`NZ_SMTD01000071.1` and `NZ_SMTD01000072.1`, both 1708), so length is not a key.
 
-### FASTA properties
+### `ecHT115.fa` properties
 
 | property | value |
-|---|---|
+| --- | --- |
 | line width | 80 bases |
 | case | **all upper-case** — zero soft-masking |
 | alphabet | strictly `ACGT`; **no `N`, no IUPAC ambiguity codes at all** |
@@ -213,24 +213,24 @@ keep all 87 spellings intact or `ChromosomeMismatchError` fires for all 87.
 
 ### `ce11.chrom.sizes` — verbatim, in file order
 
-```
-V	20924180
-X	17718942
-IV	17493829
-II	15279421
-I	15072434
-III	13783801
-MtDNA	13794
+```text
+V 20924180
+X 17718942
+IV 17493829
+II 15279421
+I 15072434
+III 13783801
+MtDNA 13794
 ```
 
 Byte-identical to columns 1–2 of `ce11.fa.fai` and to STAR's `chrNameLength.txt`. This
 order is **size-descending**, which is how WormBase ships the FASTA. Lexicographic order
 would be `I II III IV MtDNA V X` — different.
 
-### FASTA properties
+### `ce11.fa` properties
 
 | property | value |
-|---|---|
+| --- | --- |
 | line width | 60 bases |
 | case | **soft-masked** — 22,011,127 lower-case bases, 21.95% of the assembly |
 | alphabet | strictly `ACGTacgt`; **no `N`, no IUPAC ambiguity codes** |
@@ -246,7 +246,7 @@ version `WS298`, registered with `chromosomes_checked: true`. Unpacked GTF is
 numerals and `MtDNA`, no `chr` prefix). Feature-line counts:
 
 | seqname | GTF lines |
-|---|---:|
+| --- | ---: |
 | `I` | 98,364 |
 | `II` | 105,695 |
 | `III` | 88,602 |
@@ -264,7 +264,7 @@ Characters, lengths and orders a suffix separator has to survive.
 **Character inventory of the names as they exist today:**
 
 | assembly | distinct characters across all names | name lengths |
-|---|---|---|
+| --- | --- | --- |
 | `ecHT115` | `. 0 1 2 3 4 5 6 7 8 9 D M N S T Z _` | all exactly 17 |
 | `ce11` | `A D I M N V X t` | 1, 2, 3, 5 (`I`, `IV`, `III`, `MtDNA`) |
 
@@ -279,7 +279,7 @@ strictly alphanumeric. No shipped assembly name contains a separator candidate.
 **What that means for parsing.** Suffixing every name with `<sep><assembly>`:
 
 | candidate `<sep>` | already in a chromosome name? | recover assembly by `rsplit(sep, 1)` | recover by `split(sep, 1)` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `_` | **yes** (`NZ_SMTD…`) | works | **fails** |
 | `.` | **yes** (`…000010.1`) | works | **fails** |
 | `-` | no | works | works |
@@ -305,7 +305,7 @@ separator.
 **SAM legality** — the SAM spec (hts-specs `SAMv1.tex`, "Character set limitations")
 allows in a reference name:
 
-```
+```text
 [0-9A-Za-z!#$%&+./:;?@^_|~-][0-9A-Za-z!#$%&*+./:;=?@^_|~-]*
 ```
 
@@ -336,7 +336,7 @@ both source FASTAs already do internally.
 STAR's documented `min(14, log2(GenomeLength)/2 - 1)`.
 
 | | sequences | total bp | `genomeSAindexNbases` |
-|---|---:|---:|---:|
+| --- | ---: | ---: | ---: |
 | `ecHT115` | 87 | 4,602,240 | **10** (as built) |
 | `ce11` | 7 | 100,286,401 | **12** (as built) |
 | chimera `ecHT115` + `ce11` | **94** | **104,888,641** | **12** (unchanged from `ce11` alone) |
@@ -355,7 +355,7 @@ not set it.** STAR's `--help` (2.7.11b, verbatim):
 > `min(18, log2[max(GenomeLength/NumberOfReferences, ReadLength)])`.
 
 | | `GenomeLength/NumberOfReferences` | recommended `genomeChrBinNbits` | used |
-|---|---:|---:|---:|
+| --- | ---: | ---: | ---: |
 | `ecHT115` | 52,899 | **15** | 18 |
 | `ce11` | 14,326,629 | 18 | 18 |
 | chimera | 1,115,837 | **18** | — |
@@ -375,7 +375,7 @@ Two consequences:
 Index sizes as built, for scale:
 
 | | STAR `Genome` | STAR `SA` | STAR `SAindex` | chromap index |
-|---|---:|---:|---:|---:|
+| --- | ---: | ---: | ---: | ---: |
 | `ecHT115` | 23,855,104 | 37,968,483 | 6,116,787 | 34,220,408 |
 | `ce11` | 124,598,858 | 1,019,544,912 | 97,867,203 | 591,765,632 |
 
@@ -403,4 +403,3 @@ only.
 
 Written up as `docs/research/echt115-ce11-contents.md` on branch
 `research/echt115-ce11-contents` (not opened as a PR).
-

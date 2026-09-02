@@ -236,8 +236,8 @@ $ genome xref ids "Homo sapiens" --to-stems entrez 7157 672 999999999
 entrez ids -> gene id stems for Homo sapiens (alliance 9.0.0)
   source  https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz
   2 resolved, 2 gene id stems, 1 this release names none for
-7157	ENSG00000141510
-672	ENSG00000012048
+7157 ENSG00000141510
+672 ENSG00000012048
 999999999
 ```
 
@@ -254,9 +254,9 @@ gene symbols -> gene id stems for Homo sapiens (hgnc 2026-07-07)
   columns  asked, symbol, gene_id_stem, kind
   matching exact, on approved, previous, alias spellings
   2 resolved, 3 matches, 1 this release matched nothing for
-ARNTL	ARNTL	ENSG00000133794	previous
-ADCY3	ADCY3	ENSG00000138031	approved
-ADCY3	ADCY3	ENSG00000155897	previous
+ARNTL ARNTL ENSG00000133794 previous
+ADCY3 ADCY3 ENSG00000138031 approved
+ADCY3 ADCY3 ENSG00000155897 previous
 Brca1
 ```
 

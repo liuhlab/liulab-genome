@@ -104,13 +104,11 @@ def _slurm_cpus() -> int | None:
 
 def _machine_cpus() -> int:
     """Return the CPUs this process may actually run on, affinity respected where it can be."""
-    # Python 3.13's own affinity-aware count; the package's floor is 3.12, which has only
-    # the Linux-specific call underneath it.
-    counter = getattr(os, "process_cpu_count", None)
-    if counter is not None:
-        found = counter()
-        if found:
-            return int(found)
+    # The affinity-aware count, which the platform may decline to give — hence the two
+    # fallbacks under it, the first of which exists only on Linux.
+    counted = os.process_cpu_count()
+    if counted:
+        return counted
     affinity = getattr(os, "sched_getaffinity", None)
     if affinity is not None:
         found = len(affinity(0))

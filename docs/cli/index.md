@@ -19,7 +19,7 @@ Three commands belong to no topic. Everything else hangs off a group named for t
 the package it ships from:
 
 | Group | Commands |
-|---|---|
+| --- | --- |
 | `genome assembly` | `register`, `list`, `verify`, `table-row` |
 | `genome annotation` | `register`, `register-gtf`, `list`, `gene-list`, `gene-categories` |
 | `genome tf` | `gene-list`, `cofactor-list` |
@@ -52,7 +52,7 @@ captures the answer and leaves the commentary on screen. `--json` puts both in o
 everything else: a missing native tool, a failed download, a checksum mismatch, a lookup
 that found nothing.
 
-Errors go to stderr with an `error: ` prefix, and the message names the next action rather
+Errors go to stderr with an `error:` prefix, and the message names the next action rather
 than only the problem:
 
 ```console

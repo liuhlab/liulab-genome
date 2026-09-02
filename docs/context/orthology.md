@@ -34,7 +34,7 @@ inventing one. Compara's per-species files are a de-duplicated partition *at the
 either file of a pair may be the one holding it and which is not promised stable across releases: a
 fetch finding zero rows raises naming the other file rather than answering empty, and zero is a
 trustworthy signal because a pair is never partially present.
-_Avoid_: ortholog table, ortholog map, ortholog set, homology database; Compara on its own, which
+*Avoid*: ortholog table, ortholog map, ortholog set, homology database; Compara on its own, which
 names the publisher's whole resource rather than this slice of one release of it; and "the
 orthologs", which drops the paralogy the same set carries
 
@@ -44,7 +44,7 @@ publisher assigned, and the confidence fields Compara publishes beside it — it
 flag, `goc_score` and `wga_coverage`. Those are carried through unchanged so that a caller can
 filter on them, and they are null for every human↔worm row, which the answer says out loud rather
 than leaving a quality filter to empty itself silently.
-_Avoid_: ortholog pair, orthology (the relation, not the row this package holds), mapping, match,
+*Avoid*: ortholog pair, orthology (the relation, not the row this package holds), mapping, match,
 hit; and **Cross-species link**, which is the TF context's flag on a JASPAR profile and asserts no
 orthology whatever (ADR-0013)
 
@@ -55,7 +55,7 @@ paralogy labels for duplication. It is never recomputed — not after a filter, 
 into an **Annotation**, not after a caller slices the answer (ADR-0020) — so it stays a claim about
 evolution rather than a count of what happens to be in front of you, and a caller who needs a
 one-to-one relationship requires this label instead of inferring one from what came back.
-_Avoid_: cardinality on its own, which is what counting would give and this is not counted;
+*Avoid*: cardinality on its own, which is what counting would give and this is not counted;
 relationship, relation, orthology type (the paralogy labels live in the same field); one-to-one
 flag; confidence and quality, which are the separate fields a **Homology link** already carries
 
@@ -65,7 +65,7 @@ discarded — removed by a **Homology type** filter, or lost when the stems were
 registered **Annotation** that does not spell them. It is what keeps a link that merely *looks*
 one-to-one in your view distinguishable from one the publisher called one-to-one, the same
 distinction the unresolved bucket already draws for **Gene id stem**s.
-_Avoid_: missing, filtered, excluded — each says something went away without saying it is still
+*Avoid*: missing, filtered, excluded — each says something went away without saying it is still
 counted; unresolved, which names ids that resolved to nothing rather than partners a filter removed;
 loss, attrition
 
@@ -75,6 +75,6 @@ a speciation one — the two genes descend from a gene duplication. Kept and mar
 so that *not an ortholog* stays distinguishable from *absent* — the stance ADR-0013 already takes
 for a **Cross-species link** — and returned only when asked for, so that the common question stays
 the easy one.
-_Avoid_: paralog on its own, which names a gene where this names the row relating two; homolog and
+*Avoid*: paralog on its own, which names a gene where this names the row relating two; homolog and
 homology as loose synonyms for ortholog; in-paralog, out-paralog and co-ortholog, a vocabulary this
 package neither ships nor computes

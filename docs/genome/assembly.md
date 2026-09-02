@@ -77,7 +77,7 @@ The files land in the shared [data directory](../index.md#the-data-directory), w
 Four files, in one directory named for the assembly:
 
 | File | What it holds |
-|---|---|
+| --- | --- |
 | `sacCer3.fa` | The reference sequence as text: a header line naming each chromosome, followed by its bases. |
 | `sacCer3.fa.fai` | Byte offsets into that text, so a tool can jump straight to a chromosome instead of reading from the top. |
 | `sacCer3.2bit` | The same sequence packed two bits to a base. This is what a locus is read out of. |
@@ -113,8 +113,8 @@ Genome("ce11", path_or_url="https://hgdownload-euro.soe.ucsc.edu/goldenPath/ce11
 
 The shell spelling is `--source`:
 
-```console
-$ genome assembly register ce11 --source /data/ce11.fa.gz
+```bash
+genome assembly register ce11 --source /data/ce11.fa.gz
 ```
 
 Everything after that is identical: the same derived files, the same directory, the same
@@ -180,8 +180,8 @@ The name is the component names sorted and joined by `_`. You never choose it, a
 order builds and reopens the one `ce11_ecHT115`. From a shell, naming a chimera is
 building it:
 
-```console
-$ genome assembly register ce11_ecHT115
+```bash
+genome assembly register ce11_ecHT115
 ```
 
 Nothing is downloaded either way. **Every component has to be registered on this machine

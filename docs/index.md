@@ -23,11 +23,11 @@ The work is done by native binaries, so [pixi](https://pixi.sh) is the supported
 lock file brings the Python package, `samtools`, `bedtools`, `faToTwoBit`, `twoBitInfo`,
 `gffutils` and the `moods` motif scanner together:
 
-```console
-$ git clone https://github.com/liuhlab/liulab-genome.git
-$ cd liulab-genome
-$ pixi install --locked
-$ pixi shell
+```bash
+git clone https://github.com/liuhlab/liulab-genome.git
+cd liulab-genome
+pixi install --locked
+pixi shell
 ```
 
 STAR and chromap are not in that environment. They are large and most work never touches
@@ -194,7 +194,7 @@ that already finished is reused, so calling this again returns the path and runs
 ## Where to go next
 
 | I want to… | Page |
-|---|---|
+| --- | --- |
 | Prepare a reference genome, or concatenate two of them | [Assembly](genome/assembly.md) |
 | Read bases out of a region, or work with coordinates | [Sequences and regions](genome/sequences.md) |
 | Register a GTF and ask what genes it carries | [Annotations](genome/annotations.md) |

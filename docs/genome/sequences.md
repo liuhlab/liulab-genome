@@ -128,7 +128,7 @@ parse_region("chrM")                 # ('chrM', None, None)
 expected, and it carries the transforms besides.
 
 | Class | Alphabet | Transforms |
-|---|---|---|
+| --- | --- | --- |
 | `DNA` | `A C G T` | `complement`, `reverse_complement`, `transcribe`, `gc_content` |
 | `RNA` | `A C G U` | `complement`, `reverse_complement`, `back_transcribe`, `gc_content` |
 | `Protein` | the 20 standard amino acids | none |

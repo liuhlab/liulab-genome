@@ -26,7 +26,7 @@ time of measurement.
 ## 1. Worker count
 
 | Configuration | Wall |
-|---|---|
+| --- | --- |
 | serial | 5.92 s |
 | `-n 2 --dist=loadfile` | 4.25 s |
 | `-n 4 --dist=loadfile` | 3.32 s |
@@ -56,7 +56,7 @@ would oversubscribe that runner by four.
 ## 2. BLAS thread pools
 
 | Configuration | Wall |
-|---|---|
+| --- | --- |
 | `-n auto --maxprocesses 8`, no pinning | 2.83 s |
 | `-n auto --maxprocesses 8`, `OMP`/`OPENBLAS`/`MKL_NUM_THREADS=1` | 2.82 s |
 
@@ -69,7 +69,7 @@ arrives.
 ## 3. The gate, sequential against concurrent
 
 | Step | Wall, alone |
-|---|---|
+| --- | --- |
 | `lint` | 0.73 s |
 | `fmt-check` | 0.07 s |
 | `typecheck` | 2.86 s |

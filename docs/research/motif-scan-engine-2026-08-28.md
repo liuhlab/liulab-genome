@@ -56,7 +56,7 @@ This needs no sequence to measure. Replaying `fimo`'s own `_all_pwm_to_mapping` 
 matrices and comparing each threshold against that matrix's best attainable score:
 
 | | Motifs |
-|---|---|
+| --- | --- |
 | in the release | 879 |
 | **thresholded above their own best possible score** | **97** |
 | — of length 5 | 2 |
@@ -69,7 +69,7 @@ Scanning confirms it exactly. On the 1 Mb target, 97 motifs return zero `fimo` h
 returns hits for every one of those 97 — and for all 879.
 
 | Target | fimo hits | MOODS hits | Zero-hit motifs, fimo | Zero-hit motifs, MOODS | Zero in fimo, non-zero in MOODS |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | `tiny.fa`, 30 kb | 6,002 | 7,953 | 148 | 46 | 103 |
 | `ce11` chr I, 1 Mb | 214,190 | 284,441 | **97** | **0** | **97** |
 
@@ -96,7 +96,7 @@ Planting the consensus of `MA0139.2` (CTCF, 15 bp) so that it occupies exactly t
 after 100 bp of `ACGT` filler:
 
 | Sequence | Length | Site at | fimo starts | MOODS starts |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | filler + consensus | 115 | 100 | `[98]` | `[98, 100]` |
 | filler + consensus + `A` | 116 | 100 | `[98, 100]` | `[98, 100]` |
 | filler + consensus + filler | 215 | 100 | `[98, 100]` | `[98, 100]` |
@@ -120,7 +120,7 @@ Peak RSS attributable to the scan, 1 Mb, four thresholds, marginal cost per hit 
 adjacent rows:
 
 | p | fimo hits | fimo Δpeak | MOODS hits | MOODS Δpeak |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 1e-5 | 23,449 | 21 MB | 107,467 | 22 MB |
 | 1e-4 | 214,190 | 86 MB | 284,441 | 70 MB |
 | 5e-4 | 1,114,743 | 412 MB | 1,175,305 | 271 MB |
@@ -134,7 +134,7 @@ around 1.5× worse than that. Consider the 270 superseded by the table above.
 The bound that matters is not per-hit but whether it is per-file. Over 10 Mb as ten records:
 
 | Driver | Hits | Δpeak |
-|---|---|---|
+| --- | --- | --- |
 | `fimo`, one call | 2,025,451 | 736 MB |
 | MOODS, record by record, hits drained | 2,830,844 | 111 MB |
 
@@ -148,7 +148,7 @@ read into memory: MOODS can be driven to honour it and `fimo` cannot.
 everything after it.
 
 | | Setup | Scan, 1 Mb | Scan, 30 kb |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | MOODS | 6.60 s | **0.90 s** | **0.03 s** |
 | fimo | 0.26 s | 8.71 s | 0.68 s |
 

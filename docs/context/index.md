@@ -15,7 +15,7 @@ An **Aligner**'s precomputed search structure over one **Assembly**, built from 
 and read-only ever after. It exists only once its **Completion marker** is present; a directory of
 index files without one is an interrupted build, so rebuilding it is a deliberate act — `overwrite`
 — and never something that happens quietly.
-_Avoid_: never for `.fai` or `.2bit` — those are the Assembly context's own derived artifacts and are
+*Avoid*: never for `.fai` or `.2bit` — those are the Assembly context's own derived artifacts and are
 named by extension, never "index" and never "FASTA index". Also: genomeDir, reference, database
 
 **Aligner**:
@@ -23,7 +23,7 @@ The **External tool** that builds an **Index** — today STAR and chromap — to
 that knows its binary, its version, its flags and its layout. Naming the tool is not a promise to run
 it for mapping: this package builds the index and hands over the **Artifact**, and the alignment
 command is the caller's to issue.
-_Avoid_: mapper, read mapper; and never let "aligner" imply this package aligns — mapping is out of
+*Avoid*: mapper, read mapper; and never let "aligner" imply this package aligns — mapping is out of
 scope by decision, not merely unimplemented
 
 **Index dir**:
@@ -31,7 +31,7 @@ The one place an index may live: `<assembly dir>/index/<name>/` inside the assem
 so the assembly owns the layout and an index can never drift from what it indexes. `<name>` identifies
 the index rather than just the **Aligner** — STAR builds one per annotation (`index/star_<gtf>/`),
 chromap one for the whole assembly (`index/chromap/`).
-_Avoid_: output dir, genomeDir, cache; and never a caller-supplied path — the location is derived from
+*Avoid*: output dir, genomeDir, cache; and never a caller-supplied path — the location is derived from
 the assembly, not configured
 
 **Artifact**:
@@ -40,12 +40,12 @@ chromap — as distinct from everything else in the **Index dir**. Asking for it
 finished: with no **Completion marker**, or one the **Index dir** no longer bears out, it raises here
 and names the call that builds the index, rather than yielding a path that fails deep inside someone
 else's command line.
-_Avoid_: output, result, index files (most of them are not it), genomeDir
+*Avoid*: output, result, index files (most of them are not it), genomeDir
 
 **Install instructions**:
 The text carried by the error an **External tool** raises when its binary is absent from `PATH`,
 naming the conda package to add — which is the package's name and not the binary's, so the command
 runs as it stands. Every tool owes one, and it must name the next command — "STAR not found" on its
 own is a bug, not an error message.
-_Avoid_: error message, help text, usage; and never an auto-install or a silent fallback — the package
+*Avoid*: error message, help text, usage; and never an auto-install or a silent fallback — the package
 tells you what to run, it does not run it

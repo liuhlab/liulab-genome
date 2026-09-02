@@ -6,7 +6,7 @@ description = "Handling reference genome related tasks."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 authors = [{ name = "Liu Lab" }]
 keywords = ["bioinformatics", "genomics", "samtools", "bedtools"]
 classifiers = [
@@ -15,7 +15,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Typing :: Typed",
@@ -33,9 +32,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lhqing/liulab-genome"
-Issues = "https://github.com/lhqing/liulab-genome/issues"
-Changelog = "https://github.com/lhqing/liulab-genome/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/liuhlab/liulab-genome"
+Issues = "https://github.com/liuhlab/liulab-genome/issues"
+Changelog = "https://github.com/liuhlab/liulab-genome/blob/main/CHANGELOG.md"
 
 [project.scripts]
 genome = "genome.cli:app"
@@ -48,7 +47,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
-fallback-version = "0.0.0+dev"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/genome"]
@@ -79,7 +77,8 @@ matplotlib-base = ">=3.9,<4"   # what logomaker depends on; the GUI backends go 
 xarray = ">=2025.1"
 pyarrow = ">=25.0.0,<26"   # the Parquet sink a scan too large to hold streams to
 
-# One Python on purpose; the 3.12 floor is ruff's and pyright's. See AGENTS.md.
+# One Python, and one of the two places it is declared; the other is `requires-python`.
+# Nothing derived from it — ruff's target, pyright's version — is declared. See AGENTS.md.
 [tool.pixi.feature.py313.dependencies]
 python = "3.13.*"
 
@@ -96,11 +95,19 @@ griffe = "*"
 
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
-pyright = "*"
-pre-commit = "*"
+# Exact, where everything else in this table floats. The language server an editor runs is this
+# same checker, so a version that drifts between the two is the editor and CI disagreeing about
+# one file; and a release of it would turn CI red on a commit that changed nothing. Bumping the
+# pin is a commit of its own, with whatever the new release newly reports fixed in it.
+pyright = "==1.1.411"
 python-build = "*"
 hatch-vcs = "*"
 ipykernel = "*"   # backs a Jupyter kernel; see the register-kernel task
+# Exact: the jargon map and the grade-11 readability number were measured against this version.
+vale = "3.19.0.*"
+markdownlint-cli2 = "*"
+# For conformance, which parses mkdocs.yml with it.
+pyyaml = "*"
 
 [tool.pixi.feature.docs.dependencies]
 mkdocs-material = "*"
@@ -151,9 +158,27 @@ test-cov    = "pytest --cov=genome --cov-report=term-missing"
 # Serial: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
 test-failed = "pytest --lf --new-first -x -q"
 
-# The four steps are not `depends-on`: pixi runs those sequentially, which is the thing
-# this replaces. The guard is one — a precondition answers before the gate spends anything.
-check = { cmd = "bash scripts/check.sh lint fmt-check typecheck test", depends-on = ["require-tools"] }
+# The static half of the gate: everything that needs no test environment, named ONCE so
+# `ci.yml` and a laptop cannot drift. Steps are arguments to one runner, which runs them
+# concurrently and prints every result — a workflow spelling them as separate steps reports
+# only the first failure, because GitHub stops a job there.
+check-static = "bash scripts/check.sh lint fmt-check typecheck vale markdownlint conformance docs-build"
+
+# The whole gate: the static steps plus the tests, so a green gate here and a green CI mean
+# the same set of checks passed. The static list is written out a SECOND time on purpose —
+# `depends-on = ["check-static"]` is how pixi runs things sequentially, which is exactly the
+# concurrency this runner was measured to buy. The one `depends-on` is the guard: a
+# precondition answers before the gate spends anything.
+check = { cmd = "bash scripts/check.sh lint fmt-check typecheck vale markdownlint conformance docs-build test", depends-on = ["require-tools"] }
+
+# Steps of both gates above, and runnable alone when one of them is what you are fixing.
+#
+# `.`, never an absolute path: an absolute path matches no `.vale.ini` section and exits 0.
+# The globs stop vale walking trees it never lints — check.sh runs steps concurrently, and a
+# walk of .pixi/ races pytest writing __pycache__ there.
+vale        = "vale --glob='!{.pixi,site,dist,build}/**' ."
+markdownlint = "markdownlint-cli2"
+conformance = "python scripts/conformance.py"
 
 build      = "python -m build"
 docs       = "mkdocs serve"
@@ -168,7 +193,6 @@ register-kernel = "python -m ipykernel install --user --name liulab-genome --dis
 [tool.ruff]
 line-length = 100
 src = ["src", "tests", "scripts"]
-target-version = "py312"
 extend-exclude = [".pixi", "site", "build", "dist"]
 
 [tool.ruff.lint]
@@ -198,7 +222,7 @@ convention = "numpy"
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D", "S101"]
+"tests/**" = ["D"]
 "**/__init__.py" = ["D104"]
 
 # ============================== pyright ==============================
@@ -217,8 +241,14 @@ extraPaths = ["src", "scripts"]
 exclude = ["**/__pycache__", "**/.pixi"]
 venvPath = ".pixi/envs"
 venv = "default"
-pythonVersion = "3.12"
-typeCheckingMode = "basic"
+typeCheckingMode = "standard"
+# The two rules that hold the full-annotations rule in AGENTS.md, named because `standard`
+# leaves both at `none` — it adds five checks over `basic` and a missing annotation is not
+# among them, so raising the mode alone would have mechanised nothing. `strict` turns them
+# on and 556 other diagnostics with them, which is a different decision than this one.
+# Both cost nothing today: every function in `src`, `tests` and `scripts` already annotates.
+reportMissingParameterType = "error"
+reportUnknownParameterType = "error"
 useLibraryCodeForTypes = true
 reportMissingTypeStubs = "none"
 
@@ -267,3 +297,28 @@ exclude_also = [
     "if __name__ == .__main__.:",
     '\.\.\.',
 ]
+
+# ============================== liulab ==============================
+# Read by `scripts/conformance.py`; its docstring has the rules.
+
+# The declared agent-facing set. Keys are path prefixes matched against `git ls-files`, not
+# globs; a trailing `/` matches a directory. Values name the Vale Length rule, or `false`.
+# Each key is spelled verbatim inside exactly one `.vale.ini` section header, which is how
+# conformance pairs the two.
+#
+# `CONTEXT-MAP.md` and `docs/context/` take `false` because a glossary here is capped per
+# ENTRY, not per file: how long the file runs reports how many terms the domain has, which is
+# not a writing-quality signal (ADR-0024). The guard that measures an entry is local.
+[tool.liulab.agent-docs]
+"AGENTS.md" = "LengthDoc"
+"docs/agents/" = "LengthDoc"
+"docs/adr/" = "LengthAdr"
+"docs/research/" = false
+"CONTEXT-MAP.md" = false
+"docs/context/" = false
+
+# Keyed by rule name, value the reason. Per-rule, never per-file; no expiry; printed on every
+# run, green ones included, which is the visibility this needs on the day the premise stops
+# holding. `placeholder-rename` refuses to be waived.
+[tool.liulab.waived]
+agent-docs-unpublished = "mkdocs.yml's `exclude_docs` block keeps the record, agent, context and research trees out of the built site entirely, so the `search: exclude: true` front matter this rule asks for would be inert on files the site never builds"

@@ -19,7 +19,7 @@ codebase.
 This repo is **multi-context**, but not in the shape the default template assumes: the glossaries do
 not sit beside the code they describe, and there is one ADR directory rather than one per context.
 
-```
+```text
 /
 ├── AGENTS.md          ← the router; CLAUDE.md is a symlink to it, one canonical copy
 ├── CONTEXT-MAP.md     ← shared kernel + index of the eight glossaries
@@ -53,7 +53,7 @@ Two further rules this repo's map sets, which the generic guidance does not:
   terms — module, interface, depth, seam, adapter, leverage, locality — are fixed, and "component",
   "service", "API" and "boundary" are not substitutes for them. One narrowing: "component" is a
   domain term in the Assembly context, so it is banned only as a substitute for *module*.
-- **A term marked _(decided, not built — ADR-N)_** names something a record settled and the code
+- **A term marked *(decided, not built — ADR-N)*** names something a record settled and the code
   does not have yet. Use the word; do not call the API it describes.
 
 ## The bar for adding a term or a record
@@ -72,5 +72,5 @@ re-point silently when a row is inserted, so cite a rule by its idea and never b
 
 If your output contradicts an existing record, surface it rather than silently overriding:
 
-> _Contradicts ADR-0007 (a broken registration raises and names its repair) — but worth reopening
-> because…_
+> *Contradicts ADR-0007 (a broken registration raises and names its repair) — but worth reopening
+> because…*

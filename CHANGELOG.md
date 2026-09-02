@@ -12,7 +12,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 - **`genome assembly list`, and the `assembly_status()` behind it.** The CLI could not answer
   the first question a new user has. `genome assembly register` is the first command anyone
-  runs and nothing said what to put after it; the only way to find out was to import
+  runs and nothing said what to put after it. The only way to find out was to import
   `genome.assembly` and read the table. The new command prints the eight assemblies the
   metadata table offers **set against the ones prepared on this machine**, and names
   `genome assembly register <name>` and `genome assembly verify <name>` as the next actions.
@@ -23,7 +23,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   it, was invisible. Such a name now reads as `registered, not offered`, and a directory in
   the tree with no record beside it reads as `here, not registered` rather than being reported
   as absent or as an assembly. `assembly_status`, `AssemblyStatus`, `AssemblyStatusRow` and
-  `is_prepared` are exported from `genome.assembly`; the row's `state` is derived from its
+  `is_prepared` are exported from `genome.assembly`. The row's `state` is derived from its
   booleans and stays out of the `--json` payload, as the annotation report's does. Integrity
   is deliberately not asked here — `genome assembly verify` owns it, and asking it cheaply
   would report *unchecked* in the words of *checked*.
@@ -45,260 +45,30 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   `genome.store` re-exports these six and stays closed to callables, which is what keeps the
   suite's offline guard able to patch the fetch step on the module.
 
-### Changed
+- **The lab's three static writing gates are here and runnable, and they gate nothing yet.** The
+  router states the writing rules in three separate places and nothing checked any of them.
+  `pixi run vale`, `pixi run markdownlint` and `pixi run conformance` come across from
+  `liulab-repo-template` at `9c4f8ed`: the four `styles/Lab/` rules, `.markdownlint-cli2.yaml` and
+  `scripts/conformance.py` byte for byte, and `.vale.ini` rewritten around this repository's paths.
+  **None of the three is a step of `check` or of CI**, which is why they land first and alone. The
+  tree failed vale with 5 errors and markdownlint with 966 across 40 files, and a gate that is red
+  on the day it arrives teaches nobody anything. `pyproject.toml` gains `[tool.liulab.agent-docs]`,
+  the agent-facing set spelled with this repository's real paths, and `docs/agents/writing.md`
+  carries the caps themselves. Every `.vale.ini` section names every rule, including the ones it
+  turns off: vale's `*` matches `/`, so the sections overlap, and a rule left out of one keeps
+  whatever an earlier section said rather than defaulting on. That is how a record tree ends up
+  checked by nothing with a green run to show for it. Conformance now fails if any of the six
+  declared keys loses its section. One rule is waived, `agent-docs-unpublished`: `mkdocs.yml` keeps
+  the record, agent, context and research trees out of the built site with `exclude_docs`, so the
+  `search: exclude: true` front matter that rule wants would sit inert on 48 files the site never
+  builds. The waiver names its reason, suppresses that one rule and nothing else, and prints on
+  every run including the green ones. `.gitignore` gains `.cache/` and `/.gemini/` and anchors
+  `.codex/`, which matters now that markdownlint hands it the whole exclusion list.
 
-- **The package's docstring examples now run, in the unit lane.** `AGENTS.md` asks for at least
-  one runnable example on every public object and the package carries over twelve hundred of them;
-  nothing executed a single one, so the bar was held by review alone. `pytest` now collects
-  `src/genome` with `--doctest-modules`, `ELLIPSIS` set at config level, which puts every example
-  in `pixi run check` and in CI beside the tests it already runs. Three examples had drifted and
-  are fixed. `genome.store.prepared.login_node_help` promised in its `Returns` prose and asserted
-  in its example a sentence ending in the quoted command; the command moved mid-sentence and
-  neither followed. The two `UCSCGenomeDownloader` examples each had a line whose trailing text
-  read as a `# doctest: +SKIP` directive and was prose — so the one line that would fetch a genome
-  from UCSC was the one line *not* skipped, harmless only because the line above it had been
-  skipped into a `NameError`. **The suite's two autouse guards were given reach over `src/` first,
-  and proven, before either directive was repaired.** A conftest's fixtures reach the directory it
-  sits in and nothing above, so a doctest item collected from `src/` ran behind neither the
-  offline guard nor the per-test **Data dir** — and repairing the directive while that was true
-  would have turned a latent hazard into a live multi-gigabyte download from CI. Both guards now
-  live in `tests/_guards.py`, loaded by a root `conftest.py` sitting above both trees, and a test
-  runs a throwaway example in a pytest of its own to prove the reach rather than assert the shape
-  of a file. The examples carrying `+SKIP` still execute nothing; whether an example nothing runs
-  meets the bar is a separate question and is not answered here. **One suite-wide change came
-  with the load**: hypothesis's default 200 ms deadline is a per-test wall-clock budget, and in
-  a ten-worker lane where several modules spawn process pools of their own it reads the
-  scheduler rather than the code — it fired three times in sixteen runs once the examples were
-  collected, and never in eight without them. It is now off for the suite, which is the same
-  answer this repository already gave when it declined to assert such a budget itself.
-
-- **The built site carries no architecture-decision-record numbers.** A record number is a
-  citation between agents: it resolves for anyone reading the source, because the record tree is
-  in the repository beside it, and for nobody reading the site, which excludes that tree on
-  purpose. One hundred and eleven numbers were published on the API reference page — seventy-six
-  rendered from docstrings, thirty-five inside "Source code in ..." listings. Docstrings keep
-  citing records, and `mkdocstrings` now drops the citation as it renders; source listings are no
-  longer published, since a listing with the numbers stripped out would disagree with the file it
-  names. `genome.__doc__` and `help()` are untouched. Two guards hold it: a record is cited as a
-  trailing parenthetical — `(ADR-0006)` — which the test suite checks so the removal is total,
-  and `pixi run docs-build` fails if a number reaches the built site by any route.
-
-- **The API reference no longer embeds source listings.** Use the source links on GitHub. The
-  page still carries every signature, argument type and attribute exactly as the code declares
-  them, which is what it is for.
-
-- **User-facing messages no longer cite architecture-decision-record numbers.** Nine exception
-  messages, one CLI command's `--help`, and the `limits` string that rides on a *successful*
-  symbol match dropped a trailing `(ADR-00xx)`. The records live in a tree kept out of the built
-  site on purpose, so the number resolved nowhere a reader could reach; every message still says
-  in words what the record decided, and still names the same next action. **The `limits` change is
-  the one a caller may be reading**: it is not an error path — `XrefSet.for_symbols(...)`
-  `.match_symbols(...).limits`, the `"limits"` key of `as_json()`, and what `genome xref symbols`
-  echoes to stderr on every mouse or worm run all carry it, so code matching that string exactly
-  needs updating. A guard test holds the invariant rather than the list: a record number in any
-  string this package can print, or in any CLI command's docstring, fails the suite. Comments and
-  the docstrings of ordinary objects keep their citations, which are between agents and stay.
-
-- **BREAKING — the CLI grows a sub-app per topic, and fourteen commands are renamed.** `genome
-  register` is `genome assembly register`, `genome tf-gene-list` is `genome tf gene-list`, `genome
-  xref` is `genome xref ids`, `genome match-symbols` is `genome xref symbols`, `genome homologs` is
-  `genome homology links`, `genome motif-scan` is `genome motif scan`, and the eight remaining
-  moves follow the same rule — a sub-app named for the package its commands ship from, which is
-  why the Orthology context's is `homology`. `version`, `revcomp` and `doctor` belong to no topic
-  and are unchanged. Each topic package now ships its own CLI module and its own renderers beside
-  the result types they render, so what `gene-list` prints and what a `GeneList` holds change in
-  one place; `genome.cli` keeps the three commands, the `add_typer` calls and no rendering helper,
-  and the console script still points `genome` at `genome.cli:app`. The seam under the commands did
-  not move: no command constructs a `Genome` it did not construct before, every one still takes
-  `--json`, and every error message and docstring naming a command names the new spelling.
-  **Every old spelling still runs for this one release**, hidden from `genome --help` and printing
-  a deprecation notice on **stderr** so `--json` on stdout still parses — one function object per
-  command registered under both names, from one table and one loop in `genome.cli`. The single
-  exception is `genome xref`, whose old spelling is a sub-app's name as well as a command's: the
-  `xref` group answers it by handing an unrecognised first token to `ids`, with the same notice on
-  stderr. **The aliases go in the release after this one**, deleted as a unit with that table.
-- **`io/` retired: every context owns its own I/O, and what is left is a store.** The one
-  directory grouped by *kind of work* is gone, and its modules moved to whatever they are about.
-  `genome.assembly` is the whole Assembly context — `genome.py`, `chimera.py` and the seven
-  `io/` modules its glossary already claimed (`source`, `components`, `download`, `chimera` as
-  `chimera_build`, `registration`, `fasta`, `twobit`). `genome.annotation` is the annotation
-  package plus the shipped **Curated gene list**, which takes the glossary's own name as
-  `annotation/curated.py` so that a module and the registry's `gene_list()` function no longer
-  share one namespace. `genome.store` keeps what belongs to no context and is reached by all of
-  them: the **Data dir** root (`data_dir.py`), the one fetch step, the **Completion marker**,
-  checksumming (`io/utils.py` → `store/checksum.py`) and the **Prepared set** pipeline — and a
-  test reads every file under it to hold that none imports a context back. **`metadata.py`
-  split**: the assembly table is `genome.assembly.metadata` and the annotation table is
-  `genome.annotation.metadata`, the two having shared their shape and nothing else. **Every
-  root under the **Data dir** now sits with the code that reads what lives under it** — `motif/` in
-  `tf.motif.jaspar`, `xref/` in `xref.xref`, `homology/` in `homology.compara` — and the pipeline
-  they share declares none of the three. No deferred import was added; the three that existed
-  are carried over with their reasoning. `tests/` mirrors the new tree, one package per package,
-  and every import-edge guard moved with the module it defends. **Nothing the package exports
-  changed**: `genome.__all__`, the CLI's commands and its `--json` are untouched, and the
-  shipped `data/` tree did not move.
-- **One module writes every shipped table, where three build scripts each declared the writer
-  again.** `genome.shipped_writer` owns the unquoted TSV rendering with its header, the
-  deterministic gzip and the provenance merge that replaces a row by its key and re-sorts the
-  file; `scripts/build_tf_census.py`, `scripts/build_tf_cofactor.py` and
-  `scripts/build_tf_links.py` keep only their publisher's recipe. **The writer is handed the
-  reader's own table declaration**, so a file is held to the header, the required columns, the
-  flag spellings and the key it will be read under *before it reaches disk* — the column tuples,
-  the file names and the value separator are declared once and imported by both halves, and no
-  build script restates a reader's constant or spells a file suffix of its own. Each generator
-  supplies its own error class and repair, so a refused build names the recipe to fix rather than
-  telling whoever ran it to run it again. The byte-stability promise the gzip call carries is
-  stated in that one module, where three write functions and three module docstrings used to
-  carry it between them. `tests/test_shipped_writer.py` holds it
-  to all of that with no download, and re-renders every shipped table's own rows back to the bytes
-  that ship. `VALUE_SEPARATOR` moves to `genome.shipped` beside the flag spellings and is
-  re-exported from `genome.tf`; each format's declaration is public as `CENSUS_FORMAT`,
-  `COFACTOR_FORMAT`, `LINK_FORMAT` and their provenance peers, and the two species-keyed
-  provenance tables now declare that key. **No shipped `.tsv` or `.tsv.gz` byte changed.**
-- **`io/gtf.py` split four ways, and gene id stem resolution became findable.** The largest
-  module in the package held four clusters that barely touched each other, and is now
-  `genome.io.annotation`, a package of four: `registration.py` puts an annotation on disk — the
-  fetch, the placement, the **Chromosome** check, the repair-command strings, the **Completion
-  marker**, the **Merged annotation** a chimera build derives, and the two registrars addressed
-  by assembly name; `registry.py` holds `AnnotationRegistry`, the three scans, the **Default
-  annotation** rule and the by-assembly-name questions; `stems.py` holds the **Gene id stem**
-  crossing that the Xref, Orthology and TF contexts all make; and `database.py` is the `gffutils`
-  adapter, sixty lines, **the only module in the package that imports the library** — held by a
-  test that reads every file under `src/` rather than only the four. Resolving stems still walks
-  the database's gene rows one at a time, now over a generator that yields off the cursor, so a
-  GENCODE-sized annotation is still never held in memory. `AnnotationRegistry` stays one class
-  with one interface and calls across the four. **Nothing a caller can see changed.** `genome`
-  and `genome.io` export exactly the names they exported before, `genome.__all__` is untouched,
-  and every command's `--json` emits the same keys in the same order. `tests/test_gtf.py` splits
-  the same four ways into `tests/annotation/`, with the shared registration helpers in one
-  `conftest.py`; every test that was there is still there, under its own name.
-- **Every result type moved beside whatever returns it, and `genome.io.results` retired.** The
-  module held frozen dataclasses whose one shared property was being returned; a third of it
-  belonged to contexts no module under `io/` imports. `RegisteredAssembly` and `VerifiedAssembly`
-  are now in `genome.io.download`, beside the two functions that build them; `RegisteredAnnotation`,
-  `AnnotationStatus`, `AnnotationStatusRow`, `GeneList`, `GeneListSource`, `ResolvedGeneIds`,
-  `chromosome_check_summary` and `annotation_register_command` in `genome.io.gtf`; `ResolvedStems`,
-  `ResolvedXrefIds`, `ResolvedSymbols` and `SymbolMatch` in `genome.xref.xref`; `HomologyLink` and
-  `HomologyAnswer` in `genome.homology.compara`; `ResolvedHomologs` in
-  `genome.homology.annotation`. `ResolvedGeneIds` is the one type two contexts share and it lands
-  beside `resolve_gene_ids`, because the rule is where a type is returned and not where it is read.
-  The module had been opened as a seam both halves of `io` could reach, and that reason expired
-  once each type sat beside its producer; the guard that closed it is replaced by its assembly-half
-  mirror in `tests/test_download.py`, `io.gtf` already holding the annotation half's. The `as_json`
-  convention the module's docstring stated is now ADR-0022. **Nothing a caller can see changed.**
-  Every name `genome`, `genome.io` and `genome.xref` exported still imports from the same place,
-  `genome.__all__` is untouched, and every command's `--json` emits the same keys in the same order.
-- **One module reads every shipped table, where six brought their own loader.** `genome.shipped`
-  owns resource lookup, gzip, header validation, cell parsing, the blank-cell rules, duplicate-key
-  refusal and the shape of the error a broken file raises; `metadata.py`, `xref/metadata.py`,
-  `homology/metadata.py`, `tf/gene/census.py`, `tf/cofactor/table.py` and `tf/link.py` keep a
-  **table declaration** — resource path, columns, row type, the noun the table is called by and the
-  command that repairs it — and nothing else. Six failures are now checked in one place and reach
-  every table: an empty file, a header that is not the declared columns, a row with the wrong cell
-  count, a blank required cell, a flag spelled a way no table spells one, and a repeated key. The
-  last is declared per table, since a motif link table carries many rows per **Gene id stem** by
-  design. **The curated assembly, annotation and xref tables gain the header validation they
-  lacked**: those two readers went through pandas and checked no header at all, so a renamed or
-  missing column reached the cell parser as a blank cell — or read as `None` where the column was
-  optional. Every message still names its own noun and its own repair, pinned word for word by
-  `tests/test_shipped.py`, and several gained a repair they never carried. `species_slug` and
-  `parse_cell` move to live with the reader; `genome.metadata`, `genome.tf.gene` and
-  `genome.tf.cofactor` re-export them, so every existing import path still resolves. No shipped
-  `.tsv` or `.tsv.gz` byte changed — this is the reader half only.
-- **One module prepares every release-pinned set, where three had each written the pipeline out.**
-  A **Prepared set** — a **Motif set**, an **Xref set**, a **Homology set** — is files pinned to a
-  **Release**, belonging to no assembly, filed beside the assembly tree under the **Data dir**.
-  `genome.io.prepared` now owns the whole of preparing one: the set's directory, the working area,
-  the fetch, the digest, the staged rename, the **Completion marker** and the one sentence that
-  sends a caller to a login node. A source declares a URL, a checksum and how to slice or parse
-  what arrives, and nothing else — a test prepares a fictitious fourth set end to end on exactly
-  that. The three roots under the **Data dir** are declared together there (`homology/` included,
-  which used to be spelled in `homology/compara.py`), and each context keeps its own reader, its
-  own answer types and its own not-downloaded error quoting its own exact prepare command.
-- **Where a checksum is enforced now follows what it covers, and decompress-while-hashing has one
-  implementation.** A pin over the **unpacked** bytes (ADR-0006) is checked as the file is streamed
-  and unpacked; a pin over the archive as served — Ensembl Compara's own md5 of its `.gz` — is
-  pooch's `known_hash`, as before. The same streaming step digests the stored slice and every
-  re-read of it, so the whole-slice-into-memory read in `xref/xref.py` is gone and the four
-  spellings of *unpack while hashing* are one. The working area is now kept exactly when something
-  can vouch for what is in it: with an archive pin pooch re-checks a leftover download, so an
-  interrupted 110 MB fetch still costs no second download; with no such pin a leftover is
-  unverifiable and is swept before fetching rather than adopted.
-- **A JASPAR release now writes a Completion marker, and is prepared one set per directory.**
-  It used to write none, substituting an atomic rename and a motif count on the grounds that the
-  files are under a megabyte. That covered *is this finished* and missed the other half of what a
-  record is for — the only answer to *how was this made*: the URL, the package version, when, and
-  what the bytes hashed to. JASPAR publishes no checksum to pin, so what is recorded is the digest
-  of what was stored and every re-read is held to it; the motif count and the base-id check stay,
-  because they say the file is the *right release, whole*, which no digest of ours can. A release
-  is therefore prepared in `motif/jaspar/<release>/<tax group>/` rather than flat under
-  `motif/jaspar/`; **a file prepared by an earlier version is left where it lies and prepared again
-  under the new layout**, one download of under a megabyte. A fetch that fails now raises
-  `MotifSetNotDownloadedError` naming the call to make on a login node, where it used to surface
-  pooch's own transport error.
-- **The TF context moved out of the Annotation module, and the registry kept one seam.**
-  `AnnotationRegistry.resolve_gene_ids` is now the only identifier surface `genome.io.gtf` exposes:
-  it answers *which gene ids does this **Gene id stem** name here* and knows nothing about what it
-  is handed a list of. Roughly 900 lines of TF code moved out from behind it — `TFGene`,
-  `TFGeneList`, `NoTFCensusError` and the census plumbing to the new `genome.tf.gene.annotation`;
-  `TFCofactor`, `TFCofactorList`, `NoCofactorTableError` and the table plumbing to
-  `genome.tf.cofactor.annotation`; and `UnknownSpeciesError`, shared by both halves, to
-  `genome.tf.species`. `genome.io.gtf` now imports nothing under
-  `genome.tf`, held by a guard: those import lines used to pull in sixteen `genome.tf`
-  modules — both shipped-table readers, the motif link table and the whole motif tree down to the
-  scan, its worker pool and its Parquet sink — so neither module drags the motif tree in any
-  longer. The package still re-exports the five TF names eagerly, so `import genome` loads
-  `genome.tf` as it always did — what closed is the edge from `io/`, not the cost of the
-  re-export. **Nothing a caller can see changed.** `import genome` still yields `TFGeneList`,
-  `TFCofactorList`, `NoCofactorTableError`, `NoTFCensusError` and `UnknownSpeciesError` under those
-  names and `genome.__all__` is untouched; `Genome.tf_gene_list()` and `Genome.tf_cofactor_list()`
-  answer as before and now delegate into `genome.tf` rather than into the registry; `genome
-  tf-gene-list` and `genome tf-cofactor-list` keep their stdout, their stderr attribution lines,
-  their `--json` records and their exit codes. Adding a second bio topic that wants an annotation's
-  own gene ids is now one directory under `src/genome/` rather than an edit to four modules, three
-  of which have no stake in it.
-- **Worker resolution left the motif package.** `genome.tf.motif.workers` is now
-  `genome.workers`. It answers exactly the same one question — how many worker processes a run
-  may use: an explicit count as given, else the Slurm allocation, else this process's affinity,
-  else the machine — and it always had no domain coupling: about a hundred lines that import
-  nothing else from this package and name no motif, assembly or region. `genome.cli` already
-  reached past the motif package to get at it, which was the tell. `genome.tf.motif` goes on
-  re-exporting `DEFAULT_WORKERS`, `SLURM_CPU_VARS` and `resolve_workers`, so
-  `from genome.tf.motif import resolve_workers` keeps working unchanged and no answer changes.
-- **CI no longer recompiles memelite's JIT on every run, and the suite is a third of its size.**
-  The `test` lane's largest single item was not a test: `memelite`'s scan and compare engines are
-  `@numba.njit(cache=True)`, numba writes that cache inside the pixi env, and `setup-pixi` saves
-  its env tarball before any test has run — so every run recompiled from source, 27.5 s, 47% of
-  the lane's wall. `NUMBA_CACHE_DIR` now points at a workspace path cached on the `pixi.lock`
-  hash. Separately the suite was cut **2425 → 933 tests with coverage unchanged at 98%** (60 → 61
-  missed statements of 4149), by merging sibling one-assert tests that shared a fixture and
-  collapsing parametrize tables that walked one code path with many rows of data; all 169 test
-  classes and all 154 distinct refusal messages survive, checked as whole-tree set differences
-  against the previous commit. Serial **56.3 s → 24.0 s**, parallel **17–19 s → 8.4 s**, the
-  `check` gate **24 s → 10 s**. Measurements and method:
-  `docs/research/test-suite-cost-and-parallelism-2026-08-30.md`.
-- **The unit lane distributes by group rather than by load.** Nine tests spawn their own process
-  pools; distributed by load, several could fork pools at once and the lane's wall went bimodal —
-  13.5 s or 16.1 s on the same commit, decided by scheduling alone. `--dist=loadgroup` pins each
-  such module to one worker and is faster on a 4-core runner too (9.4 s against 12.3 s). The
-  worker cap moves 8 → 10; on a CI runner `auto` finds four and the cap does not bind.
-- **The docs site is rewritten for a reader who writes Python and is not a genomicist.** Three long
-  pages become eleven task pages under three nav sections: Get started, then *Working with a genome*
-  (Assembly, Sequences and regions, Annotations, Aligner indexes), *Topics* (Transcription factors,
-  Motifs, Gene identifiers, Homology) and *Interfaces* (a CLI overview and two command pages, plus
-  the API reference). `docs/genome.md`, `docs/sequences.md` and `docs/cli.md` are gone, split into
-  the pages that replace them. **`xref` and `homology` get Python coverage for the first time**, and
-  so do the JASPAR motif surface and the shipped TF-to-motif link table, which appeared nowhere
-  before. Biology and file-format context get a sentence; design rationale and ADR numbers get
-  nothing, since `docs/adr/`, `docs/context/` and `docs/research/` are excluded from the built site.
-  Every example is read-verified against the source, and every quoted output is one that was
-  actually produced. **`docs/reference.md` drops from 59 module directives to eight package
-  sections**, rendering only what each package's `__init__.py` re-exports, so the page no longer
-  publishes some fifty private modules to a reader who should never reach for them; `genome.store`
-  re-exports nothing on purpose and so gets no section. The README is rewritten to the same pitch
-  and points at the site. Nothing under `src/` changed.
-
-### Added
+- **The lab's writing rules are written down, at `docs/agents/writing.md`.** It carries the three
+  rules and the word caps against this repository's own paths. The context map and the glossaries
+  take no file cap, and that is the one part worth the words: a glossary is capped per entry, so a
+  file cap on one would measure how many terms the domain has (ADR-0024).
 
 - **Which genes in another species a gene is homologous to, on Ensembl Compara's own trees.**
   `genome.homology` is the Orthology context and a peer of `genome.tf`. `HomologySet(species,
@@ -316,7 +86,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   de-duplicated partition *at the pair level* — Compara's own README calls each file "an arbitrary
   subset of orthologies involving the given genome" — and which file holds a pair is **not stable
   across releases**: counted on 116, the human file holds **0** human↔mouse rows and 23,982
-  human↔worm; the mouse file holds 23,764 human and 25,006 worm; the worm file holds neither. (On
+  human↔worm. The mouse file holds 23,764 human and 25,006 worm. The worm file holds neither. (On
   110 the human file held 16,242 mouse rows, so the assignment really does move.) Which file holds
   which pair is therefore a **measurement** in the shipped `homology_metadata.tsv`, re-taken on every
   prepare: a slice that comes back empty **raises naming the other file** and writes nothing, rather
@@ -352,7 +122,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   v2.0's 801 human rows all 801 carry an HGNC id and all 801 resolve, but **31 still spell the gene
   by a symbol HGNC has retired** — `ARNTL` for `BMAL1`, `C11orf30` for `EMSY` — and an approved-only
   join mis-keys or drops exactly those. Matching is **exact by default**, so `Brca1` asked of a human
-  set matches nothing rather than half-working; `case_insensitive=True` is opt-in and still returns
+  set matches nothing rather than half-working. `case_insensitive=True` is opt-in and still returns
   **every** gene matched rather than picking one. **From a shell it is `genome match-symbols
   <species> <symbols>...`** — a command of its own, because a symbol is a verb of its own and not a
   third direction of `genome xref`: it parses arguments, makes that one call and renders, so
@@ -361,7 +131,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   being the keys `SymbolMatch.as_json()` writes, in its order, so the two renderings cannot drift —
   with the heading, the URL, the counts and what this source could not have matched on stderr.
   **Every symbol passed leaves with at least one row**, the ones that matched nothing getting one
-  with the other columns empty. `--case-insensitive` is the opt-in fold and still prints every match;
+  with the other columns empty. `--case-insensitive` is the opt-in fold and still prints every match.
   `--source` names an **Xref source**, and one named that carries no symbols exits `1` naming the one
   that does.
 - **A symbol lookup needs no source named, because a default is per species *and per question***
@@ -399,7 +169,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   columns in 2020 to **54** now, and a named test reverses the whole header to prove the answer does
   not move. Its pin **names a file read out of the bucket listing** rather than one built from a
   date: the archive's dates are irregular — `2024-07-02`, `2025-01-06`, and both `2026-07-03` and
-  `2026-07-07` in one quarter. HGNC's remembered EBI FTP path is a live 404; the live one is a Google
+  `2026-07-07` in one quarter. HGNC's remembered EBI FTP path is a live 404. The live one is a Google
   Cloud Storage bucket with a **doubled path segment**, `…/hgnc/archive/archive/quarterly/tsv/…`.
 - **Mouse and worm get current symbols, and are told why they get no others.** `alliance_bgi` is the
   Alliance's per-species gene submission — MGI's for mouse, WormBase's own **WS298** for worm — read
@@ -413,31 +183,28 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   `downloads.wormbase.org` answers **403 to an automated client**, measured from two networks.
 - **Ensembl is a second Xref source, selectable and pinned to a release of its own — and it is not
   the equal of the first.** `XrefSet("Homo sapiens", "ensembl", "116")` answers off Ensembl's
-  per-species TSV dumps for human and mouse, pinned to release **116** — the release the lab's
-  registered `gencode_v50` corresponds to — independently of Alliance's `9.0.0`, which stays the
-  **Default xref source**. Adding it was what the design promised: a reader module, one entry in the
-  reader table and two rows in the shipped metadata table. **Two publishers are two answers and
-  nothing merges them** (ADR-0017): Entrez GeneID `79166` names **two** stems in Alliance 9.0.0 and
-  **seventy-two** in Ensembl 116, each answer carrying the source and release that produced it, and
+  per-species TSV dumps for human and mouse, pinned to release **116**, which is the release the
+  lab's registered `gencode_v50` corresponds to. Alliance's `9.0.0` stays the **Default xref
+  source**. Adding it was what the design promised: a reader module, one entry in the reader table
+  and two rows in the shipped metadata table. **Two publishers are two answers and nothing merges
+  them** (ADR-0017). Entrez GeneID `79166` names **two** stems in Alliance 9.0.0 and
+  **seventy-two** in Ensembl 116. Each answer carries the source and release that produced it, and
   the narrower one is never widened nor the wider one voted down. **The fan-out is stated where the
   source is chosen** rather than in a note — in the constructor's `source` parameter, in the
   reader's own module and in the shipped attribution — because it is the reason to choose
-  deliberately: the two publishers agree on only **57.6%** of human gene-level (GeneID, ENSG) pairs,
-  NCBI's mapping being a sequence match at a published overlap threshold and near-one-to-one where
-  Ensembl's reaches 72 stems for one GeneID and **208 GeneIDs for one stem**. **The intuitive
-  quality filter raises rather than answering nothing**: every human `EntrezGene` row release 116
-  publishes carries `info_type=DEPENDENT` and **not one** carries `DIRECT` — 552,633 rows, zero
-  direct, and mouse the same at 358,853 — so `evidence="DIRECT"` empties the set rather than
-  narrowing it, and is met with an error naming what the release actually carries. The filter is a
-  real capability and not only a guard: it selects which of the publisher's rows are read, a
+  deliberately: the two publishers agree on only **57.6%** of human gene-level (GeneID, ENSG) pairs.
+  **The intuitive quality filter raises rather than answering nothing.** Every human `EntrezGene`
+  row release 116 publishes carries `info_type=DEPENDENT` and **not one** carries `DIRECT` — 552,633
+  rows, zero direct, and mouse the same at 358,853. So `evidence="DIRECT"` empties the set rather
+  than narrowing it, and is met with an error naming what the release actually carries. The filter
+  is a real capability and not only a guard: it selects which of the publisher's rows are read, a
   filtered set is prepared beside the unfiltered one rather than over it, and a source whose file
   grades nothing refuses a filter instead of ignoring it. Two conventions that cannot be assumed
   from one another are now recorded side by side: Alliance publishes an md5 of the **unpacked** TSV,
-  Ensembl a BSD `sum` of the **served** `.gz` — 16 bits, and no integrity check for a 6 MB file — so
-  the rows pin a digest of the unpacked bytes and the attribution records Ensembl's own value and
-  what it covers. No worm row, and not by oversight: Ensembl files *C. elegans* under Ensembl
-  Genomes' numbering, so release-116's worm directory holds a file stamped **63**, and worm is
-  answered by the Alliance where the hop is the identity.
+  Ensembl a BSD `sum` of the **served** `.gz`. The rows pin a digest of the unpacked bytes, and the
+  attribution records Ensembl's own value and what it covers. No worm row, and not by oversight:
+  Ensembl files *C. elegans* under Ensembl Genomes' numbering, so release 116's worm directory holds
+  a file stamped **63**, and worm is answered by the Alliance where the hop is the identity.
 - **An `XrefSet` carries the curated row it actually resolved to**, as `provenance`, so what is
   cited is what answered rather than what a second lookup would resolve the defaults to today.
 - **Which genes are transcription factors, answered by a published census that ships in the
@@ -455,7 +222,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   species that do** rather than returning an empty list. The species is read off the assembly's own
   metadata row and never passed in, so asking for human transcription factors while holding a mouse
   assembly is not expressible (ADR-0003). Thirteen of Lambert's twenty-nine published columns ship,
-  gzipped, at 52 KB against the publisher's 326 KB; the four uniform across every census — the
+  gzipped, at 52 KB against the publisher's 326 KB. The four uniform across every census — the
   **Gene id stem**, the symbol, the TF flag and the **DBD family** — lead every table, and every
   other column keeps a snake_case spelling of its own publisher's name and is **never compared
   across tables**. The two family vocabularies are deliberately un-crosswalked: 75 values under
@@ -505,18 +272,18 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   genes / 1,085 links on 2026 and 745 / 946 on 2024, mouse 693 / 896 and 653 / 851, with 732 of
   mouse's 896 cross-species — which is the coverage argument made concrete. **No test proves a
   shipped table still matches JASPAR and none can**, since regenerating one needs a download CI
-  cannot make; the pinned counts convert a silent drift into a loud failure, which is the most that
+  cannot make. The pinned counts convert a silent drift into a loud failure, which is the most that
   is available, and it is written down rather than papered over.
 - **`genome tf-gene-list <assembly>` prints an assembly's TF genes**, shaped exactly like
   `gene-list` because a caller who learned one has learned the other. Gene ids to stdout one per
-  line, the heading and the census attribution to stderr so the output pipes; `--annotation` names
-  which registered annotation to ask; `--json` emits the whole record — the genes with their **TF
+  line, the heading and the census attribution to stderr so the output pipes. `--annotation` names
+  which registered annotation to ask. `--json` emits the whole record — the genes with their **TF
   assessment** and **DBD family**, the census's provenance, and the unresolved **Gene id stem**s.
   Non-zero exit with a message naming the next action for each of three distinct failures: the
   annotation is not registered, no census ships for this assembly's species, and nothing says what
   species the assembly is. There is deliberately **no `--include-rejected` flag** — stdout is a bare
   id list with nowhere to carry which verdict an id holds, so the flag would feed assessed-negative
-  ids into a pipeline that reads them as TFs; the widened answer is expressible in Python, where
+  ids into a pipeline that reads them as TFs. The widened answer is expressible in Python, where
   each id travels with its flag. And **no command wraps the Motif link table**, which is already a
   file anyone can read — the reason for shipping it.
 - **The censuses and the link tables are rebuilt by committed generators**, `scripts/build_tf_census.py`
@@ -537,53 +304,50 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   two in either direction** (ADR-0014) — so a `source` of `both` is agreement about membership and
   about nothing else. EpiFactors keys on HGNC ids and publishes no Ensembl ids at all, so the stems
   of the 442 genes only it lists come from **a pinned dated HGNC monthly archive** and never the
-  rolling current file, which is what makes them reproducible; the join is on the id and **never on
+  rolling current file, which is what makes them reproducible. The join is on the id and **never on
   the symbol**, because 31 of EpiFactors' 801 rows still name their gene by a symbol HGNC has
   retired — `ACINU` for `ACIN1`, `ARNTL` for `BMAL1` — and human's `symbol` column is HGNC's
   approved spelling throughout. Five genes carry two EpiFactors rows each and ship as one with their
   cells unioned and deduplicated, at a cost stated rather than hidden: for those five the pairing
   between a function and its own modification is lost. **The TF list and the cofactor list overlap —
   151 human genes are both a Lambert-positive TF gene and a cofactor**, 57 from the AnimalTFDB side
-  and 122 from the EpiFactors side, so a caller who unions the two answers double-counts them; being
+  and 122 from the EpiFactors side, so a caller who unions the two answers double-counts them. Being
   a cofactor never suppresses a motif the census already reached. Human's provenance carries **three**
   source rows, HGNC's among them, because a source that earns 442 stems earns a citation. Multi-valued
   cells split on `;`, the separator the rest of this package already uses, and the build refuses a
   published value that already contains one. Every curation rule lives in
   `scripts/build_tf_cofactor.py` and none of it in the wheel.
 - **Which genes a publisher lists as transcription cofactors, answered by a table that ships in the
-  wheel.** `genome.tf.cofactor` is the third part of the TF context and a peer of the gene and motif
-  halves: the gene half answers whether a gene is a **TF gene** and of what **DBD family**, this one
-  answers whether it is a **Transcription cofactor** and of what class. It is keyed the same way, by
-  **Gene id stem**. Mouse and worm ship **AnimalTFDB 4.0** (PMID 36268869) — 970 genes across 84 of
-  the publisher's own families, *C. elegans* 317 across 57, and the same six categories in each — as
-  gzipped TSVs under `data/tf_cofactor/`, found by enumerating that directory so that adding a
-  species is dropping in a file. **Nothing here decides what a cofactor is** for those two:
-  membership and classification both travel with the publisher that reached them, and the answer
-  names the publisher, version and PubMed id to cite. Four uniform columns lead every table —
-  the stem, the symbol, the cofactor flag and a closed-vocabulary `source` validated on read — and
-  everything after them is one publisher's own column under a namespaced name, never compared with
-  another's (ADR-0014). `is_cofactor` reads `yes` on every row today and is kept anyway: dropping it
-  would make presence in the file the verdict, and a future source could then not record a rejection
+  wheel.** `genome.tf.cofactor` is the third part of the TF context, a peer of the gene and motif
+  halves and keyed the same way, by **Gene id stem**. The gene half answers whether a gene is a **TF
+  gene** and of what **DBD family**; this one answers whether it is a **Transcription cofactor** and
+  of what class. Mouse and worm ship **AnimalTFDB 4.0** (PMID 36268869) — 970 genes across 84 of the
+  publisher's own families, *C. elegans* 317 across 57, the same six categories in each — as gzipped
+  TSVs under `data/tf_cofactor/`, found by enumerating that directory, so adding a species is
+  dropping in a file. **Nothing here decides what a cofactor is**: membership and classification
+  both travel with the publisher that reached them, and the answer names the publisher, version and
+  PubMed id to cite. Four uniform columns lead every table — the stem, the symbol, the cofactor flag
+  and a closed-vocabulary `source` validated on read — and everything after them is one publisher's
+  own column under a namespaced name, never compared with another's (ADR-0014). `is_cofactor` reads
+  `yes` on every row today and is kept anyway, so that a future source can record a rejection
   without a format change. **Worm ships although no publisher has censused worm transcription
-  factors**, so a worm assembly answers here while the TF gene half has nothing to say — the
+  factors**, so a worm assembly answers here while the TF gene half has nothing to say: the
   publishers' shape and not a defect, stated beside the data and pinned in the tests. Provenance is
   **two** plain tables rather than one, keyed by species and by species-and-source, because one row
-  cannot describe a table built from several publishers and joining them positionally inside a cell
-  is the shape that breaks quietly. `parse_cofactor_table` is public and takes the table as text, so
-  every way a shipped file can be malformed is reachable without writing a broken one into the
-  package, and every refusal names the file and the command that regenerates it.
-  `scripts/build_tf_cofactor.py` is the third committed generator: it takes file paths and downloads
+  cannot describe a table built from several publishers. `parse_cofactor_table` is public and takes
+  the table as text, so every way a shipped file can be malformed is reachable without writing a
+  broken one into the package, and every refusal names the file and the command that regenerates it.
+  `scripts/build_tf_cofactor.py` is the third committed generator. It takes file paths and downloads
   nothing, joins AnimalTFDB's own two files through five hand-written family spellings **whose
-  arithmetic it re-runs on every build**, and fails loudly both when a family survives that map with
-  no category and when the publisher's own counts stop reconciling — so a release that renames a
-  family is a broken build rather than a quietly blanked column.
+  arithmetic it re-runs on every build**, and fails loudly when a family survives that map with no
+  category or the publisher's own counts stop reconciling.
 - **An assembly's transcription cofactors, in its own annotation's gene ids.**
   `Genome.tf_cofactor_list()` is the **TF cofactor list**, the counterpart of `tf_gene_list()` and
   the same three layers: a method on the genome, one on the annotation registry taking a **Registered
   name**, and a module-level `tf_cofactor_list(assembly)` for a caller who has not opened one — one
   code path, so a shell surface over it adds no second. Every **Gene id stem** the **Cofactor
   table** is keyed by is resolved through the annotation's own gene ids, so the answer joins to a
-  counts matrix with nothing left to normalise; a stem naming two gene ids answers with **both** and
+  counts matrix with nothing left to normalise. A stem naming two gene ids answers with **both** and
   never picks one; and the stems this annotation carries no gene for **ride back on the answer**
   rather than being dropped. The species is read off the assembly's own metadata row and never
   passed in, so asking for human cofactors while holding a mouse assembly is not expressible
@@ -601,7 +365,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 - **`genome tf-cofactor-list <assembly>` prints an assembly's transcription cofactors**, shaped
   exactly like `genome tf-gene-list` because a caller who learned one has learned the other. Gene
   ids to stdout one per line, the heading and the publishers' attribution to stderr so the output
-  pipes; `--annotation` names which registered annotation to ask; `--json` emits the whole record —
+  pipes. `--annotation` names which registered annotation to ask. `--json` emits the whole record —
   every gene with the publisher that listed it and that publisher's own classification, one
   provenance entry per publisher to cite, and the unresolved **Gene id stem**s. Non-zero exit with a
   message naming the next action for each of three distinct failures: the annotation is not
@@ -617,7 +381,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   for. The lookup now has an **order**, and the order is what keeps it correct. The census is asked
   first, so the **151 human genes that are both a TF gene and a cofactor** — TBP, KMT2A and DNMT1
   among them — come back with exactly the links they always did, because a second table must never
-  suppress an answer the census already reached; a gene it assessed and turned down still answers
+  suppress an answer the census already reached. A gene it assessed and turned down still answers
   with that verdict. Only then is that species' **Cofactor table** asked, and a gene it lists raises
   the new `TranscriptionCofactorError`, whose message names the census that did not assess the gene,
   the publisher that lists it as a cofactor and that there is no motif here to look for. A gene
@@ -642,71 +406,45 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   cofactor, and the two classification vocabularies are deliberately not crosswalked (ADR-0014).
   Vocabulary and records only; no behaviour changes.
 - **The words for cross-database gene identifiers and for cross-species homology, settled before the
-  code that will use them.** Two new bounded contexts get glossaries — `docs/context/xref.md` and
-  `docs/context/orthology.md` — so that an **Xref set** is never called a crosswalk, an id map or a
-  mapping table in an issue, a test name or an error message, and so that a **Homology link**'s
-  **Homology type** is read as its publisher's claim about evolution rather than as a count of rows
-  in whatever file came back. Xref coins **Xref set**, **Xref source**, **Default xref source**,
-  **Namespace** and **Symbol match**; orthology coins **Homology set**, **Homology link**,
-  **Homology type**, **Dropped partner** and **Paralogy link**. The context map lists both and draws
-  the seven edges joining them to Annotation, TF and Motif — two of which are **prohibitions rather
-  than calls**: nothing shipped here is keyed by a foreign **Namespace**, and no list this package
-  publishes is derived through homology. **Four records settle what the design decided.** ADR-0017:
-  the hub is the **Gene id stem**, a query reads exactly one **Xref set**, and nothing composes two
-  hops or merges two publishers — NCBI and Ensembl agree on only 57.6% of human gene-level (GeneID,
-  ENSG) pairs, so a merged table would decide nearly half its rows by a rule nobody published.
-  ADR-0018: only a publisher keeping dated releases at stable URLs is eligible, and its bytes are
-  downloaded rather than shipped, at two costs stated rather than smoothed over — neither set
-  answers offline on a fresh install, and mouse gets current symbols only, previous and alias
-  spellings being MGI's and MGI publishing no dated archive. ADR-0019: **orthology is served and
-  never consumed**, so worm still has no TF census and mouse still has no assessed-negative genes
-  even with a homology table on disk. ADR-0020: a **Homology type** is the publisher's tree-derived
-  label and is never recomputed after filtering. ADR-0014 gains a `**Status.**` line, its cost line
-  having said this package builds no ortholog or homology support at all, and the rule against
-  assuming an assembly, a coordinate system or a strand is extended in place — a gene id never
-  crosses species implicitly. **The shared kernel gains an eleventh word**: **Gene id stem** moves
-  out of the TF glossary, four contexts now keying on the identifier every **Xref set** hangs off,
-  and its definition is unchanged. Vocabulary and records only; no behaviour changes.
+  code that will use them.** Two new bounded contexts get glossaries, `docs/context/xref.md` and
+  `docs/context/orthology.md`, so that an **Xref set** is never called a crosswalk or an id map in
+  an issue, a test name or an error message. Xref coins **Xref set**, **Xref source**, **Default
+  xref source**, **Namespace** and **Symbol match**. Orthology coins **Homology set**, **Homology
+  link**, **Homology type**, **Dropped partner** and **Paralogy link**. The context map lists both
+  and draws the seven edges joining them to Annotation, TF and Motif. **Two of those edges are
+  prohibitions rather than calls**: nothing shipped here is keyed by a foreign **Namespace**, and no
+  list this package publishes is derived through homology. **Four records settle what the design
+  decided.** ADR-0017 makes the **Gene id stem** the hub and holds a query to exactly one **Xref
+  set**. ADR-0018 admits only a publisher keeping dated releases at stable URLs, and states the two
+  costs: neither set answers offline on a fresh install, and mouse gets current symbols only.
+  ADR-0019 keeps orthology served and never consumed, so worm still has no TF census. ADR-0020 makes
+  a **Homology type** the publisher's tree-derived label, never recomputed after filtering. ADR-0014
+  gains a `**Status.**` line, and the rule against assuming an assembly, a coordinate system or a
+  strand is extended in place: a gene id never crosses species implicitly. **The shared kernel gains
+  an eleventh word.** **Gene id stem** moves out of the TF glossary, four contexts now keying on the
+  identifier every **Xref set** hangs off, and its definition is unchanged. Vocabulary and records
+  only. No behaviour changes.
 - **A column of Entrez, UniProt, HGNC, MGI or WormBase ids reaches this package's answers, with no
-  assembly and no genome open.** `genome.xref` is a peer of `genome.tf`, and an **Xref set** is one
-  species, one **Xref source** and one pinned **Release**: `XrefSet("Homo sapiens")` fetches the
-  publisher's file once into `$LIULAB_DATA/xref/`, a sibling of the assembly tree beside `motif/`,
-  slices it to that species and re-reads it thereafter — the shape `JasparDatabase` established,
-  with a `cache_dir` override naming the directory itself. **Two verbs and only two** (ADR-0017):
-  `to_stems` toward the hub and `from_stems` away from it, so a caller wanting Entrez → HGNC makes
-  both calls and owns the join, and a query reads exactly one set, which makes merging two
-  publishers inexpressible rather than merely discouraged. Both answer in the shape
-  `resolve_gene_ids` already established — ask order kept, **every** id a key names and never a
-  chosen one, no resolved value ever empty, what named nothing riding back in `unresolved`, a
-  flattener that documents what flattening loses, and `as_json()` — and every answer names the
-  species, source and release that produced it, because an answer that did not would be
-  unreproducible a year later. **Alliance of Genome Resources 9.0.0 is the first source and the
-  default for all three species**, gene level only, across Ensembl, Entrez, UniProt and each
-  species' own authority; naming a release is enough to fetch it, the curated row in
-  `data/xref/xref_metadata.tsv` knowing the publisher, the version, the URL and the checksum. **The
-  three species' hops turn out to have three different shapes**, which is the argument for this
-  being an object a caller opens: for worm it is the identity — all 46,926 `WB:WBGene…` genes carry
-  `ENSEMBL:WBGene…`, the same string, with zero differing — for mouse a real join onto `ENSMUSG…`,
-  and for human a join through HGNC in which **2,535 of 40,665 genes carry two or more Ensembl
-  cross-references**, so 6.2% of HGNC ids name two stems and nothing picks one. **Every incoming id
-  is reduced to its Gene id stem on ingest**, a publisher's and a caller's alike, because joining a
-  versioned id to a bare one returns zero matches and says nothing — the most error-prone detail in
-  this landscape — and each **Namespace**'s CURIE prefix is accepted whether or not it is written,
-  so `HGNC:11998` and `11998` are one identifier. Alliance's duplication is deduplicated **on the
-  key and never on the row**: 2,659,704 rows reduce to 1,811,267 distinct
-  `(GeneID, GlobalCrossReferenceID, TaxonID)`, 31.9% redundant, and a whole-row `uniq` removes none
-  of it. **The stored form is a plain gzipped TSV** of `namespace`, `xref_id`, `gene_id_stem`,
-  sorted, unique and written with no gzip timestamp, so two machines slicing one release produce
-  identical bytes and a collaborator who does not use Python reads it in R. The **Completion
-  marker** beside it carries **both** checksums — the publisher's own md5 as provenance and the
-  slice's own sha256 as the integrity check, since what is stored is a derived slice rather than the
-  publisher's bytes — and either one disagreeing with what is on disk means unfinished rather than
-  present. The publisher's md5 is over its **unpacked** bytes (ADR-0006), which is Alliance's own
-  convention and a trap: hashing the `.tsv.gz` as it arrives mismatches every time. Four errors name
-  their next action: a set that is not downloaded names the call to make on a login node, an
-  unsupported species names the three that have a set, a **Namespace** the source does not carry
-  names the ones it does, and a file that does not match its pin refuses rather than answering with
-  silently fewer genes.
+  assembly and no genome open.** `genome.xref` is a peer of `genome.tf`. An **Xref set** is one
+  species, one **Xref source** and one pinned **Release**. `XrefSet("Homo sapiens")` fetches the
+  publisher's file once into `$LIULAB_DATA/xref/`, a sibling of the assembly tree, slices it to that
+  species and re-reads it after. A `cache_dir` override names the directory itself. **Two verbs and
+  only two** (ADR-0017): `to_stems` toward the hub, `from_stems` away from it. Entrez → HGNC is
+  therefore two calls and a caller's own join, and one query reads one set. Answers keep the shape
+  `resolve_gene_ids` set: ask order kept, every id a key names, no resolved value empty, misses
+  riding back in `unresolved`, and `as_json()`. Each names the species, source and release that
+  produced it. **Alliance of Genome Resources 9.0.0 is the first source and the default for all
+  three species**, gene level only, across Ensembl, Entrez, UniProt and each species' own authority.
+  Naming a release is enough to fetch it: the curated row in `data/xref/xref_metadata.tsv` carries
+  the publisher, the version, the URL and the checksum. Every incoming id is reduced to its **Gene
+  id stem** on ingest, publisher's and caller's alike. A **Namespace**'s CURIE prefix is optional,
+  so `HGNC:11998` and `11998` are one identifier. The stored form is a plain gzipped TSV of
+  `namespace`, `xref_id`, `gene_id_stem`, sorted, unique and written with no gzip timestamp, so two
+  machines slicing one release produce identical bytes. Its **Completion marker** carries both
+  checksums: the publisher's md5 over the unpacked bytes (ADR-0006) as provenance, and the slice's
+  own sha256 as the integrity check. Either one disagreeing means unfinished. Four errors name the
+  next action — a set not downloaded, an unsupported species, a **Namespace** the source does not
+  carry, and a file that does not match its pin.
 - **`genome xref` — a species, a set of ids and a direction, and the answer comes back with the
   misses still on it.** The shell surface over an **Xref set**, and a thin one: it parses arguments,
   makes one API call and renders, so `import genome` and the shell hit one code path and `--json`
@@ -717,11 +455,11 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   strings would be a judgement the API does not make: `HGNC:11998` asked the wrong way answers
   *nothing found* rather than quietly turning around. **The pairs go to stdout, tab-separated, so
   the output pipes** — `cut -f2` is the answer and `cut -f1` says what asked for it — with the
-  heading, the publisher's URL and the counts on stderr; an id naming two genes prints two rows
+  heading, the publisher's URL and the counts on stderr. An id naming two genes prints two rows
   rather than whichever came first, and **an id that resolved to nothing gets a row of its own with
   an empty second column**, which is exactly what a hand-rolled join drops without saying so. Every
   id passed therefore leaves with at least one row, in both renderings. `--source` names an **Xref
-  source** and omitting it answers from the species' **Default xref source**; either way the answer
+  source** and omitting it answers from the species' **Default xref source**. Either way the answer
   names the source and release that produced it. **Every failure exits non-zero naming the next
   action**: a species no set exists for names the three that do, a set that is not here and cannot
   be fetched names the call to make on a login node, a **Namespace** the source does not carry names
@@ -741,7 +479,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   in anywhere — `goc_score` and `wga_coverage` are null on every link of *either* worm pairing, so
   a shell user is told before `awk` empties their filter rather than after. `--paralogs` returns
   every link the publisher wrote and a **Paralogy link** is marked by its own `homology_type`
-  rather than excluded (ADR-0013); release 116 publishes none cross-species, so on it the flag
+  rather than excluded (ADR-0013). Release 116 publishes none cross-species, so on it the flag
   changes nothing and the heading says which question was asked either way. **Every failure exits
   non-zero naming the next action**, the wrong-file case most of all: a pair fetched from the
   Compara dump that no longer holds it raises naming the other file rather than answering empty.
@@ -749,8 +487,8 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   already did.
 
 - **`genome motif-scan` — a FASTA in, a Parquet file out, a summary on standard output.** The
-  batch case, and the one motif operation that belongs in a shell script and a scheduler job;
-  listing, plotting and comparing motifs get no command, because they are notebook work. It takes
+  batch case, and the one motif operation that belongs in a shell script and a scheduler job.
+  Listing, plotting and comparing motifs get no command, because they are notebook work. It takes
   the FASTA and the output path, plus `--release`, `--tax-group`, `--threshold`, `--background`
   and `--workers`, and prints what the run was — release, tax group, motifs scanned, motifs
   skipped, the background actually used, the threshold, sequences scanned, hits written, workers,
@@ -759,7 +497,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   **It defaults to every core the allocation granted** — the Slurm allocation first, then process
   affinity, then the machine — where the library defaults to one worker: a console script is a
   proper entry point, so the process-pool hazard behind that default does not apply here.
-  `--background` takes the three modes; four frequencies of your own stay a Python call, since a
+  `--background` takes the three modes. Four frequencies of your own stay a Python call, since a
   mistyped one on a command line would change every cutoff and look like a scan that simply found
   fewer hits. The summary is read off the Parquet footer and never by reading the hits back, which
   is what `provenance_of(path)` and `hit_count(path)` are for — what a written scan was, and how
@@ -780,7 +518,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   scan would have emitted them before the batch is handed on, so choosing two workers is a choice
   about wall time and about nothing else. **The library default is one worker**, so importing this
   package and scanning never starts a process unasked — under the spawn start method a pool
-  re-imports the caller's script, and an unguarded script would re-execute itself; the command-line
+  re-imports the caller's script, and an unguarded script would re-run itself. The command-line
   entry point will pass `None` instead, which resolves the count with `resolve_workers()`: **the
   Slurm allocation first** (`SLURM_CPUS_PER_TASK`, then `SLURM_CPUS_ON_NODE`), then process
   affinity, then the machine's cores — never the last alone, which would put fourteen workers into
@@ -795,7 +533,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   rather than a table. Batches are written **as they are produced** — one row group per named
   sequence — so the whole result is never materialised: hg38 against a full vertebrate release is
   about 550 million rows, which at the 19 bytes a row the fixed dtypes cost is 10.5 GB and is not a
-  DataFrame on any machine in the lab. **There is no row-count guard and no refusal**; a
+  DataFrame on any machine in the lab. **There is no row-count guard and no refusal**. A
   genome-scale scan is the caller's decision. `read_hits(path)` reads one back and is the reader to
   use: what comes off the disk equals the in-memory table for the same scan, **dtypes included**,
   down to the order of a categorical column's categories — the writer pins `int32` dictionary
@@ -813,7 +551,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   matters more than any other scan parameter: switching from uniform to a real chromosome's
   composition changed the hit count by 2.5% but turned over **26%** of the hit set. `background=`
   still takes four frequencies and now also takes `"uniform"` to pin it, `"derive"` to derive
-  whatever the input holds, and `"auto"`, which is what omitting it means; **whichever it was, the
+  whatever the input holds, and `"auto"`, which is what omitting it means. **Whichever it was, the
   background actually used is recorded on the result**, so handing the recorded value back
   reproduces the scan exactly. Deriving reads a **bounded prefix** of the input and hands those
   records back in front of the rest, so a FASTA is still read once and a generator source is still
@@ -823,7 +561,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   gets recorded. Converting the threshold into one cutoff per motif is the engine's one slow step —
   a few seconds for a full vertebrate release — and a pure function of `(matrices, background, p)`,
   so it is **cached on disk** under `<LIULAB_DATA>/motif/thresholds/`, shared by every project on
-  the machine exactly as the JASPAR files are; the rounding is what lets two peak sets from one
+  the machine exactly as the JASPAR files are. The rounding is what lets two peak sets from one
   genome share an entry. A cache is a speed-up and never a dependency: a corrupt, truncated or
   older entry is a miss, and a data root that cannot be written to makes a scan slow rather than
   broken.
@@ -833,76 +571,72 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   notebook — and is where the off-by-ones live — exists in exactly one place. `sequence_name`
   carries the chromosome as *this* assembly spells it, and a region naming one the assembly does not
   carry raises rather than being reconciled. **The arithmetic is written out in the docstring so a
-  reader can check it without running it**: for a `+` region (and a `.` one with it) a hit found at
-  local `[s, e)` is at `[S + s, S + e)` and keeps its strand; for a `-` region, whose bases are
-  fetched reverse-complemented, it is at `[E - e, E - s)` with the hit strand flipped — the two ends
+  reader can check it without running it.** For a `+` region, and a `.` one with it, a hit found at
+  local `[s, e)` is at `[S + s, S + e)` and keeps its strand. For a `-` region, whose bases are
+  fetched reverse-complemented, it is at `[E - e, E - s)` with the hit strand flipped: the two ends
   swap, and the `- 1`s cancel exactly because coordinates are 0-based half-open, which is why the
   same flip written for a 1-based inclusive interval is wrong. An unknown strand is **not** promoted
-  to `+`: the fetch hands back forward bases for it, so there is nothing to flip. Regions may
-  overlap and several may sit on one chromosome — each is scanned in its own right, and a hit seen
+  to `+`, since the fetch hands back forward bases for it and there is nothing to flip. Regions may
+  overlap and several may sit on one chromosome. Each is scanned in its own right, and a hit seen
   from two regions is two rows, since deduplicating would be deciding for the caller which peak a
   site belongs to. A locus *string* is refused, because it carries no strand and the strand is the
   whole question. It arrives as a mixin on `Genome`, following the aligner's, and **the dependency
-  runs Genome to motif and never back** — the motif modules name `Genome` under type checking alone,
-  since a motif belongs to no assembly and a motif set is usable with no genome open. **The raw form
-  is untouched**: scanning a mapping of sequences still answers in region-local coordinates and
-  names no assembly. What comes back is the same hit table with the same columns and dtypes, and its
-  provenance is **extended rather than replaced** — the assembly joins the background, threshold,
-  release, tax group and the two motif lists on `frame.attrs`, because a chromosome name and an
-  interval mean nothing until something says which reference they are in (ADR-0003).
+  runs Genome to motif and never back**: the motif modules name `Genome` under type checking alone,
+  since a motif belongs to no assembly. **The raw form is untouched.** Scanning a mapping of
+  sequences still answers in region-local coordinates and names no assembly. What comes back is the
+  same hit table with the same columns and dtypes, its provenance **extended rather than replaced**
+  — the assembly joins the background, threshold, release, tax group and the two motif lists on
+  `frame.attrs`, because a chromosome name and an interval mean nothing until something says which
+  reference they are in (ADR-0003).
 - **Scan DNA with a motif set and get one hit table back, whatever you scanned.**
   `MotifSet.scan(sequence, name="sequence")`, `MotifSet.scan_sequences({name: bases})` and
-  `MotifSet.scan_fasta(path)` answer with the same table — the same columns, in the same order,
-  with the same compact dtypes (`motif_id`, `motif_name`, `sequence_name` and `strand` categorical,
-  `start` and `end` `int32`, `score` `float16`) — so nothing downstream branches on how the scan was
+  `MotifSet.scan_fasta(path)` answer with the same table: the same columns, in the same order, with
+  the same compact dtypes (`motif_id`, `motif_name`, `sequence_name` and `strand` categorical,
+  `start` and `end` `int32`, `score` `float16`). Nothing downstream branches on how the scan was
   called. **The dtypes are the contract and not an optimisation**: 19 bytes a row against about 100
-  for what pandas would infer. Coordinates are **0-based half-open and always in the forward frame**,
-  both strands are scanned, and the strand is `+` or `-` and never unknown, because a scan knows
-  which of the two it scored. The engine is MOODS, which has no strand concept: the adapter doubles
-  the matrix list with reverse complements, computes a cutoff per entry, and splits the results back
-  by index — and a position reported for a reverse-complement matrix is already a forward-frame
-  start, which the suite asserts against the engine rather than trusting. **The threshold is a
-  per-position p-value**, 1e-4 by default, converted per motif against the background; the `score`
-  column carries log-odds **in bits** (MOODS scores in nats and the one conversion lives in the
-  adapter) and no per-hit p-value is computed. **Motifs shorter than 7 positions are not scanned and
-  are named on the result** rather than called at a looser cutoff than was asked for: a 6-mer has
-  4096 possible words, so its best match has p = 2.44e-4, and an engine asked for 1e-4 anyway clamps
-  and over-calls in silence on roughly 98 of 879 vertebrate motifs. **Input is upper-cased, so a
-  soft-masked sequence yields exactly the hits its upper-case equivalent does**, with no option to
-  honour the masking — the one place a scan contradicts a shared-kernel term, recorded as ADR-0012.
-  A FASTA record's name is its header **up to the first whitespace**, matching what STAR and chromap
-  write into an alignment made from the same file, so a hit table joins against that alignment with
-  nobody renaming anything; plain or gzipped, and records are read one at a time. The table carries
-  its provenance on `frame.attrs` — the background, the threshold, the release, the tax group, and
-  which motifs were scanned and which skipped — read off the set, so a `JasparDatabase` names its
-  release and a filtered one answers `None` for both, since a filtered release is no longer that
-  release. This release is serial with a uniform background; the scan produces batches internally,
-  one per named sequence, so a Parquet sink and a parallel source attach without restructuring it.
+  for what pandas would infer. Coordinates are **0-based half-open and always in the forward
+  frame**, both strands are scanned, and the strand is `+` or `-` and never unknown. The engine is
+  MOODS, which has no strand concept: the adapter doubles the matrix list with reverse complements,
+  computes a cutoff per entry, and splits the results back by index. A position reported for a
+  reverse-complement matrix is already a forward-frame start, which the suite asserts against the
+  engine rather than trusting. **The threshold is a per-position p-value**, 1e-4 by default,
+  converted per motif against the background. The `score` column carries log-odds **in bits**, and
+  no per-hit p-value is computed. **Motifs shorter than 7 positions are not scanned and are named on
+  the result**: a 6-mer has 4096 possible words, so its best match has p = 2.44e-4, and an engine
+  asked for 1e-4 anyway over-calls in silence on roughly 98 of 879 vertebrate motifs. **Input is
+  upper-cased, so a soft-masked sequence yields exactly the hits its upper-case equivalent does**,
+  with no option to honour the masking (ADR-0012). A FASTA record's name is its header **up to the
+  first whitespace**, matching what STAR and chromap write into an alignment made from the same
+  file, so a hit table joins against that alignment with nobody renaming anything. Plain or gzipped,
+  and records are read one at a time. The table carries its provenance on `frame.attrs` — the
+  background, the threshold, the release, the tax group, and which motifs were scanned and which
+  skipped — read off the set, so a filtered release answers `None` for release and tax group. This
+  release is serial with a uniform background. The scan produces batches internally, one per named
+  sequence, so a Parquet sink and a parallel source attach without restructuring it.
 - **Name a JASPAR release and query it like a dictionary that filters itself.**
   `JasparDatabase("2024", "vertebrates")` fetches that release's transfac file once into
-  `<LIULAB_DATA>/motif/jaspar/`, flat and with the release and tax group in the name, and every
+  `<LIULAB_DATA>/motif/jaspar/`, flat and with the release and tax group in the name. Every
   construction after re-reads it and fetches nothing. Both releases (2024, 2026) and all eight tax
-  groups are supported, vertebrates by default, and `"all"` selects the union file — whose
-  published name drops the tax group, which is why the cached name is built rather than copied.
-  Motif data is the **first thing filed beside the assembly tree rather than inside it**, since a
-  motif belongs to no assembly. The transfac serialization is read rather than `.jaspar`: it
-  carries the count matrix and all six annotations in one file and does not round counts to
-  integers. **Annotation values are separated by a semicolon and never by a comma** — commas live
-  inside single values (`C3H(C),C2HC zinc-fingers like factors`, `PBM, CSA and/or DIP-chip`), so
-  splitting on one would silently corrupt about fifty records per release. A `MotifSet` holds the
-  motifs — built from *any* motifs, so a model's de novo matrices get the same API — and indexing
-  it resolves a matrix id, a bare base id or a unique factor name to **exactly one** motif, never a
-  union type. An ambiguous name raises `AmbiguousMotifNameError` naming every matching id and the
-  call that returns them all, since 66 names collide in 2024 and 71 in 2026; `by_name` always hands
-  back a tuple, of one where the name is unique, and absence raises rather than answering with
-  nothing. Filtering takes annotation keywords (prose matched as a case-insensitive substring, ids
-  matched exactly) or an arbitrary predicate and returns a plain `MotifSet`, because **a filtered
-  release is no longer that release**. There is **no completion record here and that is
-  deliberate** — the files are under 1 MB, so integrity is a download to a temporary name renamed
-  into place only on success, plus a parsed-motif count checked against a constant on every read,
-  which turns a truncated file into an error rather than half a release. A non-redundant release
-  shipping one version of each matrix is asserted rather than assumed, because it is what makes a
-  bare base id address one motif.
+  groups are supported, vertebrates by default, and `"all"` selects the union file, whose published
+  name drops the tax group — which is why the cached name is built rather than copied. Motif data is
+  the **first thing filed beside the assembly tree rather than inside it**, since a motif belongs to
+  no assembly. The transfac serialization is read rather than `.jaspar`: it carries the count matrix
+  and all six annotations in one file and does not round counts to integers. **Annotation values are
+  separated by a semicolon and never by a comma**, because commas live inside single values
+  (`C3H(C),C2HC zinc-fingers like factors`), so splitting on one would silently corrupt about fifty
+  records per release. A `MotifSet` holds the motifs, built from *any* motifs, so a model's de novo
+  matrices get the same API. Indexing it resolves a matrix id, a bare base id or a unique factor
+  name to **exactly one** motif, never a union type. An ambiguous name raises
+  `AmbiguousMotifNameError` naming every matching id and the call that returns them all, since 66
+  names collide in 2024 and 71 in 2026. `by_name` always hands back a tuple, and absence raises
+  rather than answering with nothing. Filtering takes annotation keywords — prose matched as a
+  case-insensitive substring, ids matched exactly — or an arbitrary predicate, and returns a plain
+  `MotifSet`, because **a filtered release is no longer that release**. There is **no completion
+  record here and that is deliberate**: the files are under 1 MB, so integrity is a download to a
+  temporary name renamed into place only on success, plus a parsed-motif count checked against a
+  constant on every read, which turns a truncated file into an error rather than half a release. A
+  non-redundant release shipping one version of each matrix is asserted rather than assumed, because
+  it is what makes a bare base id address one motif.
 - **`Motif.tf_class` and `Motif.tf_family` are tuples, not strings.** They are genuinely
   multi-valued — a dimer carries one of each per half — so they join `uniprot_ids` and `pubmed_ids`
   as plural annotations, and a bare string handed to any of the four is refused rather than stored
@@ -918,7 +652,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   position in bits, its consensus as a typed `DNA` rather than a `str`, and its sequence logo
   through `plot()`, which takes an optional axes and returns the axes so a grid of motifs is one
   figure — with the y-axis in bits, the same quantity trimming thresholds on. **Trimming acts only
-  on the ends**, so a degenerate spacer in the middle of a dimer can never split it in two; it
+  on the ends**, so a degenerate spacer in the middle of a dimer can never split it in two. It
   honours an optional maximum length, never goes below the minimum scannable length of 7 — a 6-mer
   has 4096 possible words, so its best match has p = 2.44e-4 and cannot reach the default 1e-4
   threshold — and returns a motif with the same id, the same name and an offset such that a
@@ -948,7 +682,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   declares one category today, `rRNA`, holding **everything rRNA-derived it carries** — mature
   genes, pseudogene copies, mitochondrial rRNAs, and yeast's 35S precursor. It is drawn for
   counting rRNA-derived reads as a QC metric rather than for describing rRNA biology, so it is
-  inclusive and its genes may overlap; each list says in its own prose what it holds and what it
+  inclusive and its genes may overlap. Each list says in its own prose what it holds and what it
   under-reports. A merged annotation answers with one source per contributing component, so a
   chimera's genes stay attributable. **An annotation that cannot answer raises rather than
   returning nothing**: `NoGeneCategoriesError` for one no list ships for and
@@ -962,37 +696,353 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   `sacCer3`: a blank cap reads back as `None` and means nobody has chosen a bound, which changes no
   alignment. Every value is set by hand and none is derived from an annotation, whose longest intron
   is a floor on what the organism does rather than a ceiling on it (ADR-0010). Nothing in this
-  package reads either column; they are curated here for whoever configures the aligner.
+  package reads either column. They are curated here for whoever configures the aligner.
 - **Ask what a motif looks like: `MotifSet.compare`.** Hand it one `Motif`, several, or a whole
-  `MotifSet` and it compares them against the motifs of the set it is called on — read
+  `MotifSet` and it compares them against the motifs of the set it is called on. Read
   `release.compare(de_novo)` as *compare these against this release*. The use case is naming: a
   chromBPNet or TF-MoDISco run hands back matrices with no names on them, and this says which
   published motif each one most resembles. The comparison is `memelite`'s `tomtom`, handed the same
   4 × L probability matrices `Motif.probabilities` already produces, so **nothing transposes,
-  permutes or rescales on the way in**; this is the only place `memelite` is used, its scanner
-  having been measured against MOODS and rejected. What comes back is a `MotifComparison` wrapping
-  an `xarray.Dataset` **indexed by motif id on both axes**, so `data.sel(query="pattern_0",
-  target="MA0139.2")` asks about one pair and `data["neg_log10_p"]` is a similarity matrix ready to
-  cluster; it carries negative log10 p, score, offset, overlap and strand, the strand always `+` or
-  `-` because a comparison knows which of the two it aligned. **Negative log10 p is stored and raw
-  p never is**: the array holds half precision, whose smallest normal value is 6.1e-5, so a p of
-  1e-20 stored raw would flush to zero and take every motif's best match down with it — stored as
-  20.0 it is an ordinary small number, and an underflowed p reads back as infinite rather than as a
-  warning. `to_frame()` flattens to one row per pair, defaulting to the single best target per
-  query and taking a larger limit or none at all, ranked by p with score and then the target set's
-  own order breaking ties — which is also the order the engine's fast path returns, so the two
-  agree on which target is best. **Passing `top=n` is not a convenience over the complete answer**:
-  it takes `tomtom`'s nearest-neighbour path, which never scores the targets that lose, so the
-  result is *ragged* — dimensions `(query, rank)` with the target ids riding along as a variable,
-  because rank 0 names a different motif for each query. Such a result **cannot be widened without
-  recomputing, and that is accepted rather than a defect**; `RaggedComparisonError` says so and
-  names the call that would. A `top` above the number of targets is refused up front, because the
-  engine answers that one with a `SystemError` out of numba that names nothing a caller can act on.
-  **A motif compared against itself aligns to itself perfectly** — offset 0, the whole length
-  overlapping, on `+`, and no target scores higher. It is usually ranked first too, and the
-  exception is documented rather than papered over: TOMTOM's p-value rewards a short dense
-  alignment, so a long motif that embeds a shorter one can rank the shorter one above itself, which
-  both of the 31- and 33-column CTCF matrices do with the 15-column `MA0139.2` inside them.
+  permutes or rescales on the way in**. This is the only place `memelite` is used. What comes back
+  is a `MotifComparison` wrapping an `xarray.Dataset` **indexed by motif id on both axes**, so
+  `data.sel(query="pattern_0", target="MA0139.2")` asks about one pair and `data["neg_log10_p"]` is
+  a similarity matrix ready to cluster. It carries negative log10 p, score, offset, overlap and
+  strand, the strand always `+` or `-`. **Negative log10 p is stored and raw p never is**: the array
+  holds half precision, whose smallest normal value is 6.1e-5, so a raw 1e-20 would flush to zero.
+  `to_frame()` flattens to one row per pair, defaulting to the best target per query and taking a
+  larger limit or none, ranked by p, then score, then the target set's own order. **Passing `top=n`
+  is not a convenience over the complete answer**: it takes tomtom's nearest-neighbour path, which
+  never scores the targets that lose, so the result is *ragged* — dimensions `(query, rank)` with
+  the target ids riding along as a variable. It cannot be widened without recomputing, and
+  `RaggedComparisonError` says so and names the call that would. A `top` above the number of targets
+  is refused up front. **A motif compared against itself aligns to itself perfectly** — offset 0,
+  the whole length, on `+`, and no target scoring higher. It is usually ranked first too, the
+  exception being that a long motif embedding a shorter one can rank the shorter one above itself,
+  as both CTCF matrices do with `MA0139.2` inside them.
+
+### Changed
+
+- **CI runs one static task, and the docs deploy builds the way a laptop does.** The lint job
+  spelled out four steps. GitHub stops a job at its first failing step, so a ruff error hid
+  pyright's verdict and the site build. A new `check-static` task names the seven static steps
+  once, and the gate runner runs them at once. One run now reports everything to fix. The step
+  list also lived in two places that disagreed. The gate ran the tests and not the site build; CI
+  ran the site build and not the tests. `check` is now those seven steps plus the tests, so a
+  green gate and a green CI mean the same set passed. The docs workflow published through
+  `mkdocs gh-deploy`, which skipped the record-number check that `docs-build` pairs with the
+  build. So the one path that writes the public site was the only path not checked. It now builds
+  through the task and hands `./site` to `peaceiris/actions-gh-pages`, which still replaces the
+  branch whole. Four pinned actions move up: `checkout` to v7, `setup-pixi` to v0.10.2,
+  `upload-artifact` to v7 and `download-artifact` to v8.
+
+- **Every markdown file now reads the way markdownlint asks, bar the changelog's repeated release
+  headings.** `markdownlint-cli2 --fix` did 937 of the 966 errors: table delimiter rows, emphasis
+  markers, hard tabs. The rest were hand work — a language on sixteen bare fences, a research
+  note's two headings that named the same thing, and five command blocks re-fenced from `console`
+  to `bash`, the fixer having stripped the `$` prompt a console block needs. No table cell and no
+  command changed.
+
+- **The Unreleased entries above are shorter, and vale's three jargon words are gone.** The file
+  graded 12.47 against a cap of 11, and the whole overage sat in this section: the shipped releases
+  pass on their own. Ten entries that had grown into essays are cut back to what changed, and 70
+  semicolon joins are two sentences each. It now grades 10.82. No shipped entry was touched, and
+  every measurement dropped here is already in `docs/research/`.
+
+- **A missing type annotation now fails the gate, and the type checker is pinned exactly.** The
+  full-annotations rule was stated as non-negotiable with nothing behind it — pyright ran at
+  `basic`, where a missing annotation is not a diagnostic — and the router's own rule text said so.
+  **Raising the mode is not by itself the mechanism**, which is the thing worth writing down:
+  measured against pyright 1.1.411's own rule tables and confirmed on a probe file, `standard` adds
+  exactly five checks over `basic` — possibly-unbound variable, incompatible method override,
+  incompatible variable override, overlapping overload, function member access — and leaves
+  `reportMissingParameterType` and `reportUnknownParameterType` at `none` exactly as `basic` does.
+  Only `strict` turns those on, and it turns on **556** other diagnostics with them, which is a
+  different decision than this one. So the two rules are named beside the mode, and that is what
+  makes the rule's text true. **All of it reports zero errors across 156 files**, so there was no
+  fallout to fix: every function under `src/`, `tests/` and `scripts/` already carried the
+  annotations the rule asked for, and what changes is that the next one that does not fails
+  `pixi run check` rather than depending on a reviewer noticing. pyright is pinned `==1.1.411` where
+  every other dev dependency floats — the language server an editor runs is this same checker, so a
+  version that drifts between the two is the editor and CI disagreeing about one file, and a release
+  of it would turn CI red on a commit that changed nothing. It is the version already resolved, so
+  `pixi.lock` did not move. Bumping the pin becomes a commit of its own.
+
+- **Python narrows to 3.13, so an install on 3.12 now fails rather than succeeding untested.**
+  `requires-python` floored at `>=3.12` while the lock held one interpreter, so no lane ever ran
+  the version the floor advertised. The two settings that looked like they held it — `ruff
+  target-version` and `pyright pythonVersion` — read source syntax and not a runtime, and the
+  failure a 3.12 user would actually hit is a 3.13-only behaviour in a dependency, which neither
+  can see. Both are **deleted rather than retargeted**: ruff derives its target from
+  `requires-python` and pyright takes its version from the environment's interpreter, so Python is
+  declared in exactly two places, `requires-python` and the pixi pin. The `Programming Language ::
+  Python :: 3.12` classifier is gone with them, which is what makes a 3.12 resolver refuse the
+  package instead of installing it. A 3.12 test lane was the alternative and stays the answer if a
+  consumer pinned to 3.12 turns up. It lost because nothing is known to need one and every bioconda
+  pin would have to resolve on a second interpreter (ADR-0025). No solved package changed — the
+  environment was already 3.13.
+
+- **The package's docstring examples now run, in the unit lane.** `AGENTS.md` asks for at least
+  one runnable example on every public object and the package carries over twelve hundred of them.
+  Nothing ran a single one, so the bar was held by review alone. `pytest` now collects `src/genome`
+  with `--doctest-modules` and `ELLIPSIS` set at config level, which puts every example in
+  `pixi run check` and in CI beside the tests it already runs. Three examples had drifted and are
+  fixed. `genome.store.prepared.login_node_help` promised in its `Returns` prose, and asserted in
+  its example, a sentence ending in the quoted command; the command moved mid-sentence and neither
+  followed. The two `UCSCGenomeDownloader` examples each had a line whose trailing text read as a
+  `# doctest: +SKIP` directive and was prose, so the one line that would fetch a genome from UCSC
+  was the one line *not* skipped — harmless only because the line above it had been skipped into a
+  `NameError`. **The suite's two autouse guards were given reach over `src/` first, and proven,
+  before either directive was repaired.** A conftest's fixtures reach the directory it sits in and
+  nothing above, so a doctest item collected from `src/` ran behind neither the offline guard nor
+  the per-test **Data dir**. Repairing the directive while that was true would have turned a latent
+  hazard into a live multi-gigabyte download from CI. Both guards now live in `tests/_guards.py`,
+  loaded by a root `conftest.py` sitting above both trees, and a test runs a throwaway example in a
+  pytest of its own to prove the reach rather than assert the shape of a file. The examples carrying
+  `+SKIP` still run nothing, and whether an example nothing runs meets the bar is a separate
+  question. **One suite-wide change came with the load.** Hypothesis's default 200 ms deadline is a
+  per-test wall-clock budget, and in a ten-worker lane where several modules spawn process pools of
+  their own it reads the scheduler rather than the code. It fired three times in sixteen runs once
+  the examples were collected, and never in eight without them. It is now off for the suite, which
+  is the same answer this repository already gave when it declined to assert such a budget itself.
+
+- **The built site carries no architecture-decision-record numbers.** A record number is a
+  citation between agents: it resolves for anyone reading the source, because the record tree is
+  in the repository beside it, and for nobody reading the site, which excludes that tree on
+  purpose. One hundred and eleven numbers were published on the API reference page — seventy-six
+  rendered from docstrings, thirty-five inside "Source code in ..." listings. Docstrings keep
+  citing records, and `mkdocstrings` now drops the citation as it renders. Source listings are no
+  longer published, since a listing with the numbers stripped out would disagree with the file it
+  names. `genome.__doc__` and `help()` are untouched. Two guards hold it: a record is cited as a
+  trailing parenthetical — `(ADR-0006)` — which the test suite checks so the removal is total,
+  and `pixi run docs-build` fails if a number reaches the built site by any route.
+
+- **The API reference no longer embeds source listings.** Use the source links on GitHub. The
+  page still carries every signature, argument type and attribute exactly as the code declares
+  them, which is what it is for.
+
+- **User-facing messages no longer cite architecture-decision-record numbers.** Nine exception
+  messages, one CLI command's `--help`, and the `limits` string that rides on a *successful*
+  symbol match dropped a trailing `(ADR-00xx)`. The records live in a tree kept out of the built
+  site on purpose, so the number resolved nowhere a reader could reach. Every message still says
+  in words what the record decided, and still names the same next action. **The `limits` change is
+  the one a caller may be reading**: it is not an error path — `XrefSet.for_symbols(...)`
+  `.match_symbols(...).limits`, the `"limits"` key of `as_json()`, and what `genome xref symbols`
+  echoes to stderr on every mouse or worm run all carry it, so code matching that string exactly
+  needs updating. A guard test holds the invariant rather than the list: a record number in any
+  string this package can print, or in any CLI command's docstring, fails the suite. Comments and
+  the docstrings of ordinary objects keep their citations, which are between agents and stay.
+
+- **BREAKING — the CLI grows a sub-app per topic, and fourteen commands are renamed.** `genome
+  register` is `genome assembly register`, `genome tf-gene-list` is `genome tf gene-list`, `genome
+  xref` is `genome xref ids`, `genome match-symbols` is `genome xref symbols`, `genome homologs` is
+  `genome homology links`, `genome motif-scan` is `genome motif scan`, and the eight remaining
+  moves follow the same rule — a sub-app named for the package its commands ship from, which is
+  why the Orthology context's is `homology`. `version`, `revcomp` and `doctor` belong to no topic
+  and are unchanged. Each topic package now ships its own CLI module and its own renderers beside
+  the result types they render, so what `gene-list` prints and what a `GeneList` holds change in
+  one place. `genome.cli` keeps the three commands, the `add_typer` calls and no rendering helper,
+  and the console script still points `genome` at `genome.cli:app`. The seam under the commands did
+  not move: no command constructs a `Genome` it did not construct before, every one still takes
+  `--json`, and every error message and docstring naming a command names the new spelling.
+  **Every old spelling still runs for this one release**, hidden from `genome --help` and printing
+  a deprecation notice on **stderr** so `--json` on stdout still parses — one function object per
+  command registered under both names, from one table and one loop in `genome.cli`. The single
+  exception is `genome xref`, whose old spelling is a sub-app's name as well as a command's: the
+  `xref` group answers it by handing an unrecognised first token to `ids`, with the same notice on
+  stderr. **The aliases go in the release after this one**, deleted as a unit with that table.
+- **`io/` retired: every context owns its own I/O, and what is left is a store.** The one
+  directory grouped by *kind of work* is gone, and its modules moved to whatever they are about.
+  `genome.assembly` is the whole Assembly context — `genome.py`, `chimera.py` and the seven
+  `io/` modules its glossary already claimed (`source`, `components`, `download`, `chimera` as
+  `chimera_build`, `registration`, `fasta`, `twobit`). `genome.annotation` is the annotation
+  package plus the shipped **Curated gene list**, which takes the glossary's own name as
+  `annotation/curated.py` so that a module and the registry's `gene_list()` function no longer
+  share one namespace. `genome.store` keeps what belongs to no context and is reached by all of
+  them: the **Data dir** root (`data_dir.py`), the one fetch step, the **Completion marker**,
+  checksumming (`io/utils.py` → `store/checksum.py`) and the **Prepared set** pipeline — and a
+  test reads every file under it to hold that none imports a context back. **`metadata.py`
+  split**: the assembly table is `genome.assembly.metadata` and the annotation table is
+  `genome.annotation.metadata`, the two having shared their shape and nothing else. **Every
+  root under the **Data dir** now sits with the code that reads what lives under it** — `motif/` in
+  `tf.motif.jaspar`, `xref/` in `xref.xref`, `homology/` in `homology.compara` — and the pipeline
+  they share declares none of the three. No deferred import was added. The three that existed
+  are carried over with their reasoning. `tests/` mirrors the new tree, one package per package,
+  and every import-edge guard moved with the module it defends. **Nothing the package exports
+  changed**: `genome.__all__`, the CLI's commands and its `--json` are untouched, and the
+  shipped `data/` tree did not move.
+- **One module writes every shipped table, where three build scripts each declared the writer
+  again.** `genome.shipped_writer` owns the unquoted TSV rendering with its header, the
+  deterministic gzip and the provenance merge that replaces a row by its key and re-sorts the
+  file. `scripts/build_tf_census.py`, `scripts/build_tf_cofactor.py` and
+  `scripts/build_tf_links.py` keep only their publisher's recipe. **The writer is handed the
+  reader's own table declaration**, so a file is held to the header, the required columns, the
+  flag spellings and the key it will be read under *before it reaches disk* — the column tuples,
+  the file names and the value separator are declared once and imported by both halves, and no
+  build script restates a reader's constant or spells a file suffix of its own. Each generator
+  supplies its own error class and repair, so a refused build names the recipe to fix rather than
+  telling whoever ran it to run it again. The byte-stability promise the gzip call carries is
+  stated in that one module, where three write functions and three module docstrings used to
+  carry it between them. `tests/test_shipped_writer.py` holds it
+  to all of that with no download, and re-renders every shipped table's own rows back to the bytes
+  that ship. `VALUE_SEPARATOR` moves to `genome.shipped` beside the flag spellings and is
+  re-exported from `genome.tf`. Each format's declaration is public as `CENSUS_FORMAT`,
+  `COFACTOR_FORMAT`, `LINK_FORMAT` and their provenance peers, and the two species-keyed
+  provenance tables now declare that key. **No shipped `.tsv` or `.tsv.gz` byte changed.**
+- **`io/gtf.py` split four ways, and gene id stem resolution became findable.** The largest
+  module in the package held four clusters that barely touched each other, and is now
+  `genome.io.annotation`, a package of four: `registration.py` puts an annotation on disk — the
+  fetch, the placement, the **Chromosome** check, the repair-command strings, the **Completion
+  marker**, the **Merged annotation** a chimera build derives, and the two registrars addressed
+  by assembly name. `registry.py` holds `AnnotationRegistry`, the three scans, the **Default
+  annotation** rule and the by-assembly-name questions. `stems.py` holds the **Gene id stem**
+  crossing that the Xref, Orthology and TF contexts all make; and `database.py` is the `gffutils`
+  adapter, sixty lines, **the only module in the package that imports the library** — held by a
+  test that reads every file under `src/` rather than only the four. Resolving stems still walks
+  the database's gene rows one at a time, now over a generator that yields off the cursor, so a
+  GENCODE-sized annotation is still never held in memory. `AnnotationRegistry` stays one class
+  with one interface and calls across the four. **Nothing a caller can see changed.** `genome`
+  and `genome.io` export exactly the names they exported before, `genome.__all__` is untouched,
+  and every command's `--json` emits the same keys in the same order. `tests/test_gtf.py` splits
+  the same four ways into `tests/annotation/`, with the shared registration helpers in one
+  `conftest.py`. Every test that was there is still there, under its own name.
+- **Every result type moved beside whatever returns it, and `genome.io.results` retired.** The
+  module held frozen dataclasses whose one shared property was being returned. A third of it
+  belonged to contexts no module under `io/` imports. `RegisteredAssembly` and `VerifiedAssembly`
+  are now in `genome.io.download`, beside the two functions that build them; `RegisteredAnnotation`,
+  `AnnotationStatus`, `AnnotationStatusRow`, `GeneList`, `GeneListSource`, `ResolvedGeneIds`,
+  `chromosome_check_summary` and `annotation_register_command` in `genome.io.gtf`; `ResolvedStems`,
+  `ResolvedXrefIds`, `ResolvedSymbols` and `SymbolMatch` in `genome.xref.xref`; `HomologyLink` and
+  `HomologyAnswer` in `genome.homology.compara`; `ResolvedHomologs` in
+  `genome.homology.annotation`. `ResolvedGeneIds` is the one type two contexts share and it lands
+  beside `resolve_gene_ids`, because the rule is where a type is returned and not where it is read.
+  The module had been opened as a seam both halves of `io` could reach, and that reason expired
+  once each type sat beside its producer. The guard that closed it is replaced by its assembly-half
+  mirror in `tests/test_download.py`, `io.gtf` already holding the annotation half's. The `as_json`
+  convention the module's docstring stated is now ADR-0022. **Nothing a caller can see changed.**
+  Every name `genome`, `genome.io` and `genome.xref` exported still imports from the same place,
+  `genome.__all__` is untouched, and every command's `--json` emits the same keys in the same order.
+- **One module reads every shipped table, where six brought their own loader.** `genome.shipped`
+  owns resource lookup, gzip, header validation, cell parsing, the blank-cell rules, duplicate-key
+  refusal and the shape of the error a broken file raises. `metadata.py`, `xref/metadata.py`,
+  `homology/metadata.py`, `tf/gene/census.py`, `tf/cofactor/table.py` and `tf/link.py` keep a
+  **table declaration** — resource path, columns, row type, the noun the table is called by and the
+  command that repairs it — and nothing else. Six failures are now checked in one place and reach
+  every table: an empty file, a header that is not the declared columns, a row with the wrong cell
+  count, a blank required cell, a flag spelled a way no table spells one, and a repeated key. The
+  last is declared per table, since a motif link table carries many rows per **Gene id stem** by
+  design. **The curated assembly, annotation and xref tables gain the header validation they
+  lacked**: those two readers went through pandas and checked no header at all, so a renamed or
+  missing column reached the cell parser as a blank cell — or read as `None` where the column was
+  optional. Every message still names its own noun and its own repair, pinned word for word by
+  `tests/test_shipped.py`, and several gained a repair they never carried. `species_slug` and
+  `parse_cell` move to live with the reader. `genome.metadata`, `genome.tf.gene` and
+  `genome.tf.cofactor` re-export them, so every existing import path still resolves. No shipped
+  `.tsv` or `.tsv.gz` byte changed — this is the reader half only.
+- **One module prepares every release-pinned set, where three had each written the pipeline out.**
+  A **Prepared set** — a **Motif set**, an **Xref set**, a **Homology set** — is files pinned to a
+  **Release**, belonging to no assembly, filed beside the assembly tree under the **Data dir**.
+  `genome.io.prepared` now owns the whole of preparing one: the set's directory, the working area,
+  the fetch, the digest, the staged rename, the **Completion marker** and the one sentence that
+  sends a caller to a login node. A source declares a URL, a checksum and how to slice or parse
+  what arrives, and nothing else — a test prepares a fictitious fourth set end to end on exactly
+  that. The three roots under the **Data dir** are declared together there (`homology/` included,
+  which used to be spelled in `homology/compara.py`), and each context keeps its own reader, its
+  own answer types and its own not-downloaded error quoting its own exact prepare command.
+- **Where a checksum is enforced now follows what it covers, and decompress-while-hashing has one
+  implementation.** A pin over the **unpacked** bytes (ADR-0006) is checked as the file is streamed
+  and unpacked. A pin over the archive as served — Ensembl Compara's own md5 of its `.gz` — is
+  pooch's `known_hash`, as before. The same streaming step digests the stored slice and every
+  re-read of it, so the whole-slice-into-memory read in `xref/xref.py` is gone and the four
+  spellings of *unpack while hashing* are one. The working area is now kept exactly when something
+  can vouch for what is in it: with an archive pin pooch re-checks a leftover download, so an
+  interrupted 110 MB fetch still costs no second download. With no such pin a leftover is
+  unverifiable and is swept before fetching rather than adopted.
+- **A JASPAR release now writes a Completion marker, and is prepared one set per directory.**
+  It used to write none, substituting an atomic rename and a motif count on the grounds that the
+  files are under a megabyte. That covered *is this finished* and missed the other half of what a
+  record is for — the only answer to *how was this made*: the URL, the package version, when, and
+  what the bytes hashed to. JASPAR publishes no checksum to pin, so what is recorded is the digest
+  of what was stored and every re-read is held to it. The motif count and the base-id check stay,
+  because they say the file is the *right release, whole*, which no digest of ours can. A release
+  is therefore prepared in `motif/jaspar/<release>/<tax group>/` rather than flat under
+  `motif/jaspar/`. **A file prepared by an earlier version is left where it lies and prepared again
+  under the new layout**, one download of under a megabyte. A fetch that fails now raises
+  `MotifSetNotDownloadedError` naming the call to make on a login node, where it used to surface
+  pooch's own transport error.
+- **The TF context moved out of the Annotation module, and the registry kept one seam.**
+  `AnnotationRegistry.resolve_gene_ids` is now the only identifier surface `genome.io.gtf` exposes:
+  it answers *which gene ids does this **Gene id stem** name here* and knows nothing about what it
+  is handed a list of. Roughly 900 lines of TF code moved out from behind it — `TFGene`,
+  `TFGeneList`, `NoTFCensusError` and the census plumbing to the new `genome.tf.gene.annotation`;
+  `TFCofactor`, `TFCofactorList`, `NoCofactorTableError` and the table plumbing to
+  `genome.tf.cofactor.annotation`; and `UnknownSpeciesError`, shared by both halves, to
+  `genome.tf.species`. `genome.io.gtf` now imports nothing under
+  `genome.tf`, held by a guard: those import lines used to pull in sixteen `genome.tf`
+  modules — both shipped-table readers, the motif link table and the whole motif tree down to the
+  scan, its worker pool and its Parquet sink — so neither module drags the motif tree in any
+  longer. The package still re-exports the five TF names eagerly, so `import genome` loads
+  `genome.tf` as it always did — what closed is the edge from `io/`, not the cost of the
+  re-export. **Nothing a caller can see changed.** `import genome` still yields `TFGeneList`,
+  `TFCofactorList`, `NoCofactorTableError`, `NoTFCensusError` and `UnknownSpeciesError` under those
+  names and `genome.__all__` is untouched. `Genome.tf_gene_list()` and `Genome.tf_cofactor_list()`
+  answer as before and now delegate into `genome.tf` rather than into the registry. `genome
+  tf-gene-list` and `genome tf-cofactor-list` keep their stdout, their stderr attribution lines,
+  their `--json` records and their exit codes. Adding a second bio topic that wants an annotation's
+  own gene ids is now one directory under `src/genome/` rather than an edit to four modules, three
+  of which have no stake in it.
+- **Worker resolution left the motif package.** `genome.tf.motif.workers` is now
+  `genome.workers`. It answers exactly the same one question — how many worker processes a run
+  may use: an explicit count as given, else the Slurm allocation, else this process's affinity,
+  else the machine — and it always had no domain coupling: about a hundred lines that import
+  nothing else from this package and name no motif, assembly or region. `genome.cli` already
+  reached past the motif package to get at it, which was the tell. `genome.tf.motif` goes on
+  re-exporting `DEFAULT_WORKERS`, `SLURM_CPU_VARS` and `resolve_workers`, so
+  `from genome.tf.motif import resolve_workers` keeps working unchanged and no answer changes.
+- **CI no longer recompiles memelite's JIT on every run, and the suite is a third of its size.**
+  The `test` lane's largest single item was not a test: `memelite`'s scan and compare engines are
+  `@numba.njit(cache=True)`, numba writes that cache inside the pixi env, and `setup-pixi` saves
+  its env tarball before any test has run — so every run recompiled from source, 27.5 s, 47% of
+  the lane's wall. `NUMBA_CACHE_DIR` now points at a workspace path cached on the `pixi.lock`
+  hash. Separately the suite was cut **2425 → 933 tests with coverage unchanged at 98%** (60 → 61
+  missed statements of 4149), by merging sibling one-assert tests that shared a fixture and
+  collapsing parametrize tables that walked one code path with many rows of data. All 169 test
+  classes and all 154 distinct refusal messages survive, checked as whole-tree set differences
+  against the previous commit. Serial **56.3 s → 24.0 s**, parallel **17–19 s → 8.4 s**, the
+  `check` gate **24 s → 10 s**. Measurements and method:
+  `docs/research/test-suite-cost-and-parallelism-2026-08-30.md`.
+- **The unit lane distributes by group rather than by load.** Nine tests spawn their own process
+  pools. Distributed by load, several could fork pools at once and the lane's wall went bimodal —
+  13.5 s or 16.1 s on the same commit, decided by scheduling alone. `--dist=loadgroup` pins each
+  such module to one worker and is faster on a 4-core runner too (9.4 s against 12.3 s). The
+  worker cap moves 8 → 10. On a CI runner `auto` finds four and the cap does not bind.
+- **The docs site is rewritten for a reader who writes Python and is not a genomicist.** Three long
+  pages become eleven task pages under three nav sections: Get started, then *Working with a genome*
+  (Assembly, Sequences and regions, Annotations, Aligner indexes), *Topics* (Transcription factors,
+  Motifs, Gene identifiers, Homology) and *Interfaces* (a CLI overview and two command pages, plus
+  the API reference). `docs/genome.md`, `docs/sequences.md` and `docs/cli.md` are gone, split into
+  the pages that replace them. **`xref` and `homology` get Python coverage for the first time**, and
+  so do the JASPAR motif surface and the shipped TF-to-motif link table, which appeared nowhere
+  before. Biology and file-format context get a sentence. Design rationale and ADR numbers get
+  nothing, since `docs/adr/`, `docs/context/` and `docs/research/` are excluded from the built site.
+  Every example is read-verified against the source, and every quoted output is one that was
+  actually produced. **`docs/reference.md` drops from 59 module directives to eight package
+  sections**, rendering only what each package's `__init__.py` re-exports, so the page no longer
+  publishes some fifty private modules to a reader who should never reach for them. `genome.store`
+  re-exports nothing on purpose and so gets no section. The README is rewritten to the same pitch
+  and points at the site. Nothing under `src/` changed.
+
+### Removed
+
+- **pre-commit, a second toolchain the environment manager did not control.**
+  `.pre-commit-config.yaml` pinned `ruff-pre-commit` at `v0.15.16` and let pre-commit build that
+  copy in an ephemeral environment of its own, while `pixi.lock` resolved the ruff the gate runs.
+  Two versions formatting one file can disagree, so a commit the hook passed could fail
+  `pixi run check` — and the gate is what CI runs. The hook file also carried its own rules —
+  trailing whitespace, end-of-file, YAML and TOML parses, a 500 KB file cap — enforced at commit
+  time on one machine and by nothing in CI, which is a check that reads as green because it never
+  ran there. Nothing in the repository told a reader to install the hooks except the removed file's
+  own header. `pre-commit` leaves the `dev` feature and the lock loses it with `cfgv`, `identify`
+  and their build dependencies. The entry point is `pixi run check`, unchanged.
 
 ### Fixed
 
@@ -1056,6 +1106,15 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 - **The Orthology glossary no longer says the code does not exist.** `docs/context/orthology.md` and
   the context map's Orthology row both carried the *(decided, not built)* marker this branch made
   false.
+- **The project URLs name the account that actually holds the repository.** `Homepage`, `Issues` and
+  `Changelog` all said `github.com/lhqing/liulab-genome`, which is not where this project lives —
+  and those three are the only copy of that address a package index shows, so the Homepage and
+  Issues links on the index page went somewhere that is not this project. All three now name
+  `liuhlab`, agreeing with the site config, which had it right. Two manifest tidies ride along,
+  neither user-visible: the version fallback is gone, so a checkout with no tags in history fails
+  the build loudly instead of stamping a wheel `0.0.0+dev` — both workflows that build already
+  fetch full history, so it never fired — and the `tests/**` lint ignore drops `S101`, a rule
+  belonging to a rule set `select` does not name and which therefore fired never.
 
 ## [2026.8.0] - 2026-08-17
 
@@ -1332,7 +1391,7 @@ preparation is no longer indistinguishable from a finished one.
 
 ### Removed
 
-- **Four annotation steps leave the package surface** — `list_annotations`,
+- **Four annotation steps leave the public API** — `list_annotations`,
   `list_broken_annotations`, `default_annotation` and `fetch_annotation` are no longer re-exported
   from `genome.io`, so `from genome.io import fetch_annotation` breaks. Nothing in the package calls
   any of them by name; what a caller wants from an assembly's annotations is `AnnotationRegistry`,
@@ -1371,7 +1430,7 @@ preparation is no longer indistinguishable from a finished one.
   answered every one of them, so each was a pass-through restating its docstring:
 
   | Gone from `Genome` | Reached as |
-  |---|---|
+  | --- | --- |
   | `broken_annotations` | `genome.annotations.broken` |
   | `offered_annotations` | `genome.annotations.offered` |
   | `register_annotation(name)` | `genome.annotations.register(name)` |

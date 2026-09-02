@@ -91,6 +91,23 @@ class TestResolvingFromTheEnvironment:
         assert found >= 1
         assert found <= (os.cpu_count() or 1)
 
+    def test_an_affinity_aware_count_of_none_falls_through_rather_than_crashing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # os.process_cpu_count() may legitimately answer None, so what sits under it is not
+        # dead code: affinity where the platform has it, the machine's cores otherwise.
+        monkeypatch.setattr(os, "process_cpu_count", lambda: None)
+        found = resolve_workers(None)
+        assert found >= 1
+        assert found <= (os.cpu_count() or 1)
+
+    def test_with_nothing_left_to_ask_it_is_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The last fallback. Zero workers is not a serial scan, so no source may answer 0.
+        monkeypatch.setattr(os, "process_cpu_count", lambda: None)
+        monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+        monkeypatch.setattr(os, "cpu_count", lambda: None)
+        assert resolve_workers(None) == 1
+
 
 class TestNothingIsStarted:
     def test_resolving_starts_no_process(self, monkeypatch: pytest.MonkeyPatch) -> None:

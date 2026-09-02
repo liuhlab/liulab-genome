@@ -18,7 +18,7 @@ built against is on [Annotations](annotations.md).
 ## Which aligner
 
 | Aligner | What it maps |
-|---|---|
+| --- | --- |
 | [STAR](https://github.com/alexdobin/STAR) | RNA-seq. It is splice-aware, so a read spanning an exon junction still aligns. |
 | [chromap](https://github.com/haowenz/chromap) | ATAC-seq, ChIP-seq and Hi-C, where a read sits on one contiguous stretch. |
 
@@ -150,8 +150,8 @@ Genome("ce11").get_star_index("ensgene_v101")
 Neither aligner is in the default environment. Add the one you need with `pixi add star` or
 `pixi add chromap`, or run against the project's `aligners` environment, which carries both:
 
-```console
-$ pixi run -e aligners python build_indexes.py
+```bash
+pixi run -e aligners python build_indexes.py
 ```
 
 A missing binary raises at the point the build would have started rather than when the

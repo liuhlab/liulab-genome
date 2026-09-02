@@ -1,6 +1,6 @@
 name: CI
 
-# Five jobs, run concurrently by GitHub. Wall-clock is set by the slowest, so the shape
+# Four jobs, run concurrently by GitHub. Wall-clock is set by the slowest, so the shape
 # that matters is not "how many jobs" but "does any job do work another already did".
 # The two test lanes are a PARTITION — `-m aligner` against its negation, total by
 # boolean negation — so between them they run the suite exactly once.
@@ -19,27 +19,33 @@ permissions:
 
 jobs:
   lint:
-    name: lint + typecheck + docs
+    name: lint + typecheck + prose + docs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      # A real checkout, not a source archive: `conformance` shells out to `git ls-files`
+      # and exits without a `.git`. The default shallow depth is enough — it reads the
+      # file list, not the history.
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           environments: default
           locked: true
-      - name: ruff (lint)
-        run: pixi run -e default lint
-      - name: ruff format check
-        run: pixi run -e default fmt-check
-      - name: pyright
-        run: pixi run -e default typecheck
-      # Does the SITE build: a dead internal link, a nav entry naming a file that moved,
-      # a docstring mkdocstrings can no longer import. Folded in here rather than given
-      # a fifth runner — `default` already carries the `docs` feature, so this reuses
-      # the setup-pixi above and its whole marginal cost is the ~4 s build. Build only;
-      # deploying stays in docs.yml, the one workflow granted `contents: write`.
-      - name: mkdocs build --strict
-        run: pixi run -e default docs-build
+      # ONE step, not seven. GitHub stops a job at its first failing step, so spelling the
+      # steps out here meant a ruff error hid pyright's verdict and the site build behind
+      # it. `check-static` names the step list once — pyproject.toml owns it, so this file
+      # and a laptop cannot drift — and runs the steps concurrently through
+      # scripts/check.sh, which reports every one of them.
+      #
+      # `check-static` and not `check`: `check` is these steps plus pytest, and pytest is
+      # the `test` job below, in the environment that owns it.
+      #
+      # The SITE build is one of the steps — a dead internal link, a nav entry naming a
+      # file that moved, a docstring mkdocstrings can no longer import. It rides here
+      # rather than on a runner of its own: `default` already carries the `docs` feature,
+      # so it reuses the setup-pixi above and its whole marginal cost is the ~4 s build.
+      # Build only; deploying stays in docs.yml, the one workflow granted `contents: write`.
+      - name: pixi run check-static
+        run: pixi run -e default check-static
 
   # The unit lane: everything that does not need an aligner. It cannot select until
   # samtools, faToTwoBit and twoBitInfo answer (the verb depends on
@@ -89,8 +95,8 @@ jobs:
       NUMBA_CPU_NAME: generic
       NUMBA_CPU_FEATURES: ''
     steps:
-      - uses: actions/checkout@v5
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           environments: test
           locked: true
@@ -139,8 +145,8 @@ jobs:
     name: test (STAR + chromap)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: actions/checkout@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           environments: aligners
           locked: true
@@ -151,16 +157,16 @@ jobs:
     name: build wheel + sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # hatch-vcs needs full history to derive a version
-      - uses: prefix-dev/setup-pixi@v0.10.0
+      - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           environments: default
           locked: true
       - name: pixi run build
         run: pixi run -e default build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/

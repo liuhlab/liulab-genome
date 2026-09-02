@@ -48,7 +48,7 @@ Alliance lists with no `ENSEMBL:` cross-reference has no hub and appears in no s
 44,569 human genes and 10,668 of 88,150 mouse genes**, and **none at all** of the 46,926 worm genes.
 
 | Species | Taxon | Genes | With a hub | Namespaces carried |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | *Homo sapiens* | `NCBITaxon:9606` | 44,569 | 40,665 | Ensembl, Entrez, UniProt, HGNC |
 | *Mus musculus* | `NCBITaxon:10090` | 88,150 | 77,482 | Ensembl, Entrez, UniProt, MGI |
 | *Caenorhabditis elegans* | `NCBITaxon:6239` | 46,926 | 46,926 | Ensembl, Entrez, UniProt, WormBase |
@@ -113,7 +113,7 @@ Measured on human release 116 against NCBI's own `gene2ensembl`, both sides redu
 (Entrez GeneID, ENSG stem) pairs:
 
 | | Pairs |
-|---|---|
+| --- | --- |
 | NCBI asserts | 38,577 |
 | Ensembl asserts | 36,824 |
 | both assert | 27,554 |
@@ -124,7 +124,7 @@ threshold and comes out all but one-to-one — no GeneID names more than two ste
 by two orders of magnitude at the tail:
 
 | | NCBI | Ensembl |
-|---|---|---|
+| --- | --- | --- |
 | distinct GeneIDs | 38,546 | 28,433 |
 | GeneIDs naming exactly one stem | 38,515 (99.9%) | 25,890 (91.1%) |
 | **most stems named by one GeneID** | 2 | **72** (GeneID `79166`) |
@@ -140,7 +140,7 @@ Ensembl grades each cross-reference in an `info_type` column, so the obvious qua
 `DIRECT`. Counted over the whole release-116 file:
 
 | `db_name` | Rows | `DIRECT` | `DEPENDENT` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `EntrezGene` (human) | **552,633** | **0** | 552,633 |
 | `EntrezGene` (mouse) | **358,853** | **0** | 358,853 |
 | `EntrezGene_trans_name` (human) | 644,668 | — | `MISC` |
@@ -171,7 +171,7 @@ The file is transcript- and protein-grained, so 552,633 human rows collapse to 3
 pairs; deduplication is on the pair and happens as the file is read.
 
 | Species | Assembly | Gene-level pairs | Namespaces carried |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | *Homo sapiens* | GRCh38 | 36,824 | Ensembl, Entrez |
 | *Mus musculus* | GRCm39 | 28,681 | Ensembl, Entrez |
 
@@ -233,7 +233,7 @@ answer, and a named test reverses the whole header to prove it.
 before stripping the quotes keys the namespace by `"MOP3` and `ARNTL1"`, which nobody types.
 
 | Species | Rows | With a hub | Namespaces carried |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | *Homo sapiens* | 45,019 | 42,337 | Ensembl, Entrez, UniProt, HGNC, symbol (approved, previous, alias) |
 
 **2,682 rows carry no `ensembl_gene_id`** — mostly pseudogenes and non-coding RNAs Ensembl does not
@@ -270,7 +270,7 @@ later release rather than rebuilding it, and its file-management API lists 9.0.0
 and unlike Ensembl's. Verified by decompressing both and hashing:
 
 | Submission | Served bytes | md5 of the `.gz` | md5 of the unpacked JSON — **what the row pins** |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | MGI | 6,754,968 | `39c0fe0a8db6aa3009dd2109f0127fa8` | `a834098c9505ec7fb4a0151480a90734` |
 | WB | 5,265,513 | `d7064a579923b3ee0e8cdbf00b1b0a6f` | `4a45ce6beb26dd0dc8c053e5b2e1a835` |
 
@@ -288,7 +288,7 @@ comment, because a spelling MGI retired otherwise comes back unresolved and look
 gene that is absent.
 
 | Species | Records | With a hub | With a symbol | Namespaces carried |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | *Mus musculus* | 90,776 | 77,476 | **all 90,776** | Ensembl, Entrez, UniProt, MGI, symbol (approved) |
 | *Caenorhabditis elegans* | 48,769 | 46,926 | **all 48,769** | Ensembl, Entrez, UniProt, WormBase, symbol (approved) |
 
@@ -311,7 +311,7 @@ is a value in its `namespace` column: `symbol`, `previous_symbol`, `alias_symbol
 saying *what sort of row this is* would be the level discriminator this design refuses everywhere
 else, and the three spellings read for themselves in a shell:
 
-```
+```bash
 zcat homo_sapiens.xref_table.tsv.gz | awk -F'\t' '$1=="previous_symbol"'
 ```
 
