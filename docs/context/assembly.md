@@ -68,11 +68,9 @@ component names and joining them with `_` and is never overridable (ADR-0008), a
 is suffixed `<chromosome>__<component>` unconditionally, by the chimera's own recorded separator
 wherever a component forced a longer run (ADR-0009). `Genome.components` is the single test of
 whether an assembly is one, answering `None` when it is not, and `Genome.component_annotations` says
-which annotation each component contributed to the merge. Its sequences are laid out **one
-contiguous block per component, components in the sorted order the name spells and each component's
-own declared order inside its block** — a published contract rather than an artefact of how the
-concatenation runs, because a consumer filters one component's sequences back out of an alignment
-header only while it holds.
+which annotation each component contributed to the merge. Its sequences are laid out one contiguous
+block per component, in the sorted order the name spells — a published contract, not an artefact of
+concatenation (ADR-0026).
 *Avoid*: hybrid, combined genome, merged genome, multi-species reference; and "concatenated FASTA",
 which names the bytes rather than the assembly they belong to
 
