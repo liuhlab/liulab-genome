@@ -9,14 +9,14 @@ so this measures the annotations and the censuses rather than the resolver that 
 ## How many gene ids one stem names
 
 | Annotation | gene features | stems naming more than one gene id |
-|---|---|---|
+| --- | --- | --- |
 | `gencode_v50` | 78,733 | 0 |
 | `gencode_v50lift37` | 80,315 | **9** |
 | `gencode_vM39` | 78,289 | 0 |
 
 The nine on `gencode_v50lift37`, in full:
 
-```
+```text
 ENSG00000223274   ENSG00000223274.6_3    ENSG00000223274.1_PAR_Y
 ENSG00000251823   ENSG00000251823.2_2    ENSG00000251823.1
 ENSG00000263835   ENSG00000263835.1      ENSG00000263835.1_PAR_Y
@@ -39,7 +39,7 @@ a property of the lift, not of GENCODE 50, so a fixture asserting the two-ids ca
 ## How much of a census a real annotation carries
 
 | Annotation | stems resolved | gene ids | unresolved |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `hg38/gencode_v50` | 1,636 / 1,639 | 1,636 | 3 |
 | `hg19/gencode_v50lift37` | 1,633 / 1,639 | 1,633 | 6 |
 | `mm39/gencode_vM39` | 1,605 / 1,611 | 1,605 | 6 |

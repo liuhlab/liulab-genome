@@ -20,7 +20,7 @@ Imperatives only. Each row cites the records that decided it **by number, never 
 moves between directories and its number does not; `—` means no record cites that rule today.
 
 | # | Rule | Records |
-|---|---|---|
+| --- | --- | --- |
 | R1 | **pixi only.** Never `pip`, `uv`, `conda`, `venv` or `poetry`. The manifest is `[tool.pixi.*]` in `pyproject.toml`; `pixi.lock` is committed; channels are `conda-forge` then `bioconda` and the order is priority. Never commit secrets or large data files. | ADR-0001 |
 | R2 | **Shell out, never reimplement.** `samtools`, `bedtools`, STAR and chromap are **External tool**s: locate on `PATH`, fail naming the install command. | — |
 | R3 | **Never read a whole genomic file into memory.** | — |

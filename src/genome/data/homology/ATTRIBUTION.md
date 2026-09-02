@@ -17,7 +17,7 @@ ncRNA dumps and the whole-clade collection dumps beside them are deliberately no
 different objects with different membership, not more rows of this one.
 
 | pair | file that holds it | rows | md5 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | *C. elegans* ↔ *H. sapiens* | `homo_sapiens` | 23,982 | `59857f48…` |
 | *C. elegans* ↔ *M. musculus* | `mus_musculus` | 25,006 | `8f9870f0…` |
 | *H. sapiens* ↔ *M. musculus* | `mus_musculus` | 23,764 | `8f9870f0…` |
@@ -49,7 +49,7 @@ README states: each file holds "an arbitrary subset of orthologies involving the
 to get everything between two genomes you must take both files. Counted on release 116:
 
 | file | rows against human | against mouse | against worm |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `homo_sapiens` | — | **0** | 23,982 |
 | `mus_musculus` | 23,764 | — | 25,006 |
 | `caenorhabditis_elegans` | **0** | **0** | — |

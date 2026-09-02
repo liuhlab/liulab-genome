@@ -11,7 +11,7 @@ that survey reported, the difference is stated at the point it occurs.
 ## What was fetched
 
 | File | Retrieved from | Bytes | Checksum |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `Homo_sapiens.GRCh38.116.entrez.tsv.gz` | `ftp.ensembl.org/pub/release-116/tsv/homo_sapiens/` | 6,093,982 | md5 `0b2237c4bf392930efa130926ba9ceb1`; `sum` 28782 5952, **matching** the directory's own `CHECKSUMS` |
 | `Mus_musculus.GRCm39.116.entrez.tsv.gz` | `ftp.ensembl.org/pub/release-116/tsv/mus_musculus/` | 3,156,296 | md5 `cb143db7fa830bb2b8f67468db1081cf` |
 | `gene2ensembl.gz` | `ftp.ncbi.nlm.nih.gov/gene/DATA/` | 313,546,863 | md5 `8bf66a95cf203ca7cdbcd26b3da2bb76`; publisher ships none |
@@ -41,7 +41,7 @@ columns, with the version suffix stripped. Ensembl's file is transcript- and pro
 552,633 rows collapse to 36,824 gene-level pairs.
 
 | | Pairs |
-|---|---|
+| --- | --- |
 | NCBI asserts | 38,577 |
 | Ensembl asserts | 36,824 |
 | **both assert** | **27,554** |
@@ -54,7 +54,7 @@ columns, with the version suffix stripped. Ensembl's file is transcript- and pro
 shape of the disagreement follows the procedures:
 
 | | NCBI | Ensembl |
-|---|---|---|
+| --- | --- | --- |
 | distinct GeneIDs | 38,546 | 28,433 |
 | distinct ENSG stems | 38,295 | 31,492 |
 | GeneIDs naming exactly one stem | 38,515 (99.9%) | 25,890 (91.1%) |
@@ -76,7 +76,7 @@ cannot be resolved by re-fetching, because the build that produced 38,545 was ov
 Counted over the whole file, by `info_type`:
 
 | `db_name` | Rows | `DIRECT` | `DEPENDENT` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `EntrezGene` | 552,633 | **0** | 552,633 |
 | `EntrezGene_trans_name` | 644,668 | — | — |
 
@@ -94,7 +94,7 @@ above are that duplication, and they are a different assertion (a transcript nam
 Over the 96,205 human rows of `gene2ensembl`, counting the values that are not `-`:
 
 | Column | Bare | Versioned |
-|---|---|---|
+| --- | --- | --- |
 | `Ensembl_gene_identifier` | **96,205** | 0 |
 | `Ensembl_rna_identifier` | 0 | **86,904** |
 | `Ensembl_protein_identifier` | 0 | **70,278** |
@@ -107,7 +107,7 @@ either of the latter to a bare id returns zero rows and raises nothing.
 Every row below is a live probe made on 2026-08-29, not a reading of documentation.
 
 | Source | Pins? | What was fetched |
-|---|---|---|
+| --- | --- | --- |
 | **Alliance of Genome Resources** | yes | `fms.alliancegenome.org/api/datafile/by/GENECROSSREFERENCE?latest=true` returns a versioned `s3Path` (`9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz`), an `md5Sum`, an `uploadDate` and the releases it belongs to. The file header repeats the version and the generation date. |
 | **Ensembl per-species TSV** | yes | `Homo_sapiens.GRCh38.<r>.entrez.tsv.gz` answers 200 for every release probed from **88** through **116**. Each directory ships `CHECKSUMS` in `sum` format, verified above. |
 | **HGNC quarterly archive** | yes | 27 quarterly snapshots listed under `hgnc/archive/archive/quarterly/tsv/`, from `hgnc_complete_set_2020-07-01.txt` to `…_2026-07-07.txt`. |
@@ -139,7 +139,7 @@ directory retains a copy.
 2,659,704 data rows across ten taxa.
 
 | | Rows |
-|---|---|
+| --- | --- |
 | data rows | 2,659,704 |
 | distinct whole rows | 2,659,704 |
 | **distinct on (`GeneID`, `GlobalCrossReferenceID`, `TaxonID`)** | **1,811,267** |
@@ -178,7 +178,7 @@ GENCODE v50's `_README.TXT` states "This release corresponds to Ensembl version 
 distinct (ENST stem, GeneID) pairs:
 
 | | Pairs |
-|---|---|
+| --- | --- |
 | GENCODE asserts | 532,987 |
 | **also in Ensembl's `entrez.tsv`** | **532,859 (99.98%)** |
 | in GENCODE only | 128 |
@@ -198,7 +198,7 @@ Added while building symbol matching, on the same day and the same files. Every 
 the whole published file, not a sample.
 
 | Source | Carries a symbol? | Typed? |
-|---|---|---|
+| --- | --- | --- |
 | **HGNC quarterly archive** | yes, human only | **yes** — `symbol`, `prev_symbol` and `alias_symbol` are three columns |
 | **Alliance `GENECROSSREFERENCE_COMBINED`** | **worm only** | n/a |
 | **Alliance `BGI` per-species submissions** | yes, every contributing database | **no** — one `symbol` and one undifferentiated `synonyms` list |
@@ -224,12 +224,12 @@ and 9.1.0 — the same re-serving the cross-reference file does — so a URL bui
 number alone 404s. Verified by decompressing and hashing:
 
 | Submission | Served | Unpacked | md5 of served | md5 of unpacked — **matches the API's `md5Sum`** |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | MGI | 6,754,968 | 71,819,688 | `39c0fe0a8db6aa3009dd2109f0127fa8` | `a834098c9505ec7fb4a0151480a90734` |
 | WB | 5,265,513 | 74,123,056 | `d7064a579923b3ee0e8cdbf00b1b0a6f` | `4a45ce6beb26dd0dc8c053e5b2e1a835` |
 
 | Submission | Own `release` | Records | With an `ENSEMBL:` cross-reference | With a symbol |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | MGI | `MGI 6.27 2026-04-21` | 90,776 | 77,476 | **all 90,776** |
 | WB | `WS298` | 48,769 | 46,926 | **all 48,769** |
 

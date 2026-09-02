@@ -16,7 +16,7 @@ nothing else. A name you can only reach through a submodule path is internal, an
 move or disappear between releases.
 
 | Package | What it holds |
-|---|---|
+| --- | --- |
 | `genome` | `Genome`, `Region`, the sequence types, and the results the common calls return |
 | `genome.aligner` | The STAR and chromap index builders |
 | `genome.annotation` | Registering a GTF and asking an annotation for gene ids |

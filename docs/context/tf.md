@@ -41,7 +41,7 @@ ids. The verdict is the census's and never this package's, and it is graded rath
 distinguishable everywhere: Lambert assessed 2,765 genes and judged 1,639 of them TFs, so a human
 gene can be a TF, judged not to be, or never looked at, and only the first two are the census
 speaking.
-_Avoid_: TF and factor on their own — the **Motif** half already bans both as names for a motif, and
+*Avoid*: TF and factor on their own — the **Motif** half already bans both as names for a motif, and
 here they blur a gene with the protein it encodes; transcription factor as a bare noun in an API
 surface, which does not say *whose* judgement; regulator, DNA-binding protein, TF candidate
 
@@ -52,7 +52,7 @@ specific TF` among others. It is the column a caller tightens or loosens on: a *
 carries the assessed-positive genes, and wanting only `Known motif`, or wanting `Inferred motif`
 included, is a re-filter on this rather than a second flag invented here. One census's word, never
 compared with another's.
-_Avoid_: confidence, quality, evidence level, score — a graded verdict is not a number and nothing
+*Avoid*: confidence, quality, evidence level, score — a graded verdict is not a number and nothing
 ranks two censuses' grades against each other; status, tier, class; and "is a TF" as though the
 answer were one bit
 
@@ -62,7 +62,7 @@ The DNA-binding-domain family a census classifies a gene under, in the publisher
 in position and deliberately not in content — the two vocabularies are not crosswalked, so
 `ARID/BRIGHT` and `ARID` are not asserted equivalent (ADR-0014). Group by it within a species; never
 across two.
-_Avoid_: family alone — a **Motif** carries a `family` annotation of JASPAR's own, a different
+*Avoid*: family alone — a **Motif** carries a `family` annotation of JASPAR's own, a different
 vocabulary about a different object; class, superclass, TF class, domain; DBD by itself, which names
 the domain rather than the grouping
 
@@ -77,7 +77,7 @@ belongs to a species rather than to an annotation, and beyond four uniform colum
 its publisher's own. Its provenance — publisher, version, PubMed id, source URL, and a checksum over
 unpacked content — sits in a metadata table beside it, in the shape the assembly and annotation
 metadata tables already use.
-_Avoid_: TF list, TF database, TF catalogue; **Curated gene list**, which is the other shape of
+*Avoid*: TF list, TF database, TF catalogue; **Curated gene list**, which is the other shape of
 shipped file and answers a different question; annotation, which names a registered GTF here
 
 **TF gene list**:
@@ -87,7 +87,7 @@ holds and this annotation does not is visible rather than dropped. Assessed-posi
 species comes from the assembly's own metadata and is never passed in, so asking for human TFs while
 holding a mouse assembly is not expressible (ADR-0003); an assembly whose species has no census
 raises and names the species that do.
-_Avoid_: TF set, TF panel, TF universe; and the bare phrase "the gene list", which the Annotation
+*Avoid*: TF set, TF panel, TF universe; and the bare phrase "the gene list", which the Annotation
 context bans for naming no annotation — the qualifier is exactly what makes this compound legal
 
 ### Cofactors
@@ -99,7 +99,7 @@ own vocabulary and recognising no sequence of its own, so it has no **Motif** an
 answered with that reason rather than with a census's silence. The two are not exclusive: 151 human
 genes are both, and being a cofactor never suppresses the motifs a census already reached
 (ADR-0016).
-_Avoid_: the bare word cofactor outside the `genome.tf.cofactor` namespace — to most of biology it
+*Avoid*: the bare word cofactor outside the `genome.tf.cofactor` namespace — to most of biology it
 names NAD+ and heme, a small molecule an enzyme needs and not a gene at all; co-activator and
 corepressor, which between them name one of AnimalTFDB's six categories rather than the whole class;
 epigenetic factor, which is EpiFactors' word for EpiFactors' list and narrower than what ships;
@@ -113,7 +113,7 @@ package's and classification is each publisher's: a row saying that two publishe
 asserts agreement on membership only and never on classification, and the AnimalTFDB category it
 carries is a join this package performed onto that publisher's family rather than anything the
 published gene list itself says.
-_Avoid_: cofactor database, cofactor catalogue, epigenetic factor table; **TF cofactor list**, which
+*Avoid*: cofactor database, cofactor catalogue, epigenetic factor table; **TF cofactor list**, which
 is this table met with one **Annotation** rather than what ships; annotation, which names a
 registered GTF here
 
@@ -124,7 +124,7 @@ the counterpart of **TF gene list** in the same shape and the same layers. The s
 the assembly's own metadata and is never passed in (ADR-0003), and a species with no shipped table
 raises and names the ones that have one — worm answers here while **TF gene list** raises for it,
 because a publisher assessed worm cofactors and none has released a worm TF census.
-_Avoid_: cofactor set, cofactor panel, cofactor universe; **Cofactor table**, which is the shipped
+*Avoid*: cofactor set, cofactor panel, cofactor universe; **Cofactor table**, which is the shipped
 file this resolves rather than the answer; and the bare phrase "the cofactor list", which does not
 say whose gene ids the answer is in
 
@@ -138,7 +138,7 @@ specificity**. Links are shipped as gzipped TSVs, one per species per **Release*
 rule (ADR-0015) — so the mapping is readable in R or a shell by collaborators who never import this
 package. Only assessed-positive genes receive links, and a profile naming no gene at all, such as an
 oncogenic fusion, stays unlinked rather than asserting one.
-_Avoid_: motif assignment, TF-motif mapping (that names the whole table, not one row); annotation,
+*Avoid*: motif assignment, TF-motif mapping (that names the whole table, not one row); annotation,
 which is cisTarget's word for this idea and a different, largely inferred, thing; binding site,
 target — a link is about attribution and claims nothing about where the factor binds
 
@@ -148,7 +148,7 @@ What a **Motif link**'s profile is a motif *of*: `monomer` where the profile nam
 heterodimer matrix is never read as a monomer's — `FOS::JUN` links to both genes as a complex and to
 neither as a monomer — and so that a gene whose only motifs are complexes, AHR, DDIT3, TAL1 and TLX1
 among them, is linked rather than reported motif-less.
-_Avoid_: type, kind, link type; homodimer, heterodimer, dimer — a complex may name more than two
+*Avoid*: type, kind, link type; homodimer, heterodimer, dimer — a complex may name more than two
 genes and the row says which; direct/indirect, which grades evidence rather than saying what the
 matrix describes
 
@@ -162,7 +162,7 @@ binding better than any JUN monomer does. No quality score is computed or shippe
 JASPAR publishes none, and matrix depth is normalised per assay — SMiLE-seq sits near 1,000 sites
 throughout a range that runs from 10 to 322,803 — so ranking on depth ranks the assay. A caller who
 disagrees re-sorts on the attributes the row already carries.
-_Avoid_: quality, confidence, score, weight; best motif, primary motif, canonical motif — each names
+*Avoid*: quality, confidence, score, weight; best motif, primary motif, canonical motif — each names
 a judgement nothing here makes; rank alone, which is the ordering's output rather than its meaning
 
 **Cross-species link**:
@@ -172,5 +172,5 @@ CORE **Tax group** `vertebrates` files an orthologous pair's matrix under whiche
 assayed, so a profile's species is an artefact of the experiment rather than a claim about the
 factor. Marked on every row because the flag is the only thing a caller who needs species-matched
 profiles can filter on — 732 of mouse's 896 links on the 2026 **Release** are cross-species.
-_Avoid_: ortholog link, orthologous motif — a link asserts no orthology, only that JASPAR filed one
+*Avoid*: ortholog link, orthologous motif — a link asserts no orthology, only that JASPAR filed one
 vertebrate's assay under one vertebrate's name; foreign, non-native, imputed, borrowed

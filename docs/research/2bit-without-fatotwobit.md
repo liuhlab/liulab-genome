@@ -26,12 +26,12 @@ cannot retire `faToTwoBit`. Only question 3 can.
 
 URL shape — same `bigZips` directory the FASTA already comes from:
 
-```
+```text
 https://hgdownload.soe.ucsc.edu/goldenPath/<db>/bigZips/<db>.2bit
 ```
 
 | assembly | HTTP | size |
-|---|---|---:|
+| --- | --- | ---: |
 | hg38 | 200 | 835,393,456 B (835 MB) |
 | hg19 | 200 | 816,241,703 B (816 MB) |
 | mm39 | 200 | 714,181,470 B (714 MB) |
@@ -42,7 +42,7 @@ https://hgdownload.soe.ucsc.edu/goldenPath/<db>/bigZips/<db>.2bit
 `md5sum.txt` sits in the same directory and **covers the `.2bit`**, so `pooch`'s `known_hash`
 can be populated from it exactly as it could for the FASTA:
 
-```
+```text
 dcc3ea27079aa6dc3f9deccd7275e0f8  hg38.2bit
 1c9dcaddfa41027f17cd8f7a82c7293b  hg38.fa.gz
 ```
@@ -50,12 +50,12 @@ dcc3ea27079aa6dc3f9deccd7275e0f8  hg38.2bit
 **Caveat — six assemblies were checked, not all ~250.** Every one of the major assemblies has it;
 coverage for obscure ones is unverified. A download path would need a 404 fallback regardless.
 
-## 2. No Python library writes 2bit. None.
+## 2. No Python library writes 2bit. None
 
 Every Python 2bit package is a reader:
 
 | package | version | write support |
-|---|---|---|
+| --- | --- | --- |
 | `py2bit` (lib2bit) | 1.0.1 | no — `py2bit.open` is the entire module surface |
 | `twobitreader` | 4.0.0 | no — `TwoBitFile`'s docstring says verbatim *"(note: no writing support)"* |
 | `bx-python` `bx.seq.twobit` | 0.14.0 | no — `TwoBitFile` / `TwoBitSequence`, reader methods only |
@@ -65,7 +65,7 @@ Every Python 2bit package is a reader:
 Searching bioconda for `twobit` returns the complete set of packaged tools. Exactly one converts
 FASTA to 2bit:
 
-```
+```text
 bioconda/ucsc-fatotwobit    Convert DNA from fasta to 2bit format.     <- the only writer
 bioconda/ucsc-twobitinfo    Get information about sequences in a .2bit file.
 bioconda/ucsc-twobitmask    Apply masking to a .2bit file, creating a new .2bit file.
@@ -91,7 +91,7 @@ code to own and test, encoding 3.1 Gbp in Python.)
 `pyfaidx` 0.9.0.4 is in **every solved environment** in `pixi.lock` — pulled in as a transitive
 dependency of `gffutils`, which is a direct dependency:
 
-```
+```text
 gffutils -> ['pyfaidx>=0.5.5.2']
 ```
 
@@ -102,7 +102,7 @@ platforms), and it buys nothing `pyfaidx` does not already provide here.
 
 Columns 1–2 of the `.fai`, read in **0.12 ms**, byte-identical to `py2bit.chroms()`:
 
-```
+```text
 from .fai: {'chr1': 40000000, 'chr2': 18000000, 'chrM': 16569}
 py2bit    : {'chr1': 40000000, 'chr2': 18000000, 'chrM': 16569}
 identical : True
@@ -125,7 +125,7 @@ slower one.
 58 Mbp soft-masked FASTA with N runs, M-series Mac, warm cache:
 
 | path | 200 bp × 20,000 | 100 kb × 500 |
-|---|---:|---:|
+| --- | ---: | ---: |
 | `py2bit` `storeMasked=True` — **the repo's actual setting** | 0.4 µs/q | 78.7 µs/q |
 | `py2bit` `storeMasked=False` | 0.2 µs/q | 21.6 µs/q |
 | `pyfaidx`, plain `.fa` + `.fai`, case preserved | 2.1 µs/q | **72.4 µs/q** |
@@ -149,7 +149,7 @@ Three things fall out:
 Same 58 Mbp genome:
 
 | file | size | % of raw |
-|---|---:|---:|
+| --- | ---: | ---: |
 | `.fa` | 58.98 MB | 100% |
 | `.fa.gz` (bgzip) | 16.67 MB | 28.3% |
 | `.2bit` | 14.51 MB | 24.6% |
@@ -168,7 +168,7 @@ Today the cache holds `.fa.gz` **and** `.fa` **and** `.fai` **and** `.2bit` **an
 58 Mbp, and the ~53× extrapolation to hg38's 3.1 Gbp:
 
 | step | measured | hg38 (extrapolated) |
-|---|---:|---:|
+| --- | ---: | ---: |
 | `samtools faidx` | 0.56 s | ~30 s |
 | `faToTwoBit` | 1.99 s | ~105 s |
 | `twoBitInfo` | 0.27 s | ~14 s |
@@ -183,7 +183,7 @@ download that dominates it. Prep time is not the argument against keeping it.
 and dependency closures:
 
 | platform | package size | builds at v482 |
-|---|---:|---:|
+| --- | ---: | ---: |
 | linux-64 | 0.38 MB | 27 versions available |
 | linux-aarch64 | 0.40 MB | 9 |
 | osx-64 | 2.37 MB | 18 |
@@ -195,7 +195,7 @@ one.
 
 The package itself is trivially small; the weight is the closure it drags in:
 
-```
+```text
 linux-64 / linux-aarch64:  bzip2, libgcc, liblzma, libopenssl-static, libpng,
                            libuuid, libzlib, mysql-connector-c
 osx-64:                    same, minus libgcc

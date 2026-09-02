@@ -82,7 +82,7 @@ none is; and a second term for the symbol half — it is one idea with two flags
 The identifier system one foreign id belongs to — Entrez GeneID, HGNC id, UniProt accession, MGI id,
 WormBase gene id, symbol — named explicitly on every call, because the string on its own does not
 say. One namespace is the hub: Ensembl's, whose ids reduce to **Gene id stem**s and whose shape is
-per-species, `ENSG…`, `ENSMUSG…`, and for worm the WormBase gene id, which *is* the Ensembl stable
+per-species, `ENSG…`, `ENSMUSG…`, and for worm the WormBase gene id, which _is_ the Ensembl stable
 gene id. Every other namespace is a spoke reached only through that hub and never directly from
 another spoke (ADR-0017), and one an **Xref source** does not carry raises and names the ones it
 does.
@@ -100,10 +100,10 @@ Matching is exact by default and case-insensitive only when asked for, and the i
 still answers with every gene matched rather than picking one. Which kinds a set can match is the
 **Xref source**'s and never the species' — mouse and worm match approved spellings only, their
 authorities' typed spellings belonging to publishers that cannot be pinned or cannot be fetched
-(ADR-0018) — and why the others are missing rides back on the answer, since *this gene is absent*
-and *this source cannot match that spelling* would otherwise both be silence. The reverse direction
+(ADR-0018) — and why the others are missing rides back on the answer, since _this gene is absent_
+and _this source cannot match that spelling_ would otherwise both be silence. The reverse direction
 is not symmetric: from a stem the answer is the authority's single current approved symbol, which is
 labelling.
 _Avoid_: gene name; HGNC symbol, which is one authority's spelling of a general idea; synonym — the
-authorities' own word is *alias*, and one idea gets one word; fuzzy match, which nothing here does;
+authorities' own word is _alias_, and one idea gets one word; fuzzy match, which nothing here does;
 and **Motif name**, which labels a matrix and names no gene at all

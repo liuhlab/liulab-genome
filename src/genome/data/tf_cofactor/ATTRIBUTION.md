@@ -17,7 +17,7 @@ positionally inside a cell is the shape that breaks quietly.
 Three sources, each cited in its own row of `cofactor_source_metadata.tsv`:
 
 | source | contributes | rows |
-|---|---|---|
+| --- | --- | --- |
 | **AnimalTFDB 4.0** | membership, family, category | 1,024 genes |
 | **EpiFactors v2.0** | membership, function, target, modification, complex | 796 genes, 801 rows |
 | **HGNC**, one pinned dated monthly archive | the Ensembl gene id of every EpiFactors row | no membership |
@@ -134,7 +134,7 @@ family sits in in a separate summary,
 spell five families differently. The build joins them through five hand-written rules:
 
 | gene-list family | summary family |
-|---|---|
+| --- | --- |
 | `Lysine methyltransferase` | `Lysine methyltransferase family` |
 | `Histone lysine methyltransferase` | `Lysine methyltransferase family` |
 | `Other_Co-activator/repressors` | `Other_Co-activator_repressors` |

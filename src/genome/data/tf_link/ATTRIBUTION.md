@@ -4,7 +4,7 @@ Which JASPAR motifs answer for which **TF gene**: the profiles are JASPAR's, the
 genes are transcription factors are the censuses', **and neither is this package's**.
 
 | | |
-|---|---|
+| --- | --- |
 | Motifs | JASPAR, <https://jaspar.elixir.no/>, read from one release's SQLite dump, `https://jaspar.elixir.no/download/database/JASPAR<year>.sqlite`. **Cite the JASPAR release you used.** |
 | Genes | The censuses, attributed in `../tf_gene/ATTRIBUTION.md` — Lambert *et al.* 2018 v_1.01 (PMID 29425488) for human, AnimalTFDB 4.0 (PMID 36268869) for mouse. **Cite the one you used.** |
 | Licensing | Redistributed here: JASPAR's identifiers, published names and per-profile species, plus one number computed from its matrices — no count matrix. JASPAR is open-access, published for reuse, and asks to be cited; the censuses state no licence and are redistributed under the attribution above. |
@@ -15,7 +15,7 @@ row came from. No quoting; multi-value cells join on `;`. Gzipped because they a
 three-row `motif_name_alias.tsv` beside them is plain, as every small metadata table here is.
 
 | Table | Genes | Links | Cross-species |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `homo_sapiens.jaspar2024` | 745 | 946 | 161 |
 | `homo_sapiens.jaspar2026` | 876 | 1,085 | 162 |
 | `mus_musculus.jaspar2024` | 653 | 851 | 690 |

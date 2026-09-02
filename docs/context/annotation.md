@@ -26,7 +26,7 @@ _Avoid_: id, key, label, alias; and never "the GTF" as a way of naming one
 
 **Annotation metadata**:
 The curated TSV row keyed by **Assembly** plus **Registered name**, saying who publishes that
-annotation, which release it is, where its **GTF** is fetched from and the sha256 of the *unpacked*
+annotation, which release it is, where its **GTF** is fetched from and the sha256 of the _unpacked_
 GTF that source yields, plus whether it is the assembly's **Default annotation**. Naming an
 annotation is enough to register it because the row knows the rest. A cross-reference and never an
 allow-list — no row means one of three things: the annotation was registered by path, a complete
@@ -64,7 +64,7 @@ _Avoid_: GFF (a different format, not a different spelling), annotation file, ge
 **Annotation database**:
 The gffutils SQLite file built from the **GTF** and kept beside it as `<name>.db` — what makes an
 annotation queryable rather than merely stored. Its presence proves nothing: a build killed half-way
-leaves one that answers queries with most of the genes missing, so what *registered* means is a
+leaves one that answers queries with most of the genes missing, so what _registered_ means is a
 **Completion marker** that agrees with what is on disk, and that record is the only thing ever asked.
 _Avoid_: index, cache, store; and never "the gffutils db" in the API surface
 
@@ -84,7 +84,7 @@ overlap: `rRNA` holds everything rRNA-derived, pseudogene copies and mitochondri
 One that is declared always holds at least one gene, so an annotation that cannot answer for a
 category says so rather than answering with none.
 _Avoid_: biotype, gene type, `gene_type`/`gene_biotype` — those name the **GTF** attribute a category
-is curated *instead of*; class, group, gene set
+is curated _instead of_; class, group, gene set
 
 **Curated gene list**:
 The hand-maintained JSON shipped inside the package, one per **Annotation**, saying which of its

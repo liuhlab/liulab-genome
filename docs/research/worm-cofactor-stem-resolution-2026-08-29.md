@@ -10,7 +10,7 @@ human and mouse measurement taken the same day against the GENCODE registrations
 ## The result
 
 | | |
-|---|---|
+| --- | --- |
 | gene features in `wormbase_ws298` | 46,926 |
 | stems naming more than one gene id | **0** |
 | cofactor stems | 317 |

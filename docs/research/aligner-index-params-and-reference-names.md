@@ -92,7 +92,7 @@ This is correct, because **chromap has no genome-size or contig-count parameter 
 `chromap -h`, chromap 0.3.2-r518, the repo's own `aligners` pixi environment — the complete set of
 indexing options:
 
-```
+```text
  Indexing options:
   -i, --build-index          Build index
       --min-frag-length INT  Min fragment length for choosing k and w automatically [30]
@@ -115,7 +115,7 @@ Quoted verbatim. Two primary sources that **do not agree with each other**, whic
 the text `STAR --help` prints in our own environment:
 
 > `genomeSAindexNbases         14`
-> `    int: length (bases) of the SA pre-indexing string. Typically between 10 and 15. Longer
+> `int: length (bases) of the SA pre-indexing string. Typically between 10 and 15. Longer
 > strings will use much more memory, but allow faster searches. For small genomes, the parameter
 > --genomeSAindexNbases must be scaled down to min(14, log2(GenomeLength)/2 - 1).`
 
@@ -143,7 +143,7 @@ if (pGe.gSAindexNbases > log2(nGenomeTrue)/2-1) {
 
 That string is present in the binary we ship (`strings $(command -v STAR)` in the `aligners` env
 returns `", which may cause seg-fault at the mapping step. Re-run genome generation with recommended
---genomeSAindexNbases "`), and `warningMessage` prefixes it with `!!!!! WARNING: `
+--genomeSAindexNbases "`), and `warningMessage` prefixes it with `!!!!! WARNING:`
 (`ErrorWarning.cpp:25-38`). So a too-large value is a warning to stderr and `Log.out`, never an
 error — the index builds and may seg-fault at mapping time.
 
@@ -163,7 +163,7 @@ below 2 only for L < 64 bp, so the floor is inert for anything real.
 `source/parametersDefault` lines 68-69, again identical to `STAR --help` here:
 
 > `genomeChrBinNbits           18`
-> `    int: =log2(chrBin), where chrBin is the size of the bins for genome storage: each chromosome
+> `int: =log2(chrBin), where chrBin is the size of the bins for genome storage: each chromosome
 > will occupy an integer number of bins. For a genome with large number of contigs, it is
 > recommended to scale this parameter as min(18, log2[max(GenomeLength/NumberOfReferences,ReadLength)]).`
 
@@ -192,8 +192,8 @@ if (N>0) {//pad the chromosomes to bins boudnaries
 so the worst case is `N_references × 2^genomeChrBinNbits` wasted bases — 262,144 bases per reference
 at the default. (5,000 × 256 kB ≈ 1.3 GB, which is where the manual's ">5,000" threshold comes
 from.) STAR logs both figures, so the overhead is directly observable in `Log.out`
-(`Genome_genomeGenerate.cpp:150-151`): `Genome sequence total length = ` and
-`Genome size with padding = `.
+(`Genome_genomeGenerate.cpp:150-151`): `Genome sequence total length =` and
+`Genome size with padding =`.
 
 **No memory formula for either parameter exists in any STAR document.** The manual says only "much
 more memory" and "to reduce RAM consumption". Anything quoting a formula is secondary.
@@ -210,7 +210,7 @@ From its NCBI assembly report
 `ce11` sizes are the ones already charted on #38 (7 sequences, 100,286,401 bp).
 
 | | sequences | length | `genomeSAindexNbases` exact | repo passes | `genomeChrBinNbits` guidance |
-|---|---:|---:|---:|---:|---:|
+| --- | ---: | ---: | ---: | ---: | ---: |
 | `ce11` | 7 | 100,286,401 | 12.290 | **12** | 18.00 → 18 (= default) |
 | `ecHT115` | 87 | 4,602,240 | 10.067 | **10** | **15.69 → 15** |
 | chimera `ce11`+`ecHT115` | 94 | 104,888,641 | 12.322 | **12** | 18.00 → 18 (= default) |
@@ -221,7 +221,7 @@ Padding at various `genomeChrBinNbits`, computed as `Σ ceil(len/2^b) · 2^b` ov
 lengths:
 
 | | raw | b=18 (default) | b=15 | inflation at default |
-|---|---:|---:|---:|---:|
+| --- | ---: | ---: | ---: | ---: |
 | `ce11` | 100,286,401 | 101,187,584 | 100,368,384 | **×1.01** |
 | `ecHT115` | 4,602,240 | 23,855,104 | 6,455,296 | **×5.18** |
 | chimera | 104,888,641 | 125,042,688 | 106,823,680 | **×1.19** |
@@ -281,7 +281,7 @@ And the `@SQ SN` row itself (lines 286-290):
 > distinct. […] Regular expression: `[:rname:^*=][:rname:]*`
 
 | character | verdict |
-|---|---|
+| --- | --- |
 | `_` `.` `-` `\|` `:` `~` `+` `#` `@` `/` `!` `$` `%` `&` `;` `?` `^` and alphanumerics | **legal anywhere, including first character** |
 | `=` `*` | legal, but **not as the first character** |
 | `\` `,` `"` `'` `` ` `` `(` `)` `[` `]` `{` `}` `<` `>` | **illegal everywhere** (named in the prose exclusion list) |
@@ -327,9 +327,11 @@ description.
   (`STARmanual.tex:131`): you may rename entries in `chrName.txt` "while **keeping the order** of the
   chromosomes in this file".
 - **The name reaches `@SQ SN:` intact.** `samHeaders.cpp:28-31`:
+
   ```cpp
   samHeaderStream << "@SQ\tSN:"<< genomeOut.chrName.at(ii) <<"\tLN:"<<genomeOut.chrLength[ii]<<"\n";
   ```
+
   Verbatim, in genome order, no transformation. So whatever survives the whitespace truncation is
   exactly what downstream attribution reads back out.
 - **The GTF must agree with the FASTA on names.** STAR's own error text says so:
@@ -357,11 +359,13 @@ description.
   file stays byte-identical.**
 - **`@SQ SN:` gets the name byte-for-byte.** The only `@SQ` in the whole source tree,
   `mapping_writer.cc:311-321`:
+
   ```cpp
   this->AppendMappingOutput(
       "@SQ\tSN:" + std::string(reference_sequence_name) +
       "\tLN:" + std::to_string(reference_sequence_length) + "\n");
   ```
+
   (chromap emits no `@HD` and no `@PG` — the header is `@SQ` lines only.)
 - **No reordering by default.** rids are assigned in FASTA file order; reordering happens only when
   `--chr-order FILE` is passed, and that file is matched by exact whole-line string equality against
@@ -425,4 +429,3 @@ its own check.
   spec's changelog.
 - `ecHT115` sequence count, names and lengths from the NCBI assembly report, linked above.
 - Arithmetic is a short script over those published lengths; no index was built.
-

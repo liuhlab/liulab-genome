@@ -9,7 +9,7 @@ are lower-cased; and `planted_motifs.fa` has **39 bases overwritten** with three
 words, which is the one place a base here was chosen rather than found. Nothing else is synthesised.
 
 | File | What it is |
-|---|---|
+| --- | --- |
 | `tiny.fa` | The first 10 000 bases of `chrI`, `chrII` and `chrIII` of `sacCer3`, cut with `samtools faidx` and re-headed to the bare chromosome names |
 | `tiny.fa.gz` | `tiny.fa`, gzipped — the compressed-source path |
 | `tiny.gtf` | The 85 `sacCer3.ensGene` features that fall wholly inside those three windows |
@@ -43,7 +43,7 @@ holds every **Tax group** — five are represented, `diatoms` included, which is
 one motif in both releases.
 
 | Record | Name | Positions | Tax group | The rule it exists to break |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `MA0119.1` | `NFIC::TLX1` | 14 | vertebrates | A **dimeric name**, and the record behind it carries **two** classes, **two** families and **two** UniProt accessions — semicolon separated, which is why those four annotations are tuples and not strings |
 | `MA0789.1` | `POU3F4` | 9 | vertebrates | **Two PubMed ids** on one matrix, so the plural id lists are exercised without a dimer |
 | `MA0079.5` | `SP1` | 9 | vertebrates | **Fractional counts** — `1.05485`, which the `.jaspar` serialization rounds away and this one keeps. The only record here whose counts are not whole |
@@ -56,7 +56,7 @@ one motif in both releases.
 | `MA1407.2` | `bZIP14` | 8 | diatoms | The release's **only diatom motif**, so the degenerate tax group is a case the fixture actually holds |
 
 **The separator is a semicolon and never a comma.** Four records above turn on that: two carry
-several values in one annotation, separated by `; `, and two carry a comma *inside* a single value.
+several values in one annotation, separated by `;`, and two carry a comma *inside* a single value.
 Splitting on the comma corrupts about fifty records per release and fails nothing while doing it,
 which is what these four are here to catch.
 
@@ -79,7 +79,7 @@ What was planted, where, and on which strand — coordinates **0-based half-open
 inside this package is:
 
 | Record | Interval | Strand | Motif | Bases written | The rule it exists to break |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | `plantedI` | `[100, 115)` | `+` | `MA0139.2` CTCF | `GCCACCAGGGGGCGC` | The everyday case: a site on the forward strand, found at the position it was planted at |
 | `plantedI` | `[300, 315)` | `-` | `MA0139.2` CTCF | `GCGCCCCCTGGTGGC` | The **same word reverse-complemented**. It must be reported on `-` over *these* bases — a forward-frame `[300, 315)` and not a position counted from the other end, which is the off-by-one the whole adapter exists to centralise |
 | `plantedII` | `[200, 209)` | `+` | `MA0789.1` POU3F4 | `tatgcaaat` | **Lower case**: a soft-masked site, which must be found exactly as its upper-case equivalent is, because a scan discards **Soft-masking** without being asked (ADR-0012) |
@@ -111,7 +111,7 @@ every annotation line is still real `sacCer3`. Each carries something the naming
 opinion about and no shipped assembly can demonstrate:
 
 | Component | Chromosomes | Wrap | What it is here for |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `tinyCe` | `I`, `II`, `MtDNA` | 60 | `ce11`'s shape, and the only **soft-masked** component — so a chimera of these is heterogeneously masked. **Collides** with `tinySc` on `I` and `II`, which the shipped pair never does |
 | `tinyEc` | `NZ_TINY01000001.1`, `NZ_TINY01000002.1`, `chr1_KI270706v1_random` | 80 | Names that already **hold an underscore**, in both real shapes: `ecHT115`'s accession, an underscore and a dot in one name, so no split may be a first-occurrence one; and the `hg38` name that a *single*-underscore separator could not tell from a suffixed one. Wrapped at a second width, so no build may rewrap |
 | `tinySc` | `I`, `II`, `III` | 60 | `sacCer3` spelled the Ensembl way, where each name is a **strict prefix** of the next. Being the third makes N > 2 an ordinary case |
@@ -128,7 +128,7 @@ and the coordinates shifted to the slice — so each GTF's chromosome names are 
 component's, as both shipped GTFs are against their assemblies:
 
 | Component | Chromosome | Slice of `tiny.fa` (1-based inclusive) | Length |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `tinyCe` | `I` | `chrII:2701-5200` | 2500 |
 | `tinyCe` | `II` | `chrIII:6301-8650` | 2350 |
 | `tinyCe` | `MtDNA` | `chrI:6901-9200` | 2300 |
@@ -165,7 +165,7 @@ gene this package could not resolve, which is a case the file genuinely has and 
 should not manufacture.
 
 | Gene | Species | The case it is here for |
-|---|---|---|
+| --- | --- | --- |
 | `HGNC:11998` (`TP53`) | human | The plain case: one Ensembl id, one Entrez id, one UniProt accession |
 | `HGNC:1100` (`BRCA1`) | human | Its `NCBI_Gene:672` pair is listed **twice**, under two different pages — the duplication, on real bytes |
 | `HGNC:13666` | human | **Two `ENSEMBL:` cross-references**, so one HGNC id and one Entrez id each name two stems and nothing may pick one |
@@ -190,6 +190,7 @@ Two things the fixture deliberately does **not** show, because the publisher's f
 None of this is prose to be trusted: `TestFixtureBytes` in `tests/xref/test_xref.py` asserts the header,
 the three taxa, the duplication's shape, the hub-less gene and the worm symbol row against the
 committed bytes, and `FIXTURE_SLICES` pins what each species' slice comes to.
+
 ## `homology/` — the Compara homology dumps
 
 Three subsamples of Ensembl Compara release 116's per-species `protein_default` homology dumps, one
@@ -199,7 +200,7 @@ no row is synthesised. Each source file is 85–110 MB gzipped and holds million
 tens.
 
 | File | Rows | What it is here for |
-|---|---|---|
+| --- | --- | --- |
 | `compara116.homo_sapiens.homologies.tsv.gz` | 17 | The human dump: 11 human↔worm rows, 4 human↔human paralogy rows and 2 human↔zebrafish rows — and, as the real file has, **zero human↔mouse rows** |
 | `compara116.mus_musculus.homologies.tsv.gz` | 27 | The mouse dump: 10 mouse↔human rows, 11 mouse↔worm rows, 4 mouse↔mouse paralogy rows and 2 mouse↔zebrafish rows — one file holding **two** of the three pairs |
 | `compara116.caenorhabditis_elegans.homologies.tsv.gz` | 4 | The worm dump: four worm↔worm paralogy rows and **no row of either pair**, which is the real file's shape too |
@@ -243,7 +244,7 @@ the fixture is therefore the fan-out the release asserts, not an artefact of whe
 stopped. 151 human rows against the publisher's 1.2 million; 75 mouse rows.
 
 | Fixture | Rows | What it is here for |
-|---|---|---|
+| --- | --- | --- |
 | human | 151 | 149 `EntrezGene` rows, **every one `DEPENDENT` and not one `DIRECT`** — the empty-filter trap on real bytes, which is release 116's whole shape in miniature (552,633 rows, zero direct) |
 | human | | GeneID **`79166` naming 72 stems** — the fan-out, and the id the two sources disagree about |
 | human | | Stem **`ENSG00000173213` named by four GeneIDs** — the fan-out running the other way, which is what makes `from_stems` many-valued |
@@ -282,7 +283,7 @@ is why the reader finds its seven columns by name. Every row is real, and each i
 reason:
 
 | Row | What it is in the fixture for |
-|---|---|
+| --- | --- |
 | `BMAL1` | `prev_symbol` **`ARNTL`** — one of the 31 EpiFactors rows the cofactor work measured as spelling its gene the way HGNC used to. Also five aliases in one quoted, pipe-separated cell |
 | `EMSY` | `prev_symbol` **`C11orf30`**, the second named one of those 31, and an **empty** alias cell beside it |
 | `ACIN1` | `prev_symbol` `ACINUS`, the third — and a two-value alias cell |
@@ -303,7 +304,7 @@ two publishers' two different pretty-printers, two-space for MGI and three-space
 both in the suite.
 
 | File | Genes | What it is in the fixture for |
-|---|---|---|
+| --- | --- | --- |
 | MGI | `Trp53`, `Brca1`, `Bmal1`, `Kdm1a`, `Mecp2`, `Scgb1a1`, `Adcy3` | Mouse spellings of genes the human fixture carries, so that a mouse-cased symbol asked of a human set is a real mouse symbol rather than a typo |
 | WB | `aap-1`, `daf-16`, `msp-10`, `lin-12`, `unc-22` | The worm hop, where a WormBase gene id **is** the **Gene id stem**. `daf-16`'s record carries `daf-17`, `R13H8.1` and `CELE_R13H8.1` in **one undifferentiated `synonyms` list** — a genuine former name beside two sequence names, with nothing saying which is which, which is why this source publishes approved spellings only |
 

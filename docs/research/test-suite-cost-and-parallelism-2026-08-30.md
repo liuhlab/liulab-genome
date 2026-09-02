@@ -39,7 +39,7 @@ rather than a pytest lane, so they are not comparable to the wall-clock figures 
 Five jobs run concurrently, so the wall is the slowest job plus a 2–4 s queue.
 
 | Job | Wall (median) | setup-pixi | Real work |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **test** | **76 s** | 6–9 s | pytest **61 s** |
 | lint + typecheck + docs | 35 s | 9–12 s | ruff <1 s, pyright 11 s, mkdocs 9 s |
 | test (STAR + chromap) | 28 s | 11–12 s | pytest 9 s |
@@ -49,7 +49,7 @@ The `test` job was 76 s of an 80 s wall, and 61 s of that was pytest. Inside it,
 half the lane:
 
 | Test | CI |
-|---|---|
+| --- | --- |
 | `test_compare.py::TestWhatIsAccepted::test_one_motif` | 27.50 s |
 | `test_parquet.py::…::test_a_large_result_is_written_without_complaint` | 16.17 s |
 | `test_compare.py::…::test_a_de_novo_motif_that_no_release_published` | 7.79 s |
@@ -66,7 +66,7 @@ Isolated, with `NUMBA_CACHE_DIR` pointed at an empty directory and then at the s
 populated:
 
 | | import | first `tomtom` call | second call |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | cold cache | 0.64 s | **6.97 s** | 0.00 s |
 | warm cache | 0.60 s | **0.02 s** | 0.00 s |
 
@@ -101,7 +101,7 @@ logged `Cache restored from key: …` and then recompiled anyway — 38.96 s, 26
 `actions/cache` was never the thing failing. numba keys each compiled overload on a tuple whose
 middle element is the target description, read here out of a `.nbi` written on an M4:
 
-```
+```text
 ((float64, float64),
  ('arm64-apple-darwin25.6.0', 'apple-m4', ''),
  ('65ebbeab…', 'e3b0c442…'))
@@ -117,7 +117,7 @@ Seeding a cache under one CPU name and re-running under another, counting with n
 `Dispatcher.stats`:
 
 | run | numba's counter | index after |
-|---|---|---|
+| --- | --- | --- |
 | seed as `apple-m4` | miss ×1 | one entry |
 | again as `apple-m4` | **hit ×1** | one entry |
 | as `apple-m1` | **miss ×1** | *two* entries |
@@ -135,7 +135,7 @@ Warm runs of `tests/tf/test_compare.py` and `tests/tf/test_scan.py`, 59 tests, t
 after one cold run to fill the cache:
 
 | | cold | warm | cache |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `generic` | 10.82 s | 3.97 / 4.47 / 3.97 s | 1388 KB |
 | host (`apple-m4`) | 10.73 s | 4.02 / 4.01 / 4.02 s | 1452 KB |
 
@@ -158,7 +158,7 @@ memelite's two engines, one numba thread throughout so a varying thread count ca
 codegen difference, warm calls only, three repeats:
 
 | workload | host (`sapphirerapids`) | `generic` |
-|---|---|---|
+| --- | --- | --- |
 | `fimo`, 10 motifs × 600 bp (the suite's shape) | 12.6 / 12.2 / 12.3 ms | 12.1 / 11.9 / 15.0 ms |
 | `fimo`, 20 motifs × 200 kb (333× the suite) | 30.2 / 30.0 / 29.9 ms | 30.1 / 29.8 / 29.8 ms |
 | `tomtom`, 60 × 60 motifs | 69.6 / 70.4 / 70.2 ms | 67.9 / 68.5 / 68.9 ms |
@@ -205,7 +205,7 @@ that resolving it costs nothing but reading.
 ## 3. The suite, cut to a third
 
 | | before | after |
-|---|---|---|
+| --- | --- | --- |
 | tests collected | 2425 | 933 |
 | coverage (statements) | 98% (60 missed of 4149) | 98% (61 missed of 4149) |
 | test classes | 169 | 169 |
@@ -222,7 +222,7 @@ so a claim that merely moved between files is not counted as lost.
 `--dist=load`, which was right for the old suite, is no longer:
 
 | workers | `--dist=load` min–max | `--dist=loadgroup` min–max |
-|---|---|---|
+| --- | --- | --- |
 | 4 | 15.91 – 16.84 s | 9.43 – 9.61 s |
 | 6 | 14.44 – 15.19 s | 12.33 – 12.78 s |
 | 8 | 13.50 – 16.13 s | 8.37 – 12.82 s |
@@ -247,7 +247,7 @@ The fixed floor, for reference: spinning up workers and collecting without runni
 ## 5. Where it landed
 
 | | before | after | limit |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | serial | 56.3 s | **24.0 s** | < 60 s |
 | parallel (`pixi run test`) | 17–19 s | **8.4 s** | < 15 s |
 | gate (`pixi run check`) | 24 s | **10 s** | — |
@@ -264,7 +264,7 @@ Measured 2026-08-31, same box and same method, when `--doctest-modules` was turn
 **The lane's wall did not move.** Eight runs each way on one tree, `pixi run test` reporting:
 
 | | items collected | wall |
-|---|---|---|
+| --- | --- | --- |
 | without the examples | 1090 | 8.76 – 9.33 s |
 | with them | 1560 | 8.75 – 9.34 s |
 
@@ -280,7 +280,7 @@ the immediate re-run hypothesis does to check, which it then reports as an *unre
 than a slow one:
 
 | tree | runs | occurrences |
-|---|---|---|
+| --- | --- | --- |
 | examples collected | 16 | 3 |
 | examples not collected | 8 | 0 |
 | examples collected, deadline off | 12 | 0 |

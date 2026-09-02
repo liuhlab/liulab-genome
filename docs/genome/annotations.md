@@ -109,8 +109,8 @@ shows it as registered but not offered.
 
 The shell spelling takes the assembly, the file and the name, in that order:
 
-```console
-$ genome annotation register-gtf ce11 /data/my_genes.gtf my_genes
+```bash
+genome annotation register-gtf ce11 /data/my_genes.gtf my_genes
 ```
 
 ## The default annotation

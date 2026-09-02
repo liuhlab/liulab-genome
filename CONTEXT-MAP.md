@@ -14,7 +14,7 @@ a hypothesis, a test name — use the term as defined, not a synonym an entry li
 concept defined nowhere is a signal either way: usually it is language the project does not use,
 occasionally a real gap worth adding.
 
-**A term marked _(decided, not built — ADR-N)_ names something the record settled and the
+**A term marked *(decided, not built — ADR-N)* names something the record settled and the
 code does not have yet.** Use the word; do not call the API it describes.
 
 **Two vocabularies, and they do not mix.** Domain terms come from these files. Architecture terms —
@@ -126,46 +126,46 @@ The identity of one reference — a free-form **local** key that names its direc
 dir** at `genome/<assembly>/` and is the lookup key into the curated metadata table. UCSC is the
 default *source*, not the namespace: validation is a property of the source, so `validate_assembly`
 runs only on the UCSC fetch path and never on an assembly seeded from your own FASTA.
-_Avoid_: build, genome build, reference, species; calling it a UCSC id — the name is local even when
+*Avoid*: build, genome build, reference, species; calling it a UCSC id — the name is local even when
 the bytes came from UCSC; and **Genome**, which is this identifier already opened
 
 **Genome**:
 One **Assembly**'s materialized files and open handles, bundled behind the object you query. An
 assembly is an identifier; a genome is that assembly opened — which is why a genome closes and an
 assembly does not.
-_Avoid_: reference, genome object, organism; **Assembly** as a synonym
+*Avoid*: reference, genome object, organism; **Assembly** as a synonym
 
 **Chromosome**:
 One named sequence of an **Assembly**, sized and ordered by that assembly's `chrom.sizes`. The
 assembly's own spelling is authoritative — a name arriving from anywhere else (`chr1` against `1`) is
 reconciled against it at ingest, never assumed to match.
-_Avoid_: contig, scaffold, seqname, sequence (that is a Sequence-context word); spelled `chrom` in
+*Avoid*: contig, scaffold, seqname, sequence (that is a Sequence-context word); spelled `chrom` in
 code, but write the whole word in prose
 
 **Region**:
 A `[start, end)` interval on one **Chromosome** carrying an explicit **Strand** — the package's one
 interval type, frozen and self-validating (`src/genome/region.py`). It names no assembly, so it means
 nothing until resolved against a **Genome**.
-_Avoid_: interval, locus, range, window, BED record; "position" for anything wider than one base
+*Avoid*: interval, locus, range, window, BED record; "position" for anything wider than one base
 
 **Strand**:
 `+`, `-`, or `.` — forward, reverse, unknown. `.` is a real answer meaning nobody knows, and is never
 silently promoted to `+`.
-_Avoid_: orientation, direction, sense/antisense; `None`, `""`, or an implicit `+` standing in for
+*Avoid*: orientation, direction, sense/antisense; `None`, `""`, or an implicit `+` standing in for
 unknown
 
 **0-based half-open**:
 The only coordinate convention that exists inside this package: `[start, end)`, so `end - start` is
 the length and `chr1:0-10` is the first ten bases. 1-based-inclusive coordinates (VCF, GFF/GTF, SAM)
 are converted at the I/O boundary and never travel inward.
-_Avoid_: BED coordinates (the convention outlives the format), zero-indexed, exclusive end — name
+*Avoid*: BED coordinates (the convention outlives the format), zero-indexed, exclusive end — name
 both halves of the convention or neither
 
 **Soft-masking**:
 Lower-case bases marking repeat-masked regions. It is data, not formatting: it survives fetching,
 slicing and reverse-complement, and is discarded only by asking, since `TwoBit(masked=True)` is the
 default. Scanning is the one exception and discards it unasked — ADR-0012.
-_Avoid_: case, lowercase, formatting; bare "masking" — hard-masking writes `N` and is a different
+*Avoid*: case, lowercase, formatting; bare "masking" — hard-masking writes `N` and is a different
 thing
 
 **Gene id stem**:
@@ -176,7 +176,7 @@ carrying no version resolves to itself, which is why an annotation whose ids are
 is unaffected. The mechanism belongs to the annotation registry rather than to any one context's
 code, and reading gene ids is the first thing that opens the **Annotation database** this package
 has always built; TF genes are merely its first caller.
-_Avoid_: base id — that already names a **Motif id** with its version dropped, `MA0139` for
+*Avoid*: base id — that already names a **Motif id** with its version dropped, `MA0139` for
 `MA0139.2`, and one term must not name two things inside one package; unversioned id, stripped id,
 gene id (the versioned thing this is a stem *of*), ENSG (one publisher's spelling)
 
@@ -186,7 +186,7 @@ of it is the assembly tree at `genome/`, under which each **Assembly** owns exac
 and that per-assembly directory is the layout most other contexts file into — annotations at
 `gtf/<name>/`, indexes at `index/<name>/`. Not all of it: data belonging to no assembly is a sibling
 of that tree rather than a tenant of it, and the **Motif** files under `motif/` are the first.
-_Avoid_: cache, cache dir (a cache may be evicted; this may not — though it is spelled `cache_dir` in
+*Avoid*: cache, cache dir (a cache may be evicted; this may not — though it is spelled `cache_dir` in
 code), data root, download dir, workdir
 
 **Completion marker**:
@@ -197,7 +197,7 @@ its size, the **External tool** versions, the package version, when it finished,
 own kind must be able to explain — for an **Index**, the exact command it ran, the parameters and the
 FASTA consumed. Confirming one compares presence and size and reads no contents, so it is the cheap
 answer to *is this finished* and the only answer to *how was this made*.
-_Avoid_: flag, success flag, sentinel, stamp, lock file; and never an output file's mere existence,
+*Avoid*: flag, success flag, sentinel, stamp, lock file; and never an output file's mere existence,
 which is what this word exists to distrust
 
 **Prepared set**:
@@ -209,7 +209,7 @@ checksum and how to slice or parse what arrives, and the module owns the working
 fetch, the digest, the **Completion marker** and the one sentence that sends a caller to a
 login node. Fetching is the only step in this package that needs the network, so a set is
 prepared once where there is internet and every job afterwards reads it.
-_Avoid_: cache, download, dataset, resource; "the JASPAR download" or "the xref files",
+*Avoid*: cache, download, dataset, resource; "the JASPAR download" or "the xref files",
 which name one instance and hide that the three are one thing; and **Data dir**, which is
 the root they are filed under rather than any one of them
 
@@ -219,7 +219,7 @@ before use, and failing with the exact command that installs it. One module, `ex
 every one of them: samtools and the two 2bit tools an assembly is prepared with, and the STAR and
 chromap an **Index** is built with. Whether a tool's output is captured or streamed is an argument,
 not a second implementation.
-_Avoid_: dependency, native dependency (that is the packaging view), subprocess, backend, wrapper,
+*Avoid*: dependency, native dependency (that is the packaging view), subprocess, backend, wrapper,
 bare "binary"
 
 **Shipped table**:
@@ -230,5 +230,5 @@ beside each shipped-data directory, the censuses, the **Cofactor table**s and th
 tables. One module reads every one of them (`src/genome/shipped.py`), and a table declares itself
 to it: resource path, columns, row type, and the command that repairs it. Bulk ships gzipped and
 small metadata plain.
-_Avoid_: data file, curated table, packaged data, resource; and never the shipped **Gene list**
+*Avoid*: data file, curated table, packaged data, resource; and never the shipped **Gene list**
 JSON, which is keyed by **Registered name** and nested rather than tabular

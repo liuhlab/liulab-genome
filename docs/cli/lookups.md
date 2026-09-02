@@ -9,7 +9,7 @@ $ genome xref ids "Homo sapiens" --from-stems symbol ENSG00000141510
 gene id stems -> symbol ids for Homo sapiens (hgnc 2026-07-07)
   source  https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt
   1 resolved, 1 symbol ids, 0 this release names none for
-ENSG00000141510	TP53
+ENSG00000141510 TP53
 ```
 
 The tables land in the shared [data directory](../index.md#the-data-directory), where every project on the machine reads the same copy.
@@ -64,9 +64,9 @@ hgnc ids -> gene id stems for Homo sapiens (alliance 9.0.0)
   2 resolved, 3 gene id stems, 1 this release names none for
 
 $ cat stems.tsv
-HGNC:11998	ENSG00000141510
-HGNC:13666	ENSG00000094914
-HGNC:13666	ENSG00000291836
+HGNC:11998 ENSG00000141510
+HGNC:13666 ENSG00000094914
+HGNC:13666 ENSG00000291836
 HGNC:10041
 ```
 
@@ -87,9 +87,9 @@ gene symbols -> gene id stems for Homo sapiens (hgnc 2026-07-07)
   2 resolved, 3 matches, 1 this release matched nothing for
 
 $ cat genes.tsv
-ARNTL	ARNTL	ENSG00000133794	previous
-ADCY3	ADCY3	ENSG00000138031	approved
-ADCY3	ADCY3	ENSG00000155897	previous
+ARNTL ARNTL ENSG00000133794 previous
+ADCY3 ADCY3 ENSG00000138031 approved
+ADCY3 ADCY3 ENSG00000155897 previous
 Brca1
 ```
 
@@ -121,8 +121,8 @@ Caenorhabditis elegans -> Homo sapiens orthologs (Ensembl Compara 116)
   quality  goc_score and wga_coverage null on every link of this set, so a filter on either empties rather than narrowing
 
 $ cat homologs.tsv
-WBGene00020462	ENSG00000177479	ortholog_one2one	True	True	NULL	NULL
-WBGene00008317	ENSG00000164074	ortholog_one2one	True	True	NULL	NULL
+WBGene00020462 ENSG00000177479 ortholog_one2one True True NULL NULL
+WBGene00008317 ENSG00000164074 ortholog_one2one True True NULL NULL
 WBGene00008352
 ```
 

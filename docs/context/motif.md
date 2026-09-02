@@ -28,7 +28,7 @@ holds no **Background**, so scanning one motif against two backgrounds does not 
 It carries a trim offset as well, because trimming uninformative flanks returns a motif with the
 same id whose column zero is column `offset` of the untrimmed one — which is what lets a **Motif
 hit** found with the trimmed matrix be read back in the full motif's frame.
-_Avoid_: consensus — a motif reports one and the method keeps the word, but the vocabulary names no
+*Avoid*: consensus — a motif reports one and the method keeps the word, but the vocabulary names no
 concept with it: the string is a one-letter-per-position rendering of the **Count matrix**, never
 the motif itself and never what a **Motif hit** matched; pattern, TF, factor, "the matrix" alone
 
@@ -41,7 +41,7 @@ as stable, though: a base id addresses whichever version the **Release** ships, 
 not guaranteed to describe the same factor — or even the same organism — as another version of the
 same base id cited elsewhere. Both releases ship `MA0095.4`, mouse `Yy1`, so `db["MA0095"]` answers
 with the mouse factor to someone who came looking for the human `MA0095.1`.
-_Avoid_: accession, matrix name, key; and **Motif name** as a synonym — one addresses a motif, the
+*Avoid*: accession, matrix name, key; and **Motif name** as a synonym — one addresses a motif, the
 other labels it
 
 **Motif name**:
@@ -49,7 +49,7 @@ The factor name JASPAR publishes for a **Motif** — `CTCF`, or `Ptf1a::Rbpj` fo
 not a key: 66 names collide in the 2024 **Release** and 71 in 2026, so a lookup by name always hands
 back a tuple, of one where the name is unique, and indexing a **Motif set** by an ambiguous name
 raises an error naming every matching **Motif id** rather than silently returning one of four CTCFs.
-_Avoid_: gene name, gene symbol, symbol — a dimer's name names no gene and joins to no
+*Avoid*: gene name, gene symbol, symbol — a dimer's name names no gene and joins to no
 **Annotation** on its own; id, accession, key
 
 **Count matrix**:
@@ -58,7 +58,7 @@ position — and the single source of truth in it. Its values are floats and not
 JASPAR's own records carry fractional counts. Probabilities come from normalising a column; log-odds
 come from a **Background** and a pseudocount, which are arguments and never fields, so no derived
 form is ever stored.
-_Avoid_: PWM, PSSM, position weight matrix, scoring matrix, log-odds matrix — this package stores
+*Avoid*: PWM, PSSM, position weight matrix, scoring matrix, log-odds matrix — this package stores
 counts and derives every weighted form on demand, so a name promising weights describes something
 that is not on the object; and bare "the matrix" in an API surface, which does not say which of the
 three forms you are holding
@@ -67,7 +67,7 @@ three forms you are holding
 How much one column of a **Count matrix** says, in bits: 0 for a column that says nothing, 2 for one
 fixed base. It is the y-axis of the sequence logo and the quantity trimming thresholds on, so the
 height you see is the number you set.
-_Avoid_: entropy — the inverse of this, and one idea gets one word; conservation — the alignment
+*Avoid*: entropy — the inverse of this, and one idea gets one word; conservation — the alignment
 field's word for agreement between species, a different measurement on different data; signal,
 information, bits
 
@@ -81,7 +81,7 @@ its bytes came from; so is a set of de novo matrices out of a model, which is ho
 release can do applies to matrices JASPAR never published. Filtering — by annotation or by an
 arbitrary predicate — hands back a plain motif set rather than a release, because a filtered release
 is no longer that release.
-_Avoid_: database, except of a whole **Release** on disk, which is one; collection, which is
+*Avoid*: database, except of a whole **Release** on disk, which is one; collection, which is
 JASPAR's word for CORE against the redundant sets this package does not read; library, catalog,
 motif list
 
@@ -92,7 +92,7 @@ an **Xref source**'s and for Ensembl Compara's. A release and a **Tax group** to
 one JASPAR file, and one such file is one **Prepared set**, filed under the `motif/` subtree of the
 **Data dir** and shared by every project on the machine; both are recorded on every **Hit table**,
 so a table saved months ago still says what it was scanned with.
-_Avoid_: version — the package has one and a **Motif id** has one, and neither is this; JASPAR
+*Avoid*: version — the package has one and a **Motif id** has one, and neither is this; JASPAR
 version, database version, edition, snapshot
 
 **Tax group**:
@@ -102,7 +102,7 @@ the default, the lab's common case being human and mouse — plus `plants`, `ins
 chooses which file is downloaded rather than filtering one after it is loaded, so a worm scan never
 pays for a thousand plant and fungal matrices. Each **Motif** carries its own as one of its six
 annotations.
-_Avoid_: species — a group holds many, and `all` holds every one JASPAR curates; taxon, clade,
+*Avoid*: species — a group holds many, and `all` holds every one JASPAR curates; taxon, clade,
 lineage, taxonomy; and the bare word "group", which does not say on which axis
 
 ### Scanning
@@ -112,7 +112,7 @@ One place a **Motif** cleared the score its **Threshold** converts to: a sequenc
 `[start, end)` interval, a **Strand**, and the log-odds score in bits. Coordinates are **0-based
 half-open** and always in the forward frame, whichever strand matched, and the strand is always `+`
 or `-` — never `.`, because a scan knows which of the two it scored.
-_Avoid_: TFBS, binding site, site — a hit is a matrix clearing a cutoff on some bases, and whether
+*Avoid*: TFBS, binding site, site — a hit is a matrix clearing a cutoff on some bases, and whether
 the factor binds there is a question this package does not ask; match, call, peak
 
 **Hit table**:
@@ -124,7 +124,7 @@ downstream branches on how the scan was invoked. Its provenance travels on the f
 scanned and which were skipped, and the **Assembly** when the scan was of **Region**s — because two
 tables missing any of those cannot be reconciled. A
 scan too large to hold streams to Parquet and hands back the path instead.
-_Avoid_: results, output, scan result, hits file, BED (the coordinates outlive the format); and
+*Avoid*: results, output, scan result, hits file, BED (the coordinates outlive the format); and
 never a bare frame passed on with its metadata dropped, which is the same table with its meaning
 removed
 
@@ -136,7 +136,7 @@ fewer would distort the very cutoffs it sets. It decides the answer more than an
 moving from uniform to one real chromosome's composition changed the hit count by 2.5% and turned
 over 26% of the hits — which is why it is recorded on the **Hit table** rather than left to be
 assumed.
-_Avoid_: null model, prior, GC correction; base composition, which names the measurement rather than
+*Avoid*: null model, prior, GC correction; base composition, which names the measurement rather than
 the role it plays here; and background set or background regions, the enrichment sense of the word —
 enrichment is out of scope
 
@@ -147,6 +147,6 @@ means the same stringency for a short matrix and a long one, which a score does 
 cannot reach it is left out and named among the skipped rather than called at something looser, so
 every row of a **Hit table** was called at what was asked for; the same arithmetic is why the
 shortest scannable motif is 7 positions, the best possible word of a 6-mer being p = 2.44e-4.
-_Avoid_: cutoff — that is the per-motif score this converts into, not this; score threshold,
+*Avoid*: cutoff — that is the per-motif score this converts into, not this; score threshold,
 significance, FDR, q-value, since nothing here corrects for multiple testing; and "p-value" for the
 **Hit table**'s score column, which is log-odds in bits

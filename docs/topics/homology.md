@@ -103,7 +103,7 @@ annotation carries 46,926 genes, so most worm genes name no human homolog at all
 never recomputes it and never derives one of its own.
 
 | Label | What the tree says |
-|---|---|
+| --- | --- |
 | `ortholog_one2one` | One gene on each side, with no duplication since the species split. |
 | `ortholog_one2many` | One gene on this side, several on the other, duplicated after the split. |
 | `ortholog_many2many` | Both sides duplicated, so neither gene has a single counterpart. |
