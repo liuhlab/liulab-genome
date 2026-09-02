@@ -1,9 +1,15 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # NEVER `push: tags:`. A version cannot be unpublished and cannot be reused, and a tag
+  # trigger puts no human step between a tag reaching the remote and the upload — so one
+  # mistyped or experimental tag ships a release nobody can take back. Publishing a GitHub
+  # Release is a deliberate act by a person, so that is the trigger.
+  release:
+    types: [published]
+  # For a release that failed on something outside the code — a missing trusted publisher,
+  # an index outage. Choose the tag when you run it.
+  workflow_dispatch:
 
 permissions:
   contents: read
