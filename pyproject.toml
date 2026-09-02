@@ -96,7 +96,6 @@ griffe = "*"
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
 pyright = "*"
-pre-commit = "*"
 python-build = "*"
 hatch-vcs = "*"
 ipykernel = "*"   # backs a Jupyter kernel; see the register-kernel task

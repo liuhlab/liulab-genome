@@ -994,6 +994,19 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   alignment, so a long motif that embeds a shorter one can rank the shorter one above itself, which
   both of the 31- and 33-column CTCF matrices do with the 15-column `MA0139.2` inside them.
 
+### Removed
+
+- **pre-commit, a second toolchain the environment manager did not control.**
+  `.pre-commit-config.yaml` pinned `ruff-pre-commit` at `v0.15.16` and let pre-commit build that
+  copy in an ephemeral environment of its own, while `pixi.lock` resolved the ruff the gate runs;
+  two versions formatting one file can disagree, so a commit the hook passed could fail
+  `pixi run check` — and the gate is what CI runs. The hook file also carried its own rules —
+  trailing whitespace, end-of-file, YAML and TOML parses, a 500 KB file cap — enforced at commit
+  time on one machine and by nothing in CI, which is a check that reads as green because it never
+  ran there. Nothing in the repository told a reader to install the hooks except the removed file's
+  own header. `pre-commit` leaves the `dev` feature and the lock loses it with `cfgv`, `identify`
+  and their build dependencies; the entry point is `pixi run check`, unchanged.
+
 ### Fixed
 
 - **CI's numba cache is reused on every run, not only when the runner's CPU model happens to
