@@ -16,6 +16,11 @@
 #
 # Takes its steps as arguments so any gate can share this runner.
 #
+# Exit status: 1 when a step ran and failed, 2 when the gate itself could not run — a
+# usage error, or a capture directory it could not make. `scripts/conformance.py` spells
+# its own two the same way, so "could not run" reaches the reader as itself rather than
+# as a rule nobody broke.
+#
 # `-m` puts each step in its own process group, which is what lets the cleanup below
 # reach past `pixi` to the pytest workers underneath it. `set -e` is deliberately
 # absent: the runner must collect every step's status before it reports.
@@ -24,7 +29,7 @@ set -muo pipefail
 STEPS=("$@")
 [ ${#STEPS[@]} -gt 0 ] || { echo "usage: check.sh <task>..." >&2; exit 2; }
 
-out=$(mktemp -d)
+out=$(mktemp -d) || exit 2
 # Kill, then delete — in that order, and never one without the other. The steps write
 # into $out, so removing it while any of them is alive leaves live processes writing at
 # a path that is gone. Each leftover job leads its own process group, so the negated pid

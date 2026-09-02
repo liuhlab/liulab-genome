@@ -52,9 +52,12 @@ jobs:
   # scripts/require_tools.sh, which CI inherits rather than spelling a second copy of
   # which binaries the lane needs) — with those three absent, 90 of its 925 tests skip
   # themselves and the lane reports green having written no FASTA at all.
-  # `--durations=10` because what sets a parallel lane's wall is one indivisible test,
-  # and no worker count goes below one test — printing it makes that floor visible in
-  # every log. A measurement, not a gate.
+  # `--durations=10` is in the task rather than on the step below: what sets a parallel
+  # lane's wall is one indivisible test, and no worker count goes below one test, so
+  # printing it makes that floor visible in every log. A measurement, not a gate. It sits
+  # in the task because the workflow-step conformance rule allows nothing after a task
+  # name — see the comment beside the task for why that rule was upheld rather than
+  # loosened.
   test:
     name: test
     runs-on: ubuntu-latest
@@ -130,9 +133,9 @@ jobs:
       # merely unconfirmed; neither is visible in the cache step's own output, and they fail
       # by different amounts — see the script for which loss looks like which cause.
       - name: numba cache key
-        run: pixi run -e test python scripts/show_numba_cache_key.py
+        run: pixi run -e test numba-cache-key
       - name: pytest -m 'not aligner'
-        run: pixi run -e test test -- --durations=10
+        run: pixi run -e test test
 
   # The aligner lane: the eight tests that build a real index. It used to re-run the
   # WHOLE suite here just to un-skip them, which meant the unit lane's coverage was a
@@ -151,7 +154,7 @@ jobs:
           environments: aligners
           locked: true
       - name: pytest -m aligner
-        run: pixi run -e aligners test-aligner -- --durations=10
+        run: pixi run -e aligners test-aligner
 
   build:
     name: build wheel + sdist

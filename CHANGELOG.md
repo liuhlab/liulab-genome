@@ -722,6 +722,31 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **The conformance checker is re-synced, and "could not run" is no longer spelled the same way as
+  "a rule failed".** `scripts/conformance.py` and its negative tests come across from
+  `liulab-repo-template` at `da3085b`, wholesale rather than as a diff: the copy this repository
+  carried was pinned at `9c4f8ed`, five rules and two renumberings behind, and a three-way merge
+  would have produced nonsense. Ten rules become fifteen — thirteen that fail and two that only
+  warn — the new five being `release-trigger`, `single-toolchain`, `python-version-agreement`,
+  `workflow-step-tasks` and `nav-target-exists`. Every one of the five reports as *checked* here
+  rather than vacuous, and `agent-docs-unpublished` is still the only waiver. **The exit status is
+  a three-way answer now**: `0` every rule passed, `1` it ran and a rule failed, `2` it could not
+  run at all — no `.git` to list tracked files from, no manifest, or a manifest that will not
+  parse, which used to escape as a traceback exiting `1` and read as a violation nobody had
+  committed. `scripts/check.sh` already used that convention and now says so in its header, and
+  fails with `2` when it cannot make its capture directory rather than carrying on with no path to
+  write into. `tests/test_conformance.py` arrives with the checker: 75 trees, each correct in
+  every respect but one, asserting that the rule it breaks is the rule that fires. One of them is
+  skipped here, because `skill-symlinks` delegates to `skills/install.py` and this repository
+  ships no skills tree. The unit lane gains `pyyaml`, without which every one of those tests
+  errors on the import instead of running — the same reason `griffe` is declared there.
+
+- **The numba cache-key diagnostic is a task.** CI ran
+  `pixi run -e test python scripts/show_numba_cache_key.py`, a command line that existed in the
+  workflow and nowhere else, so nobody chasing a cache that restored and recompiled anyway could
+  repeat it by name. It is `pixi run -e test numba-cache-key` now, declared once in the task
+  table, which is where the step list lives.
+
 - **CI runs one static task, and the docs deploy builds the way a laptop does.** The lint job
   spelled out four steps. GitHub stops a job at its first failing step, so a ruff error hid
   pyright's verdict and the site build. A new `check-static` task names the seven static steps
