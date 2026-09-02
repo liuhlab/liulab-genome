@@ -154,9 +154,14 @@ typecheck = "pyright"
 # wall went bimodal — 13.5 s or 16.1 s on the same commit, decided by scheduling alone.
 # Grouping pins each such module to one worker, which is faster on BOTH box sizes (4 workers:
 # 9.4 s against 12.3 s). docs/research/test-suite-cost-and-parallelism-2026-08-30.md
-test        = { cmd = "pytest -m 'not aligner' -n auto --maxprocesses 10 --dist=loadgroup", depends-on = ["require-tools"] }
+# `--durations=10` lives in the task and not on the CI step because conformance's
+# workflow-step rule allows nothing after a task name. That rule misfires here — `--durations`
+# changes what is REPORTED and can never change a pass or fail — but it was upheld upstream on
+# the reasoning that loosening it would admit `-k`, which is the drift it exists to catch, and
+# nothing mechanical tells the two apart. The cost is a durations table on every local run.
+test        = { cmd = "pytest -m 'not aligner' -n auto --maxprocesses 10 --dist=loadgroup --durations=10", depends-on = ["require-tools"] }
 # Serial: eight tests. `depends-on` because pixi runs it first, proving the binaries answer.
-test-aligner = { cmd = "pytest -m aligner", depends-on = ["require-aligners"] }
+test-aligner = { cmd = "pytest -m aligner --durations=10", depends-on = ["require-aligners"] }
 require-aligners = "bash scripts/require_aligners.sh"
 require-tools    = "bash scripts/require_tools.sh"
 test-cov    = "pytest --cov=genome --cov-report=term-missing"
