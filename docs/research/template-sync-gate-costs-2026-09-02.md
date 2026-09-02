@@ -43,6 +43,22 @@ is that vale parses the markdown and counts prose, while `wc` counts table pipes
 targets and emphasis markers as words. A repository whose agent-facing documents are table-heavy —
 this one — is measured far more harshly by `wc` than by the rule that actually gates it.
 
+The gap is systematic rather than an artefact of one file, and it scales with markup density.
+Measured by lowering `Lab.LengthDoc`'s condition in a scratch copy so the rule prints its own
+metric:
+
+| File | `wc -w` | vale | Gap |
+| --- | --- | --- | --- |
+| `AGENTS.md` | 1290 | 891 | 31% |
+| `docs/agents/writing.md` | 641 | 527 | 18% |
+| `docs/agents/domain.md` | 591 | 458 | 23% |
+| `docs/agents/issue-tracker.md` | 562 | 340 | 40% |
+
+The widest gap is the file that is almost entirely inline code and shell invocations. The same
+comparison in `liulab-repo-template` came out around 20% on its own writing guide, so the effect is
+not particular to this repository — it is particular to the instrument. Anyone sizing headroom
+against these caps should ask the gate, not `wc`.
+
 The 966 markdownlint errors were mostly one convention: 649 `MD060` table-column-style, 142 `MD049`
 emphasis-style, 130 `MD010` hard tabs. The linter's own fixer resolved 937 of them. The residue was
 16 bare code fences, one delimiter row matching no style, two identical headings in a research
@@ -172,6 +188,6 @@ a fake, and no rule can check for defects nobody has thought of. The remedy is t
 direction, an older repository read against the template, repeated. Filed as an issue it would be
 closed by whoever did one audit; the value is entirely in the repetition.
 
-The `MD024` and pyright findings were reproduced independently in `liulab-repo-template` by the
-session working there, which also found the navigation and exit-code defects. Half of what is
-recorded above is theirs.
+The `MD024` and pyright findings were reproduced independently in `liulab-repo-template`, which
+also surfaced the navigation and exit-code defects and the syntactic-versus-transitive split; the
+exemplar technique was suggested there and measured here.
