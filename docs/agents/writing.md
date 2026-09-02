@@ -27,13 +27,16 @@ both files name it.
 **The context map and the glossaries take no file cap.** A glossary grows one term at a time,
 so a file cap on one passes or fails according to how many terms the domain happens to have —
 here, a shared kernel plus eight per-context glossaries — and that count is a fact about the
-domain, not a writing-quality signal. The cap that measures the writing is per entry: one or
-two sentences, held at review. That is what a cap on a glossary exists to catch, a definition
-that has grown into an explanation, and the file total never sees it (ADR-0024).
+domain, not a writing-quality signal. The cap that measures the writing is per entry, 200 words,
+and `tests/test_glossary_entries.py` holds it — including the half that matters, which fails a
+glossary file parsing to no entries at all, so a convention change cannot report green by
+checking nothing. That is what a cap on a glossary exists to catch, a definition that has grown
+into an explanation, and the file total never sees it (ADR-0024).
 
 Vale counts words its own way, skipping table markup, code spans and link syntax, so `wc -w`
-disagrees — by a few hundred on a table-heavy file, always in the direction of looking worse.
-Believe `pixi run vale`, and do not trim a document on `wc`'s say-so.
+overstates — measured at 18% to 40% across this repo's agent docs, and up to 65% elsewhere,
+worst on the tables and command references most likely to sit near a cap. Believe
+`pixi run vale`, and never size a document, or plan a trim, on `wc`'s say-so.
 
 The caps are dials with tight defaults. Raising one is a one-line diff in `styles/Lab/` — do
 that deliberately, and say why in the commit message. Do not raise a cap because a document
