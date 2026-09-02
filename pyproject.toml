@@ -219,6 +219,13 @@ exclude = ["**/__pycache__", "**/.pixi"]
 venvPath = ".pixi/envs"
 venv = "default"
 typeCheckingMode = "standard"
+# The two rules that hold the full-annotations rule in AGENTS.md, named because `standard`
+# leaves both at `none` — it adds five checks over `basic` and a missing annotation is not
+# among them, so raising the mode alone would have mechanised nothing. `strict` turns them
+# on and 556 other diagnostics with them, which is a different decision than this one.
+# Both cost nothing today: every function in `src`, `tests` and `scripts` already annotates.
+reportMissingParameterType = "error"
+reportUnknownParameterType = "error"
 useLibraryCodeForTypes = true
 reportMissingTypeStubs = "none"
 

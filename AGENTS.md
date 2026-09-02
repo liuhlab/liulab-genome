@@ -29,7 +29,7 @@ moves between directories and its number does not; `—` means no record cites t
 | R6 | **Default to private.** Only `__init__.py` re-exports and the CLI surface are public; promotion is a one-line refactor. | — |
 | R7 | **The CLI is a thin client.** Logic lives in the API so `import genome` and the CLI hit one code path; every command emits `--json`; non-zero exit on failure, with errors that name the next action. | — |
 | R8 | **A feature without tests is not done.** | — |
-| R9 | **Full type annotations on every public function and method.** pyright runs `basic`, so nothing catches a missing one. | — |
+| R9 | **Full type annotations on every public function and method.** pyright runs `standard`; a missing one is an error. | — |
 
 ## Where to read next
 

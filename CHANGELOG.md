@@ -47,6 +47,25 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **A missing type annotation now fails the gate, and the type checker is pinned exactly.** The
+  full-annotations rule was stated as non-negotiable with nothing behind it — pyright ran at
+  `basic`, where a missing annotation is not a diagnostic — and the router's own rule text said so.
+  **Raising the mode is not by itself the mechanism**, which is the thing worth writing down:
+  measured against pyright 1.1.411's own rule tables and confirmed on a probe file, `standard` adds
+  exactly five checks over `basic` — possibly-unbound variable, incompatible method override,
+  incompatible variable override, overlapping overload, function member access — and leaves
+  `reportMissingParameterType` and `reportUnknownParameterType` at `none` exactly as `basic` does.
+  Only `strict` turns those on, and it turns on **556** other diagnostics with them, which is a
+  different decision than this one. So the two rules are named beside the mode, and that is what
+  makes the rule's text true. **All of it reports zero errors across 156 files**, so there was no
+  fallout to fix: every function under `src/`, `tests/` and `scripts/` already carried the
+  annotations the rule asked for, and what changes is that the next one that does not fails
+  `pixi run check` rather than depending on a reviewer noticing. pyright is pinned `==1.1.411` where
+  every other dev dependency floats — the language server an editor runs is this same checker, so a
+  version that drifts between the two is the editor and CI disagreeing about one file, and a release
+  of it would turn CI red on a commit that changed nothing. It is the version already resolved, so
+  `pixi.lock` did not move; bumping the pin becomes a commit of its own.
+
 - **Python narrows to 3.13, so an install on 3.12 now fails rather than succeeding untested.**
   `requires-python` floored at `>=3.12` while the lock held one interpreter, so no lane ever ran
   the version the floor advertised. The two settings that looked like they held it — `ruff
