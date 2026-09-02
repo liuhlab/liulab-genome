@@ -22,3 +22,10 @@ config:
   # matter of taste, and tables and long links routinely exceed any limit, so MD013 would
   # fire on every one of them.
   MD013: false
+  # Keep a Changelog gives every release the same section names, so `### Added` recurs once
+  # per release by design. `siblings_only` scopes the rule to headings under one parent,
+  # which is the duplicate that is actually a mistake: a release repeating its own `Added`
+  # still fails. Verified both ways before this was set — the default is not stricter here,
+  # it is aimed at the wrong thing.
+  MD024:
+    siblings_only: true
