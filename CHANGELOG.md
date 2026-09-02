@@ -1056,6 +1056,15 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 - **The Orthology glossary no longer says the code does not exist.** `docs/context/orthology.md` and
   the context map's Orthology row both carried the *(decided, not built)* marker this branch made
   false.
+- **The project URLs name the account that actually holds the repository.** `Homepage`, `Issues` and
+  `Changelog` all said `github.com/lhqing/liulab-genome`, which is not where this project lives —
+  and those three are the only copy of that address a package index shows, so the Homepage and
+  Issues links on the index page went somewhere that is not this project. All three now name
+  `liuhlab`, agreeing with the site config, which had it right. Two manifest tidies ride along,
+  neither user-visible: the version fallback is gone, so a checkout with no tags in history fails
+  the build loudly instead of stamping a wheel `0.0.0+dev` — both workflows that build already
+  fetch full history, so it never fired — and the `tests/**` lint ignore drops `S101`, a rule
+  belonging to a rule set `select` does not name and which therefore fired never.
 
 ## [2026.8.0] - 2026-08-17
 

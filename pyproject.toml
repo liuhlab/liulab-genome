@@ -33,9 +33,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/lhqing/liulab-genome"
-Issues = "https://github.com/lhqing/liulab-genome/issues"
-Changelog = "https://github.com/lhqing/liulab-genome/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/liuhlab/liulab-genome"
+Issues = "https://github.com/liuhlab/liulab-genome/issues"
+Changelog = "https://github.com/liuhlab/liulab-genome/blob/main/CHANGELOG.md"
 
 [project.scripts]
 genome = "genome.cli:app"
@@ -48,7 +48,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
-fallback-version = "0.0.0+dev"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/genome"]
@@ -198,7 +197,7 @@ convention = "numpy"
 extend-immutable-calls = ["typer.Argument", "typer.Option"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D", "S101"]
+"tests/**" = ["D"]
 "**/__init__.py" = ["D104"]
 
 # ============================== pyright ==============================
