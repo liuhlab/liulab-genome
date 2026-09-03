@@ -1082,6 +1082,29 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Fixed
 
+- **A prepared set whose reader stores a form that is not text now finishes, and a step that
+  fails no longer wedges the directory it was building.** The digest a marker records was taken
+  by streaming the stored file through the package's line reader, which decodes every line as
+  UTF-8. A reader that wrote bytes could therefore never finish. The digest also ran **after**
+  the stored file had been moved into the set's own directory and **before** the marker was
+  written — and it is a full pass over a file that may be very large. Anything failing in that
+  window left a claimed file with no marker, which is exactly the state a killed run leaves. The
+  directory was then permanently unfinished: every retry raised `UnfinishedRegistrationError`
+  and pointed at a rebuild. The digest now reads bytes and decodes none of them, and it is taken
+  from the staged file in the working area, before the move. What follows the move is one `stat`
+  and one small record, so a failed run leaves a directory the next one treats as a fresh start.
+  **No recorded digest changes.** Whether the stored form is unpacked first is still read off its
+  stored name, so the two prepared sets that store a `.gz` still record the digest of their
+  unpacked content and every marker already prepared stays valid. The staged file wears a working
+  suffix, so its own path cannot answer that question: `unpacked_digest` now takes a `packed`
+  argument, and the pipeline names it from the stored name. A broken registration still raises
+  and still quotes the command that repairs it — nothing here resumes, repairs or rebuilds one.
+  What changed is that the pipeline no longer makes that state out of a failure it could foresee.
+  Reading a publisher's file still yields text, now by decision rather than by accident: bytes
+  that are not valid UTF-8 raise `PreparedDecodeError`, a new error importable from
+  `genome.store`. It names the file and says that this path reads text. A set whose *publisher*
+  ships binary is still not supported, and the message says so, in place of a decoder's own error
+  from mid-stream naming nothing.
 - **CI's numba cache is reused on every run, not only when the runner's CPU model happens to
   match.** numba keys each compiled overload on a tuple whose middle element is
   `(target_triple, cpu_name, cpu_features)`, so the host CPU **model** was part of the key. GitHub's

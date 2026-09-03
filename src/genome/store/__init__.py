@@ -44,11 +44,16 @@ from genome.store.completion import (
     RegistrationMismatchError,
     UnfinishedRegistrationError,
 )
-from genome.store.prepared import PreparedChecksumError, PreparedSetNotDownloadedError
+from genome.store.prepared import (
+    PreparedChecksumError,
+    PreparedDecodeError,
+    PreparedSetNotDownloadedError,
+)
 
 __all__ = [
     "ChecksumMismatchError",
     "PreparedChecksumError",
+    "PreparedDecodeError",
     "PreparedSetNotDownloadedError",
     "RegistrationError",
     "RegistrationMismatchError",
