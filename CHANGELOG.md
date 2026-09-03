@@ -1094,7 +1094,7 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   from the staged file in the working area, before the move. What follows the move is one `stat`
   and one small record, so a failed run leaves a directory the next one treats as a fresh start.
   **No recorded digest changes.** Whether the stored form is unpacked first is still read off its
-  stored name, so the two shipped sets that store a `.gz` still record the digest of their
+  stored name, so the two prepared sets that store a `.gz` still record the digest of their
   unpacked content and every marker already prepared stays valid. The staged file wears a working
   suffix, so its own path cannot answer that question: `unpacked_digest` now takes a `packed`
   argument, and the pipeline names it from the stored name. A broken registration still raises

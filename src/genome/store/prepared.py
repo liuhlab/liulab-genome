@@ -429,6 +429,10 @@ def prepare(source: PreparedSource, *, progressbar: bool = True) -> Prepared:
     PreparedChecksumError
         If a pin over the unpacked bytes does not match what arrived. A pin over the archive
         is pooch's to enforce and raises there instead.
+    PreparedDecodeError
+        If the publisher's file is not valid UTF-8. Reading it yields text, which is what
+        every reader here takes; what a reader *stores* is digested as bytes and is not
+        this.
 
     Examples
     --------
@@ -458,7 +462,7 @@ def prepare(source: PreparedSource, *, progressbar: bool = True) -> Prepared:
     # wears the working suffix, so its own name says nothing, and reading it there would
     # start hashing gzip bytes for a set that stores a `.gz` — which is neither what its
     # marker records nor what a pin covers.
-    stored = unpacked_digest(staged, packed=_is_packed(source.stored_name))
+    stored_digest = unpacked_digest(staged, packed=_is_packed(source.stored_name))
 
     directory.mkdir(parents=True, exist_ok=True)
     staged.replace(source.path)
@@ -468,7 +472,7 @@ def prepare(source: PreparedSource, *, progressbar: bool = True) -> Prepared:
         name=source.name,
         files=[source.path],
         source_url=source.url,
-        sha256=stored,
+        sha256=stored_digest,
         details={**source.details, **measured},
     )
     write_record(directory, record)

@@ -357,9 +357,11 @@ class TestTheWorkingArea:
 
 
 class TestDecompressWhileHashing:
-    def test_one_implementation_reads_packed_and_plain_alike_and_digests_the_content(
-        self, tmp_path: Path
-    ) -> None:
+    def test_one_implementation_reads_packed_and_plain_alike(self, tmp_path: Path) -> None:
+        # Gzip is undone in one place and both callers reach it, so a set shipping plain
+        # text needs no branch of its own. What the *digest* makes of the same two forms
+        # is TestTheStoredFormIsDigestedAsBytes' — it no longer reads its bytes through
+        # here, so asserting it here too would be asserting it of the wrong function.
         plain = tmp_path / "sightings.tsv"
         plain.write_text(PUBLISHED, encoding="utf-8")
         packed = tmp_path / "sightings.tsv.gz"
@@ -368,13 +370,6 @@ class TestDecompressWhileHashing:
 
         assert list(unpacked_lines(packed)) == PUBLISHED.splitlines(keepends=True)
         assert list(unpacked_lines(plain)) == list(unpacked_lines(packed))
-
-        content = hashlib.sha256(PUBLISHED.encode()).hexdigest()
-        assert unpacked_digest(plain) == content
-        assert unpacked_digest(packed) == content
-        # The archive digests to something else entirely, which is the whole of ADR-0006:
-        # recompressing at another level breaks a match that ought to hold.
-        assert hashlib.sha256(packed.read_bytes()).hexdigest() != content
 
     def test_the_digest_is_fed_the_bytes_as_they_are_read(self, tmp_path: Path) -> None:
         packed = tmp_path / "sightings.tsv.gz"
@@ -425,7 +420,7 @@ class TestTheStoredFormIsDigestedAsBytes:
 
     def test_a_packed_stored_form_digests_to_its_unpacked_content(self, tmp_path: Path) -> None:
         # What a marker already on disk records, so this value is not this package's to
-        # change: the two shipped sets that store a `.gz` recorded the unpacked digest
+        # change: the two prepared sets that store a `.gz` recorded the unpacked digest
         # (ADR-0006), and hashing the archive would invalidate every one of them.
         packed = tmp_path / "beast.sightings.tsv.gz"
         with gzip.open(packed, "wt", encoding="utf-8") as out:
