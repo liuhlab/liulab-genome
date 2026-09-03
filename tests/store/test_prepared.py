@@ -32,6 +32,7 @@ from genome.store.completion import (
     RECORD_NAME,
     RegistrationMismatchError,
     UnfinishedRegistrationError,
+    check_registration,
     read_record,
 )
 from genome.store.prepared import (
@@ -39,8 +40,10 @@ from genome.store.prepared import (
     UNPACKED,
     Checksum,
     PreparedChecksumError,
+    PreparedDecodeError,
     PreparedSetNotDownloadedError,
     PreparedSource,
+    SourceReader,
     login_node_help,
     prepare,
     unpacked_digest,
@@ -73,6 +76,11 @@ SLICE_HEADER = "stem\tsightings\n"
 URL = "https://example.invalid/beasts/2026/sightings.tsv.gz"
 PREPARE_COMMAND = "python -c \"from beasts import Sightings; Sightings('beast')\""
 
+#: A stored form no decoder would accept — the invented set's own packed index, standing in
+#: for whatever a reader might one day want to store that is not text. `\xff` opens no valid
+#: UTF-8 sequence, so anything that decodes what it digests fails on the first byte.
+BINARY_SLICE = b"\x89SIGHT\r\n\x1a\n\xff\xfe\x00\x02BEAST00000001\x03BEAST00000002\x01"
+
 
 class SightingsNotDownloadedError(PreparedSetNotDownloadedError):
     """This fourth topic's own not-downloaded error, which is all it takes to have one."""
@@ -94,17 +102,35 @@ def read_sightings(lines: Iterator[str], staged: Path, *, origin: str) -> Mappin
     return {"rows": len(kept)}
 
 
-def source(directory: Path, *, checksum: Checksum | None) -> PreparedSource:
+def read_sightings_binary(lines: Iterator[str], staged: Path, *, origin: str) -> Mapping[str, Any]:
+    """Slice the same rows, then store them in a form that is not text at all."""
+    kept = 0
+    next(lines, "")
+    for line in lines:
+        if line.split("\t")[0] == "beast":
+            kept += 1
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.write_bytes(BINARY_SLICE)
+    return {"rows": kept}
+
+
+def source(
+    directory: Path,
+    *,
+    checksum: Checksum | None,
+    read: SourceReader = read_sightings,
+    stored_name: str = "beast.sightings.tsv.gz",
+) -> PreparedSource:
     """Declare the fourth set. Everything not here is the shared pipeline's."""
     return PreparedSource(
         url=URL,
         directory=directory,
-        stored_name="beast.sightings.tsv.gz",
+        stored_name=stored_name,
         kind="sightings",
         name="beasts/2026",
         prepare_command=PREPARE_COMMAND,
         description="the beasts 2026 sightings set",
-        read=read_sightings,
+        read=read,
         not_downloaded=SightingsNotDownloadedError,
         checksum=checksum,
         details={"publisher": "The Beast Survey", "release": "2026"},
@@ -174,6 +200,33 @@ class TestAFourthSource:
         assert again.path == first.path
         assert again.record == first.record
 
+    def test_a_reader_that_stores_a_form_that_is_not_text_prepares_like_any_other(
+        self, serving: FakeFetch, pinned: Checksum, tmp_path: Path
+    ) -> None:
+        # What a stored form *is* belongs to the reader, so the pipeline digests it as
+        # bytes and never decodes it. The publisher is still text; only the slice is not.
+        directory = tmp_path / "beasts" / "2026"
+        declared = source(
+            directory,
+            checksum=pinned,
+            read=read_sightings_binary,
+            stored_name="beast.sightings.bin",
+        )
+
+        result = prepare(declared, progressbar=False)
+
+        assert result.path == directory / "beast.sightings.bin"
+        assert result.path.read_bytes() == BINARY_SLICE
+        record = read_record(directory)
+        assert record is not None
+        assert record.sha256 == hashlib.sha256(BINARY_SLICE).hexdigest()
+        assert record.details["rows"] == 2
+        assert not (directory / ".work").exists()
+
+        again = prepare(declared, progressbar=False)
+        assert len(serving.calls) == 1
+        assert again.record == record
+
     def test_a_file_that_does_not_match_its_pin_is_refused_and_names_both_halves(
         self, serving: FakeFetch, tmp_path: Path
     ) -> None:
@@ -220,6 +273,34 @@ class TestAFourthSource:
 
         assert f"rm -rf {directory}" in str(raised.value)
         assert PREPARE_COMMAND in str(raised.value)
+
+    def test_a_step_that_fails_leaves_a_directory_the_next_run_starts_from(
+        self, serving: FakeFetch, pinned: Checksum, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # The other side of the test above, and the reason the digest moved ahead of the
+        # move: an interrupted run is a wedge this pipeline accepts, and a step of its own
+        # that falls over is a wedge it manufactured. Everything that can fail happens
+        # while the directory is still fresh, so a failure leaves nothing claimed and the
+        # next run is a first run.
+        def fell_over(path: Path, algorithm: str = "sha256", *, packed: bool | None = None) -> str:
+            raise RuntimeError("the digest step fell over")
+
+        monkeypatch.setattr(prepared_mod, "unpacked_digest", fell_over)
+        directory = tmp_path / "beasts" / "2026"
+
+        with pytest.raises(RuntimeError, match="fell over"):
+            prepare(source(directory, checksum=pinned), progressbar=False)
+
+        assert [entry.name for entry in directory.iterdir() if entry.name != ".work"] == []
+        assert check_registration(directory, repair="never reached") is None
+
+        # The fault removed, and nothing else: undoing every patch would take the fetch
+        # step back online with it.
+        monkeypatch.setattr(prepared_mod, "unpacked_digest", unpacked_digest)
+        result = prepare(source(directory, checksum=pinned), progressbar=False)
+
+        assert result.path.is_file()
+        assert read_record(directory) == result.record
 
     def test_a_marker_that_disagrees_with_the_file_is_a_mismatch(
         self, serving: FakeFetch, pinned: Checksum, tmp_path: Path
@@ -305,12 +386,99 @@ class TestDecompressWhileHashing:
         assert read == PUBLISHED
         assert digest.hexdigest() == hashlib.md5(PUBLISHED.encode()).hexdigest()
 
+    def test_bytes_no_decoder_accepts_name_the_file_and_say_this_path_reads_text(
+        self, tmp_path: Path
+    ) -> None:
+        # The publisher's file is read as text on purpose, and the wall a publisher
+        # shipping bytes hits should say so rather than surfacing a decoder's own error
+        # from mid-stream, naming nothing.
+        plain = tmp_path / "sightings.tsv"
+        plain.write_bytes(b"species\tstem\tsightings\n" + BINARY_SLICE)
+
+        with pytest.raises(PreparedDecodeError) as raised:
+            list(unpacked_lines(plain))
+
+        message = str(raised.value)
+        assert str(plain) in message
+        assert "text" in message
+
+    def test_the_same_wall_stands_behind_a_gzip(self, tmp_path: Path) -> None:
+        packed = tmp_path / "sightings.tsv.gz"
+        with gzip.open(packed, "wb") as out:
+            out.write(BINARY_SLICE)
+
+        with pytest.raises(PreparedDecodeError) as raised:
+            list(unpacked_lines(packed))
+
+        assert str(packed) in str(raised.value)
+
     def test_write_through_stores_what_it_was_handed_byte_for_byte(self, tmp_path: Path) -> None:
         staged = tmp_path / "through" / "sightings.tsv"
         measured = write_through(iter(PUBLISHED.splitlines(keepends=True)), staged, origin="x")
 
         assert staged.read_text(encoding="utf-8") == PUBLISHED
         assert measured == {"lines": len(PUBLISHED.splitlines())}
+
+
+class TestTheStoredFormIsDigestedAsBytes:
+    """The digest that lands in a marker, and the two things about it that cannot move."""
+
+    def test_a_packed_stored_form_digests_to_its_unpacked_content(self, tmp_path: Path) -> None:
+        # What a marker already on disk records, so this value is not this package's to
+        # change: the two shipped sets that store a `.gz` recorded the unpacked digest
+        # (ADR-0006), and hashing the archive would invalidate every one of them.
+        packed = tmp_path / "beast.sightings.tsv.gz"
+        with gzip.open(packed, "wt", encoding="utf-8") as out:
+            out.write(PUBLISHED)
+
+        assert unpacked_digest(packed) == hashlib.sha256(PUBLISHED.encode()).hexdigest()
+        assert unpacked_digest(packed) != hashlib.sha256(packed.read_bytes()).hexdigest()
+
+    def test_a_plain_stored_form_digests_to_its_content(self, tmp_path: Path) -> None:
+        plain = tmp_path / "beast.sightings.tsv"
+        plain.write_text(PUBLISHED, encoding="utf-8")
+
+        assert unpacked_digest(plain) == hashlib.sha256(PUBLISHED.encode()).hexdigest()
+
+    def test_a_stored_form_that_is_not_text_is_digested_rather_than_refused(
+        self, tmp_path: Path
+    ) -> None:
+        # The digest reads bytes and decodes none of them, so what a reader chose to store
+        # is the reader's business and never this step's.
+        binary = tmp_path / "beast.sightings.bin"
+        binary.write_bytes(BINARY_SLICE)
+
+        assert unpacked_digest(binary) == hashlib.sha256(BINARY_SLICE).hexdigest()
+
+    def test_packedness_can_be_named_when_the_path_does_not_carry_it(self, tmp_path: Path) -> None:
+        # The staged file wears the working suffix, so its own name says nothing about
+        # whether it is packed — and the digest is taken there, before the move. Read off
+        # the path, the two `.gz` sets would silently start hashing gzip bytes.
+        staged = tmp_path / "beast.sightings.tsv.gz.part"
+        with gzip.open(staged, "wt", encoding="utf-8") as out:
+            out.write(PUBLISHED)
+
+        assert (
+            unpacked_digest(staged, packed=True) == hashlib.sha256(PUBLISHED.encode()).hexdigest()
+        )
+        assert (
+            unpacked_digest(staged, packed=False) == hashlib.sha256(staged.read_bytes()).hexdigest()
+        )
+        # Named nothing, the name still answers — which is what every other caller does.
+        assert unpacked_digest(staged) == hashlib.sha256(staged.read_bytes()).hexdigest()
+
+    def test_the_digest_a_marker_records_is_taken_from_the_staged_file_under_its_stored_name(
+        self, serving: FakeFetch, pinned: Checksum, tmp_path: Path
+    ) -> None:
+        # End to end, the value the two constraints meet in: the fourth set stores a `.gz`
+        # and is digested while still staged, and what lands in the marker is the digest of
+        # its unpacked content.
+        directory = tmp_path / "beasts" / "2026"
+        result = prepare(source(directory, checksum=pinned), progressbar=False)
+
+        stored = f"{SLICE_HEADER}BEAST00000001\t3\nBEAST00000002\t1\n"
+        assert result.record.sha256 == hashlib.sha256(stored.encode()).hexdigest()
+        assert result.record.sha256 != hashlib.sha256(result.path.read_bytes()).hexdigest()
 
 
 class TestWhatASourceDeclares:

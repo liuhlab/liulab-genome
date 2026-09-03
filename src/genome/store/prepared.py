@@ -62,6 +62,7 @@ import hashlib
 import shlex
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from io import BufferedIOBase
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
@@ -122,6 +123,25 @@ class PreparedChecksumError(ValueError):
     Examples
     --------
     >>> issubclass(PreparedChecksumError, ValueError)
+    True
+    """
+
+
+class PreparedDecodeError(ValueError):
+    """The publisher's file is not text, and what reads it here yields text.
+
+    A :class:`ValueError`, for the same reason the checksum error is one: the bytes are a
+    bad value for what is being asked of them. Every reader in this package is handed
+    decoded lines and all three publishers ship text, so a publisher that ships bytes is a
+    design question — whether a source should declare its form, and whether the reader
+    protocol should carry bytes — rather than something a caller repairs on disk. The
+    message names the file so that the wall is a wall and not a decoder's own error
+    surfacing from mid-stream naming nothing. What a *reader* stores is not this: a stored
+    form is digested as bytes and never decoded.
+
+    Examples
+    --------
+    >>> issubclass(PreparedDecodeError, ValueError)
     True
     """
 
@@ -371,10 +391,17 @@ def prepare(source: PreparedSource, *, progressbar: bool = True) -> Prepared:
 
     The whole pipeline, in the order every build in this package takes it: look for a
     marker, fetch into the working area, slice or parse into a staged file, hold the bytes
-    to what the source pins, place the staged file under its final name, write the marker,
-    and only then empty the working area. The marker is written last, after the file it
-    claims exists, so a run killed anywhere in between leaves a directory that reads as
-    unfinished rather than as present.
+    to what the source pins, digest the stored form while it is still staged, place it
+    under its final name, write the marker, and only then empty the working area. The
+    marker is written last, after the file it claims exists, so a run killed anywhere in
+    between leaves a directory that reads as unfinished rather than as present.
+
+    **Everything that can fail happens while the directory is still fresh.** What follows
+    the move is one ``stat`` and one small record — the digest, which is a full pass over a
+    file that may be very large, is taken before it. An interrupted run leaving a claimed
+    file with no marker is a state this package refuses to guess at and asks to be rebuilt
+    (ADR-0007); a step of its own falling over after the move would manufacture that same
+    state from a foreseeable failure, which is a different thing and not one to accept.
 
     Parameters
     ----------
@@ -426,6 +453,12 @@ def prepare(source: PreparedSource, *, progressbar: bool = True) -> Prepared:
     digest = _live_digest(source.checksum)
     measured = source.read(unpacked_lines(fetched, digest), staged, origin=str(fetched))
     _check_checksum(source, digest, path=fetched)
+    # Digested here, where a failure costs the caller a re-run and not a wedged directory.
+    # Packed-ness comes off the STORED name and never off the staged path: the staged file
+    # wears the working suffix, so its own name says nothing, and reading it there would
+    # start hashing gzip bytes for a set that stores a `.gz` — which is neither what its
+    # marker records nor what a pin covers.
+    stored = unpacked_digest(staged, packed=_is_packed(source.stored_name))
 
     directory.mkdir(parents=True, exist_ok=True)
     staged.replace(source.path)
@@ -435,9 +468,7 @@ def prepare(source: PreparedSource, *, progressbar: bool = True) -> Prepared:
         name=source.name,
         files=[source.path],
         source_url=source.url,
-        # Digested under its final name, since whether the stored form is packed is read
-        # off that name — and the marker is what makes the file finished, not the placing.
-        sha256=unpacked_digest(source.path),
+        sha256=stored,
         details={**source.details, **measured},
     )
     write_record(directory, record)
@@ -466,6 +497,13 @@ def unpacked_lines(path: Path, digest: Hash | None = None) -> Iterator[str]:
     str
         One line, its line ending kept, decoded as UTF-8.
 
+    Raises
+    ------
+    PreparedDecodeError
+        If the bytes are not valid UTF-8. This path yields text by decision: every reader
+        here takes ``str``, so a publisher shipping bytes is refused by name rather than
+        by a decoder's own error from mid-stream.
+
     Examples
     --------
     >>> import hashlib, gzip
@@ -475,27 +513,51 @@ def unpacked_lines(path: Path, digest: Hash | None = None) -> Iterator[str]:
     >>> [line for line in unpacked_lines(path, digest)]  # doctest: +SKIP
     ['name\tcount\n', 'aardvark\t1\n']
     """
-    if path.suffix == ".gz":
-        with gzip.open(path, "rb") as packed:
-            yield from _decoded(packed, digest)
-    else:
-        with path.open("rb") as plain:
-            yield from _decoded(plain, digest)
+    with _unpacked(path, packed=_is_packed(path.name)) as stream:
+        yield from _decoded(stream, digest, origin=path)
 
 
-def _decoded(lines: Iterable[bytes], digest: Hash | None) -> Iterator[str]:
+def _unpacked(path: Path, *, packed: bool) -> BufferedIOBase:
+    """Open ``path``'s unpacked bytes, undoing gzip when ``packed``. The caller closes it."""
+    return gzip.open(path, "rb") if packed else path.open("rb")
+
+
+def _decoded(lines: Iterable[bytes], digest: Hash | None, *, origin: Path) -> Iterator[str]:
     """Decode each line, feeding the bytes to ``digest`` exactly as they were read."""
     for raw in lines:
         if digest is not None:
             digest.update(raw)
-        yield raw.decode("utf-8")
+        try:
+            line = raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise PreparedDecodeError(
+                f"{origin} is not valid UTF-8 text: {error.reason}. Every reader here is "
+                f"handed decoded lines, so a publisher that ships bytes cannot be read by "
+                f"this package today. Check that the URL the source declares still serves "
+                f"the text file it documents — a binary form served under a text name "
+                f"reads exactly like this. If the publisher has genuinely moved to one, "
+                f"reading it needs a reader that takes bytes, which is a change to this "
+                f"package rather than anything to repair on disk."
+            ) from error
+        yield line
 
 
-def unpacked_digest(path: Path, algorithm: str = "sha256") -> str:
+def _is_packed(name: str) -> bool:
+    """Say whether ``name`` names a gzip, asked of a **name** because a path may not be one.
+
+    The stored form is digested while it still wears the working suffix, and what its
+    digest covers is decided by the name it will be read under, never by the staged path
+    (ADR-0006).
+    """
+    return Path(name).suffix == ".gz"
+
+
+def unpacked_digest(path: Path, algorithm: str = "sha256", *, packed: bool | None = None) -> str:
     """Return the digest of ``path``'s unpacked content, streaming it once.
 
-    :func:`unpacked_lines` with nothing done to the lines: the file is never held, so a
-    stored slice is digested at the cost of one pass over it.
+    Bytes throughout, decoded nowhere: what a **Prepared set** stores is its reader's
+    business, and a stored form that is not text is digested like any other. The file is
+    never held, so a stored slice costs one pass over it.
 
     Parameters
     ----------
@@ -503,6 +565,11 @@ def unpacked_digest(path: Path, algorithm: str = "sha256") -> str:
         The file to digest.
     algorithm : str, default ``"sha256"``
         The hash algorithm, as :func:`hashlib.new` names it.
+    packed : bool, optional
+        Whether to unpack before digesting. ``None`` reads it off ``path``'s own name,
+        which is what every caller holding the file under its final name wants. Name it
+        for a file whose path does not carry it — a staged file wearing the working
+        suffix, whose stored name is the authority on what its digest covers (ADR-0006).
 
     Returns
     -------
@@ -514,11 +581,19 @@ def unpacked_digest(path: Path, algorithm: str = "sha256") -> str:
     >>> from pathlib import Path
     >>> unpacked_digest(Path("tests/data/tiny.fa.gz"))   # doctest: +SKIP
     '9316629bab14f9298a043f8b92e1e04a573b12d6a367ccc07c8f8040e5a13981'
+
+    A staged file, whose own name says nothing about what it holds:
+
+    >>> import gzip, hashlib, tempfile
+    >>> with tempfile.TemporaryDirectory() as scratch:
+    ...     staged = Path(scratch) / "beasts.tsv.gz.part"
+    ...     _ = staged.write_bytes(gzip.compress(b"aardvark"))
+    ...     unpacked_digest(staged, packed=True) == hashlib.sha256(b"aardvark").hexdigest()
+    True
     """
-    digest = hashlib.new(algorithm)
-    for _line in unpacked_lines(path, digest):
-        pass
-    return digest.hexdigest()
+    unpack = _is_packed(path.name) if packed is None else packed
+    with _unpacked(path, packed=unpack) as stream:
+        return hashlib.file_digest(stream, algorithm).hexdigest()
 
 
 def write_through(lines: Iterator[str], staged: Path, *, origin: str = "") -> Mapping[str, Any]:
