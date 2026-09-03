@@ -168,7 +168,7 @@ Indexing and slicing return the same subclass:
 
 ```python
 DNA("ATCGATCG")[2:5]     # DNA('CGA')
-RNA("AUCGAUCG")[1:3]      # RNA('UC')
+RNA("AUCGAUCG")[1:3]     # RNA('UC')
 ```
 
 Nothing else does. `upper`, `lower`, `replace`, `+` and every other inherited `str` method

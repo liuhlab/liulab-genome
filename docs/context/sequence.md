@@ -15,7 +15,7 @@ the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
 ### The types
 
 **Sequence**:
-Bases or residues and nothing else: a `str` subclass whose type names what its characters mean. Case
+Bases and nothing else: a `str` subclass whose type names what its characters mean. Case
 is never normalised — lowercase is **Soft-masking**, which is information, so slicing, indexing and
 every transform hand it back intact.
 _Avoid_: string, seq; and never "read" — a read is a sequencing product, and this package has none
