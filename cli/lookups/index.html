@@ -1,0 +1,1830 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Handling genomic files — metadata, processing, feature extraction.">
+      
+      
+      
+        <link rel="canonical" href="https://liuhlab.github.io/liulab-genome/cli/lookups/">
+      
+      
+        <link rel="prev" href="../genome/">
+      
+      
+        <link rel="next" href="../../reference/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>CLI: lookup commands - liulab-genome</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-6M1CJF9WXY"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-6M1CJF9WXY",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-6M1CJF9WXY",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>"undefined"!=typeof __md_analytics&&__md_analytics()</script>
+  
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli-lookup-commands" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="liulab-genome" class="md-header__button md-logo" aria-label="liulab-genome" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            liulab-genome
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI: lookup commands
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/liuhlab/liulab-genome" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    liuhlab/liulab-genome
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="liulab-genome" class="md-nav__button md-logo" aria-label="liulab-genome" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    liulab-genome
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/liuhlab/liulab-genome" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    liuhlab/liulab-genome
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../genome/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with a genome
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Working with a genome
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/assembly/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assembly
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequences and regions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/annotations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/aligner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aligner indexes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../topics/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topics
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Topics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../topics/transcription-factors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription factors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../topics/motifs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Motifs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../topics/gene-identifiers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gene identifiers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../topics/homology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Homology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interfaces
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interfaces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../genome/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI: genome commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI: lookup commands
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI: lookup commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#genome-tf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome tf
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#genome-tf" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        genome tf
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/liuhlab/liulab-genome/edit/main/docs/cli/lookups.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="cli-lookup-commands">CLI: lookup commands<a class="headerlink" href="#cli-lookup-commands" title="Permanent link">&para;</a></h1>
+<p>Six commands that answer from a published table rather than from one genome's files. <code>tf</code>
+names an assembly, <code>xref</code> and <code>homology</code> name a species, and <code>motif</code> names a FASTA. Every
+answer says which publisher and which release produced it.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="gp">$ </span>genome<span class="w"> </span>xref<span class="w"> </span>ids<span class="w"> </span><span class="s2">&quot;Homo sapiens&quot;</span><span class="w"> </span>--from-stems<span class="w"> </span>symbol<span class="w"> </span>ENSG00000141510
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="go">gene id stems -&gt; symbol ids for Homo sapiens (hgnc 2026-07-07)</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="go">  source  https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="go">  1 resolved, 1 symbol ids, 0 this release names none for</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="go">ENSG00000141510 TP53</span>
+</code></pre></div>
+<p>The tables land in the shared <a href="../../#the-data-directory">data directory</a>, where every project on the machine reads the same copy.</p>
+<p>Each synopsis below is its group's own <code>--help</code>, so it leaves the leading <code>genome</code> off:
+<code>xref ids</code> is run as <code>genome xref ids</code>. <code>homology</code> and <code>motif</code> carry one command each, which
+their synopses fold into the group name; they are run as <code>genome homology links</code> and <code>genome
+motif scan</code>. <code>--json</code>, exit codes and the split between stdout and stderr are on the
+<a href="../">CLI overview</a>.</p>
+<h2 id="genome-tf">genome tf<a class="headerlink" href="#genome-tf" title="Permanent link">&para;</a></h2>
+<p><code>gene-list</code> prints the gene ids a published census judges transcription factors, and
+<code>cofactor-list</code> the ids a publisher lists as cofactors. Which census or table answers is
+decided by the species the assembly's own metadata row names, never by anything you pass.
+Both resolve the publisher's gene id stems into the ids the annotation actually spells, so
+the output joins straight to a counts matrix. Who published the verdict, and what it does
+and does not cover, is on <a href="../../topics/transcription-factors/">Transcription factors</a>.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="gp">$ </span>genome<span class="w"> </span>tf<span class="w"> </span>cofactor-list<span class="w"> </span>ce11<span class="w"> </span>&gt;<span class="w"> </span>cofactors.txt
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="go">TF cofactors for ce11 / wormbase_ws298 (Caenorhabditis elegans)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="go">  AnimalTFDB 4.0 (PMID 36268869) — https://guolab.wchscu.cn/AnimalTFDB4_static/download/Cof_list_final/Caenorhabditis_elegans_Cof</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="go">  317 cofactors, 317 gene ids, 0 stems this annotation carries no gene for</span>
+</code></pre></div>
+<p><strong>A worm assembly is answered by <code>cofactor-list</code> and refused by <code>gene-list</code></strong>, because
+AnimalTFDB assessed worm cofactors and no publisher has released a worm TF census. The
+message names the species that do have one. An assembly that is not registered here, and one
+whose species nothing names, exit <code>1</code> too, each with its own message.</p>
+<p>The two commands, with every argument and option:</p>
+<div class="typer-docs">
+<h1 id="tf">tf<a class="headerlink" href="#tf" title="Permanent link">&para;</a></h1>
+<p>Read a species' transcription factors and cofactors in one annotation's gene ids.</p>
+<h2 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h2>
+<p><code>tf [OPTIONS] COMMAND [ARGS]...</code></p>
+<h2 id="arguments">Arguments<a class="headerlink" href="#arguments" title="Permanent link">&para;</a></h2>
+<p><em>No arguments available</em></p>
+<h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--install-completion</code></td>
+<td>Install completion for the current shell.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--show-completion</code></td>
+<td>Show completion for the current shell, to copy it or customize the installation.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<h2 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gene-list</code></td>
+<td>Print the gene ids a published census...</td>
+</tr>
+<tr>
+<td><code>cofactor-list</code></td>
+<td>Print the gene ids a publisher lists as...</td>
+</tr>
+</tbody>
+</table>
+<h2 id="subcommands">Subcommands<a class="headerlink" href="#subcommands" title="Permanent link">&para;</a></h2>
+<h3 id="gene-list">gene-list<a class="headerlink" href="#gene-list" title="Permanent link">&para;</a></h3>
+<p>Print the gene ids a published census judges transcription factors, one per line.</p>
+<p>Nothing here decides what a transcription factor is. The verdict is the census's —
+Lambert et al. 2018 for human, AnimalTFDB 4.0 for mouse — and which one spoke is
+printed beside the answer, since citing it is the condition on shipping it. The
+species comes from the assembly's own metadata row and is never passed in, so asking
+for human transcription factors while holding a mouse assembly is not expressible.</p>
+<p>A census is keyed by gene id stems — gene ids with the version suffix dropped — and a
+registered annotation is not, so every stem is resolved into the ids that annotation
+actually spells and the output joins to a counts matrix with nothing left to
+normalise. A stem naming two genes prints both rather than one of them.</p>
+<p>Only the ids go to stdout, so the output pipes: the heading, the census's attribution
+and the counts go to stderr, the last of them saying how many stems this annotation
+carries no gene for. <code>--json</code> carries the whole record — every gene with the census's
+own assessment and DBD family, the provenance to cite, and those unresolved stems.</p>
+<p>Assessed-positive genes only, and there is no flag to widen it: a gene the census
+assessed and turned down is a verdict too, but a bare id list has nowhere to say which
+of the two an id is, and a pipeline would read the rejected ones as transcription
+factors. <code>Genome(<assembly>).tf_gene_list(include_rejected=True)</code> is where that answer
+is expressible, because there each id travels with the verdict reached on it.</p>
+<p>Exits with code 1 when the annotation is not registered here, when no census ships for
+the assembly's species, and when nothing says what species the assembly is — three
+different facts, each with its own message, and none of them an empty list of genes.</p>
+<h4 id="usage_1">Usage<a class="headerlink" href="#usage_1" title="Permanent link">&para;</a></h4>
+<p><code>tf gene-list [OPTIONS] ASSEMBLY</code></p>
+<h4 id="arguments_1">Arguments<a class="headerlink" href="#arguments_1" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ASSEMBLY</code></td>
+<td>Assembly name, e.g. 'hg38'.</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<h4 id="options_1">Options<a class="headerlink" href="#options_1" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--annotation TEXT</code></td>
+<td>Ask about this registered annotation instead of the assembly's default one. An assembly with no default and none named has nothing to answer about, and says so.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Emit JSON instead of plain text.</td>
+<td>No</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="cofactor-list">cofactor-list<a class="headerlink" href="#cofactor-list" title="Permanent link">&para;</a></h3>
+<p>Print the gene ids a publisher lists as transcription cofactors, one per line.</p>
+<p><code>genome tf gene-list</code> for the other half of the machinery, and the same shape: a
+cofactor — a chromatin remodeller, a histone-modifying enzyme, a Mediator subunit —
+recognises no sequence of its own and so has no motif to scan for, but which genes are
+cofactors is published, and this is that list met with one annotation. Nothing here
+decides what a cofactor is: membership and classification both travel with the
+publisher, and who to cite is printed beside the answer.</p>
+<p>The species comes from the assembly's own metadata row and is never passed in, so
+asking for mouse cofactors while holding a worm assembly is not expressible. A table
+is keyed by gene id stems — gene ids with the version suffix dropped — and a
+registered annotation is not, so every stem is resolved into the ids that annotation
+actually spells and the output joins to a counts matrix with nothing left to
+normalise. A stem naming two genes prints both rather than one of them.</p>
+<p>Only the ids go to stdout, so the output pipes: the heading, the publishers'
+attribution and the counts go to stderr, the last of them saying how many stems this
+annotation carries no gene for. <code>--json</code> carries the whole record — every gene with
+the publisher that listed it and that publisher's own classification, one provenance
+entry per publisher to cite, and those unresolved stems.</p>
+<p>A worm assembly is answered here and refused by <code>genome tf gene-list</code>: a publisher
+assessed worm cofactors and none has released a worm TF census. That is what the
+publishers have done rather than a defect here.</p>
+<p>Exits with code 1 when the annotation is not registered here, when no cofactor table
+ships for the assembly's species, and when nothing says what species the assembly is —
+three different facts, each with its own message, and none of them an empty list of
+genes.</p>
+<h4 id="usage_2">Usage<a class="headerlink" href="#usage_2" title="Permanent link">&para;</a></h4>
+<p><code>tf cofactor-list [OPTIONS] ASSEMBLY</code></p>
+<h4 id="arguments_2">Arguments<a class="headerlink" href="#arguments_2" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ASSEMBLY</code></td>
+<td>Assembly name, e.g. 'mm39'.</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<h4 id="options_2">Options<a class="headerlink" href="#options_2" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--annotation TEXT</code></td>
+<td>Ask about this registered annotation instead of the assembly's default one. An assembly with no default and none named has nothing to answer about, and says so.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Emit JSON instead of plain text.</td>
+<td>No</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 id="genome-xref">genome xref<a class="headerlink" href="#genome-xref" title="Permanent link">&para;</a></h2>
+<p><code>ids</code> converts identifiers to and from gene id stems, which is how a column of Entrez
+GeneIDs from a GEO series or UniProt accessions from a mass-spec run reaches the rest of
+this package. The direction is named and never inferred: <code>--to-stems NAMESPACE</code> reads the
+ids as that namespace, <code>--from-stems NAMESPACE</code> answers in it, and naming neither or both
+exits <code>2</code>. What the namespaces are and which source answers by default is on
+<a href="../../topics/gene-identifiers/">Gene identifiers</a>.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="gp">$ </span>genome<span class="w"> </span>xref<span class="w"> </span>ids<span class="w"> </span><span class="s2">&quot;Homo sapiens&quot;</span><span class="w"> </span>--to-stems<span class="w"> </span>hgnc<span class="w"> </span>HGNC:11998<span class="w"> </span>HGNC:13666<span class="w"> </span>HGNC:10041<span class="w"> </span>&gt;<span class="w"> </span>stems.tsv
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="go">hgnc ids -&gt; gene id stems for Homo sapiens (alliance 9.0.0)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="go">  source  https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="go">  2 resolved, 3 gene id stems, 1 this release names none for</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="gp">$ </span>cat<span class="w"> </span>stems.tsv
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="go">HGNC:11998 ENSG00000141510</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="go">HGNC:13666 ENSG00000094914</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="go">HGNC:13666 ENSG00000291836</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="go">HGNC:10041</span>
+</code></pre></div>
+<p><strong>Every id you passed gets at least one row.</strong> One naming two genes prints both rather than
+whichever came first, and one this release names nothing for gets a row with an empty second
+column, so nothing you asked about goes missing from the output.</p>
+<p><code>symbols</code> is the separate command for going the other way from a gene symbol. It matches
+approved, previous and alias spellings, and each row says which kind matched, which is why
+it is not a third direction of <code>ids</code>:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="gp">$ </span>genome<span class="w"> </span>xref<span class="w"> </span>symbols<span class="w"> </span><span class="s2">&quot;Homo sapiens&quot;</span><span class="w"> </span>ARNTL<span class="w"> </span>ADCY3<span class="w"> </span>Brca1<span class="w"> </span>&gt;<span class="w"> </span>genes.tsv
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="go">gene symbols -&gt; gene id stems for Homo sapiens (hgnc 2026-07-07)</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="go">  source   https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="go">  columns  asked, symbol, gene_id_stem, kind</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="go">  matching exact, on approved, previous, alias spellings</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="go">  2 resolved, 3 matches, 1 this release matched nothing for</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="gp">$ </span>cat<span class="w"> </span>genes.tsv
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="go">ARNTL ARNTL ENSG00000133794 previous</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="go">ADCY3 ADCY3 ENSG00000138031 approved</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="go">ADCY3 ADCY3 ENSG00000155897 previous</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="go">Brca1</span>
+</code></pre></div>
+<p><code>ARNTL</code> is a spelling HGNC retired and it still reaches its gene. Matching is exact by
+default, because the species already fixes the authority; <code>--case-insensitive</code> folds both
+sides and still answers with every gene it matched.</p>
+<p>The two commands, with every argument and option:</p>
+<div class="typer-docs">
+<h1 id="xref">xref<a class="headerlink" href="#xref" title="Permanent link">&para;</a></h1>
+<p>Convert identifiers against one published xref set, and match gene symbols.</p>
+<h2 id="usage_3">Usage<a class="headerlink" href="#usage_3" title="Permanent link">&para;</a></h2>
+<p><code>xref [OPTIONS] COMMAND [ARGS]...</code></p>
+<h2 id="arguments_3">Arguments<a class="headerlink" href="#arguments_3" title="Permanent link">&para;</a></h2>
+<p><em>No arguments available</em></p>
+<h2 id="options_3">Options<a class="headerlink" href="#options_3" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--install-completion</code></td>
+<td>Install completion for the current shell.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--show-completion</code></td>
+<td>Show completion for the current shell, to copy it or customize the installation.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<h2 id="commands_1">Commands<a class="headerlink" href="#commands_1" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ids</code></td>
+<td>Convert identifiers to and from gene id...</td>
+</tr>
+<tr>
+<td><code>symbols</code></td>
+<td>Print the genes each gene symbol names,...</td>
+</tr>
+</tbody>
+</table>
+<h2 id="subcommands_1">Subcommands<a class="headerlink" href="#subcommands_1" title="Permanent link">&para;</a></h2>
+<h3 id="ids">ids<a class="headerlink" href="#ids" title="Permanent link">&para;</a></h3>
+<p>Convert identifiers to and from gene id stems against one published xref set.</p>
+<p>The way a column of Entrez GeneIDs from a GEO series, UniProt accessions from a
+mass-spec run or HGNC ids from a curated resource reaches this package's answers,
+without writing Python and without the hand-built join everyone in the lab writes
+slightly differently. No assembly is named and no genome is opened: an identifier is a
+name and not a place.</p>
+<p><strong>The direction is named, never inferred.</strong> <code>--to-stems NAMESPACE</code> reads the ids as
+that namespace and answers in gene id stems; <code>--from-stems NAMESPACE</code> reads them as
+stems and answers in that namespace. A string does not say which system it belongs to,
+so <code>HGNC:11998</code> asked the wrong way answers <em>nothing found</em> rather than quietly turning
+around. There is no third direction: Entrez to HGNC is two calls and the join is yours,
+which keeps the hop visible in your pipeline rather than invisible in ours.</p>
+<p><strong>A gene symbol is the one namespace these two directions do not mirror.</strong>
+<code>--from-stems symbol</code> is answered here and gives the authority's single current approved
+spelling. The other way round is <code>genome xref symbols</code>, because a symbol also matches
+spellings the authority has retired and each match carries which kind it was — so
+<code>--to-stems symbol</code> exits 2 naming that command rather than matching approved spellings
+alone, which is what drops 31 of EpiFactors' 801 rows.</p>
+<p><strong>The pairs go to stdout, tab-separated, so the output pipes</strong> — <code>cut -f2</code> is the
+answer, <code>cut -f1</code> says what asked for it — and the heading, the publisher's URL and the
+counts go to stderr. An id naming two genes prints two rows rather than whichever came
+first, and <strong>an id that resolved to nothing gets a row too, with an empty second
+column</strong>: what your list holds and this release does not is the one thing a hand-rolled
+join drops silently. <code>--json</code> carries the same answer, keyed by what was asked about,
+with those ids under <code>unresolved</code>.</p>
+<p>Omitting <code>--source</code> answers from the species' default xref source, so everyone in the
+lab reaches for the same one without discussing it. It is a default and not a
+recommendation: naming a source is how the scientific choice gets made deliberately,
+and every answer names the source and the release that produced it either way. <strong>A
+default is per species and per question</strong>, so <code>--from-stems symbol</code> — the one question
+here that is about symbols — is answered by the source that carries them, <code>hgnc</code> for
+human and <code>alliance_bgi</code> for mouse and worm, rather than by the identifier default.</p>
+<p>Naming a species prepares its set, which the first time is a download. <strong>The lab's CPU
+cluster compute nodes have no internet</strong>, so a set must be constructed once from a login
+node — by running this there, or from Python — before a job that needs it is submitted;
+after that it is read from the <strong>Data dir</strong> and shared by every project on the machine.</p>
+<p>Exits with code 2 when no direction is named or both are, and when the symbol namespace
+is asked toward the hub; and with code 1 when no set exists for the species — the message
+names the ones that do — when the source is not one this package prepares, when the set
+is not here and cannot be fetched, when the namespace is not one the set carries, and
+when a directory holds a set left unfinished.</p>
+<h4 id="usage_4">Usage<a class="headerlink" href="#usage_4" title="Permanent link">&para;</a></h4>
+<p><code>xref ids [OPTIONS] SPECIES IDS...</code></p>
+<h4 id="arguments_4">Arguments<a class="headerlink" href="#arguments_4" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SPECIES</code></td>
+<td>Species an xref set exists for, e.g. 'Homo sapiens' — the slug 'homo_sapiens' names the same one. A species none exists for names the ones that do rather than answering nothing.</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>IDS</code></td>
+<td>The identifiers to convert. Each comes back in the order you passed it, with its version suffix and its namespace's CURIE prefix accepted either way.</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<h4 id="options_4">Options<a class="headerlink" href="#options_4" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--to-stems NAMESPACE</code></td>
+<td>Read the ids as this namespace and answer in gene id stems: ensembl, entrez, uniprot, hgnc, mgi, wormbase, whichever of them this set carries. A gene symbol is not among them — it matches spellings the authority has retired and each match carries which kind it was, so <code>genome xref symbols</code> answers it. Exactly one of this and --from-stems is named.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--from-stems NAMESPACE</code></td>
+<td>Read the ids as gene id stems and answer in this namespace, <code>symbol</code> included — which gives the authority's one current approved spelling, the one a figure axis wants. A versioned gene id is accepted and reduced to its stem, so an annotation's own ids go straight in.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--source TEXT</code></td>
+<td>Answer from this xref source rather than the species' default one. Which publisher answers is a scientific choice and not a detail: NCBI and Ensembl agree on 57.6% of human gene-level (GeneID, ENSG) pairs.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Emit JSON instead of plain text.</td>
+<td>No</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="symbols">symbols<a class="headerlink" href="#symbols" title="Permanent link">&para;</a></h3>
+<p>Print the genes each gene symbol names, and which kind of spelling matched.</p>
+<p>The way a gene list copied out of a paper becomes usable without first finding its ids —
+and without the join that silently drops every row spelling its gene the way the
+authority used to. No assembly is named and no genome is opened: a symbol is a name and
+not a place.</p>
+<p><strong>A symbol is matched, never converted.</strong> Approved, previous <em>and</em> alias spellings are
+matched, every <strong>Gene id stem</strong> any of them names comes back, and each match says which
+kind of spelling it was — so ambiguity is what you are handed rather than something
+resolved on your behalf. <code>ADCY3</code> is HGNC's approved symbol for one gene and a symbol it
+retired from another, and both are printed. This is why it is a command of its own and
+not a third direction of <code>genome xref ids</code>: matching approved spellings alone would drop
+exactly the rows this exists for — 31 of EpiFactors' 801 human rows spell their gene the
+way HGNC spelled it years ago. The opposite hop, a stem to the authority's one current
+approved spelling, is <code>genome xref ids --from-stems symbol</code>.</p>
+<p><strong>The matches go to stdout, tab-separated, so the output pipes</strong> — <code>cut -f3</code> is the
+answer, <code>cut -f1</code> says what asked for it and <code>cut -f4</code> says which kind of spelling
+matched — and the heading, the publisher's URL, the counts and what this source could
+not have matched go to stderr. A symbol naming two genes prints two rows rather than
+whichever came first, and <strong>a symbol this release matched nothing for gets a row too,
+with every other column empty</strong>. Column 2 is the authority's own spelling, which is not
+always the one asked about: folded, <code>brca1</code> asked comes back as <code>BRCA1</code> matched.</p>
+<p><strong>Matching is exact by default</strong>, because the species is fixed by the set:
+<code>--case-insensitive</code> folds both sides and still answers with every gene matched rather
+than picking one.</p>
+<p><strong>What this source could not have matched is printed too.</strong> Only HGNC publishes previous
+and alias spellings typed; mouse and worm match current approved symbols alone, their
+authorities' typed spellings belonging to publishers that cannot be pinned or cannot be
+fetched. So the answer says which kinds it could match and why the others are
+missing — without which <em>this gene is not in the release</em> and <em>this source does not
+publish the spelling you used</em> would both be silence.</p>
+<p><strong>Omitting <code>--source</code> answers from the species' default source for symbols</strong>, which is
+not the same row as its default for identifiers: human's identifiers come from
+<code>alliance</code>, whose cross-reference file publishes no human symbol at all, and its symbols
+from <code>hgnc</code>; mouse's and worm's from <code>alliance_bgi</code>. A default is per species and per
+question for that reason, and every answer names the source and release that produced it
+either way. Naming a source is still how the scientific choice gets made deliberately,
+and a named one is never swapped — so <code>--source alliance</code> here exits 1 saying that set
+carries no symbol, rather than quietly answering from somebody else's file.</p>
+<p>Naming a species prepares its set, which the first time is a download. <strong>The lab's CPU
+cluster compute nodes have no internet</strong>, so a set must be constructed once from a login
+node — by running this there, or from Python — before a job that needs it is submitted.</p>
+<p>Exits with code 1 when no set exists for the species — the message names the ones that
+do — when the source is not one this package prepares, when a named source carries no
+symbols at all — the message names the one that does — when the set is not here and
+cannot be fetched, and when a directory holds a set left unfinished.</p>
+<h4 id="usage_5">Usage<a class="headerlink" href="#usage_5" title="Permanent link">&para;</a></h4>
+<p><code>xref symbols [OPTIONS] SPECIES SYMBOLS...</code></p>
+<h4 id="arguments_5">Arguments<a class="headerlink" href="#arguments_5" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SPECIES</code></td>
+<td>Species an xref set exists for, e.g. 'Homo sapiens' — the slug 'homo_sapiens' names the same one. The species fixes the authority, so a symbol is matched against that authority's spellings and no other's.</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>SYMBOLS</code></td>
+<td>The gene symbols to match, answered in the order you passed them. Surrounding whitespace goes; case does not, unless --case-insensitive is named.</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<h4 id="options_5">Options<a class="headerlink" href="#options_5" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--source TEXT</code></td>
+<td>Answer from this xref source rather than the species' default one for symbols, which is <code>hgnc</code> for human and <code>alliance_bgi</code> for mouse and worm. Naming one is deliberate and is never overridden: a source that carries no symbol says so and names the one that does, rather than matching nothing.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--case-insensitive</code></td>
+<td>Fold case on both sides — your spelling and the authority's — and still answer with every gene matched. Off by default: the species is fixed by the set, so 'Brca1' asked of a human set is a mouse spelling asked of the wrong authority.</td>
+<td>No</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Emit JSON instead of plain text.</td>
+<td>No</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<h2 id="genome-homology">genome homology<a class="headerlink" href="#genome-homology" title="Permanent link">&para;</a></h2>
+<p><code>links</code> prints the genes of another species that a gene id stem's gene is homologous to, on
+Ensembl Compara's own gene trees. Any pairing among human, mouse and worm answers, either
+way round, off one file fetched once and read locally. What the labels mean and how to put
+an answer back into an annotation's own gene ids is on <a href="../../topics/homology/">Homology</a>.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gp">$ </span>genome<span class="w"> </span>homology<span class="w"> </span>links<span class="w"> </span><span class="s2">&quot;Caenorhabditis elegans&quot;</span><span class="w"> </span><span class="s2">&quot;Homo sapiens&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">      </span>WBGene00020462<span class="w"> </span>WBGene00008317<span class="w"> </span>WBGene00008352<span class="w"> </span>&gt;<span class="w"> </span>homologs.tsv
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="go">Caenorhabditis elegans -&gt; Homo sapiens orthologs (Ensembl Compara 116)</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="go">  source   Ensembl Compara release 116 (PMID 26896847) — https://ftp.ensembl.org/pub/release-116/tsv/ensembl-compara/homologies/homo_sapiens/Compara.116.protein_default.homologies.tsv.gz</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="go">  columns  gene_id_stem, homolog_gene_id_stem, homology_type, is_ortholog, is_high_confidence, goc_score, wga_coverage</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="go">  2 resolved, 2 links, 1 this release names no homolog for, 0 dropped partners</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="go">  quality  goc_score and wga_coverage null on every link of this set, so a filter on either empties rather than narrowing</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="gp">$ </span>cat<span class="w"> </span>homologs.tsv
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="go">WBGene00020462 ENSG00000177479 ortholog_one2one True True NULL NULL</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="go">WBGene00008317 ENSG00000164074 ortholog_one2one True True NULL NULL</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="go">WBGene00008352</span>
+</code></pre></div>
+<p>Every cell is the publisher's, printed verbatim and never recomputed. <strong>An empty row is not
+<code>NULL</code></strong>: an empty row is a gene this release names no homolog for, and <code>NULL</code> is Compara's
+own word for a cell it recorded nothing in on a link that does exist. Orthologs are the
+answer by default and <code>--paralogs</code> returns every link the publisher wrote, marked by its own
+<code>homology_type</code> rather than filtered out.</p>
+<p>The command, with every argument and option:</p>
+<div class="typer-docs">
+<h1 id="homology">homology<a class="headerlink" href="#homology" title="Permanent link">&para;</a></h1>
+<p>Print the genes of another species a gene id stem's gene is homologous to.</p>
+<p>The way a hit carries across species without leaving the package and without the
+Ensembl BioMart web API, whose intermittent failures make a pipeline built on it fail
+irreproducibly. Everything here is a bulk file fetched once and read locally. No
+assembly is named and no genome is opened: a <strong>Homology set</strong> is anchored to a species
+pair and a release, not to a build.</p>
+<p><strong>Every cell is Ensembl Compara's.</strong> The <code>homology_type</code> — <code>ortholog_one2one</code>,
+<code>ortholog_one2many</code>, <code>ortholog_many2many</code> — is the publisher's own tree-derived label
+printed verbatim, and it is never recomputed from what came back: an answer can show
+one partner and still read <code>ortholog_one2many</code>, which is the point of carrying the
+label rather than counting rows. The high-confidence flag and both quality scores come
+through the same way, and this package publishes no score, ranking or "best ortholog"
+of its own.</p>
+<p><strong>The links go to stdout, tab-separated, so the output pipes</strong> — <code>cut -f2</code> is the
+answer, <code>cut -f1</code> says what asked for it — and the heading, the attribution, the counts
+and the two qualifications below go to stderr. A gene with three homologs prints three
+rows rather than whichever came first, and <strong>a stem this release names no homolog for
+gets a row too, with every other column empty</strong>: what your list holds and this release
+does not is visible rather than dropped. An empty cell there is not <code>NULL</code>, which is
+the publisher's own word for a cell it recorded nothing in on a link that does exist.</p>
+<p><strong>Two qualifications ride on every answer.</strong> The <strong>Dropped partner</strong>s — the homologous
+genes a filter removed — are counted and named, so a link that merely <em>looks</em>
+one-to-one in your view stays distinguishable from one the publisher called one-to-one.
+And whichever quality columns this set holds no value in <em>anywhere</em> are named up front:
+Compara records neither <code>goc_score</code> nor <code>wga_coverage</code> on any link of either worm
+pairing, so a filter written against one would empty itself in silence.</p>
+<p>Orthologs are the answer by default and <code>--paralogs</code> returns every link the publisher
+wrote; a <strong>Paralogy link</strong> is marked by its own <code>homology_type</code> rather than excluded,
+so <em>not an ortholog</em> stays distinguishable from <em>absent</em>. Release 116 publishes no
+cross-species paralogy for these three species, so on it the flag changes nothing.</p>
+<p>Naming a pair prepares its set, which the first time is a download. <strong>The lab's CPU
+cluster compute nodes have no internet</strong>, so a set must be constructed once from a
+login node — by running this there, or from Python — before a job that needs it is
+submitted; after that it is read from the <strong>Data dir</strong> and shared by every project on
+the machine.</p>
+<p>Exits with code 1 when no set is pinned for the species — the message names the ones
+that are — when the release is not pinned, when both species are the same one, when a
+stem carries a version, when the set is not here and cannot be fetched, when a
+directory holds a set left unfinished, and when the file that was recorded as holding
+this pair holds none of its rows, which means Compara re-partitioned and the message
+names the other file.</p>
+<h2 id="usage_6">Usage<a class="headerlink" href="#usage_6" title="Permanent link">&para;</a></h2>
+<p><code>homology [OPTIONS] SPECIES OTHER_SPECIES STEMS...</code></p>
+<h2 id="arguments_6">Arguments<a class="headerlink" href="#arguments_6" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SPECIES</code></td>
+<td>Species the gene id stems belong to, e.g. 'Homo sapiens' — the slug 'homo_sapiens' names the same one. A species no set is pinned for names the ones that are rather than answering nothing.</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>OTHER_SPECIES</code></td>
+<td>Species the homologous genes come back in. Any pairing among human, mouse and worm; the same species twice is refused, since a gene's paralogs within one species is a different question this does not answer.</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>STEMS</code></td>
+<td>The gene id stems to ask about, answered in the order you passed them. Compara writes its gene ids bare, so a versioned id is refused by name rather than answered emptily.</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="options_6">Options<a class="headerlink" href="#options_6" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--release TEXT</code></td>
+<td>Ensembl Compara release to answer from. Recorded on the answer, so a result is reproducible a year later.</td>
+<td>No</td>
+<td><code>116</code></td>
+</tr>
+<tr>
+<td><code>--paralogs</code></td>
+<td>Return every link the publisher wrote for these genes rather than only the ones its own label calls a speciation event. A paralogy link is marked by that label in the <code>homology_type</code> column, never excluded.</td>
+<td>No</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Emit JSON instead of plain text.</td>
+<td>No</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td><code>--install-completion</code></td>
+<td>Install completion for the current shell.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--show-completion</code></td>
+<td>Show completion for the current shell, to copy it or customize the installation.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<h2 id="commands_2">Commands<a class="headerlink" href="#commands_2" title="Permanent link">&para;</a></h2>
+<p><em>No commands available</em></p>
+</div>
+<h2 id="genome-motif">genome motif<a class="headerlink" href="#genome-motif" title="Permanent link">&para;</a></h2>
+<p><code>scan</code> reads a FASTA, scores every sequence against a JASPAR release, writes the hits to
+Parquet and prints a summary of the run. It is the batch case and the only motif command.
+Listing, plotting and comparing motifs are notebook work, on
+<a href="../../topics/motifs/">Motifs</a>.</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="gp">$ </span>genome<span class="w"> </span>motif<span class="w"> </span>scan<span class="w"> </span>peaks.fa<span class="w"> </span>hits.parquet<span class="w"> </span>--release<span class="w"> </span><span class="m">2024</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="go">scanned 500 sequences with 781 motifs from JASPAR 2024 vertebrates</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="go">  background  0.298, 0.198, 0.198, 0.306</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="go">  threshold   0.0001</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="go">  skipped     98 under 7 positions, so not scanned: MA0004.1, MA0130.1, MA0151.1, …</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="go">  workers     14</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="go">  hits        22251 -&gt; hits.parquet</span>
+</code></pre></div>
+<p>The skipped list is trimmed here; the command names all 98. A motif under seven positions
+cannot reach the default threshold at all, so it is named rather than scanned at some looser
+cutoff you did not ask for.</p>
+<p>The hits go to the named file and the summary to stdout, so <code>--json</code> is never corrupted by
+table data. Read the file back with <code>genome.tf.motif.read_hits</code>, which restores the compact
+dtypes and the provenance that says what the scan was; <code>pandas.read_parquet</code> gives the rows
+and drops both. <strong><code>--background</code> decides the answer more than any other option</strong>, and
+whichever mode was used is recorded in the summary and on the hits.</p>
+<p>The command, with every argument and option:</p>
+<div class="typer-docs">
+<h1 id="motif">motif<a class="headerlink" href="#motif" title="Permanent link">&para;</a></h1>
+<p>Scan a FASTA with a JASPAR release and write the hits to Parquet.</p>
+<p>The batch case, and the one motif operation that belongs in a shell script and a
+scheduler job: a FASTA in, a Parquet file out, a summary of the run on standard
+output. Listing, plotting and comparing motifs are notebook work and get no command.</p>
+<p><strong>The hits go to the named file and the summary to standard output</strong>, so <code>--json</code> is
+never corrupted by table data. The summary says which release was scanned with, how
+many motifs it scanned and which it left out, the background actually used, how many
+sequences were read, and how many hits were written where — the same facts the table
+itself carries, so a pipeline consuming the summary and a reader opening the file
+months later agree about what happened.</p>
+<p><strong>It defaults to every core the allocation granted</strong>, where the library defaults to
+one: a console script is a proper entry point, so the process-pool hazard that
+justifies the serial default does not apply here. <code>--workers 1</code> scans serially and
+answers with the identical table.</p>
+<p>Naming a release prepares it, which the first time is a download. <strong>The lab's CPU
+cluster compute nodes have no internet</strong>, so a release must be constructed once from a
+login node — by running this there, or from Python — before a job that needs it is
+submitted; after that it is read from the <strong>Data dir</strong> and shared by every project on
+the machine.</p>
+<p>Exits with code 1 when the FASTA is not there or is not FASTA, when the release or tax
+group is not one this package prepares, when the threshold is not a p-value in <code>(0, 1)</code>,
+when the worker count is below 1, when the release is not prepared here and cannot be
+fetched — which is what a compute node with no internet looks like — and when a directory
+holds a release left unfinished.</p>
+<h2 id="usage_7">Usage<a class="headerlink" href="#usage_7" title="Permanent link">&para;</a></h2>
+<p><code>motif [OPTIONS] FASTA OUTPUT</code></p>
+<h2 id="arguments_7">Arguments<a class="headerlink" href="#arguments_7" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FASTA</code></td>
+<td>FASTA to scan, plain or .gz. A record is named by its header up to the first whitespace — what the aligners write into an alignment made from the same file.</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>OUTPUT</code></td>
+<td>Where to write the hits, as Parquet. Read it back with genome.tf.motif.read_hits, which restores the dtypes and the provenance both.</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<h2 id="options_7">Options<a class="headerlink" href="#options_7" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+<th>Required</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--release TEXT</code></td>
+<td>JASPAR release to scan with: 2024, 2026. Recorded on the hits, so a table opened months later still says what made it.</td>
+<td>No</td>
+<td><code>2026</code></td>
+</tr>
+<tr>
+<td><code>--tax-group TEXT</code></td>
+<td>JASPAR taxonomic group: vertebrates, plants, insects, nematodes, fungi, urochordates, diatoms, all. It chooses which file is fetched rather than filtering one afterwards, so a worm scan never pays for a thousand plant matrices.</td>
+<td>No</td>
+<td><code>vertebrates</code></td>
+</tr>
+<tr>
+<td><code>--threshold FLOAT</code></td>
+<td>The per-position p-value each motif's cutoff is converted from — one number meaning the same stringency for a short matrix and a long one. A motif that cannot reach it is left out and named among the skipped, never called at something looser.</td>
+<td>No</td>
+<td><code>0.0001</code></td>
+</tr>
+<tr>
+<td><code>--background [auto|uniform|derive]</code></td>
+<td>The base composition scores are taken against, and the parameter that decides the answer most: auto derives it from the input above 10 000 unambiguous bases and stays uniform below that, uniform pins it, derive derives whatever the input holds. Four frequencies of your own are a Python call rather than a flag.</td>
+<td>No</td>
+<td><code>auto</code></td>
+</tr>
+<tr>
+<td><code>--workers INTEGER</code></td>
+<td>How many processes to shard the scan across. Every core the allocation granted by default — the Slurm allocation first, then this process's CPU affinity, then the machine — where the library defaults to one. More than one produces the identical table.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--json</code></td>
+<td>Emit JSON instead of plain text.</td>
+<td>No</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td><code>--install-completion</code></td>
+<td>Install completion for the current shell.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+<tr>
+<td><code>--show-completion</code></td>
+<td>Show completion for the current shell, to copy it or customize the installation.</td>
+<td>No</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<h2 id="commands_3">Commands<a class="headerlink" href="#commands_3" title="Permanent link">&para;</a></h2>
+<p><em>No commands available</em></p>
+</div>
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.indexes", "content.code.copy", "content.code.annotate", "content.action.edit", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1422 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Handling genomic files — metadata, processing, feature extraction.">
+      
+      
+      
+        <link rel="canonical" href="https://liuhlab.github.io/liulab-genome/topics/gene-identifiers/">
+      
+      
+        <link rel="prev" href="../motifs/">
+      
+      
+        <link rel="next" href="../homology/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Gene identifiers - liulab-genome</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-6M1CJF9WXY"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-6M1CJF9WXY",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-6M1CJF9WXY",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>"undefined"!=typeof __md_analytics&&__md_analytics()</script>
+  
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#gene-identifiers" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="liulab-genome" class="md-header__button md-logo" aria-label="liulab-genome" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            liulab-genome
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Gene identifiers
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/liuhlab/liulab-genome" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    liuhlab/liulab-genome
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="liulab-genome" class="md-nav__button md-logo" aria-label="liulab-genome" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    liulab-genome
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/liuhlab/liulab-genome" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    liuhlab/liulab-genome
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../genome/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with a genome
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Working with a genome
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/assembly/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assembly
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequences and regions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/annotations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/aligner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aligner indexes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topics
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Topics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transcription-factors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription factors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../motifs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Motifs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gene identifiers
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gene identifiers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#preparing-a-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preparing a set
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources-and-releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources and releases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#converting-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Converting ids
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Converting ids">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-did-not-resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What did not resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioned-ids-and-stems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioned ids and stems
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#matching-symbols" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Matching symbols
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Matching symbols">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-source-could-not-match" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a source could not match
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#citing-what-answered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Citing what answered
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the command line
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../homology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Homology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../cli/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interfaces
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interfaces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/genome/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI: genome commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/lookups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI: lookup commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#preparing-a-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Preparing a set
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sources-and-releases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sources and releases
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#converting-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Converting ids
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Converting ids">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-did-not-resolve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What did not resolve
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#versioned-ids-and-stems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Versioned ids and stems
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#matching-symbols" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Matching symbols
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Matching symbols">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-source-could-not-match" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a source could not match
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#citing-what-answered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Citing what answered
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#from-the-command-line" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the command line
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/liuhlab/liulab-genome/edit/main/docs/topics/gene-identifiers.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="gene-identifiers">Gene identifiers<a class="headerlink" href="#gene-identifiers" title="Permanent link">&para;</a></h1>
+<p>One gene carries many names: an Ensembl stable id, an NCBI Entrez GeneID, a UniProt
+accession, an HGNC id, and the symbol a paper prints. An <strong>xref set</strong> is one publisher's
+table of which of those names go together, for one species, at one pinned release. Name a
+species and the set is prepared on this machine, then ask it in either direction.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.xref</span><span class="w"> </span><span class="kn">import</span> <span class="n">XrefSet</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">human</span> <span class="o">=</span> <span class="n">XrefSet</span><span class="p">(</span><span class="s2">&quot;Homo sapiens&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">human</span><span class="o">.</span><span class="n">to_stems</span><span class="p">([</span><span class="s2">&quot;7157&quot;</span><span class="p">],</span> <span class="s2">&quot;entrez&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">gene_id_stems</span>    <span class="c1"># [&#39;ENSG00000141510&#39;]</span>
+</code></pre></div>
+<p>No genome is opened and no assembly is named. What a gene is called in another species is a
+separate question, answered on <a href="../homology/">Homology</a>.</p>
+<h2 id="preparing-a-set">Preparing a set<a class="headerlink" href="#preparing-a-set" title="Permanent link">&para;</a></h2>
+<p>The first <code>XrefSet("Homo sapiens")</code> downloads the publisher's file, slices it to that one
+species and writes the slice as a plain gzipped TSV. Every construction after reads the
+slice and fetches nothing.</p>
+<p>The files land in the shared <a href="../../#the-data-directory">data directory</a>, where every project on the machine reads the same copy.</p>
+<p>The first use downloads. The lab's CPU compute nodes have no internet, so run <code>genome xref ids</code> once on a login node before submitting a job that needs it.</p>
+<p>A set prints which species, source and release it holds, and how many genes it covers.
+<code>namespaces</code> is read off the slice, so it lists what this set can actually answer in:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">human</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="c1"># XrefSet(species=&#39;Homo sapiens&#39;, source=&#39;alliance&#39;, release=&#39;9.0.0&#39;, stems=43867)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">human</span><span class="o">.</span><span class="n">namespaces</span>    <span class="c1"># (&#39;ensembl&#39;, &#39;entrez&#39;, &#39;uniprot&#39;, &#39;hgnc&#39;)</span>
+</code></pre></div>
+<p>Each species has its own authority, so a human set carries <code>hgnc</code>, a mouse set <code>mgi</code> and a
+worm set <code>wormbase</code>. Asking for one the set does not carry raises
+<code>NamespaceNotCarriedError</code>, and the message lists the ones it does.</p>
+<h2 id="sources-and-releases">Sources and releases<a class="headerlink" href="#sources-and-releases" title="Permanent link">&para;</a></h2>
+<p>Three species have a set, and more than one publisher offers each of them:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.xref</span><span class="w"> </span><span class="kn">import</span> <span class="n">xref_releases</span><span class="p">,</span> <span class="n">xref_sources</span><span class="p">,</span> <span class="n">xref_species</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">xref_species</span><span class="p">()</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># (&#39;Homo sapiens&#39;, &#39;Mus musculus&#39;, &#39;Caenorhabditis elegans&#39;)</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="n">xref_sources</span><span class="p">(</span><span class="s2">&quot;Homo sapiens&quot;</span><span class="p">)</span>                 <span class="c1"># (&#39;alliance&#39;, &#39;ensembl&#39;, &#39;hgnc&#39;)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">xref_releases</span><span class="p">(</span><span class="s2">&quot;Homo sapiens&quot;</span><span class="p">,</span> <span class="s2">&quot;alliance&quot;</span><span class="p">)</span>    <span class="c1"># (&#39;9.0.0&#39;,)</span>
+</code></pre></div>
+<p>Leave the source out and the species' default answers, so everyone in the lab reaches for
+the same one. <strong>The default is per species and per question</strong>, because the publisher that
+carries a species' ids is usually not the one that carries its symbols. <code>lookup_xref</code> says
+which row will answer, without downloading anything:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.xref</span><span class="w"> </span><span class="kn">import</span> <span class="n">lookup_xref</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">lookup_xref</span><span class="p">(</span><span class="s2">&quot;Homo sapiens&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">source</span>                      <span class="c1"># &#39;alliance&#39;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">lookup_xref</span><span class="p">(</span><span class="s2">&quot;Homo sapiens&quot;</span><span class="p">,</span> <span class="n">for_symbols</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">source</span>    <span class="c1"># &#39;hgnc&#39;</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">lookup_xref</span><span class="p">(</span><span class="s2">&quot;Mus musculus&quot;</span><span class="p">,</span> <span class="n">for_symbols</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">source</span>    <span class="c1"># &#39;alliance_bgi&#39;</span>
+</code></pre></div>
+<p>Name a source, as <code>XrefSet("Homo sapiens", "ensembl")</code>, and it is honoured rather than
+swapped for a default. Two publishers can disagree about which Ensembl gene an Entrez id
+names, so pick one deliberately when it matters; every answer records the source and
+release that produced it. Naming a species, source or release nothing is prepared for
+raises <code>NoXrefSetError</code>.</p>
+<p>There is more here than the common path uses: an <code>evidence=</code> filter for publishers that
+grade their rows, the <code>normalise_id</code> and <code>normalise_symbol</code> helpers, and a reader module per
+publisher. All of it is in the <a href="../../reference/">API reference</a>.</p>
+<h2 id="converting-ids">Converting ids<a class="headerlink" href="#converting-ids" title="Permanent link">&para;</a></h2>
+<p>Everything is joined through one namespace. A <strong>gene id stem</strong> is an Ensembl gene id with
+any version suffix removed, and it is what both directions have in common. <code>to_stems</code> reads
+ids in a namespace and answers in stems; <code>from_stems</code> reads stems and answers in a
+namespace. Which one you want is named rather than guessed from the string:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">human</span><span class="o">.</span><span class="n">to_stems</span><span class="p">([</span><span class="s2">&quot;7157&quot;</span><span class="p">,</span> <span class="s2">&quot;672&quot;</span><span class="p">],</span> <span class="s2">&quot;entrez&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">resolved</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># {&#39;7157&#39;: (&#39;ENSG00000141510&#39;,), &#39;672&#39;: (&#39;ENSG00000012048&#39;,)}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">human</span><span class="o">.</span><span class="n">from_stems</span><span class="p">([</span><span class="s2">&quot;ENSG00000141510&quot;</span><span class="p">],</span> <span class="s2">&quot;uniprot&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">resolved</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># {&#39;ENSG00000141510&#39;: (&#39;P04637&#39;,)}</span>
+</code></pre></div>
+<p>The keys are your own spelling of what you asked about, in the order you asked, so the
+answer lines up against your table row for row. <strong>A value is every gene the publisher
+asserts, never one picked for you.</strong> An HGNC id that names two genes answers with both:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">human</span><span class="o">.</span><span class="n">to_stems</span><span class="p">([</span><span class="s2">&quot;HGNC:11998&quot;</span><span class="p">,</span> <span class="s2">&quot;HGNC:13666&quot;</span><span class="p">],</span> <span class="s2">&quot;hgnc&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">resolved</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># {&#39;HGNC:11998&#39;: (&#39;ENSG00000141510&#39;,),</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1">#  &#39;HGNC:13666&#39;: (&#39;ENSG00000094914&#39;, &#39;ENSG00000291836&#39;)}</span>
+</code></pre></div>
+<p><code>gene_id_stems</code> flattens those values into one list. It drops which id named which gene, so
+read <code>resolved</code> whenever that matters. There is no direct hop from one namespace to
+another: Entrez to UniProt is two calls with the stem in the middle, and you join them.</p>
+<h3 id="what-did-not-resolve">What did not resolve<a class="headerlink" href="#what-did-not-resolve" title="Permanent link">&para;</a></h3>
+<p>Ids this release names nothing for ride back on the answer instead of being dropped:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">answer</span> <span class="o">=</span> <span class="n">human</span><span class="o">.</span><span class="n">to_stems</span><span class="p">([</span><span class="s2">&quot;7157&quot;</span><span class="p">,</span> <span class="s2">&quot;999999999&quot;</span><span class="p">],</span> <span class="s2">&quot;entrez&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">answer</span><span class="o">.</span><span class="n">resolved</span>      <span class="c1"># {&#39;7157&#39;: (&#39;ENSG00000141510&#39;,)}</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">answer</span><span class="o">.</span><span class="n">unresolved</span>    <span class="c1"># (&#39;999999999&#39;,)</span>
+</code></pre></div>
+<p><strong>Read <code>unresolved</code> on every answer</strong>, because a hand-written join drops these rows without
+saying so. It is in ask order, and a stem that carries no id in the namespace you asked for
+lands there too. Nothing here separates an id a publisher retired from one it never
+carried.</p>
+<h2 id="versioned-ids-and-stems">Versioned ids and stems<a class="headerlink" href="#versioned-ids-and-stems" title="Permanent link">&para;</a></h2>
+<p>GENCODE and Ensembl's own GTFs spell a gene id with a version suffix,
+<code>ENSG00000141510.18</code>. Most cross-reference files spell it bare. <strong>Joining a versioned column
+to a bare one matches nothing and raises no error</strong>, which is the usual cause of an empty
+lookup with nothing to explain it.</p>
+<p>The version is dropped on both sides here, so the two spellings are one identifier:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">human</span><span class="o">.</span><span class="n">from_stems</span><span class="p">([</span><span class="s2">&quot;ENSG00000141510.18&quot;</span><span class="p">,</span> <span class="s2">&quot;ENSG00000141510&quot;</span><span class="p">],</span> <span class="s2">&quot;uniprot&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">resolved</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="c1"># {&#39;ENSG00000141510.18&#39;: (&#39;P04637&#39;,), &#39;ENSG00000141510&#39;: (&#39;P04637&#39;,)}</span>
+</code></pre></div>
+<p>Two keys, because the keys are your spelling, and the same value under both. For a column
+you are cleaning up before a join of your own, <code>gene_id_stem</code> does the reduction on its own:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.xref</span><span class="w"> </span><span class="kn">import</span> <span class="n">gene_id_stem</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">gene_id_stem</span><span class="p">(</span><span class="s2">&quot;ENSG00000141510.18&quot;</span><span class="p">)</span>    <span class="c1"># &#39;ENSG00000141510&#39;</span>
+</code></pre></div>
+<p>Worm ids are published unversioned, so <code>WBGene00003001</code> is already a stem and the reduction
+changes nothing.</p>
+<h2 id="matching-symbols">Matching symbols<a class="headerlink" href="#matching-symbols" title="Permanent link">&para;</a></h2>
+<p>The two directions are different questions. Starting from a stem, a gene has one current
+approved symbol, which is what a figure axis wants, and <code>from_stems</code> gives it:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">symbols</span> <span class="o">=</span> <span class="n">XrefSet</span><span class="o">.</span><span class="n">for_symbols</span><span class="p">(</span><span class="s2">&quot;Homo sapiens&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">symbols</span><span class="o">.</span><span class="n">from_stems</span><span class="p">([</span><span class="s2">&quot;ENSG00000133794&quot;</span><span class="p">],</span> <span class="s2">&quot;symbol&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">resolved</span>    <span class="c1"># {&#39;ENSG00000133794&#39;: (&#39;BMAL1&#39;,)}</span>
+</code></pre></div>
+<p>Starting from a symbol, the answer is genes, and the match is made against spellings the
+authority has since retired as well as the current one. That is <code>match_symbols</code>, and every
+hit says which kind of spelling matched:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">answer</span> <span class="o">=</span> <span class="n">symbols</span><span class="o">.</span><span class="n">match_symbols</span><span class="p">([</span><span class="s2">&quot;ARNTL&quot;</span><span class="p">,</span> <span class="s2">&quot;ADCY3&quot;</span><span class="p">,</span> <span class="s2">&quot;Brca1&quot;</span><span class="p">])</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">answer</span><span class="o">.</span><span class="n">resolved</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># {&#39;ARNTL&#39;: (SymbolMatch(symbol=&#39;ARNTL&#39;, gene_id_stem=&#39;ENSG00000133794&#39;, kind=&#39;previous&#39;),),</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1">#  &#39;ADCY3&#39;: (SymbolMatch(symbol=&#39;ADCY3&#39;, gene_id_stem=&#39;ENSG00000138031&#39;, kind=&#39;approved&#39;),</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1">#            SymbolMatch(symbol=&#39;ADCY3&#39;, gene_id_stem=&#39;ENSG00000155897&#39;, kind=&#39;previous&#39;))}</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">answer</span><span class="o">.</span><span class="n">unresolved</span>    <span class="c1"># (&#39;Brca1&#39;,)</span>
+</code></pre></div>
+<p><code>ARNTL</code> is a spelling HGNC retired and it still reaches <code>BMAL1</code>. <code>ADCY3</code> is HGNC's approved
+symbol for one gene and a symbol it took away from another, so it answers with both.
+<strong>Matching is exact by default</strong>, so <code>Brca1</code>, a mouse spelling asked of the human
+authority, matches nothing. Pass <code>case_insensitive=True</code> to fold both sides.</p>
+<p><code>XrefSet.for_symbols</code> fills in the source that carries symbols; the plain constructor fills
+in the identifier one, which for human carries no symbol at all, so
+<code>XrefSet("Homo sapiens").match_symbols(...)</code> raises <code>NamespaceNotCarriedError</code>. Asking
+<code>to_stems</code> for the symbol namespace raises <code>SymbolDirectionError</code>, whose message names
+<code>match_symbols</code>.</p>
+<h3 id="what-a-source-could-not-match">What a source could not match<a class="headerlink" href="#what-a-source-could-not-match" title="Permanent link">&para;</a></h3>
+<p>Only HGNC labels its previous and alias spellings as such. The mouse and worm authorities
+each publish one approved symbol per gene beside an undifferentiated synonyms list, so
+those sets match approved spellings and nothing else. The pair that works for human does
+not work for mouse:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">mouse</span> <span class="o">=</span> <span class="n">XrefSet</span><span class="o">.</span><span class="n">for_symbols</span><span class="p">(</span><span class="s2">&quot;Mus musculus&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">answer</span> <span class="o">=</span> <span class="n">mouse</span><span class="o">.</span><span class="n">match_symbols</span><span class="p">([</span><span class="s2">&quot;Bmal1&quot;</span><span class="p">,</span> <span class="s2">&quot;Arntl&quot;</span><span class="p">])</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">answer</span><span class="o">.</span><span class="n">resolved</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># {&#39;Bmal1&#39;: (SymbolMatch(symbol=&#39;Bmal1&#39;, gene_id_stem=&#39;ENSMUSG00000055116&#39;, kind=&#39;approved&#39;),)}</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="n">answer</span><span class="o">.</span><span class="n">unresolved</span>    <span class="c1"># (&#39;Arntl&#39;,)</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">answer</span><span class="o">.</span><span class="n">kinds</span>         <span class="c1"># (&#39;approved&#39;,)</span>
+</code></pre></div>
+<p><strong>A symbol this release does not have and a spelling this source could never have matched
+both land in <code>unresolved</code></strong>, and the entry alone does not say which happened. <code>kinds</code> says
+which kinds the set can match, and <code>limits</code> says why the rest are missing. <code>limits</code> is a
+long string, trimmed here after its first clause:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nb">print</span><span class="p">(</span><span class="n">answer</span><span class="o">.</span><span class="n">limits</span><span class="p">)</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="c1"># this source publishes one current approved symbol per gene beside an undifferentiated</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="c1"># synonyms list, and a spelling in that list does not say whether the authority retired</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># it or merely records it ...</span>
+</code></pre></div>
+<p>For a human symbol set, <code>kinds</code> is <code>('approved', 'previous', 'alias')</code> and <code>limits</code> is
+<code>None</code>.</p>
+<h2 id="citing-what-answered">Citing what answered<a class="headerlink" href="#citing-what-answered" title="Permanent link">&para;</a></h2>
+<p>A set carries the curated row it resolved to, so what you cite is what answered rather than
+what you looked up afterwards:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nb">print</span><span class="p">(</span><span class="n">symbols</span><span class="o">.</span><span class="n">provenance</span><span class="o">.</span><span class="n">attribution</span><span class="p">())</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="c1"># HGNC 2026-07-07 (PMID 41287213) —</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="c1"># https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt</span>
+</code></pre></div>
+<p>Publisher, their own version string, the paper to cite where there is one, and the file the
+bytes came from. <code>provenance</code> is the whole record, including the species, the NCBI taxid
+and the publisher's checksum. Each command below prints its own source URL on every answer.</p>
+<h2 id="from-the-command-line">From the command line<a class="headerlink" href="#from-the-command-line" title="Permanent link">&para;</a></h2>
+<p>Neither question needs a genome, and both have a command. <code>genome xref ids</code> converts in the
+direction the flag names:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="gp">$ </span>genome<span class="w"> </span>xref<span class="w"> </span>ids<span class="w"> </span><span class="s2">&quot;Homo sapiens&quot;</span><span class="w"> </span>--to-stems<span class="w"> </span>entrez<span class="w"> </span><span class="m">7157</span><span class="w"> </span><span class="m">672</span><span class="w"> </span><span class="m">999999999</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="go">entrez ids -&gt; gene id stems for Homo sapiens (alliance 9.0.0)</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="go">  source  https://download.alliancegenome.org/9.0.0/GENECROSSREFERENCE/COMBINED/GENECROSSREFERENCE_COMBINED_11.tsv.gz</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="go">  2 resolved, 2 gene id stems, 1 this release names none for</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="go">7157 ENSG00000141510</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="go">672 ENSG00000012048</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="go">999999999</span>
+</code></pre></div>
+<p>The pairs go to stdout, tab-separated, so <code>cut -f2</code> is the answer and the rest pipes. The
+heading and the counts go to stderr. Every id you passed gets a row, and one that resolved
+to nothing gets an empty second column.</p>
+<p><code>genome xref symbols</code> matches, and prints the kind of spelling in the fourth column:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="gp">$ </span>genome<span class="w"> </span>xref<span class="w"> </span>symbols<span class="w"> </span><span class="s2">&quot;Homo sapiens&quot;</span><span class="w"> </span>ARNTL<span class="w"> </span>ADCY3<span class="w"> </span>Brca1
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="go">gene symbols -&gt; gene id stems for Homo sapiens (hgnc 2026-07-07)</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="go">  source   https://storage.googleapis.com/public-download-files/hgnc/archive/archive/quarterly/tsv/hgnc_complete_set_2026-07-07.txt</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="go">  columns  asked, symbol, gene_id_stem, kind</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="go">  matching exact, on approved, previous, alias spellings</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="go">  2 resolved, 3 matches, 1 this release matched nothing for</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="go">ARNTL ARNTL ENSG00000133794 previous</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="go">ADCY3 ADCY3 ENSG00000138031 approved</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="go">ADCY3 ADCY3 ENSG00000155897 previous</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="go">Brca1</span>
+</code></pre></div>
+<p>Both take <code>--source</code> and <code>--json</code>. Both exit non-zero when a species, source or namespace is
+not one this package has, rather than printing an answer shorter than you asked for. The
+full option list is on <a href="../../cli/lookups/">CLI: lookup commands</a>.</p>
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.indexes", "content.code.copy", "content.code.annotate", "content.action.edit", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
