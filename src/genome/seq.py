@@ -1,8 +1,8 @@
 """Typed biological sequence classes.
 
-This module defines :class:`DNA`, :class:`RNA`, and :class:`Protein` — thin,
-typed subclasses of :class:`str` that carry biological transforms (complement,
-reverse complement, transcription) without losing their type or case.
+This module defines :class:`DNA` and :class:`RNA` — thin, typed subclasses of
+:class:`str` that carry biological transforms (complement, reverse complement,
+transcription) without losing their type or case.
 
 Notes
 -----
@@ -74,7 +74,7 @@ class _Seq(str):
         on :class:`_Seq` directly rather than a concrete subclass.
         """
         if cls is _Seq:
-            raise TypeError("_Seq is abstract; instantiate DNA, RNA, or Protein instead.")
+            raise TypeError("_Seq is abstract; instantiate DNA or RNA instead.")
         return str.__new__(cls, value)
 
     @classmethod
@@ -108,8 +108,6 @@ class _Seq(str):
         []
         >>> RNA.outside_alphabet("ATCG")            # each class asks its own alphabet
         ['T']
-        >>> Protein.outside_alphabet("MKTAY")
-        []
         >>> DNA("ATCX")                             # reporting it never blocks construction
         DNA('ATCX')
         """
@@ -272,23 +270,6 @@ class RNA(_Seq):
         0.0
         """
         return _gc_fraction(self)
-
-
-class Protein(_Seq):
-    """A protein sequence over the 20 standard amino acids.
-
-    Alphabet: ``ACDEFGHIKLMNPQRSTVWY`` (case-insensitive at construction;
-    case preserved in the stored value). No biological transforms are defined.
-
-    Examples
-    --------
-    >>> Protein("MKTAY")
-    Protein('MKTAY')
-    >>> Protein("MKTAY")[1:3]
-    Protein('KT')
-    """
-
-    ALPHABET: ClassVar[frozenset[str]] = frozenset("ACDEFGHIKLMNPQRSTVWY")
 
 
 def _gc_fraction(seq: str) -> float:
