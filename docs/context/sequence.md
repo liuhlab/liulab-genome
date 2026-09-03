@@ -1,6 +1,6 @@
 # Sequence
 
-Bases as values. This context covers `seq.py`: `DNA`, `RNA` and `Protein` are `str` subclasses that
+Bases as values. This context covers `seq.py`: `DNA` and `RNA` are `str` subclasses that
 carry the biological transforms without ever losing their type or their case. A sequence is a
 **leaf** — a `DNA` carries no **Assembly**, no **Region** and no **Strand**, and nothing here can
 tell you where its bases came from. That is deliberate: coordinates and provenance belong to the
@@ -32,11 +32,6 @@ A **Sequence** over `A`, `C`, `G`, `U`, reached by transcribing a **DNA** and re
 _Avoid_: transcript (a transcript is an annotation feature with coordinates; an `RNA` has none),
 mRNA, cDNA
 
-**Protein**:
-A **Sequence** over the twenty standard amino acids. A terminus by design: no complement, no
-transcription, and no translation into it — the codon table is not this package's business.
-_Avoid_: peptide, amino acid sequence, ORF, residues
-
 **Alphabet**:
 The character set a sequence class names — **documentation, not a runtime check**. Construction
 validates nothing, deliberately: scanning every character costs too much on a whole chromosome, so
@@ -58,7 +53,7 @@ biological meaning
 The `T`-to-`U` rewrite that turns a **DNA** into an **RNA**, and its exact inverse. A type change and
 a letter swap: no splicing, no promoter, no biology beyond the characters.
 _Avoid_: reverse-transcribe (that names a wet-lab reaction yielding cDNA), translate (translation
-makes a **Protein** and is out of scope), convert
+makes a protein sequence, which `liulab-protein` owns), convert
 
 **GC content**:
 The fraction of a sequence's characters that are `G` or `C`, case-insensitive, `0.0` for the empty

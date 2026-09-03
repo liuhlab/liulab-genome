@@ -1058,6 +1058,17 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Removed
 
+- **`genome.Protein`, which now ships from `liulab-protein`.** The class was a leaf: a `str`
+  subclass with an alphabet and no transforms, produced by nothing in this package. The
+  sequence docs said as much — there is no translation to protein here, and the codon table
+  is not this package's business — so the only thing `genome.Protein` did was hold a name that
+  `liulab-protein` needs for a different and larger object: a protein with metadata,
+  embeddings, a structure and database searches. Two classes called `Protein` across two
+  packages that a caller imports together is a rename at every call site or an alias at every
+  import. Removing the leaf costs nothing here and leaves the name unambiguous. `DNA` and
+  `RNA` are unchanged. `Protein` is gone from `genome`, from `genome.seq` and from `__all__`;
+  ADR-0005 keeps its wording, because a record says what was decided at the time.
+
 - **pre-commit, a second toolchain the environment manager did not control.**
   `.pre-commit-config.yaml` pinned `ruff-pre-commit` at `v0.15.16` and let pre-commit build that
   copy in an ephemeral environment of its own, while `pixi.lock` resolved the ruff the gate runs.

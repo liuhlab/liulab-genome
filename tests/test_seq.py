@@ -6,7 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from genome.seq import DNA, RNA, Protein, _Seq
+from genome.seq import DNA, RNA, _Seq
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -14,11 +14,6 @@ from genome.seq import DNA, RNA, Protein, _Seq
 
 dna_text = st.text(alphabet="ACGTacgt", min_size=0, max_size=64)
 rna_text = st.text(alphabet="ACGUacgu", min_size=0, max_size=64)
-protein_text = st.text(
-    alphabet="ACDEFGHIKLMNPQRSTVWYacdefghiklmnpqrstvwy",
-    min_size=0,
-    max_size=64,
-)
 
 
 # ---------------------------------------------------------------------------
@@ -30,16 +25,13 @@ class TestConstruction:
     def test_construction_preserves_case_including_non_alphabet_chars_and_empty(self) -> None:
         assert DNA("") == ""
         assert RNA("") == ""
-        assert Protein("") == ""
         assert str(DNA("aTcG")) == "aTcG"
         assert str(RNA("aUcG")) == "aUcG"
-        assert str(Protein("mKtAy")) == "mKtAy"
         # Alphabet checking is intentionally skipped for performance; any
         # string is accepted and stored as-is.
         assert str(DNA("ATCX")) == "ATCX"
         assert str(DNA("AUCG")) == "AUCG"
         assert str(RNA("ATCG")) == "ATCG"
-        assert str(Protein("MBTOUZ")) == "MBTOUZ"
         with pytest.raises(TypeError, match="abstract"):
             _Seq("ATCG")
 
@@ -67,12 +59,9 @@ class TestOutsideAlphabet:
         assert DNA.outside_alphabet("AUCG") == ["U"]
         assert RNA.outside_alphabet("ATCG") == ["T"]
         assert RNA.outside_alphabet("AUCG") == []
-        assert Protein.outside_alphabet("MKTAY") == []
-        assert Protein.outside_alphabet("MBTOUZ") == ["B", "O", "U", "Z"]
         # Joined sorted, which is how a caller naming the alphabet in a message renders it.
         assert "".join(sorted(DNA.ALPHABET)) == "ACGT"
         assert "".join(sorted(RNA.ALPHABET)) == "ACGU"
-        assert "".join(sorted(Protein.ALPHABET)) == "ACDEFGHIKLMNPQRSTVWY"
 
 
 class TestPropertiesOutsideAlphabet:
@@ -85,7 +74,7 @@ class TestPropertiesOutsideAlphabet:
         assert set(offenders) <= set(s)
         assert (offenders == []) == all(c.upper() in DNA.ALPHABET for c in s)
 
-    @given(st.sampled_from([DNA, RNA, Protein]), st.text(max_size=32))
+    @given(st.sampled_from([DNA, RNA]), st.text(max_size=32))
     def test_every_subclass_answers_against_its_own_alphabet(self, cls: type[_Seq], s: str) -> None:
         assert cls.outside_alphabet(s) == sorted({c for c in s if c.upper() not in cls.ALPHABET})
 
@@ -112,7 +101,6 @@ class TestSlicingAndRepr:
         assert indexed == "A"
         assert repr(DNA("ATCG")) == "DNA('ATCG')"
         assert repr(RNA("AUCG")) == "RNA('AUCG')"
-        assert repr(Protein("MKT")) == "Protein('MKT')"
         # Documented contract: only __getitem__ and biological methods stay typed.
         upper_result = DNA("aTcG").upper()
         assert type(upper_result) is str
@@ -193,12 +181,3 @@ class TestPropertiesRNA:
         r = RNA(s)
         assert r.reverse_complement().reverse_complement() == r
         assert r.back_transcribe().transcribe() == r
-
-
-class TestPropertiesProtein:
-    @given(protein_text)
-    def test_constructor_preserves_case_and_value_and_slice_returns_protein(self, s: str) -> None:
-        assert str(Protein(s)) == s
-        p = Protein(s)
-        if len(p) >= 2:
-            assert isinstance(p[1:], Protein)

@@ -124,23 +124,22 @@ parse_region("chrM")                 # ('chrM', None, None)
 
 ## Typed sequences
 
-`DNA`, `RNA` and `Protein` subclass `str`. A `DNA` is a string anywhere a string is
-expected, and it carries the transforms besides.
+`DNA` and `RNA` subclass `str`. A `DNA` is a string anywhere a string is expected, and it
+carries the transforms besides.
 
 | Class | Alphabet | Transforms |
 | --- | --- | --- |
 | `DNA` | `A C G T` | `complement`, `reverse_complement`, `transcribe`, `gc_content` |
 | `RNA` | `A C G U` | `complement`, `reverse_complement`, `back_transcribe`, `gc_content` |
-| `Protein` | the 20 standard amino acids | none |
 
 Build one from any string. The value is stored verbatim, case included:
 
 ```python
-from genome import DNA, RNA, Protein
+from genome import DNA, RNA
 
 DNA("ATCG")         # DNA('ATCG')
 DNA("aTcG")         # DNA('aTcG')
-Protein("MKTAY")    # Protein('MKTAY')
+RNA("AUCG")         # RNA('AUCG')
 ```
 
 **The alphabet is not checked at construction.** Scanning every character costs too much
@@ -169,7 +168,7 @@ Indexing and slicing return the same subclass:
 
 ```python
 DNA("ATCGATCG")[2:5]     # DNA('CGA')
-Protein("MKTAY")[1:3]    # Protein('KT')
+RNA("AUCGAUCG")[1:3]      # RNA('UC')
 ```
 
 Nothing else does. `upper`, `lower`, `replace`, `+` and every other inherited `str` method
@@ -197,8 +196,8 @@ RNA("AUCG").back_transcribe()       # DNA('ATCG')
 DNA("aTcG").gc_content    # 0.5
 ```
 
-There is no translation to protein. `Protein` holds a sequence and defines no transforms
-of its own. The full surface of all three is in the [API reference](../reference.md).
+There is no translation to protein: protein sequences live in `liulab-protein`, not here.
+The full surface of both types is in the [API reference](../reference.md).
 
 ## From the command line
 
