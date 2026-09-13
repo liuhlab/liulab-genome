@@ -146,6 +146,20 @@ sacCer3.files.twobit
 # PosixPath('/Users/hanqing/liulab_data/genome/sacCer3/sacCer3.2bit')
 ```
 
+Constructing a `Genome` prepares an assembly that is not here yet, which for most names is a
+download. When all you want is a path to hand to another program, `registered_assembly`
+reads the same four paths off the registration record and prepares nothing. A name that is
+not registered raises `FileNotFoundError`, naming the command that registers it:
+
+```python
+from genome.assembly import registered_assembly
+
+registered_assembly("sacCer3").genome_files.fasta
+# PosixPath('/Users/hanqing/liulab_data/genome/sacCer3/sacCer3.fa')
+```
+
+`genome assembly files sacCer3` is the same lookup from a shell.
+
 ### Metadata
 
 `metadata` says which reference this is and how other databases name it. It is always a

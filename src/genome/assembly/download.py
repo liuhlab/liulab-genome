@@ -38,11 +38,12 @@ record-that-disagrees into errors naming ``genome assembly register <assembly> -
 that command is what repairs them (ADR-0007).
 
 What :func:`register_assembly` and :func:`verify_assembly` answer *with* —
-:class:`RegisteredAssembly` and :class:`VerifiedAssembly` — is here, beside the two
-functions that build them: a result is defined by whatever returns it (ADR-0022). Both are
-frozen, and the first carries the **Completion marker** whole rather than copying it out
-field by field, so a surface reporting the registration that just happened answers every
-later question off the record in hand instead of by opening the directory again.
+:class:`RegisteredAssembly` and :class:`VerifiedAssembly` — is here, beside the functions
+that build them: a result is defined by whatever returns it (ADR-0022). Both are frozen,
+and the first carries the **Completion marker** whole rather than copying it out field by
+field, so a surface reporting the registration that just happened answers every later
+question off the record in hand instead of by opening the directory again.
+:func:`registered_assembly` reads the first back for a registration already on disk.
 
 Examples
 --------
@@ -110,7 +111,8 @@ class RegisteredAssembly:
     """What preparing an assembly on disk produced: its record, and where that landed.
 
     :func:`register_assembly`'s answer — what ``genome assembly register`` prints, and what its
-    ``--json`` serializes. The **Completion marker** the run wrote *is* the answer, so it
+    ``--json`` serializes — and :func:`registered_assembly`'s, which reads it back without
+    preparing anything. The **Completion marker** the run wrote *is* the answer, so it
     is carried whole rather than copied out field by field, and the two questions a surface
     then asks — which files are claimed, and is this a **Chimera** — are answered from that
     one record instead of by reading the directory again.
@@ -147,8 +149,12 @@ class RegisteredAssembly:
     ['hg38.fa', 'hg38.fa.fai']
     >>> registered.chimera is None
     True
+    >>> registered.genome_files.twobit
+    PosixPath('/data/genome/hg38/hg38.2bit')
     >>> registered.as_json()["directory"]
     '/data/genome/hg38'
+    >>> registered.as_json()["genome_files"]["fasta"]
+    '/data/genome/hg38/hg38.fa'
     """
 
     assembly: str
@@ -180,19 +186,33 @@ class RegisteredAssembly:
         """
         return ChimeraDetails.from_record(self.record)
 
+    @property
+    def genome_files(self) -> GenomeFiles:
+        """The four **Genome files**, where the **Assembly dir** layout puts them.
+
+        From the layout rather than :attr:`record`, whose ``files`` are sizes keyed by name.
+        """
+        return AssemblyDir(assembly=self.assembly, path=self.directory).genome_files
+
     def as_json(self) -> dict[str, Any]:
         """Return this registration as ``--json`` serializes it.
 
         The record's own fields under the record's own names, then the ``assembly`` asked
-        for and the ``directory`` it landed in — the two facts a record does not hold
-        about itself. The names are the ones written on disk and are never respelled here.
+        for, the ``directory`` it landed in and its ``genome_files`` — the facts a record
+        does not hold about itself. No name is respelled here.
 
         Returns
         -------
         dict
-            The record's fields, followed by ``assembly`` and ``directory``.
+            The record's fields, followed by ``assembly``, ``directory`` and
+            ``genome_files`` (``fasta``, ``fai``, ``twobit``, ``chrom_sizes``, as text).
         """
-        return {**asdict(self.record), "assembly": self.assembly, "directory": str(self.directory)}
+        return {
+            **asdict(self.record),
+            "assembly": self.assembly,
+            "directory": str(self.directory),
+            "genome_files": {name: str(path) for name, path in asdict(self.genome_files).items()},
+        }
 
 
 @dataclass(frozen=True)
@@ -919,6 +939,64 @@ def register_assembly(
             f"`{assembly_repair_command(assembly, source)}`."
         )
     return RegisteredAssembly(assembly=assembly, directory=downloader.cache_dir, record=record)
+
+
+def registered_assembly(
+    assembly: str, *, cache_dir: str | Path | None = None
+) -> RegisteredAssembly:
+    """Return ``assembly``'s registration as it stands on disk, preparing nothing.
+
+    The check reopening a registered assembly makes, and nothing registering one does: the
+    **Completion marker** must be there, every file it claims present at its size, and a
+    **Chimera**'s components unchanged. Nothing is fetched, no **External tool** runs and no
+    directory is created. Whether the bytes are intact is :func:`verify_assembly`'s question.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to read back, e.g. ``"sacCer3"``.
+    cache_dir : str or pathlib.Path, optional
+        Override which directory the assembly is registered in. Defaults to
+        :func:`assembly_data_dir(assembly) <assembly_data_dir>`.
+
+    Returns
+    -------
+    RegisteredAssembly
+        The answer :func:`register_assembly` gives for an assembly already registered, with
+        its ``directory`` made absolute, so every path in
+        :attr:`~RegisteredAssembly.genome_files` is absolute too.
+
+    Raises
+    ------
+    FileNotFoundError
+        If nothing is registered there: the directory is absent, or holds nothing an
+        assembly's record would claim. The message names ``genome assembly register
+        <assembly>``.
+    genome.store.completion.RegistrationError
+        If the directory holds a build that cannot be trusted as finished, or a chimera
+        whose component was registered again since it was built. The message names
+        ``genome assembly register <assembly> --force``.
+
+    Examples
+    --------
+    >>> registered_assembly("sacCer3").genome_files.fasta      # doctest: +SKIP
+    PosixPath('/data/genome/sacCer3/sacCer3.fa')
+    >>> registered_assembly("hg38", cache_dir="/tmp/definitely-not-a-build")
+    Traceback (most recent call last):
+    FileNotFoundError: hg38 is not registered in /tmp/definitely-not-a-build...
+    """
+    located = AssemblyDir.locate(assembly, cache_dir)
+    assembly_dir = AssemblyDir(assembly=assembly, path=located.path.absolute())
+    finished = assembly_dir.completed_files(repair=assembly_repair_command(assembly))
+    record = assembly_dir.read_record()
+    if finished is None or record is None:
+        raise FileNotFoundError(
+            f"{assembly} is not registered in {assembly_dir.path}, and nothing was fetched "
+            f"or prepared. Register it with `genome assembly register {assembly}`."
+        )
+    # Free for an assembly with no components; for a chimera, the refusal opening it raises.
+    components_status(assembly_dir)
+    return RegisteredAssembly(assembly=assembly, directory=assembly_dir.path, record=record)
 
 
 def verify_assembly(

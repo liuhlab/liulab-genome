@@ -1,6 +1,6 @@
 # CLI: genome commands
 
-Nine commands in two groups: one prepares a reference on this machine, the other registers
+Ten commands in two groups: one prepares a reference on this machine, the other registers
 annotations against it and reads what they carry. Every one of them takes an assembly name
 as its first argument, except `assembly list`, which is the command that tells you what to
 put there.
@@ -23,7 +23,8 @@ codes and the split between stdout and stderr are on the [CLI overview](index.md
 
 `register` prepares an assembly and prints where it landed, as above. `list` is what to run
 before it: the assemblies the metadata table offers, set against the ones already prepared
-on this machine, downloading nothing to answer. `verify` re-reads the
+on this machine, downloading nothing to answer. `files` prints where one registered
+assembly's four files are, for handing a path to another tool. `verify` re-reads the
 FASTA and recomputes its sha256, which is the full-file check; registering and reopening go
 by size and are instant. `table-row` downloads an assembly and prints the line to paste into
 the shipped metadata table, which is how a new assembly gets a pinned checksum.
@@ -49,6 +50,21 @@ registration record beside it reads as `here, not registered`. Neither is an err
 neither costs the exit code.
 
 ```console
+$ genome assembly files sacCer3
+registered sacCer3 in /Users/hanqing/liulab_data/genome/sacCer3
+  fasta        /Users/hanqing/liulab_data/genome/sacCer3/sacCer3.fa
+  fai          /Users/hanqing/liulab_data/genome/sacCer3/sacCer3.fa.fai
+  twobit       /Users/hanqing/liulab_data/genome/sacCer3/sacCer3.2bit
+  chrom_sizes  /Users/hanqing/liulab_data/genome/sacCer3/sacCer3.chrom.sizes
+$ genome assembly files sacCer3 --json | jq -r .genome_files.fasta
+/Users/hanqing/liulab_data/genome/sacCer3/sacCer3.fa
+```
+
+Every path is absolute. `--json` prints the object `register --json` does, with the four
+paths under `genome_files`. **`files` never prepares anything**: an assembly not registered
+here exits `1` and names the `genome assembly register` command.
+
+```console
 $ genome assembly verify sacCer3
 /Users/hanqing/liulab_data/genome/sacCer3/sacCer3.fa: sha256 6ff72f079c3268431fc514a1a88730f8290e717663d343fa8a3590af65c422c3 matches the digest the metadata table pins for it
 ```
@@ -58,7 +74,7 @@ off its record. A directory whose files changed after they were registered exits
 instead. **`--force` is the repair**, and it keeps whatever is provably good: a FASTA whose
 checksum still matches is reused and only the derived files are rebuilt.
 
-The four commands, with every argument and option:
+The five commands, with every argument and option:
 
 ::: mkdocs-typer2
     :module: genome.assembly.cli

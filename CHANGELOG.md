@@ -10,6 +10,14 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Added
 
+- **`genome assembly files`, and the `registered_assembly()` behind it.** They print where a
+  registered assembly's FASTA, `.fai`, `.2bit` and `chrom.sizes` are, as absolute paths,
+  without opening a `Genome`, which registers a name that is not here. **They never prepare
+  anything**: a name not registered raises `FileNotFoundError` naming `genome assembly
+  register <assembly>`, and a directory that cannot be trusted raises as opening it would.
+  The answer is the existing `RegisteredAssembly`, which gains `genome_files`, so
+  `genome assembly register --json` gains that key too, after `directory`.
+
 - **`genome assembly list`, and the `assembly_status()` behind it.** The CLI could not answer
   the first question a new user has. `genome assembly register` is the first command anyone
   runs and nothing said what to put after it. The only way to find out was to import

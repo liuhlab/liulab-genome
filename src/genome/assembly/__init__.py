@@ -59,6 +59,7 @@ from genome.assembly.download import (
     VerifiedAssembly,
     assembly_table_row,
     register_assembly,
+    registered_assembly,
     verify_assembly,
 )
 from genome.assembly.fasta import GenomeFiles, prepare_fasta, read_chrom_sizes
@@ -116,6 +117,7 @@ __all__ = [
     "read_chimera_details",
     "read_chrom_sizes",
     "register_assembly",
+    "registered_assembly",
     "split_name",
     "split_suffixed",
     "suffixed",

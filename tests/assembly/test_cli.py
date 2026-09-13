@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from genome.assembly import assembly_status, metadata
+from genome.assembly import assembly_status, metadata, registered_assembly
 from genome.assembly import download as download_mod
 from genome.assembly.fasta import PREPARATION_TOOLS, GenomeFiles
 from genome.assembly.metadata import AssemblyMetadata
@@ -268,6 +268,71 @@ class TestList(_OfflineTinyFasta):
         assert (rows["half_built"]["registered"], rows["half_built"]["present"]) == (False, True)
         assert rows["hg38"]["sha256"] is not None
         assert "state" not in rows["hg38"]
+
+
+class TestFiles(_OfflineTinyFasta):
+    """``genome assembly files`` — where a registered assembly's files are, preparing nothing.
+
+    ``tiny`` is registered through ``register`` first, offline as everything in this module
+    is, so what is asserted is this command reading back a registration the CLI itself made.
+    The fetch step is recorded rather than merely stubbed, because what the refusal is held
+    to is that asking where a file is never becomes the download that would put it there.
+    """
+
+    def test_a_registered_assembly_prints_its_four_files_as_text_and_as_json(
+        self, liulab_data: Path
+    ) -> None:
+        assert runner.invoke(app, ["assembly", "register", "tiny"]).exit_code == 0
+        directory = liulab_data / "genome" / "tiny"
+
+        result = runner.invoke(app, ["assembly", "files", "tiny"])
+        assert result.exit_code == 0, output(result)
+        heading, *rows = result.stdout.splitlines()
+        assert heading == f"registered tiny in {directory}"
+        assert [row.split() for row in rows] == [
+            ["fasta", str(directory / "tiny.fa")],
+            ["fai", str(directory / "tiny.fa.fai")],
+            ["twobit", str(directory / "tiny.2bit")],
+            ["chrom_sizes", str(directory / "tiny.chrom.sizes")],
+        ]
+
+        # The API's own answer, verbatim: the registration record `register --json` prints,
+        # with the four paths beside it.
+        json_result = runner.invoke(app, ["assembly", "files", "tiny", "--json"])
+        assert json_result.exit_code == 0, output(json_result)
+        payload = _json.loads(json_result.stdout)
+        assert payload == registered_assembly("tiny").as_json()
+        assert payload["genome_files"] == {
+            "fasta": str(directory / "tiny.fa"),
+            "fai": str(directory / "tiny.fa.fai"),
+            "twobit": str(directory / "tiny.2bit"),
+            "chrom_sizes": str(directory / "tiny.chrom.sizes"),
+        }
+
+    def test_an_unregistered_assembly_exits_1_on_stderr_with_nothing_fetched_or_created(
+        self, liulab_data: Path, fake_fetch: FakeFetch
+    ) -> None:
+        result = runner.invoke(app, ["assembly", "files", "tiny", "--json"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert result.stderr.startswith("error: ")
+        assert "`genome assembly register tiny`" in result.stderr
+        assert fake_fetch.calls == []
+        assert not (liulab_data / "genome" / "tiny").exists()
+
+    def test_a_directory_that_cannot_be_trusted_exits_1_naming_the_repair(
+        self, liulab_data: Path
+    ) -> None:
+        directory = liulab_data / "genome" / "tiny"
+        directory.mkdir(parents=True)
+        (directory / "tiny.fa").write_text("half a genome\n")
+
+        result = runner.invoke(app, ["assembly", "files", "tiny"])
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "`genome assembly register tiny --force`" in result.stderr
 
 
 class TestVerify(_OfflineTinyFasta):
