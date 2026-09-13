@@ -235,16 +235,10 @@ def files(
 ) -> None:
     """Print where a registered assembly's FASTA, `.fai`, `.2bit` and `chrom.sizes` are.
 
-    For handing those files to another program by path. Nothing is downloaded, prepared,
-    built or created to answer, so asking after an assembly this machine does not have is
-    a refusal rather than a registration. Every path printed is absolute, under the
-    assembly directory the lab data directory actually resolved to, and `--json` prints
-    the same object `genome assembly register --json` does.
-
-    It trusts what reopening a registered assembly trusts: the registration record must be
-    there, and every file it claims must be present at the size it claims. A **chimera**
-    is refused as well when a component it was built from has been registered again since.
-    Whether the bytes themselves are intact is what `genome assembly verify` checks.
+    Nothing is downloaded, prepared or created, so an assembly not registered here is
+    refused rather than registered. Paths are absolute, and `--json` prints the object
+    `genome assembly register --json` does. Whether the bytes are intact is what
+    `genome assembly verify` checks.
 
     Exits with code 1 when the assembly is not registered here, naming the command that
     registers it, and when its directory cannot be trusted, naming the `--force` repair.

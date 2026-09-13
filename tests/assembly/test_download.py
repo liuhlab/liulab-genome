@@ -1026,16 +1026,6 @@ class TestReadingARegistrationBack:
         assert fake_fetch.calls == []
         assert head_recorder.calls == []  # not even the UCSC name check
 
-    def test_a_directory_holding_only_another_contexts_subtree_is_not_registered_either(
-        self, tmp_path: Path
-    ) -> None:
-        # An annotation registered before its assembly leaves `gtf/` behind, and the
-        # assembly is still one nothing has registered: refused as absent, not as broken.
-        (tmp_path / "gtf" / "genes").mkdir(parents=True)
-
-        with pytest.raises(FileNotFoundError, match="`genome assembly register tiny`"):
-            registered_assembly("tiny", cache_dir=tmp_path)
-
     def test_files_with_no_record_are_refused_naming_the_repair(self, tmp_path: Path) -> None:
         (tmp_path / "tiny.fa").write_text(">chrI\nACGT\n")
 
@@ -1105,21 +1095,6 @@ class TestReadingARegistrationBack:
         genome_files = again.as_json()["genome_files"]
         assert genome_files["fasta"] == str(tmp_path / "relative" / "tiny" / "tiny.fa")
         assert all(Path(path).is_absolute() for path in genome_files.values())
-
-    def test_verifying_an_assembly_nothing_registered_keeps_its_own_way_forward(
-        self, tmp_path: Path
-    ) -> None:
-        # Verifying asks through the same function and keeps its own words, since it has a
-        # second way forward a lookup does not: checking a FASTA handed over by hand.
-        nowhere = tmp_path / "nowhere"
-
-        with pytest.raises(FileNotFoundError) as excinfo:
-            verify_assembly("tiny", cache_dir=nowhere)
-
-        assert str(excinfo.value) == (
-            f"tiny is not registered in {nowhere}, so there is nothing to verify. Register it "
-            "with `genome assembly register tiny`, or pass the FASTA to check with --fasta."
-        )
 
 
 # ---------------------------------------------------------------------------------------

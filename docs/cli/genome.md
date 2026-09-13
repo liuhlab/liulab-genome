@@ -60,12 +60,9 @@ $ genome assembly files sacCer3 --json | jq -r .genome_files.fasta
 /Users/hanqing/liulab_data/genome/sacCer3/sacCer3.fa
 ```
 
-Every path is absolute, and the heading names the assembly directory the data directory
-resolved to. `--json` prints the object `register --json` does, with the four paths under
-`genome_files`. **`files` never prepares anything.** An assembly that is not registered
-here exits `1` and names the `genome assembly register` command, where `register` would
-have downloaded it. A directory that cannot be trusted exits `1` too, as it would on
-opening.
+Every path is absolute. `--json` prints the object `register --json` does, with the four
+paths under `genome_files`. **`files` never prepares anything**: an assembly not registered
+here exits `1` and names the `genome assembly register` command.
 
 ```console
 $ genome assembly verify sacCer3
