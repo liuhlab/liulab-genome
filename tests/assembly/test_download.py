@@ -15,6 +15,7 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pooch
 import pytest
@@ -22,6 +23,7 @@ import requests
 
 from genome import __version__
 from genome.assembly import download as download_mod
+from genome.assembly.components import ChimeraDetails, ComponentDetails
 from genome.assembly.download import (
     EXPECTED_FROM_RECORD,
     EXPECTED_FROM_TABLE,
@@ -32,6 +34,7 @@ from genome.assembly.download import (
     assembly_table_row,
     liulab_data_dir,
     register_assembly,
+    registered_assembly,
     verify_assembly,
 )
 from genome.assembly.fasta import PREPARATION_TOOLS, GenomeFiles
@@ -42,9 +45,11 @@ from genome.store.completion import (
     CompletionRecord,
     RegistrationMismatchError,
     UnfinishedRegistrationError,
+    build_record,
     read_record,
     record_path,
     work_dir,
+    write_record,
 )
 
 from ..conftest import FakeFetch
@@ -622,12 +627,20 @@ def test_register_assembly_reports_serializes_repairs_and_seeds_from_a_source(
     # The `--json` payload is the completion record under its own on-disk key names,
     # with the two facts a record does not hold about itself. A type wraps those names;
     # it never renames them, because lab directories on shared storage are read by both.
+    # The four files follow, under `GenomeFiles`' own names: added after every key that was
+    # already there, so nothing a script already parses moves.
     assert registered.as_json() == {
         **asdict(registered.record),
         "assembly": "tiny",
         "directory": str(tmp_path / "normal"),
+        "genome_files": {
+            "fasta": str(tmp_path / "normal" / "tiny.fa"),
+            "fai": str(tmp_path / "normal" / "tiny.fa.fai"),
+            "twobit": str(tmp_path / "normal" / "tiny.2bit"),
+            "chrom_sizes": str(tmp_path / "normal" / "tiny.chrom.sizes"),
+        },
     }
-    assert list(registered.as_json())[-2:] == ["assembly", "directory"]
+    assert list(registered.as_json())[-3:] == ["assembly", "directory", "genome_files"]
 
     # The command the error message names has to be the command that fixes it.
     (tmp_path / "broken" / "tiny.fa").parent.mkdir(parents=True)
@@ -903,8 +916,16 @@ class TestTheJsonKeysAndTheirOrder:
             "details",
             "assembly",
             "directory",
+            "genome_files",
         ]
         assert registered.as_json()["directory"] == "/data/genome/hg38"
+        # The four files under the names and in the order `GenomeFiles` gives them.
+        assert list(registered.as_json()["genome_files"].items()) == [
+            ("fasta", "/data/genome/hg38/hg38.fa"),
+            ("fai", "/data/genome/hg38/hg38.fa.fai"),
+            ("twobit", "/data/genome/hg38/hg38.2bit"),
+            ("chrom_sizes", "/data/genome/hg38/hg38.chrom.sizes"),
+        ]
 
     def test_a_verified_assembly_pins_its_keys_and_serializes_what_supplied_the_digest(
         self,
@@ -959,6 +980,173 @@ def test_a_registered_assembly_is_carried_whole_and_not_copied_out() -> None:
     first.append("intruder")
     assert registered.file_names == ["hg38.fa", "hg38.fa.fai"]  # a fresh list each call
     assert registered.chimera is None  # no build merged this one
+    # The four files, named where the layout names them rather than off the record.
+    assert registered.genome_files == GenomeFiles(
+        fasta=Path("/data/genome/hg38/hg38.fa"),
+        fai=Path("/data/genome/hg38/hg38.fa.fai"),
+        twobit=Path("/data/genome/hg38/hg38.2bit"),
+        chrom_sizes=Path("/data/genome/hg38/hg38.chrom.sizes"),
+    )
+
+
+# --- reading a registration back, preparing nothing ----------------------------------
+
+
+def _record_genome(
+    directory: Path,
+    assembly: str,
+    *,
+    sha256: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> None:
+    """Write an assembly's four files and a record claiming them, with no registration run."""
+    directory.mkdir(parents=True, exist_ok=True)
+    fasta = directory / f"{assembly}.fa"
+    fasta.write_text(">I\nACGT\n")
+    files = _derive(fasta)
+    write_record(
+        directory,
+        build_record(
+            directory,
+            kind="genome",
+            name=assembly,
+            files=[files.fasta, files.fai, files.twobit, files.chrom_sizes],
+            sha256=sha256,
+            details=details,
+        ),
+    )
+
+
+class TestReadingARegistrationBack:
+    """:func:`registered_assembly` — the registration already on disk, or a refusal.
+
+    What reopening a registered assembly asks, and nothing that registering one does. A
+    name nothing has registered is refused rather than fetched, so asking where a file is
+    never becomes the download that would put it there.
+    """
+
+    def test_a_registered_assembly_is_read_back_as_registering_it_answered(
+        self, fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+    ) -> None:
+        fake_fetch.serve("tiny.fa.gz")
+        registered = register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
+        fetched = len(fake_fetch.calls)
+
+        again = registered_assembly("tiny", cache_dir=tmp_path)
+
+        assert again == registered
+        assert again.genome_files.fasta == tmp_path / "tiny.fa"
+        assert again.genome_files.chrom_sizes == tmp_path / "tiny.chrom.sizes"
+        assert len(fake_fetch.calls) == fetched  # read back, never fetched again
+
+    def test_nothing_registered_is_refused_naming_the_register_command_and_nothing_is_created(
+        self, fake_fetch: FakeFetch, liulab_data: Path, head_recorder: _HeadRecorder
+    ) -> None:
+        directory = liulab_data / "genome" / "sacCer3"
+
+        with pytest.raises(FileNotFoundError) as excinfo:
+            registered_assembly("sacCer3")
+
+        assert "`genome assembly register sacCer3`" in str(excinfo.value)
+        assert str(directory) in str(excinfo.value)
+        assert not (liulab_data / "genome").exists()
+        assert fake_fetch.calls == []
+        assert head_recorder.calls == []  # not even the UCSC name check
+
+    def test_a_directory_holding_only_another_contexts_subtree_is_not_registered_either(
+        self, tmp_path: Path
+    ) -> None:
+        # An annotation registered before its assembly leaves `gtf/` behind, and the
+        # assembly is still one nothing has registered: refused as absent, not as broken.
+        (tmp_path / "gtf" / "genes").mkdir(parents=True)
+
+        with pytest.raises(FileNotFoundError, match="`genome assembly register tiny`"):
+            registered_assembly("tiny", cache_dir=tmp_path)
+
+    def test_files_with_no_record_are_refused_naming_the_repair(self, tmp_path: Path) -> None:
+        (tmp_path / "tiny.fa").write_text(">chrI\nACGT\n")
+
+        with pytest.raises(
+            UnfinishedRegistrationError, match="genome assembly register tiny --force"
+        ):
+            registered_assembly("tiny", cache_dir=tmp_path)
+
+    def test_a_record_that_disagrees_with_disk_is_refused_naming_the_repair(
+        self, fake_fetch: FakeFetch, tmp_path: Path, no_native_prepare: None
+    ) -> None:
+        fake_fetch.serve("tiny.fa.gz")
+        register_assembly("tiny", cache_dir=tmp_path, progressbar=False)
+        (tmp_path / "tiny.2bit").write_text("")
+
+        with pytest.raises(RegistrationMismatchError) as excinfo:
+            registered_assembly("tiny", cache_dir=tmp_path)
+
+        assert "tiny.2bit" in str(excinfo.value)
+        assert "`genome assembly register tiny --force`" in str(excinfo.value)
+
+    def test_a_chimera_whose_component_was_registered_again_is_refused_as_opening_it_is(
+        self, tmp_path: Path
+    ) -> None:
+        # Its own files still agree with its own record, so nothing about its directory
+        # shows it: the sequence it holds is a copy of a component that is not there now.
+        root = tmp_path / "genome"
+        chimera = root / "tinyCe_tinySc"
+        built_from = ChimeraDetails(
+            separator="__",
+            component_details=(
+                ComponentDetails("tinyCe", "1a2b", None, None),
+                ComponentDetails("tinySc", "5e6f", None, None),
+            ),
+        )
+        _record_genome(chimera, "tinyCe_tinySc", details=built_from.as_details(merged=False))
+        _record_genome(root / "tinyCe", "tinyCe", sha256="1a2b")
+        _record_genome(root / "tinySc", "tinySc", sha256="5e6f")
+        assert registered_assembly("tinyCe_tinySc", cache_dir=chimera).chimera == built_from
+
+        _record_genome(root / "tinySc", "tinySc", sha256="differentnow")
+
+        with pytest.raises(RegistrationMismatchError) as looked_up:
+            registered_assembly("tinyCe_tinySc", cache_dir=chimera)
+        with pytest.raises(RegistrationMismatchError) as opened:
+            UCSCGenomeDownloader("tinyCe_tinySc", cache_dir=chimera).fetch_genome(progressbar=False)
+
+        assert str(looked_up.value) == str(opened.value)
+        assert "differentnow" in str(looked_up.value)
+        assert "`genome assembly register tinyCe_tinySc --force`" in str(looked_up.value)
+
+    def test_every_path_is_absolute_even_when_the_directory_was_named_relatively(
+        self,
+        fake_fetch: FakeFetch,
+        tmp_path: Path,
+        no_native_prepare: None,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # A path handed to a program running somewhere else means nothing relative to here.
+        fake_fetch.serve("tiny.fa.gz")
+        register_assembly("tiny", cache_dir=tmp_path / "relative" / "tiny", progressbar=False)
+        monkeypatch.chdir(tmp_path)
+
+        again = registered_assembly("tiny", cache_dir="relative/tiny")
+
+        assert again.directory == tmp_path / "relative" / "tiny"
+        genome_files = again.as_json()["genome_files"]
+        assert genome_files["fasta"] == str(tmp_path / "relative" / "tiny" / "tiny.fa")
+        assert all(Path(path).is_absolute() for path in genome_files.values())
+
+    def test_verifying_an_assembly_nothing_registered_keeps_its_own_way_forward(
+        self, tmp_path: Path
+    ) -> None:
+        # Verifying asks through the same function and keeps its own words, since it has a
+        # second way forward a lookup does not: checking a FASTA handed over by hand.
+        nowhere = tmp_path / "nowhere"
+
+        with pytest.raises(FileNotFoundError) as excinfo:
+            verify_assembly("tiny", cache_dir=nowhere)
+
+        assert str(excinfo.value) == (
+            f"tiny is not registered in {nowhere}, so there is nothing to verify. Register it "
+            "with `genome assembly register tiny`, or pass the FASTA to check with --fasta."
+        )
 
 
 # ---------------------------------------------------------------------------------------

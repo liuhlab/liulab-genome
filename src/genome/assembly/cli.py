@@ -8,7 +8,7 @@ Examples
 --------
 >>> from genome.assembly.cli import app
 >>> [command.name for command in app.registered_commands]
-['register', 'list', 'verify', 'table-row']
+['register', 'list', 'files', 'verify', 'table-row']
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from genome.assembly import assembly_status as _assembly_status
 from genome.assembly import assembly_table_row as _assembly_table_row
 from genome.assembly import format_table_row as _format_table_row
 from genome.assembly import register_assembly as _register_assembly
+from genome.assembly import registered_assembly as _registered_assembly
 from genome.assembly import verify_assembly as _verify_assembly
 
 #: What a failed assembly command raises, in one place. Every one of them is already
@@ -225,6 +226,45 @@ def _names_of(row: _AssemblyStatusRow) -> str:
     not list carries neither and a **Chimera**'s row carries only its name.
     """
     return " ".join(part for part in (row.species, row.ncbi_name) if part)
+
+
+@app.command("files")
+def files(
+    assembly: str = typer.Argument(..., help="Assembly name, e.g. 'sacCer3'."),
+    json: bool = typer.Option(False, "--json", help="Emit JSON instead of plain text."),
+) -> None:
+    """Print where a registered assembly's FASTA, `.fai`, `.2bit` and `chrom.sizes` are.
+
+    For handing those files to another program by path. Nothing is downloaded, prepared,
+    built or created to answer, so asking after an assembly this machine does not have is
+    a refusal rather than a registration. Every path printed is absolute, under the
+    assembly directory the lab data directory actually resolved to, and `--json` prints
+    the same object `genome assembly register --json` does.
+
+    It trusts what reopening a registered assembly trusts: the registration record must be
+    there, and every file it claims must be present at the size it claims. A **chimera**
+    is refused as well when a component it was built from has been registered again since.
+    Whether the bytes themselves are intact is what `genome assembly verify` checks.
+
+    Exits with code 1 when the assembly is not registered here, naming the command that
+    registers it, and when its directory cannot be trusted, naming the `--force` repair.
+    """
+    try:
+        registered = _registered_assembly(assembly)
+    except _ASSEMBLY_ERRORS as err:
+        typer.echo(f"error: {err}", err=True)
+        raise typer.Exit(code=1) from err
+
+    if json:
+        typer.echo(_json.dumps(registered.as_json()))
+        return
+    typer.echo(f"registered {registered.assembly} in {registered.directory}")
+    # Labelled with `GenomeFiles`' own field names, which are the keys `--json` nests them
+    # under, so the two surfaces never call one file two things.
+    paths = _asdict(registered.genome_files)
+    width = max(len(label) for label in paths)
+    for label, path in paths.items():
+        typer.echo(f"  {label:<{width}}  {path}")
 
 
 @app.command("verify")

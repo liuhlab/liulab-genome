@@ -38,11 +38,14 @@ record-that-disagrees into errors naming ``genome assembly register <assembly> -
 that command is what repairs them (ADR-0007).
 
 What :func:`register_assembly` and :func:`verify_assembly` answer *with* —
-:class:`RegisteredAssembly` and :class:`VerifiedAssembly` — is here, beside the two
-functions that build them: a result is defined by whatever returns it (ADR-0022). Both are
-frozen, and the first carries the **Completion marker** whole rather than copying it out
-field by field, so a surface reporting the registration that just happened answers every
-later question off the record in hand instead of by opening the directory again.
+:class:`RegisteredAssembly` and :class:`VerifiedAssembly` — is here, beside the functions
+that build them: a result is defined by whatever returns it (ADR-0022). Both are frozen,
+and the first carries the **Completion marker** whole rather than copying it out field by
+field, so a surface reporting the registration that just happened answers every later
+question off the record in hand instead of by opening the directory again.
+:func:`registered_assembly` returns the same type for a registration already on disk, and
+:func:`verify_assembly` reads a registration through it: the one read of an assembly's
+record that prepares nothing, refuses what reopening refuses, and is written once.
 
 Examples
 --------
@@ -110,10 +113,13 @@ class RegisteredAssembly:
     """What preparing an assembly on disk produced: its record, and where that landed.
 
     :func:`register_assembly`'s answer — what ``genome assembly register`` prints, and what its
-    ``--json`` serializes. The **Completion marker** the run wrote *is* the answer, so it
-    is carried whole rather than copied out field by field, and the two questions a surface
-    then asks — which files are claimed, and is this a **Chimera** — are answered from that
-    one record instead of by reading the directory again.
+    ``--json`` serializes. It is also :func:`registered_assembly`'s, which reads the same
+    answer back for an assembly already registered and prepares nothing, and that is what
+    ``genome assembly files`` prints. The **Completion marker** the run wrote *is* the
+    answer, so it is carried whole rather than copied out field by field, and the questions
+    a surface then asks — which files are claimed, where the **Genome files** are, and is
+    this a **Chimera** — are answered from that one record and the directory it landed in,
+    instead of by reading the directory again.
 
     Attributes
     ----------
@@ -147,8 +153,12 @@ class RegisteredAssembly:
     ['hg38.fa', 'hg38.fa.fai']
     >>> registered.chimera is None
     True
+    >>> registered.genome_files.twobit
+    PosixPath('/data/genome/hg38/hg38.2bit')
     >>> registered.as_json()["directory"]
     '/data/genome/hg38'
+    >>> registered.as_json()["genome_files"]["fasta"]
+    '/data/genome/hg38/hg38.fa'
     """
 
     assembly: str
@@ -180,19 +190,38 @@ class RegisteredAssembly:
         """
         return ChimeraDetails.from_record(self.record)
 
+    @property
+    def genome_files(self) -> GenomeFiles:
+        """The four **Genome files** this registration vouches for, where the layout puts them.
+
+        Named by the **Assembly dir** layout rather than read off :attr:`record`, whose
+        ``files`` are sizes keyed by relative name. The layout is the one spelling of where
+        an assembly's FASTA and its companions are, so these cannot disagree with the paths
+        registering wrote to.
+        """
+        return AssemblyDir(assembly=self.assembly, path=self.directory).genome_files
+
     def as_json(self) -> dict[str, Any]:
         """Return this registration as ``--json`` serializes it.
 
         The record's own fields under the record's own names, then the ``assembly`` asked
-        for and the ``directory`` it landed in — the two facts a record does not hold
-        about itself. The names are the ones written on disk and are never respelled here.
+        for, the ``directory`` it landed in and its ``genome_files`` — the facts a record
+        does not hold about itself. The names are the ones written on disk, and the four
+        files keep :class:`~genome.assembly.fasta.GenomeFiles`' own; none is respelled here.
 
         Returns
         -------
         dict
-            The record's fields, followed by ``assembly`` and ``directory``.
+            The record's fields, followed by ``assembly``, ``directory`` and
+            ``genome_files``: an object of ``fasta``, ``fai``, ``twobit`` and
+            ``chrom_sizes``, each path rendered as text.
         """
-        return {**asdict(self.record), "assembly": self.assembly, "directory": str(self.directory)}
+        return {
+            **asdict(self.record),
+            "assembly": self.assembly,
+            "directory": str(self.directory),
+            "genome_files": {name: str(path) for name, path in asdict(self.genome_files).items()},
+        }
 
 
 @dataclass(frozen=True)
@@ -850,7 +879,9 @@ def register_assembly(
     Naming an assembly is enough: where its FASTA comes from and which digest it must
     match are the metadata table's to know. The whole pipeline runs — fetch, unpack,
     verify, index, derive — and the completion record lands last. An assembly that is
-    already registered is returned from its record without fetching anything.
+    already registered is returned from its record without fetching anything, and
+    :func:`registered_assembly` returns that same answer while refusing, rather than
+    registering, a name that is not.
 
     A directory that cannot be trusted raises instead (see :meth:`
     UCSCGenomeDownloader.fetch_genome`); ``force=True`` is what repairs one, and it
@@ -919,6 +950,74 @@ def register_assembly(
             f"`{assembly_repair_command(assembly, source)}`."
         )
     return RegisteredAssembly(assembly=assembly, directory=downloader.cache_dir, record=record)
+
+
+def registered_assembly(
+    assembly: str, *, cache_dir: str | Path | None = None
+) -> RegisteredAssembly:
+    """Return ``assembly``'s registration as it stands on disk, preparing nothing to answer.
+
+    What reopening a registered assembly already asks, and nothing that registering one
+    does: the **Completion marker** must be there, and every file it claims must be present
+    at the size it claims. A **Chimera** is held to its components as well, as opening one
+    is (see :func:`~genome.assembly.components.components_status`). Nothing is fetched, no
+    **External tool** runs and no directory is created, so a name nothing has registered
+    is refused rather than downloaded.
+
+    This is how a registered assembly's **Genome files** reach an **External tool** or
+    another program without opening a :class:`~genome.assembly.genome.Genome`, which would
+    register the assembly first. Whether the bytes are still the ones the record digested
+    is not asked here: that is a full read of the FASTA, and :func:`verify_assembly` owns
+    it.
+
+    Parameters
+    ----------
+    assembly : str
+        The assembly to read back, e.g. ``"sacCer3"``.
+    cache_dir : str or pathlib.Path, optional
+        Override which directory the assembly is registered in. Defaults to
+        :func:`assembly_data_dir(assembly) <assembly_data_dir>`.
+
+    Returns
+    -------
+    RegisteredAssembly
+        The answer :func:`register_assembly` gives for an assembly already registered, with
+        its ``directory`` made absolute, so every path in
+        :attr:`~RegisteredAssembly.genome_files` is absolute too.
+
+    Raises
+    ------
+    FileNotFoundError
+        If nothing is registered there: the directory is absent, or holds nothing an
+        assembly's record would claim. The message names ``genome assembly register
+        <assembly>``.
+    genome.store.completion.RegistrationError
+        If the directory holds a build that cannot be trusted as finished, or a chimera
+        whose component was registered again since it was built. The message names
+        ``genome assembly register <assembly> --force``.
+
+    Examples
+    --------
+    >>> registered_assembly("sacCer3").genome_files.fasta      # doctest: +SKIP
+    PosixPath('/data/genome/sacCer3/sacCer3.fa')
+    >>> registered_assembly("hg38", cache_dir="/tmp/definitely-not-a-build")
+    Traceback (most recent call last):
+    FileNotFoundError: hg38 is not registered in /tmp/definitely-not-a-build...
+    """
+    located = AssemblyDir.locate(assembly, cache_dir)
+    assembly_dir = AssemblyDir(assembly=assembly, path=located.path.absolute())
+    finished = assembly_dir.completed_files(repair=assembly_repair_command(assembly))
+    record = assembly_dir.read_record()
+    if finished is None or record is None:
+        raise FileNotFoundError(
+            f"{assembly} is not registered in {assembly_dir.path}, so there is no "
+            f"registration to read back, and nothing was fetched or prepared to make one. "
+            f"Register it with `genome assembly register {assembly}`."
+        )
+    # Answered instantly for an assembly with no components. For a chimera, the refusal
+    # is the point, and it is the one opening the chimera by name raises.
+    components_status(assembly_dir)
+    return RegisteredAssembly(assembly=assembly, directory=assembly_dir.path, record=record)
 
 
 def verify_assembly(
@@ -1002,17 +1101,24 @@ def verify_assembly(
             )
     else:
         target = assembly_dir.genome_files.fasta
-        registered = assembly_dir.completed_files(repair=assembly_repair_command(assembly))
-        if registered is None or not target.is_file():
-            raise FileNotFoundError(
-                f"{assembly} is not registered in {assembly_dir.path}, so there is "
-                f"nothing to verify. Register it with `genome assembly register {assembly}`, or "
-                f"pass the FASTA to check with --fasta."
-            )
+        unregistered = (
+            f"{assembly} is not registered in {assembly_dir.path}, so there is "
+            f"nothing to verify. Register it with `genome assembly register {assembly}`, or "
+            f"pass the FASTA to check with --fasta."
+        )
+        try:
+            # The check every read of a registration makes, and every refusal with it.
+            registered_assembly(assembly, cache_dir=cache_dir)
+        except FileNotFoundError as absent:
+            # Verifying has a second way forward that reading a registration back does not.
+            raise FileNotFoundError(unregistered) from absent
+        if not target.is_file():
+            raise FileNotFoundError(unregistered)
         # Beside the digest, never instead of it: this one reads records rather than
         # bytes, and answers what a digest of this assembly's own bytes cannot. Its
         # answer is reported as well as enforced, so that "nothing was comparable" is
-        # never handed back looking like "everything agreed".
+        # never handed back looking like "everything agreed". The read above enforced it
+        # and kept no answer, so it is asked again here for one.
         components = components_status(assembly_dir)
     expected, expected_from = _expected_digest(assembly_dir, row)
     actual = sha256_file(target)
