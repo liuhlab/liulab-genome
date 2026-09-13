@@ -15,7 +15,6 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import pooch
 import pytest
@@ -45,14 +44,13 @@ from genome.store.completion import (
     CompletionRecord,
     RegistrationMismatchError,
     UnfinishedRegistrationError,
-    build_record,
     read_record,
     record_path,
     work_dir,
-    write_record,
 )
 
 from ..conftest import FakeFetch
+from .test_components import _record as _record_genome
 from .test_source import _module_level_imports
 
 #: sha256 of the committed ``tiny.fa`` — the *unpacked* bytes ``tiny.fa.gz`` yields.
@@ -990,31 +988,6 @@ def test_a_registered_assembly_is_carried_whole_and_not_copied_out() -> None:
 
 
 # --- reading a registration back, preparing nothing ----------------------------------
-
-
-def _record_genome(
-    directory: Path,
-    assembly: str,
-    *,
-    sha256: str | None = None,
-    details: dict[str, Any] | None = None,
-) -> None:
-    """Write an assembly's four files and a record claiming them, with no registration run."""
-    directory.mkdir(parents=True, exist_ok=True)
-    fasta = directory / f"{assembly}.fa"
-    fasta.write_text(">I\nACGT\n")
-    files = _derive(fasta)
-    write_record(
-        directory,
-        build_record(
-            directory,
-            kind="genome",
-            name=assembly,
-            files=[files.fasta, files.fai, files.twobit, files.chrom_sizes],
-            sha256=sha256,
-            details=details,
-        ),
-    )
 
 
 class TestReadingARegistrationBack:

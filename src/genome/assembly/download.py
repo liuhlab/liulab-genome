@@ -43,9 +43,9 @@ that build them: a result is defined by whatever returns it (ADR-0022). Both are
 and the first carries the **Completion marker** whole rather than copying it out field by
 field, so a surface reporting the registration that just happened answers every later
 question off the record in hand instead of by opening the directory again.
-:func:`registered_assembly` returns the same type for a registration already on disk, and
-:func:`verify_assembly` reads a registration through it: the one read of an assembly's
-record that prepares nothing, refuses what reopening refuses, and is written once.
+:func:`registered_assembly` returns the same type for a registration already on disk,
+preparing nothing and refusing what reopening one refuses, and :func:`verify_assembly`
+reads a registration through it.
 
 Examples
 --------
