@@ -5,7 +5,7 @@ codebase.
 
 ## Before exploring, read these
 
-- **`CONTEXT-MAP.md`** at the repo root — the shared kernel of words every context uses, plus the
+- **`GLOSSARY-MAP.md`** at the repo root — the shared kernel of words every context uses, plus the
   index of the per-context glossaries.
 - **`docs/context/<context>.md`** — one glossary per bounded context. Read the ones relevant to the
   topic; they are not meant to be read as a set.
@@ -22,7 +22,7 @@ not sit beside the code they describe, and there is one ADR directory rather tha
 ```text
 /
 ├── AGENTS.md          ← the router; CLAUDE.md is a symlink to it, one canonical copy
-├── CONTEXT-MAP.md     ← shared kernel + index of the eight glossaries
+├── GLOSSARY-MAP.md     ← shared kernel + index of the eight glossaries
 ├── docs/
 │   ├── adr/           ← every decision, system-wide, numbered
 │   ├── agents/        ← this file and its siblings

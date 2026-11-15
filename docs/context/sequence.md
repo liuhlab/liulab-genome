@@ -8,7 +8,7 @@ tell you where its bases came from. That is deliberate: coordinates and provenan
 the same question two answers.
 
 Words every context shares — **Assembly**, **Genome**, **Region**, **Strand**, **Soft-masking** and
-the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
+the rest — are defined once in the repo-root `GLOSSARY-MAP.md`.
 
 ## Language
 

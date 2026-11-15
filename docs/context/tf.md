@@ -25,7 +25,7 @@ used one set — which is why no entry below carries a *(decided, not built)* ma
 context map describes.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir**, **Gene id stem** and the
-rest — are defined once in the repo-root `CONTEXT-MAP.md`. **Annotation**, **Registered name**,
+rest — are defined once in the repo-root `GLOSSARY-MAP.md`. **Annotation**, **Registered name**,
 **Annotation database** and **Curated gene list** belong to the [Annotation](./annotation.md)
 context; **Motif**, **Motif id**, **Motif name**, **Release**, **Tax group** and **Information
 content** to the [Motif](./motif.md) half of this one.

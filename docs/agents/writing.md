@@ -17,7 +17,7 @@ survives deletion without loss, delete it. The caps below are ceilings, not targ
 | `docs/agents/` | 1000 (`Lab.LengthDoc`) |
 | `docs/adr/` | 400 (`Lab.LengthAdr`) |
 | `docs/research/` | none — a measurement is as long as its method |
-| `CONTEXT-MAP.md` and `docs/context/` | none — capped per entry instead, see below |
+| `GLOSSARY-MAP.md` and `docs/context/` | none — capped per entry instead, see below |
 
 The same six paths are declared under `[tool.liulab.agent-docs]` in `pyproject.toml`, and
 `pixi run conformance` pairs each to the `.vale.ini` section that carries its rule. Add a

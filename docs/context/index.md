@@ -6,7 +6,7 @@ package builds indexes and never aligns a single read. One word does double duty
 this context claims it outright: *index* here is a built aligner index, never a `.fai` or a `.2bit`.
 
 Words every context shares — **Assembly**, **Data dir**, **Completion marker**, **External tool** and
-the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
+the rest — are defined once in the repo-root `GLOSSARY-MAP.md`.
 
 ## Language
 

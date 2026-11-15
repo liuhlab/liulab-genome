@@ -730,6 +730,16 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
+- **Tests now have time limits, and CI runs as one job on ready pull requests.** Each test may
+  take at most 2 seconds and the whole run at most 45; every run prints its time against that
+  budget. A test marked `slow` is exempt from both, is skipped by `pixi run test`, and runs with
+  `pixi run test-slow`. `pixi run check` now runs the tests after the static checks rather than
+  beside them, and still reports every failure. CI is one job instead of four, runs on pull
+  requests only (not on pushes to `main`), and skips draft pull requests. The `test` pixi
+  environment is gone: the tests run in `default`. The conformance checker is updated to the
+  template's latest version, which adds a check on these limits, so the glossary map is renamed
+  from `CONTEXT-MAP.md` to `GLOSSARY-MAP.md`, the name the lab's skills look for.
+
 - **The conformance checker is re-synced, and "could not run" is no longer spelled the same way as
   "a rule failed".** `scripts/conformance.py` and its negative tests come across from
   `liulab-repo-template` at `da3085b`, wholesale rather than as a diff: the copy this repository

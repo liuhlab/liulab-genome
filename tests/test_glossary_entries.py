@@ -37,7 +37,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 
 #: The shared kernel, at the root, and one glossary per bounded context.
-CONTEXT_MAP = REPO / "CONTEXT-MAP.md"
+CONTEXT_MAP = REPO / "GLOSSARY-MAP.md"
 GLOSSARY_DIR = REPO / "docs" / "context"
 
 #: The shared conformance script's number, so the two mean the same thing.

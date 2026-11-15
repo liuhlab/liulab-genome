@@ -20,7 +20,7 @@ approved, previous and alias spellings each typed, and the Alliance's per-specie
 for mouse and worm, with the current approved spelling alone.
 
 Words every context shares — **Assembly**, **Genome**, **Data dir**, **Completion marker**,
-**Prepared set** and the rest — are defined once in the repo-root `CONTEXT-MAP.md`, **Gene id
+**Prepared set** and the rest — are defined once in the repo-root `GLOSSARY-MAP.md`, **Gene id
 stem**, the hub every entry below hangs off, among them. **Annotation**, **Registered name** and
 **Annotation database** belong to [Annotation](./annotation.md); **Release**, **Motif set** and
 **Motif name** to [Motif](./motif.md), and a release here is the same word it is there — one dated,
