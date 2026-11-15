@@ -63,6 +63,7 @@ True
 '''
 
 
+@pytest.mark.slow
 def test_a_docstring_example_outside_tests_runs_behind_both_autouse_guards(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:

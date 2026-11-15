@@ -259,6 +259,7 @@ class TestTheCoordinateArithmetic:
 
         assert set(hits["end"] - hits["start"]) == {15}
 
+    @pytest.mark.slow
     @given(
         chrom=st.sampled_from(["plantedI", "plantedII"]),
         bounds=st.tuples(st.integers(0, LENGTH), st.integers(0, LENGTH)),

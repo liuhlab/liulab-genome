@@ -502,6 +502,7 @@ class TestSkippedMotifs:
 
 
 class TestThreshold:
+    @pytest.mark.slow
     def test_stricter_is_a_subset_looser_is_a_superset_and_out_of_range_is_refused(
         self, motifs: MotifSet, planted: Path
     ) -> None:
@@ -515,6 +516,7 @@ class TestThreshold:
             with pytest.raises(ValueError, match="per-position p-value"):
                 motifs.scan("ACGT" * 20, threshold=threshold)
 
+    @pytest.mark.slow
     def test_a_thresholds_conversion_is_cached_per_value_and_not_reused_across_values(
         self, motifs: MotifSet, planted: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -613,6 +615,7 @@ class TestBackgroundAndProvenance:
         pd.testing.assert_frame_equal(replayed, derived)
         assert replayed.attrs["background"] == derived.attrs["background"]
 
+    @pytest.mark.slow
     def test_the_background_choice_changes_which_hits_are_found(
         self, motifs: MotifSet, planted: Path, planted_records: dict[str, str]
     ) -> None:

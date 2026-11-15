@@ -138,7 +138,10 @@ class TestSerialAndParallelAgree:
         pd.testing.assert_frame_equal(shared, serial)
         assert shared.attrs == serial.attrs
 
-    @pytest.mark.parametrize("shard_length", [100, 110, 37])
+    @pytest.mark.parametrize(
+        "shard_length",
+        [100, pytest.param(110, marks=pytest.mark.slow), pytest.param(37, marks=pytest.mark.slow)],
+    )
     def test_two_workers_agree_when_a_record_is_cut_across_a_shard_boundary(
         self,
         motifs: MotifSet,
@@ -158,6 +161,7 @@ class TestSerialAndParallelAgree:
         shared = motifs.scan_fasta(planted, workers=2)
         pd.testing.assert_frame_equal(shared, serial)
 
+    @pytest.mark.slow
     def test_a_parallel_scan_streams_to_parquet_the_same_way(
         self, motifs: MotifSet, planted: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
