@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # mkdocs revision dates / hatch-vcs version need history
-      - uses: prefix-dev/setup-pixi@v0.10.2
+      - uses: prefix-dev/setup-pixi@v0.11.3
         with:
           environments: docs
           locked: true
