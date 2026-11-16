@@ -1,88 +1,65 @@
+# The gate, run on the pull request rather than on the branch.
+#
+# ONE job, because GitHub bills every job rounded up to a whole minute: several short jobs bill
+# far more than one longer one, and on a private repo the minutes are shared by every repo the
+# account owns. Every step after the first gate step runs even when one before it failed, so
+# a run still reports every failure.
+#
+# Every step invokes `pixi run <task>` and never a command line. The step list lives in
+# `pyproject.toml` — `check-static` names it once — so adding a step is one more word
+# there and nothing here. Conformance rule `workflow-step-tasks` holds every workflow in
+# the repo to it, and what it checks is that the command came from the task table: a step
+# may pass arguments after `--`, and the rule prints them rather than forbidding them.
+# It reads the `run:` line only, so `env:`, `working-directory:`, `shell:` and a local
+# composite action can still make a step do something no `pixi run` does here. Keeping
+# CI and a laptop the same is a habit this file keeps, not a property anything proves.
+#
+# The two test lanes split the suite on `-m aligner`, so between them they run every test not
+# marked `slow` exactly once.
 name: CI
 
-# Four jobs, run concurrently by GitHub. Wall-clock is set by the slowest, so the shape
-# that matters is not "how many jobs" but "does any job do work another already did".
-# The two test lanes are a PARTITION — `-m aligner` against its negation, total by
-# boolean negation — so between them they run the suite exactly once.
-
 on:
-  push:
-    branches: [main]
+  # `pull_request` tests the MERGE commit — the code that will exist after the merge, not the
+  # branch tip — and it is the only event that produces a run for a pull request from a fork.
+  # Nothing runs on a push to `main`: it would test again what the pull request just tested.
+  # `workflow_dispatch` is for checking `main` by hand.
+  #
+  # `ready_for_review` is listed because a draft runs nothing (the job's `if:` below): open a
+  # pull request as a draft, pass the local gate, then mark it ready to run CI once.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
+# Keyed on the workflow and the ref, so pushing again to a pull request cancels the run it
+# supersedes. A run started by hand is never cancelled.
+#
+# The draft state is part of the key: a draft's run is skipped, and must not cancel the real
+# run that marking the pull request ready starts in the same second.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event.pull_request.draft }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
-  lint:
-    name: lint + typecheck + prose + docs
-    runs-on: ubuntu-latest
-    steps:
-      # A real checkout, not a source archive: `conformance` shells out to `git ls-files`
-      # and exits without a `.git`. The default shallow depth is enough — it reads the
-      # file list, not the history.
-      - uses: actions/checkout@v7
-      - uses: prefix-dev/setup-pixi@v0.10.2
-        with:
-          environments: default
-          locked: true
-      # ONE step, not seven. GitHub stops a job at its first failing step, so spelling the
-      # steps out here meant a ruff error hid pyright's verdict and the site build behind
-      # it. `check-static` names the step list once — pyproject.toml owns it, so this file
-      # and a laptop cannot drift — and runs the steps concurrently through
-      # scripts/check.sh, which reports every one of them.
-      #
-      # `check-static` and not `check`: `check` is these steps plus pytest, and pytest is
-      # the `test` job below, in the environment that owns it.
-      #
-      # The SITE build is one of the steps — a dead internal link, a nav entry naming a
-      # file that moved, a docstring mkdocstrings can no longer import. It rides here
-      # rather than on a runner of its own: `default` already carries the `docs` feature,
-      # so it reuses the setup-pixi above and its whole marginal cost is the ~4 s build.
-      # Build only; deploying stays in docs.yml, the one workflow granted `contents: write`.
-      - name: pixi run check-static
-        run: pixi run -e default check-static
-
-  # The unit lane: everything that does not need an aligner. It cannot select until
-  # samtools, faToTwoBit and twoBitInfo answer (the verb depends on
-  # scripts/require_tools.sh, which CI inherits rather than spelling a second copy of
-  # which binaries the lane needs) — with those three absent, 90 of its 925 tests skip
-  # themselves and the lane reports green having written no FASTA at all.
-  # `--durations=10` is in the task rather than on the step below: what sets a parallel
-  # lane's wall is one indivisible test, and no worker count goes below one test, so
-  # printing it makes that floor visible in every log. A measurement, not a gate. It sits
-  # in the task because the workflow-step conformance rule allows nothing after a task
-  # name — see the comment beside the task for why that rule was upheld rather than
-  # loosened.
-  test:
-    name: test
+  check:
+    # Skipped on a draft, which bills nothing. A run by hand has no pull request, so it runs.
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     # memelite's scan and compare engines are `@numba.njit(cache=True)`, and numba writes
     # that cache beside the package it compiled — inside the pixi env. setup-pixi saves its
     # env tarball straight after `pixi install`, which is BEFORE any test has run, so the
-    # compiled artifacts were never in it: every run recompiled from source. Measured at
-    # 27.5 s, which was 47% of this lane's whole wall and the single largest item in CI.
-    #
-    # Redirecting the cache to a path of our own is what makes it cacheable separately.
-    # It is 936 KB and restores in under a second.
+    # compiled artifacts were never in it: every run recompiled from source. Redirecting the
+    # cache to a path of our own is what makes it cacheable separately.
     #
     # `NUMBA_CPU_NAME` is what makes the restored cache USABLE. numba keys each compiled
     # overload on a tuple whose middle element is `(target_triple, cpu_name, cpu_features)`,
-    # so the host CPU MODEL is part of the key. GitHub's runners are heterogeneous and which
-    # one a job lands on is not ours to choose, so an unpinned key varies per run: the cache
-    # restores, numba rejects it per overload, and the suite recompiles. That failure is
-    # silent and reads as a hit — `actions/cache` reports on the FILES, numba decides on the
-    # CONTENTS, and only `--durations` below tells you which happened. Measured on a run that
-    # logged `Cache restored from key: …` and then paid 38.96 s, 26.06 s, 23.63 s and 23.60 s.
-    #
-    # `generic` gives up CPU-specific vectorisation and that was measured, not assumed, on a
-    # Sapphire Rapids Xeon with the full AVX-512 set — the widest vectors x86-64 has, so the
-    # largest gap the pin can cost: memelite's engines came out a dead heat, and did not
-    # diverge as the scanned sequence grew 333×. Numbers and method in
+    # so the host CPU MODEL is part of the key. GitHub's runners are heterogeneous, so an
+    # unpinned key varies per run: the cache restores, numba rejects it per overload, and the
+    # suite recompiles. That failure is silent and reads as a hit — `actions/cache` reports
+    # on the FILES, numba decides on the CONTENTS, and only `--durations` tells you which
+    # happened. What `generic` costs is in
     # docs/research/test-suite-cost-and-parallelism-2026-08-30.md, which is also where to add
     # anything learned later rather than growing this comment.
     #
@@ -92,16 +69,28 @@ jobs:
     # `NUMBA_CPU_FEATURES` is redundant TODAY — numba defaults it to `""` whenever
     # `NUMBA_CPU_NAME` is `generic`. It is set anyway because that default is numba's private
     # business, and if it ever changes the key silently starts varying by the host feature
-    # string, which is a long one (117 flags on that Xeon) and the exact bug this pin ends.
+    # string, which is the exact bug this pin ends.
     env:
       NUMBA_CACHE_DIR: ${{ github.workspace }}/.numba-cache
       NUMBA_CPU_NAME: generic
       NUMBA_CPU_FEATURES: ''
     steps:
+      # A real checkout, not a source archive: `conformance` shells out to `git ls-files`
+      # and exits 2 without a `.git` — its "could not run", spelled apart from the 1 a
+      # broken rule exits, so a bad checkout never reads as a rule this repo failed.
       - uses: actions/checkout@v7
-      - uses: prefix-dev/setup-pixi@v0.10.2
         with:
-          environments: test
+          # Full history, because `build` needs the tags: the version is dynamic and
+          # hatch-vcs reads the newest tag, so a shallow clone would stamp a released commit
+          # as a dev build.
+          fetch-depth: 0
+      - uses: prefix-dev/setup-pixi@v0.11.3
+        with:
+          # `default` carries the `docs` feature, so it builds the site too. `aligners` adds
+          # STAR and chromap for the aligner lane; both share one solve group.
+          environments: default aligners
+          # Fail if `pixi.lock` no longer matches `pyproject.toml`, rather than silently
+          # solving something else. This is what makes CI run the versions the laptop ran.
           locked: true
       # Keyed on the lockfile, because a compiled artifact is only valid for the numba and
       # memelite that produced it, and the lock pins both — but with the run id APPENDED and
@@ -110,17 +99,20 @@ jobs:
       # That rotation is the whole point, and a fixed key is a trap here. numba caches per
       # type signature, so one run compiles only the specialisations it happened to reach;
       # `actions/cache` refuses to overwrite an existing key, so a first run that saved a
-      # PARTIAL cache freezes it permanently and every later run pays the missing compiles
-      # forever. Measured: two runs on the same commit, one restoring a 437 KB cache and
-      # paying nothing, the other restoring a 474 KB cache and still recompiling four tests
-      # at 24-39 s each. Rotating the key lets each run save what it learned, so the cache
-      # converges on the full set of signatures the suite needs instead of freezing at
-      # whichever subset went first.
+      # PARTIAL cache would freeze it, and every later run would pay the missing compiles.
+      # Rotating the key lets each run save what it learned, so the cache converges on the
+      # full set of signatures the suite needs.
       #
       # `run_attempt` as well as `run_id`, because a run id is SHARED by every attempt of a
       # run: with the id alone a re-run restores its own first attempt's cache and then
-      # cannot save, so a re-run could never converge and looked from the outside exactly
-      # like the frozen-cache bug this rotation exists to fix.
+      # cannot save, so a re-run could never converge.
+      #
+      # It warms only a later run of the SAME pull request. The first run of every pull
+      # request is cold: a pull request's caches are scoped to it, nothing runs on `main` to
+      # save one every pull request could read, and a fresh `pixi install` gives memelite's
+      # files new modification times, which numba reads as changed source and discards the
+      # whole cache for. So `pixi run test` compiles first (scripts/warm_numba_cache.py), in
+      # one process, and no test ever pays the compile under its time limit.
       - name: numba JIT cache
         uses: actions/cache@v4
         with:
@@ -128,49 +120,27 @@ jobs:
           key: numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             numba-${{ runner.os }}-${{ hashFiles('pixi.lock') }}-
-      # What the restored cache is keyed against, printed before anything reads it. The CPU
-      # half of this key has already gone wrong silently once and the source-stamp half is
-      # merely unconfirmed; neither is visible in the cache step's own output, and they fail
-      # by different amounts — see the script for which loss looks like which cause.
-      - name: numba cache key
-        run: pixi run -e test numba-cache-key
-      - name: pytest -m 'not aligner'
-        run: pixi run -e test test
-
-  # The aligner lane: the eight tests that build a real index. It used to re-run the
-  # WHOLE suite here just to un-skip them, which meant the unit lane's coverage was a
-  # function of what happened to be installed — those eight skipped there, silently,
-  # and a skip is green. The marker partition ends both halves of that: this lane
-  # selects only what it installed binaries for, and cannot select at all until they
-  # answer (the verb depends on scripts/require_aligners.sh, which CI inherits rather
-  # than spelling a second copy of which binaries the lane needs).
-  aligner:
-    name: test (STAR + chromap)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: prefix-dev/setup-pixi@v0.10.2
-        with:
-          environments: aligners
-          locked: true
-      - name: pytest -m aligner
-        run: pixi run -e aligners test-aligner
-
-  build:
-    name: build wheel + sdist
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0   # hatch-vcs needs full history to derive a version
-      - uses: prefix-dev/setup-pixi@v0.10.2
-        with:
-          environments: default
-          locked: true
-      - name: pixi run build
-        run: pixi run -e default build
+      # `check-static` and `test` as two steps, not `check` as one, so each has its own
+      # verdict on the run page. The site build is one of the static steps.
+      - run: pixi run check-static
+      # What the restored cache is keyed against, printed before anything reads it. See the
+      # script for which loss looks like which cause.
+      - run: pixi run numba-cache-key
+        if: ${{ !cancelled() }}
+      - run: pixi run test
+        if: ${{ !cancelled() }}
+      # The eight tests that build a real index, in the environment that installs the
+      # aligners. The task cannot select until they answer (scripts/require_aligners.sh).
+      - run: pixi run -e aligners test-aligner
+        if: ${{ !cancelled() }}
+      - run: pixi run build
+        id: build
+        if: ${{ !cancelled() }}
       - uses: actions/upload-artifact@v7
+        # Only a wheel that was built: a failed build would otherwise fail this step too.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           name: dist
           path: dist/
+          # An empty upload is a green step that proved nothing.
           if-no-files-found: error

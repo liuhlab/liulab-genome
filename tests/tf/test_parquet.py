@@ -140,6 +140,7 @@ class TestTheFileIsTheTable:
 
 
 class TestTheCategoriesComeBackInOrder:
+    @pytest.mark.slow
     def test_categories_stay_sorted_and_the_index_width_follows_cardinality(
         self, tmp_path: Path
     ) -> None:

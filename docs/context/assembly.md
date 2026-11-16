@@ -6,7 +6,7 @@ and `external.py`: a name becomes a directory of prepared files, everything in t
 derivable from one FASTA, and nothing is derived twice.
 
 Words every context shares — **Assembly**, **Genome**, **Chromosome**, **Region**, **Data dir** and
-the rest — are defined once in the repo-root `CONTEXT-MAP.md`.
+the rest — are defined once in the repo-root `GLOSSARY-MAP.md`.
 
 ## Language
 
@@ -82,7 +82,7 @@ one rule makes the derived chimera name injective and lets a suffixed chromosome
 to the component it came from. `Genome.chrom_components` performs that split and is **total** — a
 non-chimera maps every chromosome to its own assembly rather than to nothing.
 *Avoid*: part, member, sub-genome, sub-assembly, constituent; and the architecture sense of the
-word, which `CONTEXT-MAP.md` bans as a substitute for *module*
+word, which `GLOSSARY-MAP.md` bans as a substitute for *module*
 
 **Genome files**:
 The complete prepared set for an assembly: the FASTA plus its three derived files. Prepared as a

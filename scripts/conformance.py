@@ -5,7 +5,7 @@
     python scripts/conformance.py [--root PATH]
 
 It states the RULE, not the file contents — a pull model, so a repo that legitimately diverges
-stays green while the shared conventions stay checked. Fifteen rules: thirteen fail, two only warn.
+stays green while the shared conventions stay checked. Sixteen rules: fourteen fail, two only warn.
 
 Three exit statuses, spelled the way `scripts/check.sh` spells its own: **0** every rule passed,
 **1** it ran and a rule failed, **2** it could not run at all — no `.git` to list tracked files
@@ -33,14 +33,15 @@ never per-file. No expiry, and every waiver is printed on every run — green on
 because an escape hatch that stops being visible becomes permanent. Rule 1 refuses to be waived.
 
 This lives in `scripts/` and not `tests/` because one lab repo has neither `src/` nor `tests/`,
-and pytest is in no default environment. Its negative tests are `tests/test_conformance.py`: one
-tree per rule that violates it, because a rule that checks nothing passes the happy path and a
-gate that fires on nothing looks identical to a gate that passes.
+and pytest is in no default environment. Each rule is tested against a tree that violates it,
+because a rule that checks nothing passes the happy path and a gate that fires on nothing looks
+identical to a gate that passes.
 """
 
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import posixpath
 import re
 import shlex
@@ -48,7 +49,7 @@ import subprocess
 import sys
 import textwrap
 import tomllib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path, PurePosixPath
@@ -60,7 +61,7 @@ import yaml
 #: `CANNOT_RUN` is the one that says nothing about this repo's rules: `scripts/check.sh` already
 #: spells "could not run" as 2 — a usage error, a capture directory it could not make — and a
 #: checker that exited 1 for both would have every reader looking for a rule violation instead of
-#: for the missing checkout. `tests/test_conformance.py` asserts all three.
+#: for the missing checkout.
 PASSED, FAILED, CANNOT_RUN = 0, 1, 2
 
 
@@ -74,13 +75,13 @@ class CannotRunError(Exception):
 
 
 #: The template's placeholder module name, SPELLED IN TWO PIECES on purpose. `init-repo`
-#: substitutes that name throughout the tree and the dogfood job then greps a rendered repo for
+#: substitutes that name throughout the tree and the dogfood step then greps a rendered repo for
 #: it. A literal here would be rewritten — turning rule 1 into a check for the new module's own
 #: name, which is everywhere — and would leave a copy for that grep to find. Two pieces, and
 #: neither happens.
 PLACEHOLDER = "new" + "pkg"
 
-#: Rule 1 and warning 14 are both gated on this directory, and it is the only discriminator either
+#: Rule 1 and warning 15 are both gated on this directory, and it is the only discriminator either
 #: needs. While it is here, `init-repo` has not run: the placeholder is still the repo's own name,
 #: and the auto-discovered skill is itself the nag. Once it is gone the repo claims to be its own,
 #: and both rules start checking.
@@ -88,6 +89,20 @@ INIT_SKILL = "skills/init-repo"
 
 #: Rule 1's name, needed by name because it is the one rule that refuses to be waived.
 UNWAIVABLE = "placeholder-rename"
+
+#: The glossary, by the name the upstream skills read and write, and the name each file had
+#: before upstream renamed it. A repo still on the old name is failed rather than passed over:
+#: "no GLOSSARY.md" would be the quiet answer to a rename that never happened.
+GLOSSARY = "GLOSSARY.md"
+GLOSSARY_MAP = "GLOSSARY-MAP.md"
+GLOSSARY_RENAMES = (("CONTEXT.md", GLOSSARY), ("CONTEXT-MAP.md", GLOSSARY_MAP))
+
+#: A glossary entry as the `domain-modeling` skill writes it: a line that is a bold term and a
+#: colon and nothing else, the definition on the lines below. Whole-line on purpose. A paragraph
+#: may open on a bold phrase and a colon and run on, and that is prose.
+_TERM_LINE_RE = re.compile(r"^\*\*(?P<term>[^*]+)\*\*:\s*$")
+#: A Markdown heading, and its level.
+_HEADING_RE = re.compile(r"^(?P<level>#{1,6})\s")
 
 #: The site configuration every repo that publishes a site has, and where the site source sits
 #: when it does not say. Rules 2 and 13 are both scoped to the pages the site publishes, so they
@@ -102,6 +117,13 @@ DEFAULT_DOCS_DIR = "docs"
 #: site from one docs tree: a second configuration `INHERIT`s the first and APPENDS to its nav,
 #: and the navbar the build renders carries the entries of both. A repo with one configuration
 #: reads one, and this costs nothing.
+#:
+#: Every one of them INCLUDING a local overlay no task builds, which is the known cost. Reading
+#: instead only the configurations a declared docs task names with `-f` was considered and
+#: declined: pixi writes a task as a string, as `{cmd = "..."}` or as a list, so it needs a second
+#: command-line parser beside rule 12's, and it would stop reading a configuration built by a
+#: Makefile or a workflow rather than by a task. A rule that reads one file too many is the
+#: cheaper error here.
 _SITE_CONFIG_RE = re.compile(r"^mkdocs(?:\..+)?\.ya?ml$")
 
 #: Where GitHub reads workflows, and the two file endings it accepts. Nothing below this
@@ -116,32 +138,57 @@ WORKFLOW_SUFFIXES = (".yml", ".yaml")
 #: 9 both read it, so the name is written here once and nowhere else.
 RELEASE_WORKFLOW = f"{WORKFLOW_DIR}release.yml"
 
+#: The tag `init_repo.py` creates on a repo's opening day, and the one ref rule 9 asks about. A
+#: trigger that admits it runs the publishing workflow before anyone has decided to release.
+FIRST_TAG = "v0.0.0"
+
 #: Vale's spelling of on and off. Both forms appear in the wild; the gate accepts either.
 VALE_ON = {"YES", "TRUE", "ON"}
 VALE_OFF = {"NO", "FALSE", "OFF"}
+#: A key holding one of these is a glob, and a glob key matches no file.
+GLOB_CHARS = frozenset("*?[")
 
 #: The command a workflow step is allowed to run, and the table its task must be declared in.
 #: Both are named here because rule 12's problem text and its fix both spell them.
 PIXI_RUN = "pixi run"
 TASK_TABLE = "[tool.pixi.tasks]"
 
-#: The `pixi run` options that take a SEPARATE value, so the token after one is that value and
-#: never the task name. The `--option=value` form needs no entry, being one token. Anything else
-#: beginning with `-` is read as a switch, so an option pixi grows later would be mistaken for the
-#: task and reported LOUDLY — the safe direction of error for a check whose whole job is to notice
-#: drift nobody announced.
+#: Every `pixi run` option that takes a SEPARATE value, so the token after one is that value and
+#: never the task name. Both spellings of each, because a workflow writes either. The
+#: `--option=value` form needs no entry, being one token.
+#:
+#: READ OFF `pixi run --help`, at pixi 0.71.2, and not guessed. A missing spelling is not a safe
+#: error: the option's value is mistaken for the task, and a step that literally is
+#: `pixi run -p linux-64 build` is told it runs a command rather than `pixi run <task>`. That
+#: shipped — the list held eight spellings of the twelve options pixi has. Re-measure when the
+#: pixi version moves, and add both spellings of anything new.
 PIXI_VALUE_OPTIONS = frozenset(
     {
         "-e",
         "--environment",
+        "-p",
+        "--platform",
+        "-m",
         "--manifest-path",
+        "-w",
+        "--workspace",
         "--color",
         "--auth-file",
+        "--config-file",
+        "--pinning-strategy",
         "--pypi-keyring-provider",
+        "--tls-root-certs",
         "--concurrent-solves",
         "--concurrent-downloads",
     }
 )
+
+#: What separates a task from the arguments passed to it, and the tokens that are not arguments
+#: at all. pixi reads a bare `--durations=10` as its own option and refuses to run, so a step
+#: passing one without the separator is broken before this rule sees it. A shell operator after
+#: the task starts a second command, which is the drift rule 12 is about.
+ARGUMENT_SEPARATOR = "--"
+SHELL_OPERATORS = frozenset({"&&", "||", "|", ";", "&"})
 
 #: What a `${{ ... }}` expression is replaced by before a step's command is split into tokens.
 #: GitHub substitutes these when the job runs, and `shlex` would split one into three tokens and
@@ -149,6 +196,18 @@ PIXI_VALUE_OPTIONS = frozenset(
 #: its task with an expression is reported as unresolved rather than failed.
 EXPRESSION = "${{}}"
 _EXPRESSION_RE = re.compile(r"\$\{\{.*?\}\}", re.DOTALL)
+
+#: Rule 14's three other places to set a test time limit: pytest-timeout's environment variable
+#: and its flag, and its mark. Whole tokens, so `--timeout-method` and `--session-timeout` pass.
+TIMEOUT_ENV = "PYTEST_TIMEOUT"
+TIMEOUT_FLAG = "--timeout"
+TIMEOUT_MARK = "pytest.mark.timeout"
+_TIMEOUT_ENV_RE = re.compile(r"\bPYTEST_TIMEOUT\b")
+_TIMEOUT_FLAG_RE = re.compile(r"(?<![\w-])--timeout(?![\w-])")
+_TIMEOUT_MARK_RE = re.compile(r"\bmark\.timeout\b")
+_PYTEST_RE = re.compile(r"\bpytest\b")
+#: A file pytest reads tests or fixtures from, by its default names.
+_TEST_FILE_RE = re.compile(r"(?:^|/)(?:test_[^/]*|[^/]*_test|conftest)\.py$")
 
 _SECTION_RE = re.compile(r"^\[(?P<header>.+)\]\s*$")
 _SETTING_RE = re.compile(r"^(?P<key>[A-Za-z][^=]*?)\s*=\s*(?P<value>.*?)\s*$")
@@ -162,48 +221,60 @@ _SKILL_DIR_RES = (
     re.compile(r"^\.(?:claude|agents)/skills/(?P<name>[^/]+)(?:/|$)"),
 )
 
+#: The prefix the lab's shared plugin owns, and where it ships every other name: Claude Code's
+#: clone of the `liulab` marketplace, relative to the home directory. Kimi Code reads its skills
+#: from that clone too. Read from the machine, so CI, with no plugin installed, cannot check it.
+LAB_PREFIX = "lab-"
+PLUGIN_SKILLS = ".claude/plugins/marketplaces/liulab/skills"
+
 
 @dataclass(frozen=True)
 class SecondToolchain:
-    """One toolchain other than pixi, and where it would declare a dependency version.
+    """One resolver other than pixi, and where it leaves the environment it resolved.
 
     Attributes
     ----------
     tool
         The tool named in the failure, and listed in the note that says what was looked for.
-    path
-        A regex FULL-matched against a repo-relative tracked path. A pattern with no `/` in it
-        therefore matches at the repo root and nowhere else, which is where a resolver reads:
-        `tests/fixtures/requirements.txt` is a test's input, not this repo's dependencies.
+    name
+        A regex FULL-matched against a tracked path's FILE NAME, so a marker is found wherever
+        it sits. Un-anchored on purpose: `env/poetry.lock` resolves the same environment
+        `poetry.lock` does, and anchoring at the root would have made `git mv` the fix.
     table
-        A dotted table in `pyproject.toml`, for a tool that declares versions in the manifest
-        instead of a file of its own — a second build backend's dependency section.
+        A dotted table in `pyproject.toml`, for a resolver configured in the manifest rather
+        than in a file of its own.
     """
 
     tool: str
-    path: str = ""
+    name: str = ""
     table: str = ""
 
 
-#: Every second place a dependency version can be declared. Rule 10 reads this and nothing else,
-#: so covering one more tool is one more line here.
+#: Every marker of a second resolver. Rule 10 reads this and nothing else, so covering one more
+#: resolver is one more line here.
 #:
 #: It is a constant and not a `[tool.liulab.*]` key because it is not a claim a repo makes about
 #: itself: the rule is the same in every Liu Lab repo, and a repo that must keep one of these has
 #: `[tool.liulab.waived]`, which is printed on every run. A manifest list could be emptied
 #: instead, and an escape hatch nobody can see is the thing this file exists to prevent.
 #:
-#: Lockfiles are named per tool, never `*.lock`: `pixi.lock` is the lock this rule protects.
-#: `setup.cfg` is absent because it commonly carries only tool configuration and no dependency.
+#: One category and nothing wider: a competing resolver's GENERATED artifact, or the table that
+#: configures it. Each has no legitimate form, no human reader, and no sensible use in a
+#: subdirectory. Lockfiles are named per tool, never `*.lock`, because `pixi.lock` is the lock
+#: this rule protects.
+#:
+#: Four markers were measured firing on correct work and are gone. `requirements.txt`, because a
+#: notebook a researcher runs on Colab needs one and cannot run pixi. `environment.yml`, because
+#: `binder/environment.yml` is how a repo ships a runnable notebook. `setup.py`, because it
+#: builds C extensions while declaring no dependency at all. `.pre-commit-config.yaml`, because
+#: the hook shape a Liu Lab repo would write — `language: system`, `entry: pixi run lint` — pins
+#: nothing and is the pattern that REMOVES the drift this rule names. Telling a researcher to
+#: delete any of them is advice that breaks working science.
 SECOND_TOOLCHAINS: tuple[SecondToolchain, ...] = (
-    SecondToolchain("pre-commit", path=r"\.pre-commit-config\.ya?ml"),
-    SecondToolchain("pip", path=r"[^/]*requirements[^/]*\.txt|requirements/[^/]+\.txt"),
-    SecondToolchain("conda", path=r"[^/]*environment[^/]*\.ya?ml"),
-    SecondToolchain("pipenv", path=r"Pipfile(\.lock)?"),
-    SecondToolchain("setuptools", path=r"setup\.py"),
-    SecondToolchain("poetry", path=r"poetry\.lock", table="tool.poetry"),
-    SecondToolchain("uv", path=r"uv\.lock", table="tool.uv"),
-    SecondToolchain("pdm", path=r"pdm\.lock", table="tool.pdm"),
+    SecondToolchain("poetry", name=r"poetry\.lock", table="tool.poetry"),
+    SecondToolchain("uv", name=r"uv\.lock", table="tool.uv"),
+    SecondToolchain("pdm", name=r"pdm\.lock", table="tool.pdm"),
+    SecondToolchain("pipenv", name=r"Pipfile(\.lock)?"),
 )
 
 
@@ -293,12 +364,15 @@ class Workflow:
     steps
         Every step of every job, in file order, each carrying the job it came from. Flat because
         the rules that read steps ask about all of them, and a step knows its own job.
+    strings
+        Every key and string value in the file, at any depth. Comments are not among them.
     """
 
     path: str
     name: str
     triggers: dict[str, Any]
     steps: tuple[Step, ...]
+    strings: tuple[str, ...] = ()
 
 
 def _string(value: Any) -> str | None:
@@ -368,15 +442,23 @@ class SiteConfig:
         Whether the file has a `nav:` key at all. A configuration with none is not one whose nav
         is empty — the generator builds the navbar from the directory tree instead — so a rule
         reports it as unchecked rather than green.
+    generators
+        The page-generating plugins this file declares, along `INHERIT`, in name order. A
+        configuration with one builds pages nothing tracks, so its nav cannot be resolved
+        against a checkout at all.
     targets
-        Repo-relative path -> the nav string that named it, for every entry that names a page
-        rather than a link or a bare anchor.
+        Repo-relative path -> the nav string that named it, for every entry that names a page.
+    unresolved
+        The entries that name no page and no link — a directory, an `...` — as written. Not a
+        problem and not a target: the rule says it did not resolve them.
     """
 
     path: str
     docs_dir: str
     declares_nav: bool
+    generators: tuple[str, ...]
     targets: dict[str, str]
+    unresolved: tuple[str, ...]
 
 
 @dataclass
@@ -432,13 +514,12 @@ class Repo:
             loaded = None
         return loaded if isinstance(loaded, dict) else {}
 
-    def resolved_docs_dir(self, rel: str) -> str:
-        """One configuration's site source, resolved along the `INHERIT` chain.
+    def inherit_chain(self, rel: str) -> Iterator[dict[str, Any]]:
+        """One configuration and every one it `INHERIT`s, nearest first.
 
-        Walked rather than read from the one file, because a configuration that inherits another
-        and declares no `docs_dir` of its own uses the parent's, and reading only the child would
-        resolve its nav against a directory that is not the site source. `INHERIT` is a path
-        relative to the configuration that writes it.
+        `INHERIT` is a path relative to the configuration that writes it. Anything a child does
+        not declare it takes from the parent, so a rule reading the child alone reads half a
+        configuration.
 
         The visited set is not defensive clutter: a cycle is a configuration nobody can build, and
         it must not be a conformance crash either.
@@ -447,14 +528,33 @@ class Repo:
         while rel not in seen:
             seen.add(rel)
             document = self.config(rel)
+            yield document
+            parent = document.get("INHERIT")
+            if not isinstance(parent, str):
+                return
+            rel = posixpath.normpath(posixpath.join(posixpath.dirname(rel), parent))
+
+    def resolved_docs_dir(self, rel: str) -> str:
+        """One configuration's site source, resolved along the `INHERIT` chain.
+
+        Walked rather than read from the one file, because a configuration that inherits another
+        and declares no `docs_dir` of its own uses the parent's, and reading only the child would
+        resolve its nav against a directory that is not the site source.
+        """
+        for document in self.inherit_chain(rel):
             declared = document.get("docs_dir")
             if isinstance(declared, str):
                 return posixpath.normpath(declared).strip("/")
-            parent = document.get("INHERIT")
-            if not isinstance(parent, str):
-                break
-            rel = posixpath.normpath(posixpath.join(posixpath.dirname(rel), parent))
         return DEFAULT_DOCS_DIR
+
+    def page_generators(self, rel: str) -> tuple[str, ...]:
+        """Every page-generating plugin one configuration declares, along the `INHERIT` chain.
+
+        Walked for the same reason the site source is: a child that inherits a parent declaring
+        `gen-files` builds the same generated pages, and its own nav names them.
+        """
+        declared = {name for document in self.inherit_chain(rel) for name in _plugins(document)}
+        return tuple(sorted(declared & PAGE_GENERATORS))
 
     @cached_property
     def mkdocs(self) -> dict[str, Any]:
@@ -469,7 +569,8 @@ class Repo:
     @cached_property
     def nav(self) -> dict[str, str]:
         """Repo-relative path -> the `mkdocs.yml` nav entry that names it."""
-        return _nav_targets(self.docs_dir, self.mkdocs.get("nav"))
+        targets, _ = _nav_targets(self.docs_dir, self.mkdocs.get("nav"))
+        return targets
 
     @cached_property
     def site_configs(self) -> tuple[SiteConfig, ...]:
@@ -485,6 +586,12 @@ class Repo:
         other's dead entry, and a rule merging them into a single nav would have to know which
         file won; the union needs neither, because an entry is checked where it was written. A
         repo with one configuration reads one, and this costs nothing.
+
+        The join is ZENSICAL's: it merges an inherited configuration with `deepmerge`'s
+        `always_merger`, which CONCATENATES lists. mkdocs' own `INHERIT` replaces them, so a repo
+        that takes ADR 0001's fallback back to mkdocs has a child nav that wins outright — and
+        the union then checks entries no build renders. It would report a dead entry in a file
+        that is no longer read, which is a false failure. Revisit this with the generator.
         """
         found: list[SiteConfig] = []
         for rel in self.tracked:
@@ -492,12 +599,15 @@ class Repo:
                 continue
             document = self.config(rel)
             docs_dir = self.resolved_docs_dir(rel)
+            targets, unresolved = _nav_targets(docs_dir, document.get("nav"))
             found.append(
                 SiteConfig(
                     path=rel,
                     docs_dir=docs_dir,
                     declares_nav="nav" in document,
-                    targets=_nav_targets(docs_dir, document.get("nav")),
+                    generators=self.page_generators(rel),
+                    targets=targets,
+                    unresolved=unresolved,
                 )
             )
         return tuple(found)
@@ -516,7 +626,12 @@ class Repo:
         lives on the `docs` feature — so a rule reading one table would fail the docs job of a
         workflow that is entirely correct.
         """
-        return frozenset(_task_names(self.manifest.get("tool", {}).get("pixi")))
+        return frozenset(name for name, _ in self.task_definitions)
+
+    @cached_property
+    def task_definitions(self) -> tuple[tuple[str, Any], ...]:
+        """Every pixi task as (name, definition), from every table `tasks` walks."""
+        return tuple(_tasks(self.manifest.get("tool", {}).get("pixi")))
 
     @cached_property
     def workflows(self) -> tuple[Workflow, ...]:
@@ -549,6 +664,7 @@ class Repo:
                     name=_string(document.get("name")) or PurePosixPath(rel).stem,
                     triggers=_triggers(document),
                     steps=_steps(rel, document),
+                    strings=tuple(_keys_and_strings(document)),
                 )
             )
         return tuple(found)
@@ -576,9 +692,33 @@ def _walk_strings(node: Any) -> Iterator[str]:
 #: is a file that can be missing. The scheme half is what covers `mailto:`, which has no `//`.
 _NAV_LINK_RE = re.compile(r"^[a-z][a-z0-9+.\-]*:|^//|^#", re.IGNORECASE)
 
+#: The anchor a nav entry may carry — `guide.md#install` names `guide.md`, and the anchor is a
+#: place on it. A bare `#top` never reaches this, being a link by the rule above.
+_ANCHOR_RE = re.compile(r"#.*$")
 
-def _nav_targets(docs_dir: str, nav: Any) -> dict[str, str]:
-    """Repo-relative path -> the `nav:` entry that named it, for one site configuration.
+#: What a nav entry has to end in to name a PAGE. Markdown, a notebook where the repo has the
+#: plugin that renders one, and an HTML file the builder passes through.
+#:
+#: An entry ending in anything else names something this cannot resolve and must not guess at:
+#: `- API: reference/` is a directory `literate-nav` expands, `- ...` is `awesome-pages` asking
+#: for the rest of the tree. Both were measured failing rule 13, and the fix it printed for the
+#: second — "add docs/..." — is what a rule looks like outside its domain. A typo is unaffected:
+#: `hnad.md` still ends in `.md`.
+PAGE_SUFFIXES = (".md", ".ipynb", ".html")
+
+#: The plugins that WRITE PAGES into the site source while the build runs. A nav entry naming one
+#: of them resolves to nothing a checkout carries, so rule 13 has no premise in a repo that
+#: declares one and reports itself vacuous instead.
+#:
+#: That replaces a waiver, and the difference is the point. Waivers are per RULE, which is right
+#: for an all-or-nothing rule and wrong for this one: a repo with a single generated section had
+#: to turn rule 13 off for every hand-written entry it exists to protect, and the waiver then
+#: swallowed the genuine dead links too — measured, two problems suppressed where one was real.
+PAGE_GENERATORS = frozenset({"gen-files", "literate-nav", "awesome-pages", "macros"})
+
+
+def _nav_targets(docs_dir: str, nav: Any) -> tuple[dict[str, str], tuple[str, ...]]:
+    """One configuration's nav, read apart: the pages it names, and the entries that name none.
 
     Nav paths are relative to `docs_dir`, so they are prefixed with it before they can be compared
     with anything `git ls-files` said. Getting that wrong is not a false negative that shows up
@@ -587,17 +727,45 @@ def _nav_targets(docs_dir: str, nav: Any) -> dict[str, str]:
     Rules 2 and 13 read the same mapping, so what counts as a nav path is decided once. `normpath`
     is what lets rule 13 see an entry reaching ABOVE the site source: `../README.md` under `docs/`
     arrives here as `README.md`, outside the directory the builder copies.
+
+    The second half is everything that is neither a link nor a page — the entries a rule should
+    say it did not resolve rather than report as missing.
     """
     targets: dict[str, str] = {}
+    unresolved: list[str] = []
     for raw in _walk_strings(nav):
         if _NAV_LINK_RE.match(raw):
             continue
-        targets[posixpath.normpath(f"{docs_dir or '.'}/{raw}")] = raw
-    return targets
+        path = _ANCHOR_RE.sub("", raw)
+        if not path.endswith(PAGE_SUFFIXES):
+            unresolved.append(raw)
+            continue
+        targets[posixpath.normpath(f"{docs_dir or '.'}/{path}")] = raw
+    return targets, tuple(unresolved)
 
 
-def _task_names(node: Any) -> Iterator[str]:
-    """Every key of every `tasks` table at any depth, wherever pixi accepts one.
+def _plugins(document: dict[str, Any]) -> set[str]:
+    """Every plugin name one site configuration declares.
+
+    Both spellings: a LIST, whose items are bare names or single-key mappings carrying options,
+    and a MAPPING of name to options. A theme-namespaced name — `material/search` — is that
+    theme's copy of the plugin, so the last segment is the name.
+    """
+    declared = document.get("plugins")
+    names: list[Any] = []
+    if isinstance(declared, list):
+        for item in declared:  # pyright: ignore[reportUnknownVariableType]
+            if isinstance(item, str):
+                names.append(item)
+            elif isinstance(item, dict):
+                names.extend(item)  # pyright: ignore[reportUnknownArgumentType]
+    elif isinstance(declared, dict):
+        names.extend(declared)  # pyright: ignore[reportUnknownArgumentType]
+    return {str(name).rsplit("/", 1)[-1] for name in names}
+
+
+def _tasks(node: Any) -> Iterator[tuple[str, Any]]:
+    """Every entry of every `tasks` table at any depth, wherever pixi accepts one.
 
     One walk rather than four reads: a task may be declared on the workspace, on a feature, on a
     platform target, or on a target under a feature.
@@ -606,23 +774,72 @@ def _task_names(node: Any) -> Iterator[str]:
         return
     for key, value in node.items():  # pyright: ignore[reportUnknownVariableType]
         if key == "tasks" and isinstance(value, dict):
-            yield from (str(name) for name in value)  # pyright: ignore[reportUnknownVariableType]
+            for name, definition in value.items():  # pyright: ignore[reportUnknownVariableType]
+                yield str(name), definition  # pyright: ignore[reportUnknownArgumentType]
         else:
-            yield from _task_names(value)
+            yield from _tasks(value)
 
 
-def _invoked_task(run: str) -> str | None:
+def _outside_tasks(node: Any) -> Iterator[str]:
+    """Every key and string under `[tool.pixi]` that is not inside a `tasks` table."""
+    if isinstance(node, dict):
+        for key, value in node.items():  # pyright: ignore[reportUnknownVariableType]
+            if key == "tasks" and isinstance(value, dict):
+                continue
+            yield str(key)  # pyright: ignore[reportUnknownArgumentType]
+            yield from _outside_tasks(value)
+    else:
+        yield from _keys_and_strings(node)
+
+
+def _keys_and_strings(node: Any) -> Iterator[str]:
+    """Every mapping key and every string value in a parsed document, at any depth."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, list):
+        for item in node:  # pyright: ignore[reportUnknownVariableType]
+            yield from _keys_and_strings(item)
+    elif isinstance(node, dict):
+        for key, value in node.items():  # pyright: ignore[reportUnknownVariableType]
+            yield str(key)  # pyright: ignore[reportUnknownArgumentType]
+            yield from _keys_and_strings(value)
+
+
+@dataclass(frozen=True)
+class Invocation:
+    """One `pixi run` command line, read apart.
+
+    Attributes
+    ----------
+    task
+        The task name — the first token that is neither an option nor an option's value.
+    arguments
+        Whatever the step passes to that task after `--`, empty for most steps. Kept rather
+        than discarded because rule 12 prints them: an argument only CI passes is a legitimate
+        thing to write and a thing a reader should be able to see without opening the workflow.
+    """
+
+    task: str
+    arguments: tuple[str, ...]
+
+
+def _invoked_task(run: str) -> Invocation | None:
     """Read the pixi task one step's `run:` script invokes, or ``None`` when it runs a command.
 
-    The accepted shape is `pixi run`, any pixi options, and one more token — the task. Options are
-    skipped on both sides of `run`, so `pixi run -e test test` and `pixi run docs-build` arrive
-    the same way and no spelling is privileged.
+    The accepted shape is `pixi run`, any pixi options, the task, and then — optionally — `--`
+    and arguments for it. Options are skipped on both sides of `run`, so
+    `pixi run -e docs docs-build` and `pixi run test` arrive the same way and no spelling is
+    privileged.
 
-    Nothing may follow the task, and that is the strict half of the rule rather than an oversight.
-    A step passing arguments of its own is the drift this rule is about, one level down: the
-    arguments a task runs with belong in the task, which is exactly where `check-static` keeps its
-    own list. A script of several lines, or two commands joined by `&&`, leaves tokens after the
-    task and lands here too.
+    Arguments are ACCEPTED and reported, not forbidden. A flag a workflow wants and a laptop does
+    not — `--durations=10` on the CI run of the test suite — is ordinary, and forbidding it only
+    moves the divergence into a second task definition, where nothing checks it against the first.
+    What the rule can still say is that the command came from the task table.
+
+    Two shapes are still not this one. Tokens after the task that do not start with `--`: pixi
+    would read them as its own options and refuse to run, so the step is broken already. And a
+    shell operator anywhere after the task — `pixi run build && rm -rf dist` is two commands, and
+    the second one is what no `pixi run` does. A script of several lines lands here too.
     """
     script = _EXPRESSION_RE.sub(EXPRESSION, run)
     try:
@@ -636,9 +853,15 @@ def _invoked_task(run: str) -> str | None:
     if index >= len(tokens) or tokens[index] != "run":
         return None
     index = _skip_options(tokens, index + 1)
-    if len(tokens) - index != 1:
+    if index >= len(tokens):
         return None
-    return tokens[index]
+    task, rest = tokens[index], tokens[index + 1 :]
+    if rest and rest[0] != ARGUMENT_SEPARATOR:
+        return None
+    arguments = rest[1:]
+    if any(token in SHELL_OPERATORS for token in arguments):
+        return None
+    return Invocation(task=task, arguments=tuple(arguments))
 
 
 def _skip_options(tokens: list[str], index: int) -> int:
@@ -693,32 +916,34 @@ def _vale_sections(text: str) -> list[tuple[str, dict[str, str]]]:
 
 
 def _glossary_entries(text: str) -> list[tuple[str, int]]:
-    """Each `###` entry under `## Glossary` in `CONTEXT.md`, with its word count.
+    """Each entry in the glossary, with its word count.
 
-    The cap is per ENTRY and not per file, so a repo with a large vocabulary is not punished for
-    the size of its domain. An entry runs from its own heading to the next heading at the same or
-    a higher level.
+    An entry is a `###` heading under `## Glossary`, or a `**Term**:` line under any `##` section.
+    The first runs to the next heading at its own level or higher, the second to the next heading
+    of any level; either ends at the next entry. The cap is per ENTRY and not per file, so a repo
+    with a large vocabulary is not punished for the size of its domain.
     """
     entries: list[tuple[str, int]] = []
-    in_glossary = False
+    section: str | None = None
     title: str | None = None
+    ends_below = 0
     words = 0
     for line in text.splitlines():
-        if line.startswith("## "):
-            if title is not None:
-                entries.append((title, words))
-                title = None
-            in_glossary = line[3:].strip().lower() == "glossary"
-            continue
-        if not in_glossary:
-            continue
-        if line.startswith("### "):
-            if title is not None:
-                entries.append((title, words))
-            title = line[4:].strip()
+        heading = _HEADING_RE.match(line)
+        term = _TERM_LINE_RE.match(line) if section is not None else None
+        level = len(heading["level"]) if heading else 0
+        if title is not None and (term or (heading and level < ends_below)):
+            entries.append((title, words))
+            title = None
+        if level == 2:
+            section = line[3:].strip().lower()
+        elif level == 3 and section == "glossary":
+            title, ends_below = line[4:].strip(), 4
             words = len(title.split())
-            continue
-        if title is not None:
+        elif term:
+            title, ends_below = str(term["term"]).strip(), 7
+            words = len(title.split())
+        elif title is not None:
             words += len(line.split())
     if title is not None:
         entries.append((title, words))
@@ -796,7 +1021,7 @@ def _python_pins(pyproject: dict[str, Any]) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------------------
-# The rules. Thirteen fail, two warn. Each returns what it found; nothing here exits or prints.
+# The rules. Fourteen fail, two warn. Each returns what it found; nothing here exits or prints.
 # --------------------------------------------------------------------------------------
 
 
@@ -849,7 +1074,7 @@ def rule_agent_docs_unpublished(repo: Repo) -> Result:
     """2. Agent-facing pages the site would publish stay out of the navbar and out of search."""
     result = Result()
     prefix = f"{repo.docs_dir}/"
-    # Scoped to the agent-docs keys UNDER THE SITE SOURCE. `AGENTS.md`, `CONTEXT.md` and
+    # Scoped to the agent-docs keys UNDER THE SITE SOURCE. `AGENTS.md`, `GLOSSARY.md` and
     # `skills/` are agent-facing too, but the site never publishes them: front matter there means
     # nothing, and on a SKILL.md it lands in the frontmatter a skill loader reads.
     keys = sorted(k for k in repo.agent_docs if k.startswith(prefix))
@@ -857,6 +1082,9 @@ def rule_agent_docs_unpublished(repo: Repo) -> Result:
         result.notes.append(f"not checked: no [tool.liulab.agent-docs] key is under {prefix}")
         return result
     pages = sorted({p for key in keys for p in repo.under(key) if p.endswith(".md")})
+    if not pages:
+        result.notes.append(f"not checked: no markdown file is under {', '.join(keys)}")
+        return result
     for page in pages:
         text = repo.read(page)
         if text is not None and not _excluded_from_search(text):
@@ -906,6 +1134,22 @@ def rule_vale_length_sections(repo: Repo) -> Result:
     # adding a third cap needs no edit here.
     caps = sorted({v for v in repo.agent_docs.values() if isinstance(v, str)})
     for key, declared in sorted(repo.agent_docs.items()):
+        first_glob = next((i for i, ch in enumerate(key) if ch in GLOB_CHARS), None)
+        if first_glob is not None:
+            # A glob in an earlier segment would widen the prefix past the directories it named.
+            in_last_segment = "/" not in key[first_glob:].rstrip("/")
+            plain = key[: key.rfind("/", 0, first_glob) + 1] if in_last_segment else ""
+            result.problems.append(
+                _problem(
+                    f"`{key}` is a glob, and agent-docs keys are plain path prefixes",
+                    "rule 2 matches keys as prefixes, so a glob matches no file and its pages "
+                    "are checked by nothing, while its .vale.ini section still looks paired",
+                    f"use `{plain}`, or one key per directory it was meant to cover"
+                    if plain
+                    else "use one plain key per directory it was meant to cover",
+                )
+            )
+            continue
         matched = [(header, settings) for header, settings in sections if key in header]
         if len(matched) != 1:
             result.problems.append(
@@ -945,23 +1189,44 @@ def rule_vale_length_sections(repo: Repo) -> Result:
     return result
 
 
-def rule_glossary_entry_length(repo: Repo) -> Result:
-    """4. No glossary entry in `CONTEXT.md` runs past 200 words."""
+def rule_glossary_format(repo: Repo) -> Result:
+    """4. The glossary is `GLOSSARY.md`, and no entry in it runs past 200 words."""
     cap = 200
     result = Result()
-    text = repo.read("CONTEXT.md")
+    if repo.exists(GLOSSARY_MAP):
+        result.notes.append(
+            f"not checked: {GLOSSARY_MAP} is here, so the glossary is split by context into "
+            "files this rule does not read"
+        )
+        return result
+    for before, after in GLOSSARY_RENAMES:
+        if repo.exists(before) and not repo.exists(after):
+            result.problems.append(
+                _problem(
+                    f"{before} is still here, and {after} is not",
+                    f"the upstream skills read and write {after} and nothing else, so they find "
+                    "no glossary here and start a second one beside this",
+                    f"`git mv {before} {after}`, with the entries unchanged",
+                )
+            )
+    text = repo.read(GLOSSARY)
     if text is None:
-        result.notes.append("not checked: no CONTEXT.md")
+        if not result.problems:
+            result.notes.append(f"not checked: no {GLOSSARY}")
         return result
     entries = _glossary_entries(text)
     if not entries:
-        result.notes.append("not checked: CONTEXT.md has no entries under `## Glossary`")
+        if not result.problems:
+            result.notes.append(
+                f"not checked: {GLOSSARY} has no entries, neither a `###` heading under "
+                "`## Glossary` nor a `**Term**:` line under a `##` section"
+            )
         return result
     for title, words in entries:
         if words > cap:
             result.problems.append(
                 _problem(
-                    f"CONTEXT.md glossary entry `{title}` is {words} words, over {cap}",
+                    f"{GLOSSARY} glossary entry `{title}` is {words} words, over {cap}",
                     "the glossary says what a word MEANS in this repo. An entry that long is an "
                     "explanation, and it belongs in a document the glossary can point at",
                     "cut it to a definition and move the rest to docs/, or to an ADR if it is a "
@@ -992,8 +1257,21 @@ def rule_skill_file_location(repo: Repo) -> Result:
     return result
 
 
-def rule_skill_name_prefix(repo: Repo) -> Result:
-    """6. No repo-local skill directory begins with `lab-`."""
+def _shipped_skills(home: Path) -> frozenset[str] | None:
+    """Every skill name the installed `lab` plugin ships, casefolded, or ``None`` if none is found.
+
+    Read from the marketplace clone, where each directory holding a `SKILL.md` is one skill. An
+    empty or absent directory is ``None`` and never an empty set: an empty set would let every
+    name through, which is the pass this rule must not give when it knows nothing.
+    """
+    found = frozenset(
+        skill.parent.name.casefold() for skill in (home / PLUGIN_SKILLS).glob("*/SKILL.md")
+    )
+    return found or None
+
+
+def rule_skill_name_clash(repo: Repo) -> Result:
+    """6. No repo-local skill takes a name the `lab` plugin ships."""
     result = Result()
     names: dict[str, str] = {}
     for rel in repo.tracked:
@@ -1002,19 +1280,33 @@ def rule_skill_name_prefix(repo: Repo) -> Result:
             if match:
                 names.setdefault(match["name"], rel)
                 break
+    try:
+        shipped = _shipped_skills(Path.home())
+    except RuntimeError:  # no HOME and no password entry: nowhere to look
+        shipped = None
     for name, rel in sorted(names.items()):
-        if name.startswith("lab-"):
+        if name.casefold().startswith(LAB_PREFIX) or name.casefold() in (shipped or ()):
             result.problems.append(
                 _problem(
                     f"{rel} is a repo-local skill named `{name}`",
-                    "the lab's shared plugin owns the `lab-` prefix, and a repo-local skill of "
-                    "the same name shadows it for everyone working in this repo — silently, "
-                    "since both are discovered the same way",
-                    "rename it to something without the `lab-` prefix, then run "
+                    f"the `lab` plugin ships this name or owns it, as it owns every `{LAB_PREFIX}` "
+                    "name. A repo-local skill of the same name replaces the plugin's for "
+                    "everyone working here — silently, and in Kimi Code even when only the case "
+                    "differs",
+                    "rename it to a name the plugin does not ship, then run "
                     "`python skills/install.py --target all`",
                 )
             )
-    result.notes.append(f"{len(names)} skill director(ies) named across the discovery paths")
+    if shipped is None:
+        result.notes.append(
+            f"not checked: no `lab` plugin skills under ~/{PLUGIN_SKILLS}, so the "
+            f"{len(names)} skill name(s) here were held to the `{LAB_PREFIX}` prefix alone"
+        )
+    else:
+        result.notes.append(
+            f"{len(names)} skill director(ies) named across the discovery paths, against the "
+            f"{len(shipped)} name(s) the `lab` plugin ships"
+        )
     return result
 
 
@@ -1088,27 +1380,69 @@ def rule_repo_shape(repo: Repo) -> Result:
     return result
 
 
-def _tag_push_events(workflow: Workflow) -> list[str]:
-    """List the triggers in one workflow that pushing a tag can fire, spelled as they are written.
+def _matches(patterns: Any, ref: str) -> bool | None:
+    """Whether a GitHub ref filter matches one ref, or ``None`` where it cannot be read.
 
-    Three of them, and only the first is the one people think of:
+    The filter syntax is `fnmatch` plus a leading `!` that excludes, and the LAST pattern to
+    match decides. That is the whole of the semantics and the whole of this function.
 
-    - `push:` with a `tags:` or `tags-ignore:` filter — the trigger written on purpose.
-    - `push:` naming no branch filter at all. An absent filter is not "no refs", it is EVERY
-      ref, so a bare `push:` fires on a tag exactly as it fires on a branch. `paths:` narrows
-      which files, never which refs.
+    The two places the dialects differ cannot change this answer for `FIRST_TAG`. GitHub's `*`
+    stops at a `/` where `fnmatch`'s does not, and `v0.0.0` has no `/`. GitHub's `+` is a
+    quantifier that `fnmatch` reads as a literal `+`, which can only turn a match into a miss —
+    and a miss is the answer that lets a workflow through, never the one that fails a correct
+    one.
+
+    ``None`` is what a caller cannot clear a workflow on: a filter written as something other
+    than strings is one this cannot read, and every caller reads that as the hazard.
+    """
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    if not isinstance(patterns, list) or not patterns:
+        return None
+    matched = False
+    for pattern in patterns:  # pyright: ignore[reportUnknownVariableType]
+        if not isinstance(pattern, str):
+            return None
+        if fnmatch.fnmatchcase(ref, pattern.removeprefix("!")):
+            matched = not pattern.startswith("!")
+    return matched
+
+
+def _first_tag_events(workflow: Workflow) -> list[str]:
+    """List the triggers in one workflow that pushing `FIRST_TAG` fires, spelled as written.
+
+    Two of them are the same mistake — an absent filter is not "no refs", it is EVERY ref — and
+    they have no legitimate form, so they are listed whenever they appear:
+
+    - `push:` naming no branch filter at all, which fires on a tag exactly as on a branch.
+      `paths:` narrows which files, never which refs.
     - `create`, which fires on a branch or a tag coming into existence, and a pushed tag is a
       tag coming into existence.
 
-    A `push:` that names `branches:` or `branches-ignore:` is a branch trigger and is absent
-    from this list: naming any branch filter is what stops tags reaching the workflow.
+    A `tags:` or `tags-ignore:` filter is the other shape, and it is a DECISION rather than an
+    accident: someone wrote down which tags reach this workflow. So it is READ, not refused, and
+    listed only where it lets `FIRST_TAG` through. Under CalVer `vYYYY.M.PATCH` a filter like
+    `tags: ['v20*']` cannot match `v0.0.0`, and such a workflow is not listed here.
+
+    A `push:` that names `branches:` or `branches-ignore:` and no tag filter is a branch trigger
+    and is absent from this list: naming any branch filter is what stops tags reaching it.
     """
     fired: list[str] = []
     if "push" in workflow.triggers:
         config = workflow.triggers["push"]
         config = config if isinstance(config, dict) else {}
-        if "tags" in config or "tags-ignore" in config:
-            fired.append("`on: push:` names `tags:`")
+        if "tags" in config:
+            # Read even where `branches:` is also written: the two filters are a union, so a
+            # branch filter beside a tag filter narrows nothing about tags.
+            if _matches(config["tags"], FIRST_TAG) is not False:
+                fired.append(f"`on: push:` has a `tags:` filter that admits `{FIRST_TAG}`")
+        elif "tags-ignore" in config:
+            # The same call inverted. `tags-ignore:` fires on every tag its list does NOT match,
+            # so the hazard is gone only where the list provably matches `FIRST_TAG`.
+            if _matches(config["tags-ignore"], FIRST_TAG) is not True:
+                fired.append(
+                    f"`on: push:` has a `tags-ignore:` filter that does not exclude `{FIRST_TAG}`"
+                )
         elif not ("branches" in config or "branches-ignore" in config):
             fired.append("`on: push:` names no branch filter, so it fires on every ref, tags too")
     if "create" in workflow.triggers:
@@ -1117,23 +1451,34 @@ def _tag_push_events(workflow: Workflow) -> list[str]:
 
 
 def rule_release_trigger(repo: Repo) -> Result:
-    """9. Nothing a tag push fires can trigger the publishing workflow."""
+    """9. Nothing a `FIRST_TAG` push fires can trigger the publishing workflow.
+
+    KNOWN LIMIT, stated rather than closed: this reads one path, `RELEASE_WORKFLOW`, so the same
+    trigger in a workflow under any other name is outside the rule and `git mv` clears it. The
+    path is not a guess — a package index binds its trusted publisher to a workflow FILENAME, so
+    renaming the file is a change to external configuration and not a way around a check — but a
+    repo that publishes under another name is a repo this rule says nothing about. Closing that
+    would mean reading every workflow's steps for whatever action publishes, which is a list
+    nobody can keep, on every repo made from here. The narrow rule is the honest one.
+    """
     result = Result()
     publishing = [w for w in repo.workflows if w.path == RELEASE_WORKFLOW]
     if not publishing:
         result.notes.append(
-            f"not checked: no {RELEASE_WORKFLOW}, so this repo publishes to no package index"
+            f"not checked: no {RELEASE_WORKFLOW}. This rule reads that one path — the filename a "
+            "package index binds a trusted publisher to — so a publishing workflow under any "
+            "other name is outside it"
         )
         return result
     for workflow in publishing:
-        for fired in _tag_push_events(workflow):
+        for fired in _first_tag_events(workflow):
             result.problems.append(
                 _problem(
                     f"{workflow.path} can be triggered by a tag push: {fired}",
-                    "publishing is the one act in this toolchain that cannot be undone — a "
-                    "version can be neither unpublished nor reused — and `init-repo` pushes a "
-                    "first tag on a repo's opening day, so this trigger publishes from a repo "
-                    "nobody has finished naming",
+                    f"`init-repo` pushes `{FIRST_TAG}` on a repo's opening day and a "
+                    "`git push --tags` pushes every tag at once, so this trigger runs the "
+                    "publishing workflow with nobody having decided to release anything. "
+                    "Publishing a GitHub Release is that decision, written down",
                     "trigger it on `release:` with `types: [published]`, which is a person "
                     "publishing a GitHub Release on purpose, and add `workflow_dispatch:` for "
                     "re-running one that failed",
@@ -1145,22 +1490,34 @@ def rule_release_trigger(repo: Repo) -> Result:
 
 
 def rule_single_toolchain(repo: Repo) -> Result:
-    """10. No second toolchain is configured: pixi and the manifest are the only ones."""
+    """10. No competing resolver has been run here: pixi and the manifest are the only ones.
+
+    A LOCKFILE or a resolver's table, and nothing wider. The rule was cut back to that category
+    after four of its eight markers were measured firing on correct work — a Colab notebook's
+    `requirements.txt`, a `binder/environment.yml`, a `setup.py` that builds a C extension and
+    declares no dependency, and a pre-commit hook that only invokes `pixi run`. Each of those is
+    a file someone reads or a build someone needs, and the rule's advice for all four was to
+    delete it.
+
+    It says nothing about a root `requirements.txt` any more, not even a warning. A researcher
+    whose notebook runs on Colab needs that file, cannot run pixi as the kernel, and would get
+    nothing from being told about it on every run.
+    """
     result = Result()
     # One why for every marker, because it is one failure: the class, not the tool.
     why = (
-        "two resolvers can disagree, and it fails silently rather than loudly: a version "
-        "declared here is one `pixi.lock` never sees, so an environment built from it and the "
-        "environment the gate runs in differ while both look correct. pyproject.toml is the "
-        "single source of truth for dependencies, environments and tasks"
+        "a second resolver is set up to build this repo's environment, and it resolves against "
+        "its own inputs: what it installs and what the gate runs in can differ while both look "
+        "correct, and nothing reports it. pyproject.toml is the single source of truth for "
+        "dependencies, environments and tasks, and pixi.lock is the only lock read here"
     )
     for marker in SECOND_TOOLCHAINS:
-        if marker.path:
+        if marker.name:
             for rel in repo.tracked:
-                if re.fullmatch(marker.path, rel):
+                if re.fullmatch(marker.name, PurePosixPath(rel).name):
                     result.problems.append(
                         _problem(
-                            f"{rel} declares dependencies for {marker.tool}, a second toolchain",
+                            f"{rel} belongs to {marker.tool}, a resolver other than pixi",
                             why,
                             f"delete {rel} and declare what it pinned in pyproject.toml — "
                             "`[tool.pixi.dependencies]` for a package, `[tool.pixi.tasks]` for a "
@@ -1177,11 +1534,11 @@ def rule_single_toolchain(repo: Repo) -> Result:
                 )
             )
     # This rule is never vacuous — the list is always there and so is the manifest — but a run
-    # still has to say WHICH second toolchains it knew to look for, or a green means nothing.
+    # still has to say WHICH resolvers it knew to look for, or a green means nothing.
     names = ", ".join(marker.tool for marker in SECOND_TOOLCHAINS)
     result.notes.append(
-        f"{len(SECOND_TOOLCHAINS)} second toolchain(s) looked for across "
-        f"{len(repo.tracked)} tracked path(s) and pyproject.toml: {names}"
+        f"{len(SECOND_TOOLCHAINS)} competing resolver(s) looked for anywhere in "
+        f"{len(repo.tracked)} tracked path(s) and in pyproject.toml: {names}"
     )
     return result
 
@@ -1286,7 +1643,22 @@ def rule_python_version_agreement(repo: Repo) -> Result:
 
 
 def rule_workflow_step_tasks(repo: Repo) -> Result:
-    """12. Every workflow step that runs anything invokes a task the manifest declares."""
+    """12. Every workflow step that runs anything invokes a task the manifest declares.
+
+    What this verifies is that the command a step runs is DECLARED — its text lives in the task
+    table, where a person can read it and a laptop can run it. It is not a guarantee that CI and
+    a laptop run the same thing, and it was once written down as one. The known limits, none of
+    them closed here:
+
+    - only the `run:` line is read. `env:` at any of three scopes, `working-directory:`, `shell:`
+      and `--manifest-path` all change what a step does without changing that line;
+    - a step that `uses:` a local composite action runs whatever that action's steps run, and
+      reading those means parsing `.github/actions/**`;
+    - a task may pass arguments after `--`. They are printed in the notes rather than forbidden.
+
+    Closing any of them means parsing foreign files in a check that ships to every lab repo, for
+    a guarantee no wording here can make true. Say the limits instead.
+    """
     result = Result()
     # `uses:` steps are not examined at all, and that is the rule and not an exemption: an action
     # is a dependency the workflow pulls in, not a step of this repo's own build, and there is no
@@ -1296,41 +1668,53 @@ def rule_workflow_step_tasks(repo: Repo) -> Result:
         result.notes.append("not checked: no tracked workflow has a step that runs a command")
         return result
     unresolved = 0
+    passing: list[str] = []
     for step in running:
         where = f"{step.workflow} job `{step.job}` step {step.index}"
         if step.name:
             where += f" ({step.name})"
-        task = _invoked_task(step.run or "")
-        if task is None:
+        invocation = _invoked_task(step.run or "")
+        if invocation is None:
             result.problems.append(
                 _problem(
                     f"{where} runs a command rather than `{PIXI_RUN} <task>`",
-                    "the step list lives in the task table so that CI and a laptop run the same "
-                    "steps by construction. A step that spells out a command runs something no "
+                    "the step list lives in the task table so that what CI runs is something a "
+                    "laptop can run too. A step that spells out a command runs something no "
                     "local `pixi run` does, and both stay green while they quietly stop being the "
                     "same claim — until someone notices the two lists disagree, months later",
-                    f"declare what it runs as a task in {TASK_TABLE}, arguments included, and "
-                    f"make the step `{PIXI_RUN} <that task>`",
+                    f"declare what it runs as a task in {TASK_TABLE} and make the step "
+                    f"`{PIXI_RUN} <that task>`. An argument only CI passes goes after "
+                    f"`{ARGUMENT_SEPARATOR}`",
                 )
             )
-        elif EXPRESSION in task:
+            continue
+        if invocation.arguments:
+            passing.append(f"{where} -> {shlex.join(invocation.arguments)}")
+        if EXPRESSION in invocation.task:
             unresolved += 1
-        elif task not in repo.tasks:
+        elif invocation.task not in repo.tasks:
             result.problems.append(
                 _problem(
-                    f"{where} invokes `{task}`, which this repo declares no task by",
+                    f"{where} invokes `{invocation.task}`, which this repo declares no task by",
                     "a step naming a task nobody declared cannot run at all, and the workflow "
                     "that finds out is often one that runs rarely — the publish, the scheduled "
                     "job — so the break surfaces on the day it costs the most. It reads as if it "
                     "were following the convention, which is what makes it worse than a command",
-                    f"declare `{task}` in pyproject.toml under {TASK_TABLE}, or point the step at "
-                    "a task that is declared",
+                    f"declare `{invocation.task}` in pyproject.toml under {TASK_TABLE}, or point "
+                    "the step at a task that is declared",
                 )
             )
     result.notes.append(
         f"{len(running)} step(s) that run a command, across {len(repo.workflows)} workflow(s), "
         f"against {len(repo.tasks)} declared task(s)"
     )
+    # Printed on every run that has one, green runs included. An argument a workflow passes and a
+    # laptop does not is a real difference between the two, and the rule no longer forbids it —
+    # so the one thing left to do about it is make it visible without opening the workflow.
+    if passing:
+        result.notes.append(
+            f"{len(passing)} step(s) pass arguments to their task: {'; '.join(passing)}"
+        )
     if unresolved:
         result.notes.append(
             f"{unresolved} step(s) name their task with a `" + EXPRESSION + "` expression, which "
@@ -1340,12 +1724,15 @@ def rule_workflow_step_tasks(repo: Repo) -> Result:
 
 
 def rule_nav_target_exists(repo: Repo) -> Result:
-    """13. Every `nav:` entry names a tracked page under that configuration's site source.
+    """13. Every `nav:` entry that names a page names a tracked one, under the site source.
 
-    TRACKED and not merely present, because CI builds from a checkout. The one shape that
-    legitimately fails is a repo GENERATING pages into the site source at build time, whose
-    entries name nothing this can see; `[tool.liulab.waived]` is the answer there, and it is
-    printed on every run so the choice stays visible.
+    TRACKED and not merely present, because CI builds from a checkout.
+
+    Two shapes are outside it rather than waived. An entry that names no page at all — a
+    directory, an `...` — is reported unresolved, because a rule that cannot tell what a menu
+    item points at cannot say the page is missing. And a configuration declaring a plugin that
+    WRITES pages during the build has no premise here at all: nothing it names is in a checkout,
+    so the rule reports itself vacuous rather than failing every generated entry.
     """
     result = Result()
     if not repo.site_configs:
@@ -1363,6 +1750,17 @@ def rule_nav_target_exists(repo: Repo) -> Result:
             result.notes.append(
                 f"not checked: {config.path} declares no `nav:`, so the site builds its navbar "
                 "from the directory tree and names no page for this rule to resolve"
+            )
+            continue
+        # A page-generating plugin is the shape that used to need a waiver. The pages it writes
+        # exist after the build and never in the checkout this reads, so the rule has no premise
+        # rather than a repo to fail — and saying so leaves the waiver table free for a decision
+        # somebody actually made.
+        if config.generators:
+            result.notes.append(
+                f"not checked: {config.path} declares {', '.join(config.generators)}, which "
+                "writes pages into the site source while the build runs, so a nav entry may name "
+                "a page no checkout carries"
             )
             continue
         prefix = f"{config.docs_dir}/" if config.docs_dir not in {"", "."} else ""
@@ -1405,11 +1803,82 @@ def rule_nav_target_exists(repo: Repo) -> Result:
         result.notes.append(
             f"{config.path}: {len(config.targets)} nav entry(s) against {prefix or 'the repo root'}"
         )
+        # Said out loud rather than passed over. These are the entries the rule declined to
+        # resolve, and a reader who expected one of them to be checked should find out here.
+        if config.unresolved:
+            result.notes.append(
+                f"{config.path}: {len(config.unresolved)} nav entry(s) name no page and were not "
+                f"resolved: {', '.join(config.unresolved)}"
+            )
+    return result
+
+
+def _timeout_overrides(strings: Iterable[str]) -> list[str]:
+    """Which of `PYTEST_TIMEOUT` and `--timeout` these strings set, as a problem's verb phrase."""
+    joined = "\n".join(strings)
+    found: list[str] = []
+    if _TIMEOUT_ENV_RE.search(joined):
+        found.append(f"sets `{TIMEOUT_ENV}`")
+    if _TIMEOUT_FLAG_RE.search(joined):
+        found.append(f"passes `{TIMEOUT_FLAG}`")
+    return found
+
+
+def rule_test_time_limits(repo: Repo) -> Result:
+    """14. The test time limits are set in `[tool.pytest.ini_options]` and nowhere else.
+
+    Three other places can set pytest-timeout's limit, and each beats the ini value: an
+    environment variable or a flag in a workflow, the same in pixi's tasks or activation, and a
+    mark on a test.
+
+    `--timeout` is read in a task only when the task runs pytest, because the flag belongs to
+    other tools too and a download that waits for a server is not a test time limit. A workflow
+    step can only invoke a task (rule 12), so a `--timeout` there is read as one whichever task it
+    goes to. `PYTEST_TIMEOUT` is read everywhere: it reaches pytest through any task that runs it.
+    """
+    result = Result()
+    why = (
+        "`timeout` and `suite_budget` live in [tool.pytest.ini_options] so that raising one is "
+        "a one-line diff a reviewer sees. A copy here overrides it without touching that line, "
+        "and limits raised one unreviewed place at a time are how a suite gets slow unnoticed"
+    )
+    fix = (
+        "delete it. Mark a test that needs longer `slow`; change a limit that is wrong for the "
+        "whole suite in [tool.pytest.ini_options]"
+    )
+    for workflow in repo.workflows:
+        for found in _timeout_overrides(workflow.strings):
+            result.problems.append(_problem(f"{workflow.path} {found}", why, fix))
+    pytest_tasks = 0
+    for name, definition in repo.task_definitions:
+        strings = tuple(_keys_and_strings(definition))
+        runs_pytest = any(_PYTEST_RE.search(string) for string in strings)
+        pytest_tasks += runs_pytest
+        for found in _timeout_overrides(strings):
+            if runs_pytest or TIMEOUT_ENV in found:
+                result.problems.append(_problem(f"pixi task `{name}` {found}", why, fix))
+    pixi = repo.manifest.get("tool", {}).get("pixi")
+    if any(_TIMEOUT_ENV_RE.search(string) for string in _outside_tasks(pixi)):
+        result.problems.append(
+            _problem(f"[tool.pixi] sets `{TIMEOUT_ENV}` outside a task", why, fix)
+        )
+    tests = [rel for rel in repo.tracked if _TEST_FILE_RE.search(rel)]
+    for rel in tests:
+        for number, line in enumerate((repo.read(rel) or "").splitlines(), start=1):
+            if _TIMEOUT_MARK_RE.search(line):
+                result.problems.append(_problem(f"{rel}:{number} sets `{TIMEOUT_MARK}`", why, fix))
+    if not (repo.workflows or pytest_tasks or tests):
+        result.notes.append("not checked: no workflow, no task that runs pytest, and no test file")
+        return result
+    result.notes.append(
+        f"{len(repo.workflows)} workflow(s), {pytest_tasks} pytest task(s) and {len(tests)} test "
+        "file(s) read"
+    )
     return result
 
 
 def warning_init_sentinel(repo: Repo) -> Result:
-    """14. `AGENTS.md` still carries the line telling you to run `/init`."""
+    """15. `AGENTS.md` still carries the line telling you to run `/init`."""
     result = Result()
     if repo.exists(INIT_SKILL):
         result.notes.append(f"not checked: {INIT_SKILL}/ is here, and that skill is the nag")
@@ -1472,9 +1941,12 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         4,
-        "glossary-entry-length",
-        "no glossary entry in CONTEXT.md exceeds 200 words",
-        rule_glossary_entry_length,
+        "glossary-format",
+        f"the glossary is {GLOSSARY}, never a CONTEXT.md left unrenamed, and no entry in it "
+        "exceeds 200 words, whether a `###` heading under `## Glossary` or a `**Term**:` line "
+        f"under any `##` section. Where a {GLOSSARY_MAP} splits it by context, it is reported "
+        "unchecked",
+        rule_glossary_format,
     ),
     Rule(
         5,
@@ -1484,9 +1956,11 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         6,
-        "skill-name-prefix",
-        "no repo-local skill directory begins with `lab-`, which the shared plugin owns",
-        rule_skill_name_prefix,
+        "skill-name-clash",
+        f"no repo-local skill takes a name the `lab` plugin ships: no `{LAB_PREFIX}` name, and no "
+        f"name in the plugin's marketplace clone under ~/{PLUGIN_SKILLS}. Where no clone is "
+        "found the prefix alone is held, and the rule says it did not check the rest",
+        rule_skill_name_clash,
     ),
     Rule(
         7,
@@ -1504,15 +1978,17 @@ RULES: tuple[Rule, ...] = (
     Rule(
         9,
         "release-trigger",
-        f"{RELEASE_WORKFLOW} is triggered by publishing a GitHub Release and by nothing a tag "
-        "push fires — not `push: tags:`, not a `push:` with no branch filter, not `create`",
+        f"{RELEASE_WORKFLOW} names no trigger a `{FIRST_TAG}` push fires — not a `push:` with no "
+        "branch filter, not `create`, and not a `tags:` filter that admits it. A tag filter that "
+        f"cannot match `{FIRST_TAG}` is read and allowed; this rule reads that one path only",
         rule_release_trigger,
     ),
     Rule(
         10,
         "single-toolchain",
-        "no second toolchain is configured — no pre-commit config, requirements file, conda "
-        "environment or foreign resolver's table declares a version the pixi lock never sees",
+        "no competing resolver is set up here — no poetry.lock, uv.lock, pdm.lock or Pipfile "
+        "anywhere in the tree, and no [tool.poetry], [tool.uv] or [tool.pdm] in pyproject.toml. "
+        "A generated artifact of another resolver, and nothing a person reads or writes",
         rule_single_toolchain,
     ),
     Rule(
@@ -1525,21 +2001,33 @@ RULES: tuple[Rule, ...] = (
     Rule(
         12,
         "workflow-step-tasks",
-        f"every workflow step that runs a command invokes a declared task — `{PIXI_RUN} <task>` "
-        f"and nothing else, with the task in {TASK_TABLE}, so the step list cannot drift from the "
-        "one a laptop runs. A step that `uses:` an action is not a step of this repo's build",
+        f"every workflow step that runs a command invokes a declared task — `{PIXI_RUN} <task>`, "
+        f"with the task in {TASK_TABLE}, so the command CI runs is one a laptop can run too. "
+        f"Arguments are allowed after `{ARGUMENT_SEPARATOR}` and printed in the notes; a shell "
+        "operator is not an argument. A step that `uses:` an action is not a step of this build",
         rule_workflow_step_tasks,
     ),
     Rule(
         13,
         "nav-target-exists",
-        "every `nav:` entry in every tracked site configuration names a tracked file under that "
-        "configuration's site source. This is the one broken site the generator does not validate "
-        "at all — it builds green, reports no issues, and publishes a menu item that 404s",
+        "every `nav:` entry that names a page — `.md`, `.ipynb`, `.html` — names a tracked one "
+        "under that configuration's site source. This is the one broken site the generator does "
+        "not validate at all: it builds green, reports no issues, and publishes a menu item that "
+        "404s. An entry naming no page, and a configuration whose plugins write pages during the "
+        "build, are reported unchecked rather than failed",
         rule_nav_target_exists,
     ),
     Rule(
         14,
+        "test-time-limits",
+        f"the test time limits are `timeout` and `suite_budget` in [tool.pytest.ini_options], and "
+        f"nowhere else: no `{TIMEOUT_ENV}` in a workflow or anywhere under [tool.pixi], no "
+        f"`{TIMEOUT_FLAG}` in a workflow or in a pixi task that runs pytest, and no "
+        f"`{TIMEOUT_MARK}` in a test",
+        rule_test_time_limits,
+    ),
+    Rule(
+        15,
         "init-sentinel",
         "AGENTS.md is still the template's generic copy",
         warning_init_sentinel,
@@ -1547,9 +2035,9 @@ RULES: tuple[Rule, ...] = (
     ),
 )
 
-#: Warning 15 is not a rule with a tree to inspect: it is the waiver table itself, printed on
+#: Warning 16 is not a rule with a tree to inspect: it is the waiver table itself, printed on
 #: every run. It lives in `report` because only the reporter knows what each waiver suppressed.
-WAIVER_RULE = (15, "waivers")
+WAIVER_RULE = (16, "waivers")
 
 
 def load(root: Path) -> Repo:
@@ -1611,7 +2099,7 @@ def _verdict(repo: Repo, rule: Rule, result: Result) -> tuple[str, list[str]]:
 
 
 def _waiver_lines(repo: Repo, results: list[tuple[Rule, Result]]) -> list[str]:
-    """Warning 15: every waiver, with what it actually suppressed.
+    """Warning 16: every waiver, with what it actually suppressed.
 
     A waiver naming no rule is called out rather than ignored, and so is one naming rule 1, which
     refuses to be waived. A waiver that quietly does nothing is the same invisible escape hatch

@@ -179,6 +179,35 @@ class TestWhatIsAccepted:
         with pytest.raises(ValueError, match="only 10 targets"):
             targets.compare(targets["MA0139.2"], top=11)
 
+    def test_the_engine_is_handed_one_memory_layout_whatever_the_motifs_were_built_from(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The one test here that stands tomtom in, because its claim is about what goes in,
+        # not what comes back: numba compiles the engine once per memory layout it is
+        # handed, so a second layout costs a second compile of seconds, inside whichever
+        # caller met it first.
+        import memelite
+
+        handed: list[np.ndarray] = []
+
+        def recording(
+            queries: list[np.ndarray], targets_: list[np.ndarray], n_nearest: int | None = None
+        ) -> tuple[np.ndarray, ...]:
+            handed.extend([*queries, *targets_])
+            shape = (len(queries), len(targets_))
+            return (np.full(shape, 0.5), *(np.zeros(shape) for _ in range(4)))
+
+        monkeypatch.setattr(memelite, "tomtom", recording)
+        columns = np.hstack([np.eye(4) * 20 + 1] * 2)
+        c_ordered = Motif("c_ordered", "", columns)
+        fortran = Motif("fortran", "", np.asfortranarray(columns))
+        assert not fortran.probabilities.flags.c_contiguous, "the premise: two layouts go in"
+
+        MotifSet([c_ordered, fortran]).compare([fortran, c_ordered])
+
+        assert len(handed) == 4
+        assert all(matrix.flags.c_contiguous for matrix in handed)
+
 
 # ---------------------------------------------------------------------------
 # The anchor: a motif compared against itself

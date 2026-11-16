@@ -11,7 +11,7 @@ The package is a scaffold today and its modules land one at a time. The words ar
 that every issue, test name, error message and docstring on the way uses one set.
 
 Words every context shares — **Genome**, **Region**, **Strand**, **0-based half-open**,
-**Soft-masking**, **Data dir** and the rest — are defined once in the repo-root `CONTEXT-MAP.md`,
+**Soft-masking**, **Data dir** and the rest — are defined once in the repo-root `GLOSSARY-MAP.md`,
 **Prepared set** among them: what a downloaded **Release** on disk *is*, and how one is prepared,
 is that entry's and is not restated here.
 

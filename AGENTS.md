@@ -1,7 +1,7 @@
 # AGENTS.md
 
 The router — `CLAUDE.md` is a symlink to this file: one canonical copy, no fork. Read it in full;
-everything else is looked up. Terms are defined once in [`CONTEXT-MAP.md`](CONTEXT-MAP.md) — a
+everything else is looked up. Terms are defined once in [`GLOSSARY-MAP.md`](GLOSSARY-MAP.md) — a
 shared kernel of the words every context uses, plus one glossary per bounded context under
 [`docs/context/`](docs/context/) — and decisions once in [`docs/adr/`](docs/adr/). This file points
 at both and restates neither.
@@ -33,7 +33,7 @@ moves between directories and its number does not; `—` means no record cites t
 
 ## Where to read next
 
-- **A term, or a synonym to avoid** — [`CONTEXT-MAP.md`](CONTEXT-MAP.md) and the eight per-context
+- **A term, or a synonym to avoid** — [`GLOSSARY-MAP.md`](GLOSSARY-MAP.md) and the eight per-context
   glossaries it lists under [`docs/context/`](docs/context/).
 - **A decision — why it is this way, and what lost** — [`docs/adr/`](docs/adr/).
 - **A measurement — a number, and the method that produced it** — [`docs/research/`](docs/research/),
@@ -50,8 +50,9 @@ mechanises it.**
 - **Python is 3.13, declared in exactly two places** — `requires-python` and the pixi pin. Ruff's
   target version and pyright's are derived from those, never declared: declaring either again is
   how the language level and the runtime drift apart.
-- **Tests.** `pixi run check` is the gate — lint, fmt-check, typecheck, test, run concurrently.
-  Write the test from the spec first, then implement until green. pytest, and hypothesis for parsers,
+- **Tests.** `pixi run check` is the gate — the static steps concurrently, the docs build among
+  them, then the tests. CI runs it on pull requests only, and tests the merge commit. Write the
+  test from the spec first, then implement until green. pytest, and hypothesis for parsers,
   coordinate conversions and sequence transforms: assert invariants over generated inputs —
   `reverse_complement` is an involution, length is preserved, round-trips are identity. Tests mirror
   `src/`. Fixtures are small real files under `tests/data/`, subsampled; never a large genomic file.
@@ -62,6 +63,10 @@ mechanises it.**
   different: those live in optional features, so gate it with `_needs` in
   `tests/aligner/test_aligner.py`, which applies the marker and the skip under one name. Never the skip alone — that test would sit in
   the unit lane and skip itself green, which is what the split exists to end.
+- **Test time has two limits**, set in `[tool.pytest.ini_options]` and nowhere else. `timeout`
+  caps one test, setup and teardown included; `suite_budget` caps a run with no slow test in
+  it, and prints its time against it. A test marked `slow` is held to neither, and runs only
+  in `pixi run test-slow`.
 - **Docstrings: NumPy structure is mechanised** — ruff selects `D` with the numpy convention — so the
   bar is what ruff cannot check. At least one runnable example on a public object, and *runnable* is
   mechanised too: the unit lane runs every example, so one that drifts from the code fails the build.
@@ -107,6 +112,6 @@ The five canonical roles, each label string equal to its name. See
 
 ### Domain docs
 
-Multi-context, and not in the shape the default assumes: `CONTEXT-MAP.md` and eight glossaries
+Multi-context, and not in the shape the default assumes: `GLOSSARY-MAP.md` and eight glossaries
 under `docs/context/`, against one `docs/adr/`. There is no `CONTEXT.md` and its absence is not
 a gap. See [`docs/agents/domain.md`](docs/agents/domain.md).

@@ -87,16 +87,12 @@ pytest = "*"
 pytest-cov = "*"
 pytest-xdist = "*"
 hypothesis = "*"
+pytest-timeout = "*"
 # The suite tests `scripts/mkdocs_record_citations.py`, which is a griffe extension, so the
 # lane that runs the suite needs griffe. It arrives with the docs feature too; naming it
 # here is what keeps those tests in the unit lane rather than skipping themselves green in
 # it, which is the one thing the two-lane split exists to prevent.
 griffe = "*"
-# Same reason as griffe above, one file along: the suite tests `scripts/conformance.py`, which
-# parses mkdocs.yml and every workflow with PyYAML. It arrives with the dev feature too, so the
-# `conformance` task has always had it — but the unit lane runs in `test`, where without this
-# line every conformance test errors on the import instead of running.
-pyyaml = "*"
 
 [tool.pixi.feature.dev.dependencies]
 ruff = "*"
@@ -137,7 +133,6 @@ chromap = "*"
 [tool.pixi.environments]
 default  = { features = ["py313", "dev", "test", "docs"], solve-group = "default" }
 aligners = { features = ["py313", "dev", "test", "docs", "star", "chromap"], solve-group = "default" }
-test     = { features = ["py313", "test"], solve-group = "default" }
 docs     = { features = ["py313", "docs"], solve-group = "default" }
 
 [tool.pixi.tasks]
@@ -146,7 +141,7 @@ fmt       = "ruff format ."
 fmt-check = "ruff format --check ."
 typecheck = "pyright"
 
-# Two lanes, and together they are the suite — see AGENTS.md for why they must stay one.
+# Two lanes, and with `test-slow` they are the suite — see AGENTS.md for why they must stay one.
 # The cap: `auto` alone oversubscribes, a bare number is wrong on a small runner. Ten is the
 # floor of the curve on a 14-core box; on a 4-core CI runner `auto` finds four and the cap
 # does not bind. `loadgroup` rather than `load` because a handful of tests spawn their own
@@ -154,22 +149,23 @@ typecheck = "pyright"
 # wall went bimodal — 13.5 s or 16.1 s on the same commit, decided by scheduling alone.
 # Grouping pins each such module to one worker, which is faster on BOTH box sizes (4 workers:
 # 9.4 s against 12.3 s). docs/research/test-suite-cost-and-parallelism-2026-08-30.md
-# `--durations=10` lives in the task and not on the CI step because conformance's
-# workflow-step rule allows nothing after a task name. That rule misfires here — `--durations`
-# changes what is REPORTED and can never change a pass or fail — but it was upheld upstream on
-# the reasoning that loosening it would admit `-k`, which is the drift it exists to catch, and
-# nothing mechanical tells the two apart. The cost is a durations table on every local run.
-test        = { cmd = "pytest -m 'not aligner' -n auto --maxprocesses 10 --dist=loadgroup --durations=10", depends-on = ["require-tools"] }
+# `--durations=10` prints the slowest tests on every run: one indivisible test is the floor
+# no worker count goes below.
+# `numba-warm` first, so memelite's compile happens once, before the workers, and never
+# inside a test under the time limit; the script says why CI is always cold.
+test        = { cmd = "pytest -m 'not aligner and not slow' -n auto --maxprocesses 10 --dist=loadgroup --durations=10", depends-on = ["require-tools", "numba-warm"] }
 # Serial: eight tests. `depends-on` because pixi runs it first, proving the binaries answer.
 test-aligner = { cmd = "pytest -m aligner --durations=10", depends-on = ["require-aligners"] }
 require-aligners = "bash scripts/require_aligners.sh"
 require-tools    = "bash scripts/require_tools.sh"
-test-cov    = "pytest --cov=genome --cov-report=term-missing"
+test-cov    = { cmd = "pytest --cov=genome --cov-report=term-missing", depends-on = ["numba-warm"] }
 # Serial: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
-test-failed = "pytest --lf --new-first -x -q"
+test-failed = { cmd = "pytest --lf --new-first -x -q", depends-on = ["numba-warm"] }
+numba-warm  = "python scripts/warm_numba_cache.py"
+test-slow   = "pytest -m slow"
 # The test lane's cache diagnostic, run in CI before anything reads the restored cache. A task
 # and not a command line in `ci.yml`, so what CI runs is what a laptop runs when the numbers in
-# a run stop making sense. Run it in the environment the lane uses — `pixi run -e test
+# a run stop making sense. Run it in the environment the lane uses — `pixi run
 # numba-cache-key` — or it describes a process that is not the one compiling; the script says why.
 numba-cache-key = "python scripts/show_numba_cache_key.py"
 
@@ -179,12 +175,10 @@ numba-cache-key = "python scripts/show_numba_cache_key.py"
 # only the first failure, because GitHub stops a job there.
 check-static = "bash scripts/check.sh lint fmt-check typecheck vale markdownlint conformance docs-build"
 
-# The whole gate: the static steps plus the tests, so a green gate here and a green CI mean
-# the same set of checks passed. The static list is written out a SECOND time on purpose —
-# `depends-on = ["check-static"]` is how pixi runs things sequentially, which is exactly the
-# concurrency this runner was measured to buy. The one `depends-on` is the guard: a
-# precondition answers before the gate spends anything.
-check = { cmd = "bash scripts/check.sh lint fmt-check typecheck vale markdownlint conformance docs-build test", depends-on = ["require-tools"] }
+# `test` runs whatever `check-static` returned; `depends-on` would skip it. After it, not beside
+# it, so pytest's time limits and vale's walk of `tests/` never share the machine. pixi's task
+# shell has `$?` but no arithmetic.
+check = "pixi run check-static; static=$?; pixi run test && exit $static"
 
 # Steps of both gates above, and runnable alone when one of them is what you are fixing.
 #
@@ -243,7 +237,7 @@ extend-immutable-calls = ["typer.Argument", "typer.Option"]
 # ============================== pyright ==============================
 
 [tool.pyright]
-# `conftest.py` at the root is three lines of plugin wiring, and it is named explicitly
+# `conftest.py` at the root is the suite's plugin wiring and time limits, named explicitly
 # because naming a directory does not reach a file beside it.
 include = ["src", "tests", "conftest.py"]
 # `scripts/` is build tooling, not the wheel, so it is resolved but not checked — the same
@@ -284,7 +278,16 @@ testpaths = ["tests", "src/genome"]
 # `--doctest-modules` cannot be aimed at one testpath, so it also collects the handful of
 # examples in the suite's own shared helpers. They pass, and an example there is worth the
 # same as one in `src/` — but `src/` is what it is here for.
-addopts = ["-ra", "--strict-markers", "--strict-config", "-p", "no:anyio", "--doctest-modules"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "-p",
+    "no:anyio",
+    "--doctest-modules",
+    "-m",
+    "not slow",
+]
 # Set at config level rather than per example: only a handful of the package's examples
 # carry an inline `+ELLIPSIS` today, so this is the shape they are already written in.
 doctest_optionflags = ["ELLIPSIS"]
@@ -294,6 +297,11 @@ doctest_optionflags = ["ELLIPSIS"]
 pythonpath = ["scripts"]
 xfail_strict = true
 filterwarnings = ["error"]
+# The two time limits, here and nowhere else: conformance fails a copy in a workflow, a task or
+# a test. `conftest.py` reads `suite_budget`; pytest-timeout reads `timeout`, which covers a
+# test's setup, call and teardown. A test marked `slow` is held to neither.
+timeout = 2
+suite_budget = 45
 markers = [
     "aligner: needs STAR or chromap — a binary this package does not ship with itself",
 ]
@@ -321,7 +329,7 @@ exclude_also = [
 # Each key is spelled verbatim inside exactly one `.vale.ini` section header, which is how
 # conformance pairs the two.
 #
-# `CONTEXT-MAP.md` and `docs/context/` take `false` because a glossary here is capped per
+# `GLOSSARY-MAP.md` and `docs/context/` take `false` because a glossary here is capped per
 # ENTRY, not per file: how long the file runs reports how many terms the domain has, which is
 # not a writing-quality signal (ADR-0024). The guard that measures an entry is local.
 [tool.liulab.agent-docs]
@@ -329,7 +337,7 @@ exclude_also = [
 "docs/agents/" = "LengthDoc"
 "docs/adr/" = "LengthAdr"
 "docs/research/" = false
-"CONTEXT-MAP.md" = false
+"GLOSSARY-MAP.md" = false
 "docs/context/" = false
 
 # Keyed by rule name, value the reason. Per-rule, never per-file; no expiry; printed on every
