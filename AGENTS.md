@@ -64,9 +64,9 @@ mechanises it.**
   `tests/aligner/test_aligner.py`, which applies the marker and the skip under one name. Never the skip alone — that test would sit in
   the unit lane and skip itself green, which is what the split exists to end.
 - **Test time has two limits**, set in `[tool.pytest.ini_options]` and nowhere else. `timeout`
-  caps one test, setup and teardown included; `suite_budget` caps the whole run, and every run
-  prints its time against it. A test marked `slow` is held to neither, and runs only in
-  `pixi run test-slow`.
+  caps one test, setup and teardown included; `suite_budget` caps a run with no slow test in
+  it, and prints its time against it. A test marked `slow` is held to neither, and runs only
+  in `pixi run test-slow`.
 - **Docstrings: NumPy structure is mechanised** — ruff selects `D` with the numpy convention — so the
   bar is what ruff cannot check. At least one runnable example on a public object, and *runnable* is
   mechanised too: the unit lane runs every example, so one that drifts from the code fails the build.
