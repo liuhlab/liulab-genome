@@ -151,14 +151,17 @@ typecheck = "pyright"
 # 9.4 s against 12.3 s). docs/research/test-suite-cost-and-parallelism-2026-08-30.md
 # `--durations=10` prints the slowest tests on every run: one indivisible test is the floor
 # no worker count goes below.
-test        = { cmd = "pytest -m 'not aligner and not slow' -n auto --maxprocesses 10 --dist=loadgroup --durations=10", depends-on = ["require-tools"] }
+# `numba-warm` first, so memelite's compile happens once, before the workers, and never
+# inside a test under the time limit; the script says why CI is always cold.
+test        = { cmd = "pytest -m 'not aligner and not slow' -n auto --maxprocesses 10 --dist=loadgroup --durations=10", depends-on = ["require-tools", "numba-warm"] }
 # Serial: eight tests. `depends-on` because pixi runs it first, proving the binaries answer.
 test-aligner = { cmd = "pytest -m aligner --durations=10", depends-on = ["require-aligners"] }
 require-aligners = "bash scripts/require_aligners.sh"
 require-tools    = "bash scripts/require_tools.sh"
-test-cov    = "pytest --cov=genome --cov-report=term-missing"
+test-cov    = { cmd = "pytest --cov=genome --cov-report=term-missing", depends-on = ["numba-warm"] }
 # Serial: `-x` is unreliable under xdist, and 8 workers to re-run two tests loses.
-test-failed = "pytest --lf --new-first -x -q"
+test-failed = { cmd = "pytest --lf --new-first -x -q", depends-on = ["numba-warm"] }
+numba-warm  = "python scripts/warm_numba_cache.py"
 test-slow   = "pytest -m slow"
 # The test lane's cache diagnostic, run in CI before anything reads the restored cache. A task
 # and not a command line in `ci.yml`, so what CI runs is what a laptop runs when the numbers in

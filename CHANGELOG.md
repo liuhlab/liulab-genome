@@ -731,9 +731,10 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 ### Changed
 
 - **Tests now have time limits, and CI runs as one job on ready pull requests.** Each test may
-  take at most 2 seconds and the whole run at most 45; every run prints its time against that
-  budget. A test marked `slow` is exempt from both, is skipped by `pixi run test`, and runs with
-  `pixi run test-slow`. `pixi run check` now runs the tests after the static checks rather than
+  take at most 2 seconds and the whole run at most 45; a run with no slow test in it prints its
+  time against that budget. A test marked `slow` is exempt from both, is skipped by `pixi run
+  test`, and runs with `pixi run test-slow`. `pixi run test` first compiles memelite's
+  comparison engine (`pixi run numba-warm`), so no test pays that compile under its time limit. `pixi run check` now runs the tests after the static checks rather than
   beside them, and still reports every failure. CI is one job instead of four, runs on pull
   requests only (not on pushes to `main`), and skips draft pull requests. The `test` pixi
   environment is gone: the tests run in `default`. The conformance checker is updated to the
@@ -1099,6 +1100,12 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
   and their build dependencies. The entry point is `pixi run check`, unchanged.
 
 ### Fixed
+
+- **Comparing motifs compiles tomtom once, not once per memory layout.** A motif parsed from a
+  file holds its matrix in Fortran order and one built by hand holds it in C order. memelite's
+  engine is compiled by numba for each layout it is handed, so each new mix of the two cost a
+  compile of 7 to 25 seconds on first use. `MotifSet.compare` now hands it C-ordered matrices,
+  so one compile serves every comparison.
 
 - **A prepared set whose reader stores a form that is not text now finishes, and a step that
   fails no longer wedges the directory it was building.** The digest a marker records was taken

@@ -302,3 +302,21 @@ marker was declined.
 - **A per-test wall-clock budget asserted in the suite.** The same unchanged test measured 8.4 s
   alone and 12.8 s under contention here, so the assertion would be keyed on hardware and load
   rather than on the test.
+
+## Addendum, 2026-11-16: the memory layout, and the stamp
+
+Measured in a four-CPU Linux container on numba 0.67.0 and memelite 0.4.0, and read from two
+CI logs. The suite now has a 2 s limit per test, which a compile inside a test cannot meet.
+
+- **Why one warm-up call reached fewer signatures than the suite.** tomtom concatenates the
+  matrices it is given, and numba specialises on the memory layout of the result. A motif
+  parsed from transfac holds a Fortran-ordered matrix and a hand-built one a C-ordered matrix,
+  so a suite that compares both kinds compiled `_tomtom` once per layout. With the matrices
+  made C-ordered where `compare` calls tomtom, one warm-up call (24.6 s cold in the container)
+  left nothing to compile: the 55 compare tests and examples that followed wrote no new cache
+  file, and the slowest took 0.86 s.
+- **The stamp candidate above is real.** Two CI runs on one lock file, both installing the
+  environment fresh, stamped memelite's `tomtom.py` at `1789330344.87` and `1789330462.73`.
+  A fresh install moves every stamp, and a moved stamp discards the whole index. CI now runs
+  on pull requests only, and a pull request's caches are scoped to it, so the first run of
+  every pull request installs fresh and compiles cold, whatever the cache step restores.

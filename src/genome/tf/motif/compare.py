@@ -430,9 +430,13 @@ def _compare(
 
     query_ids = list(query_set.motif_ids)
     target_ids = list(targets.motif_ids)
+    # C order, whatever order the motif was built in. tomtom concatenates the matrices it is
+    # given and numba compiles its engine once per memory layout it is handed: a parsed motif
+    # is Fortran-ordered and a hand-built one C-ordered, so without this each mix of the two
+    # cost a compile of its own, seconds each, where one now serves every call.
     returned = tomtom(
-        [motif.probabilities for motif in query_set],
-        [motif.probabilities for motif in targets],
+        [np.ascontiguousarray(motif.probabilities) for motif in query_set],
+        [np.ascontiguousarray(motif.probabilities) for motif in targets],
         n_nearest=top,
     )
     p_values, score, offset, overlap, strand = returned[:5]

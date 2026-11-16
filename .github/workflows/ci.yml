@@ -106,6 +106,13 @@ jobs:
       # `run_attempt` as well as `run_id`, because a run id is SHARED by every attempt of a
       # run: with the id alone a re-run restores its own first attempt's cache and then
       # cannot save, so a re-run could never converge.
+      #
+      # It warms only a later run of the SAME pull request. The first run of every pull
+      # request is cold: a pull request's caches are scoped to it, nothing runs on `main` to
+      # save one every pull request could read, and a fresh `pixi install` gives memelite's
+      # files new modification times, which numba reads as changed source and discards the
+      # whole cache for. So `pixi run test` compiles first (scripts/warm_numba_cache.py), in
+      # one process, and no test ever pays the compile under its time limit.
       - name: numba JIT cache
         uses: actions/cache@v4
         with:
