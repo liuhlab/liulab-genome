@@ -730,13 +730,12 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Changed
 
-- **`import genome` no longer loads pandas or pyarrow, and takes about a third of the time.**
-  Importing any `genome` module used to load both, because importing a submodule runs
-  `genome/__init__` first. Now each loads on the first call that needs it: reading
-  `chrom.sizes`, building a `Genome`, a table's `frame`, a motif scan, or reading or writing
-  a Parquet hit table. Measured on a Mac with Python 3.13, the import fell from about 0.98 s
-  to about 0.36 s. Every return type, type hint and public name stays the same, and so does
-  the Parquet hit schema, so files written before this change read the same after it.
+- **`import genome` no longer loads pandas or pyarrow, so it is much faster.** Importing any
+  `genome` module used to load both, because importing a submodule runs `genome/__init__`
+  first. Now each loads on the first call that needs it: reading `chrom.sizes`, building a
+  `Genome`, a table's `frame`, a motif scan, or reading or writing a Parquet hit table.
+  Every return type, type hint and public name stays the same, and so does the Parquet hit
+  schema, so files written before this change read the same after it.
 
 - **Tests now have time limits, and CI runs as one job on ready pull requests.** Each test may
   take at most 2 seconds and the whole run at most 45; a run with no slow test in it prints its

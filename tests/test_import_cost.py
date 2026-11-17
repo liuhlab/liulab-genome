@@ -1,7 +1,7 @@
 """Importing the package stays cheap: pandas and pyarrow load on first use, not on import.
 
-pandas alone was more than half of what ``import genome`` cost, and every entry point paid
-it, because importing any submodule runs ``genome/__init__`` first. A caller that only
+pandas was the largest part of what ``import genome`` cost, and every entry point paid it,
+because importing any submodule runs ``genome/__init__`` first. A caller that only
 names an assembly or locates a tool never touches a frame. So the modules that use pandas
 or pyarrow import them inside the functions that need them, and only for typing at module
 scope.

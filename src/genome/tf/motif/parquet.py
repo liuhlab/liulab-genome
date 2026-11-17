@@ -74,7 +74,7 @@ HIT_PROVENANCE_KEY = b"genome.hit_provenance"
 # The ignore: pyarrow ships no stubs, so pyright cannot see `pa.Schema`. The annotation is
 # written, which is what the full-annotations rule asks; only its target is unknown.
 @cache
-def _schema() -> pa.Schema:  # pyright: ignore[reportUnknownParameterType]
+def _hit_schema() -> pa.Schema:  # pyright: ignore[reportUnknownParameterType]
     """How the **Hit table**'s dtypes are spelled in Arrow, built on first use.
 
     Built from :func:`~genome.tf.motif.scan.empty_hits` so that pandas' own column metadata
@@ -150,7 +150,7 @@ def write_hits(
             f"e.g. {path / 'hits.parquet'}."
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    schema = _schema()
+    schema = _hit_schema()
     metadata = dict(schema.metadata or {})
     metadata[HIT_PROVENANCE_KEY] = json.dumps(dict(provenance)).encode("utf-8")
     with pq.ParquetWriter(path, schema.with_metadata(metadata)) as writer:

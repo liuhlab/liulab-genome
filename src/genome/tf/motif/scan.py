@@ -469,6 +469,8 @@ def _batch(
     starting at or past ``owned`` belongs to the next shard and is dropped here — so a hit
     spanning a shard boundary is found once by the shard that owns its start and once only.
     """
+    import pandas as pd
+
     # Upper-cased here and nowhere else: soft-masking changes no answer (ADR-0012).
     results = engine.scan(sequence.upper())
     count = len(prepared.motifs)
@@ -493,8 +495,6 @@ def _batch(
                 )
     if not rows:
         return empty_hits()
-    import pandas as pd
-
     return pd.DataFrame(rows, columns=pd.Index(list(HIT_COLUMNS))).astype(dict(HIT_DTYPES))
 
 
