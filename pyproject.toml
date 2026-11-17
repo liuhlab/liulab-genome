@@ -72,6 +72,7 @@ pandas = ">=2.1,<3"
 py2bit = ">=1.0.1,<2"
 gffutils = ">=0.14,<0.15"
 moods = ">=1.9.4,<2"   # the scan engine; docs/research/motif-scan-engine-2026-08-28.md
+numba = "*"   # memelite needs it; PyPI ships no osx-64 wheel, so conda-forge's build is the one that installs there
 logomaker = ">=0.8.6,<0.9"
 matplotlib-base = ">=3.9,<4"   # what logomaker depends on; the GUI backends go unused
 xarray = ">=2025.1"

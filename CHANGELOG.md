@@ -1101,6 +1101,12 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Fixed
 
+- **`pixi install` now works on an Intel Mac (osx-64).** numba and llvmlite reached that platform
+  only through memelite, from PyPI, which publishes no osx-64 wheel for them, so pixi built both
+  from source and stopped for want of CMake and LLVM. `numba` is now a conda dependency, so the
+  solver takes conda-forge's prebuilt numba and llvmlite on every platform. The lock file
+  moves numba from 0.67.0 to 0.68.1 and llvmlite from 0.49.0 to 0.50.0.
+
 - **Comparing motifs compiles tomtom once, not once per memory layout.** A motif parsed from a
   file holds its matrix in Fortran order and one built by hand holds it in C order. memelite's
   engine is compiled by numba for each layout it is handed, so each new mix of the two cost a
