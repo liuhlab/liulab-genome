@@ -54,12 +54,12 @@ def test_importing_the_package_loads_none_of_the_lazy_libraries() -> None:
 
 
 def test_a_call_that_needs_moods_names_how_to_get_it_when_it_is_missing(
-    monkeypatch: pytest.MonkeyPatch, liulab_data: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # None in sys.modules is how an import is told the library is not there.
     monkeypatch.setitem(sys.modules, "MOODS.tools", None)
 
-    # A matrix no earlier run has cached, so the call reaches the library.
+    # The threshold cache is this test's own and empty, so the call reaches the library.
     with pytest.raises(ModuleNotFoundError, match="moods") as raised:
         cutoffs_for([[[0.1], [0.2], [0.3], [0.4]]], (0.25,) * 4, 1e-4)
 
