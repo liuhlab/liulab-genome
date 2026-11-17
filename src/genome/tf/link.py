@@ -70,8 +70,7 @@ from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
 from types import MappingProxyType
-
-import pandas as pd
+from typing import TYPE_CHECKING
 
 # ``VALUE_SEPARATOR`` is re-exported rather than defined here: how a cell spells two values
 # is a convention every **Shipped table** in this package shares and none of them owns, so it
@@ -87,6 +86,9 @@ from genome.shipped import (
 from genome.tf.cofactor import BOTH, SOURCES, UNIFORM_COLUMNS, CofactorTable, cofactor_table
 from genome.tf.gene import TFGeneTable, tf_gene_table
 from genome.tf.motif.jaspar import DEFAULT_RELEASE, DEFAULT_TAX_GROUP
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
+    import pandas as pd
 
 #: Directory inside the package holding one **Motif link** table per species per
 #: **Release**, plus the alias table the generator used and ``ATTRIBUTION.md``.
@@ -549,6 +551,8 @@ class MotifLinkTable:
         >>> int(frame["is_cross_species"].sum())
         162
         """
+        import pandas as pd
+
         rows = [[getattr(link, column) for column in LINK_COLUMNS] for link in self.links]
         return pd.DataFrame(rows, columns=pd.Index(LINK_COLUMNS))
 

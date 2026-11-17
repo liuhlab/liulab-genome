@@ -67,7 +67,6 @@ from typing import IO, TYPE_CHECKING, Any, overload
 import MOODS.scan
 import MOODS.tools
 import numpy as np
-import pandas as pd
 
 from genome.tf.motif.background import BackgroundArg, resolve_background
 from genome.tf.motif.motif import DEFAULT_THRESHOLD, MIN_MOTIF_LENGTH, Motif
@@ -75,6 +74,9 @@ from genome.tf.motif.thresholds import cutoffs_for
 from genome.workers import DEFAULT_WORKERS, resolve_workers
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the import runs the other way
+    # pandas too, so importing genome stays cheap.
+    import pandas as pd
+
     from genome.tf.motif.motif import MotifSet
 
 #: The **Hit table**'s columns and their dtypes, in order. **This is the contract**, not an
@@ -467,6 +469,8 @@ def _batch(
     starting at or past ``owned`` belongs to the next shard and is dropped here — so a hit
     spanning a shard boundary is found once by the shard that owns its start and once only.
     """
+    import pandas as pd
+
     # Upper-cased here and nowhere else: soft-masking changes no answer (ADR-0012).
     results = engine.scan(sequence.upper())
     count = len(prepared.motifs)
@@ -501,6 +505,8 @@ def _collect(batches: Iterable[pd.DataFrame], prepared: _Prepared) -> pd.DataFra
     no row, and pandas would otherwise have to decide the result's dtypes from a frame that
     holds none.
     """
+    import pandas as pd
+
     filled = [batch for batch in batches if not batch.empty]
     frame = pd.concat(filled, ignore_index=True) if filled else empty_hits()
     # Re-applied after the concatenation: two batches whose categories differ collapse to
@@ -541,4 +547,6 @@ def empty_hits() -> pd.DataFrame:
     >>> empty_hits().dtypes["start"]
     dtype('int32')
     """
+    import pandas as pd
+
     return pd.DataFrame({name: pd.Series(dtype=dtype) for name, dtype in HIT_DTYPES.items()})

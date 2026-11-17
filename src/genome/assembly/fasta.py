@@ -29,10 +29,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-
-import pandas as pd
+from typing import TYPE_CHECKING
 
 from genome.external import InstalledTool
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
+    import pandas as pd
 
 #: The **External tools** :func:`prepare_fasta` runs, in pipeline order. Named here so
 #: that whatever records a finished preparation records the versions of these three.
@@ -232,6 +234,8 @@ def read_chrom_sizes(sizes_path: str | Path) -> pd.Series:
     >>> sizes["chr1"]                                 # doctest: +SKIP
     248956422
     """
+    import pandas as pd
+
     path = Path(sizes_path)
     if not path.is_file():
         raise FileNotFoundError(f"chrom.sizes file not found: {path}")
