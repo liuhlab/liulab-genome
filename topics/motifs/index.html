@@ -1,0 +1,1397 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Handling genomic files — metadata, processing, feature extraction.">
+      
+      
+      
+        <link rel="canonical" href="https://liuhlab.github.io/liulab-genome/topics/motifs/">
+      
+      
+        <link rel="prev" href="../transcription-factors/">
+      
+      
+        <link rel="next" href="../gene-identifiers/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Motifs - liulab-genome</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-6M1CJF9WXY"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-6M1CJF9WXY",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-6M1CJF9WXY",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>"undefined"!=typeof __md_analytics&&__md_analytics()</script>
+  
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#motifs" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="liulab-genome" class="md-header__button md-logo" aria-label="liulab-genome" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            liulab-genome
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Motifs
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/liuhlab/liulab-genome" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    liuhlab/liulab-genome
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="liulab-genome" class="md-nav__button md-logo" aria-label="liulab-genome" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    liulab-genome
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/liuhlab/liulab-genome" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    liuhlab/liulab-genome
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../genome/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with a genome
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Working with a genome
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/assembly/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assembly
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/sequences/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sequences and regions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/annotations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Annotations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../genome/aligner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Aligner indexes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Topics
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Topics
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../transcription-factors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Transcription factors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Motifs
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Motifs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#getting-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting a release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#looking-at-a-motif" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Looking at a motif
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scanning-regions-of-a-genome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scanning regions of a genome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-hit-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The hit table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scanning-a-whole-fasta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scanning a whole FASTA
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-hits-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading hits back
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#thresholds-and-backgrounds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Thresholds and backgrounds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-motifs-come-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the motifs come from
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gene-identifiers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gene identifiers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../homology/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Homology
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../cli/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interfaces
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Interfaces
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/genome/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI: genome commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/lookups/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI: lookup commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#getting-a-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting a release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#looking-at-a-motif" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Looking at a motif
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scanning-regions-of-a-genome" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scanning regions of a genome
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-hit-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The hit table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scanning-a-whole-fasta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scanning a whole FASTA
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-hits-back" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reading hits back
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#thresholds-and-backgrounds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Thresholds and backgrounds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-the-motifs-come-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the motifs come from
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+    <a href="https://github.com/liuhlab/liulab-genome/edit/main/docs/topics/motifs.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 20H6V4h7v5h5v3.1l2-2V8l-6-6H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h4zm10.2-7c.1 0 .3.1.4.2l1.3 1.3c.2.2.2.6 0 .8l-1 1-2.1-2.1 1-1c.1-.1.2-.2.4-.2m0 3.9L14.1 23H12v-2.1l6.1-6.1z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="motifs">Motifs<a class="headerlink" href="#motifs" title="Permanent link">&para;</a></h1>
+<p>A <strong>motif</strong> is the short stretch of DNA a transcription factor recognises, written down as a
+count of how often each base appeared at each position across the sites the factor was
+measured binding. JASPAR publishes them in sets. Name a set and it is prepared on this
+machine, and what comes back scans sequence for you.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.tf.motif</span><span class="w"> </span><span class="kn">import</span> <span class="n">JasparDatabase</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">jaspar</span> <span class="o">=</span> <span class="n">JasparDatabase</span><span class="p">()</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nb">len</span><span class="p">(</span><span class="n">jaspar</span><span class="p">)</span>          <span class="c1"># 1019</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">jaspar</span><span class="o">.</span><span class="n">release</span>       <span class="c1"># &#39;2026&#39;</span>
+</code></pre></div>
+<p>Which motifs stand for which gene is on
+<a href="../transcription-factors/">Transcription factors</a>.</p>
+<h2 id="getting-a-release">Getting a release<a class="headerlink" href="#getting-a-release" title="Permanent link">&para;</a></h2>
+<p>A <strong>release</strong> is one dated publication of JASPAR's collection. This package prepares <code>2024</code>
+and <code>2026</code>, and uses <code>2026</code> when you name none. A <strong>tax group</strong> is the slice of the release
+the file covers: <code>vertebrates</code>, <code>plants</code>, <code>insects</code>, <code>nematodes</code>, <code>fungi</code>, <code>urochordates</code>,
+<code>diatoms</code>, or <code>all</code> for the union of the other seven. The default is <code>vertebrates</code>.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nb">len</span><span class="p">(</span><span class="n">JasparDatabase</span><span class="p">())</span>                       <span class="c1"># 1019</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">len</span><span class="p">(</span><span class="n">JasparDatabase</span><span class="p">(</span><span class="s2">&quot;2024&quot;</span><span class="p">))</span>                 <span class="c1"># 879</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nb">len</span><span class="p">(</span><span class="n">JasparDatabase</span><span class="p">(</span><span class="s2">&quot;2026&quot;</span><span class="p">,</span> <span class="s2">&quot;nematodes&quot;</span><span class="p">))</span>    <span class="c1"># 103</span>
+</code></pre></div>
+<p>The tax group picks which file is downloaded rather than filtering one afterwards, so a worm
+scan never pays for a thousand plant matrices.</p>
+<p>Constructing a <code>JasparDatabase</code> prepares it. The first construction of a given release and
+tax group fetches the file, checks that it holds the number of motifs that release is known
+to hold, and records that it finished. Every construction after that re-reads what is there
+and needs no network.</p>
+<p>The files land in the shared <a href="../../#the-data-directory">data directory</a>, where every project on the machine reads the same copy.</p>
+<p>The first use downloads. The lab's CPU compute nodes have no internet, so run <code>genome motif scan</code> once on a login node before submitting a job that needs it.</p>
+<p>Naming a release this package does not prepare raises <code>ValueError</code>, and the message lists
+the ones it does.</p>
+<h2 id="looking-at-a-motif">Looking at a motif<a class="headerlink" href="#looking-at-a-motif" title="Permanent link">&para;</a></h2>
+<p>A motif is addressed by its id. Indexing tries the full id, then the id without its version,
+then the motif name, and returns exactly one motif:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">ctcf</span> <span class="o">=</span> <span class="n">jaspar</span><span class="p">[</span><span class="s2">&quot;MA0139.2&quot;</span><span class="p">]</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">ctcf</span><span class="o">.</span><span class="n">motif_name</span>       <span class="c1"># &#39;CTCF&#39;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nb">len</span><span class="p">(</span><span class="n">ctcf</span><span class="p">)</span>             <span class="c1"># 15</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">ctcf</span><span class="o">.</span><span class="n">consensus</span>        <span class="c1"># DNA(&#39;GCCACCAGGGGGCGC&#39;)</span>
+</code></pre></div>
+<p>The annotation JASPAR publishes beside the matrix comes with it. Four of the fields hold a
+tuple, because a dimer has one value per half:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">ctcf</span><span class="o">.</span><span class="n">tf_class</span>         <span class="c1"># (&#39;C2H2 zinc finger factors&#39;,)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">ctcf</span><span class="o">.</span><span class="n">uniprot_ids</span>      <span class="c1"># (&#39;P49711&#39;,)</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">ctcf</span><span class="o">.</span><span class="n">data_type</span>        <span class="c1"># &#39;ChIP-seq&#39;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">ctcf</span><span class="o">.</span><span class="n">counts</span><span class="o">.</span><span class="n">shape</span>     <span class="c1"># (4, 15)</span>
+</code></pre></div>
+<p><code>counts</code> is the matrix itself, four rows in <code>A</code>, <code>C</code>, <code>G</code>, <code>T</code> order and one column per
+position. It is read-only, so nothing can change a motif's matrix while it keeps the same
+id.</p>
+<p><strong>A motif name is a label and several motifs can carry it</strong>, which is why indexing by one
+that is not unique refuses rather than picking:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">jaspar</span><span class="p">[</span><span class="s2">&quot;CTCF&quot;</span><span class="p">]</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="c1"># AmbiguousMotifNameError: the motif name &#39;CTCF&#39; labels 3 motifs here, so it addresses</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># none of them: MA0139.2, MA1929.2, MA1930.2. Index by the motif id of the one you mean,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># or call set.by_name(&#39;CTCF&#39;) for all of them — a name is a label and only a motif id is</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># a key.</span>
+</code></pre></div>
+<p><code>by_name</code> always answers with a tuple, whether the name labels one motif or four:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">[</span><span class="n">motif</span><span class="o">.</span><span class="n">motif_id</span> <span class="k">for</span> <span class="n">motif</span> <span class="ow">in</span> <span class="n">jaspar</span><span class="o">.</span><span class="n">by_name</span><span class="p">(</span><span class="s2">&quot;CTCF&quot;</span><span class="p">)]</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="c1"># [&#39;MA0139.2&#39;, &#39;MA1929.2&#39;, &#39;MA1930.2&#39;]</span>
+</code></pre></div>
+<p><code>filter</code> narrows the set by annotation or by a predicate. The four prose fields match on a
+case-insensitive substring, so one spelling finds every spelling:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">zinc</span> <span class="o">=</span> <span class="n">jaspar</span><span class="o">.</span><span class="n">filter</span><span class="p">(</span><span class="n">tf_class</span><span class="o">=</span><span class="s2">&quot;zinc finger&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">len</span><span class="p">(</span><span class="n">zinc</span><span class="p">)</span>     <span class="c1"># 385</span>
+</code></pre></div>
+<p>What comes back is a plain <code>MotifSet</code>, not a database, and it no longer claims to be the
+release it was cut from. Hits scanned with it record <code>None</code> for release and tax group.</p>
+<h2 id="scanning-regions-of-a-genome">Scanning regions of a genome<a class="headerlink" href="#scanning-regions-of-a-genome" title="Permanent link">&para;</a></h2>
+<p><code>scan_regions</code> takes a motif set and one or more
+<a href="../../genome/sequences/"><code>Region</code></a>s, fetches each region's bases, and scans them in one pass.
+These two regions gave 227 hits:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome</span><span class="w"> </span><span class="kn">import</span> <span class="n">Genome</span><span class="p">,</span> <span class="n">Region</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="n">sacCer3</span> <span class="o">=</span> <span class="n">Genome</span><span class="p">(</span><span class="s2">&quot;sacCer3&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">peaks</span> <span class="o">=</span> <span class="p">[</span><span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">1500</span><span class="p">,</span> <span class="s2">&quot;+&quot;</span><span class="p">),</span> <span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">9000</span><span class="p">,</span> <span class="mi">9500</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)]</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">hits</span> <span class="o">=</span> <span class="n">sacCer3</span><span class="o">.</span><span class="n">scan_regions</span><span class="p">(</span><span class="n">jaspar</span><span class="p">,</span> <span class="n">peaks</span><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">hits</span><span class="o">.</span><span class="n">head</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1">#    motif_id motif_name sequence_name  start   end strand      score</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># 0  MA0069.1       PAX6         chrIV   1188  1202      +  11.570312</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="c1"># 1  MA0069.1       PAX6         chrIV   1186  1200      -  11.031250</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># 2  MA0069.1       PAX6         chrIV   1447  1461      -  12.843750</span>
+</code></pre></div>
+<p><strong>The hits come back in the assembly's own coordinates</strong>, not in positions counted from the
+start of each region. Both strands are scanned whatever the region's strand is. A <code>-</code> strand
+region is fetched reverse-complemented, and its hits are flipped back into the forward frame
+before you see them, so one interval scanned as <code>+</code> and as <code>-</code> gives the same rows.</p>
+<p>Regions have to be <code>Region</code> objects. A locus string is refused, because it carries no strand,
+and the strand is what decides whether the flip happens.</p>
+<p>Passing <code>output=</code> here raises <code>TypeError</code>: a scan that streams to a file answers with a path,
+and a path holds no coordinates to lift into the assembly's frame.</p>
+<h2 id="the-hit-table">The hit table<a class="headerlink" href="#the-hit-table" title="Permanent link">&para;</a></h2>
+<p>Every scan in this package answers with the same table, one row per hit.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>What it holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>motif_id</code>, <code>motif_name</code></td>
+<td>Which motif matched.</td>
+</tr>
+<tr>
+<td><code>sequence_name</code></td>
+<td>The chromosome or FASTA record the hit sits on.</td>
+</tr>
+<tr>
+<td><code>start</code>, <code>end</code></td>
+<td>The bases the matrix scored, 0-based and half-open.</td>
+</tr>
+<tr>
+<td><code>strand</code></td>
+<td><code>+</code> or <code>-</code>, never <code>.</code>. A scan knows which of the two it scored.</td>
+</tr>
+<tr>
+<td><code>score</code></td>
+<td>The log-odds score in bits. Not a p-value.</td>
+</tr>
+</tbody>
+</table>
+<p>What the scan was is on <code>frame.attrs</code>, so a table always says where it came from:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">hits</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;threshold&quot;</span><span class="p">]</span>              <span class="c1"># 0.0001</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">hits</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;background&quot;</span><span class="p">]</span>             <span class="c1"># (0.25, 0.25, 0.25, 0.25)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">hits</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;release&quot;</span><span class="p">]</span>                <span class="c1"># &#39;2026&#39;</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">hits</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;tax_group&quot;</span><span class="p">]</span>              <span class="c1"># &#39;vertebrates&#39;</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">hits</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;assembly&quot;</span><span class="p">]</span>               <span class="c1"># &#39;sacCer3&#39;</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nb">len</span><span class="p">(</span><span class="n">hits</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;motifs_scanned&quot;</span><span class="p">])</span>    <span class="c1"># 904</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="nb">len</span><span class="p">(</span><span class="n">hits</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;motifs_skipped&quot;</span><span class="p">])</span>    <span class="c1"># 115</span>
+</code></pre></div>
+<p><code>assembly</code> is there only on a table from <code>scan_regions</code>. The other scans answer in the frame
+of whatever they were handed and name no assembly.</p>
+<h2 id="scanning-a-whole-fasta">Scanning a whole FASTA<a class="headerlink" href="#scanning-a-whole-fasta" title="Permanent link">&para;</a></h2>
+<p><code>scan_fasta</code> reads one record at a time, so the file is never held whole. Given <code>output=</code> it
+streams the hits to Parquet and answers with the path it wrote:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">written</span> <span class="o">=</span> <span class="n">jaspar</span><span class="o">.</span><span class="n">scan_fasta</span><span class="p">(</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">sacCer3</span><span class="o">.</span><span class="n">files</span><span class="o">.</span><span class="n">fasta</span><span class="p">,</span> <span class="n">output</span><span class="o">=</span><span class="s2">&quot;/tmp/sacCer3_hits.parquet&quot;</span><span class="p">,</span> <span class="n">workers</span><span class="o">=</span><span class="kc">None</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="p">)</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># PosixPath(&#39;/tmp/sacCer3_hits.parquet&#39;)</span>
+</code></pre></div>
+<p>A record is named by its header up to the first whitespace, which is what STAR and chromap
+write into an alignment made from the same file, so the two join with nobody renaming
+anything.</p>
+<p><code>workers</code> shards the scan across processes and defaults to one; <code>None</code> asks for every core
+the allocation granted. More than one produces the identical table, row for row. <strong>A worker
+re-imports the script that started it</strong>, so a script scanning with more than one worker needs
+its top-level code under <code>if __name__ == "__main__":</code>.</p>
+<p>The same scan runs from a shell, which defaults to every core instead of one. The skipped
+list is trimmed here:</p>
+<div class="language-console highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="gp">$ </span>genome<span class="w"> </span>motif<span class="w"> </span>scan<span class="w"> </span>/Users/hanqing/liulab_data/genome/sacCer3/sacCer3.fa<span class="w"> </span>hits.parquet
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="go">scanned 17 sequences with 904 motifs from JASPAR 2026 vertebrates</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="go">  background  0.303, 0.194, 0.199, 0.304</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="go">  threshold   0.0001</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="go">  skipped     115 under 7 positions, so not scanned: MA0004.1, MA0130.1, MA0151.1, ...</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="go">  workers     14</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="go">  hits        2302168 -&gt; hits.parquet</span>
+</code></pre></div>
+<p>The hits go to the file and the summary to standard output, so <code>--json</code> is never mixed with
+table data.</p>
+<h2 id="reading-hits-back">Reading hits back<a class="headerlink" href="#reading-hits-back" title="Permanent link">&para;</a></h2>
+<p><code>read_hits</code> restores the column dtypes and the provenance both. <code>pandas.read_parquet</code> on its
+own gives the rows and drops what the scan was.</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">genome.tf.motif</span><span class="w"> </span><span class="kn">import</span> <span class="n">hit_count</span><span class="p">,</span> <span class="n">read_hits</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">hits</span> <span class="o">=</span> <span class="n">read_hits</span><span class="p">(</span><span class="s2">&quot;/tmp/sacCer3_hits.parquet&quot;</span><span class="p">)</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">hits</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;background&quot;</span><span class="p">]</span>    <span class="c1"># (0.303, 0.194, 0.199, 0.304)</span>
+</code></pre></div>
+<p><code>hit_count</code> counts the rows off the file's footer without reading one of them:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">hit_count</span><span class="p">(</span><span class="s2">&quot;/tmp/sacCer3_hits.parquet&quot;</span><span class="p">)</span>    <span class="c1"># 2302168</span>
+</code></pre></div>
+<p><code>provenance_of</code> does the same for <code>attrs</code> alone. Both cost the same on a 2.3-million-row file
+as on an empty one. A path that does not exist raises <code>FileNotFoundError</code>.</p>
+<h2 id="thresholds-and-backgrounds">Thresholds and backgrounds<a class="headerlink" href="#thresholds-and-backgrounds" title="Permanent link">&para;</a></h2>
+<p><code>threshold</code> is one per-position p-value, <code>1e-4</code> by default. It is converted per motif into the
+score that motif has to clear, so one number means the same stringency for a short matrix and
+a long one. A smaller number returns fewer hits:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">region</span> <span class="o">=</span> <span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">20000</span><span class="p">,</span> <span class="s2">&quot;+&quot;</span><span class="p">)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nb">len</span><span class="p">(</span><span class="n">sacCer3</span><span class="o">.</span><span class="n">scan_regions</span><span class="p">(</span><span class="n">jaspar</span><span class="p">,</span> <span class="n">region</span><span class="p">))</span>                    <span class="c1"># 4122</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="nb">len</span><span class="p">(</span><span class="n">sacCer3</span><span class="o">.</span><span class="n">scan_regions</span><span class="p">(</span><span class="n">jaspar</span><span class="p">,</span> <span class="n">region</span><span class="p">,</span> <span class="n">threshold</span><span class="o">=</span><span class="mf">1e-5</span><span class="p">))</span>    <span class="c1"># 853</span>
+</code></pre></div>
+<p>Motifs shorter than 7 positions cannot reach the default threshold at all. They are left out
+of the scan and named in <code>motifs_skipped</code>, rather than being called at some looser cutoff
+without saying so.</p>
+<p><code>background</code> is the base composition the scores are taken against, and it moves the answer
+more than anything else on this page. Left alone it is chosen from the input: derived from it
+when the input holds at least 10,000 unambiguous bases, uniform below that, since a
+composition estimated from fewer would distort the cutoffs it sets. <strong>Whichever it turned out
+to be is recorded on the result</strong>, so a table always says what its scores were measured
+against:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">short</span> <span class="o">=</span> <span class="n">Region</span><span class="p">(</span><span class="s2">&quot;chrIV&quot;</span><span class="p">,</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">1500</span><span class="p">,</span> <span class="s2">&quot;+&quot;</span><span class="p">)</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">scan_regions</span><span class="p">(</span><span class="n">jaspar</span><span class="p">,</span> <span class="n">short</span><span class="p">)</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;background&quot;</span><span class="p">]</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1"># (0.25, 0.25, 0.25, 0.25)</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">sacCer3</span><span class="o">.</span><span class="n">scan_regions</span><span class="p">(</span><span class="n">jaspar</span><span class="p">,</span> <span class="n">region</span><span class="p">)</span><span class="o">.</span><span class="n">attrs</span><span class="p">[</span><span class="s2">&quot;background&quot;</span><span class="p">]</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="c1"># (0.307, 0.203, 0.181, 0.309)</span>
+</code></pre></div>
+<p><code>"uniform"</code> pins it, <code>"derive"</code> derives whatever the input holds however little that is, and
+four frequencies of your own are accepted in place of a mode. Comparing an unnamed matrix
+against a release with <code>MotifComparison</code>, reading a transfac file yourself with
+<code>parse_transfac</code>, and the sharding knobs behind <code>workers</code> are in the
+<a href="../../reference/">API reference</a>.</p>
+<h2 id="where-the-motifs-come-from">Where the motifs come from<a class="headerlink" href="#where-the-motifs-come-from" title="Permanent link">&para;</a></h2>
+<p>The matrices are JASPAR's. Every database says which release it is and which file it read:</p>
+<div class="language-python highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">jaspar</span><span class="o">.</span><span class="n">source_url</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="c1"># &#39;https://jaspar.elixir.no/download/data/2026/CORE/JASPAR2026_CORE_vertebrates_non-redundant_pfms_transfac.txt&#39;</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">jaspar</span><span class="o">.</span><span class="n">path</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># PosixPath(&#39;/Users/hanqing/liulab_data/motif/jaspar/2026/vertebrates/JASPAR2026_CORE_vertebrates_non-redundant_pfms_transfac.txt&#39;)</span>
+</code></pre></div>
+<p>Cite the JASPAR release you scanned with. The release and tax group travel on every hit table
+and into every Parquet file, so a result opened months later still names what to cite.</p>
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.indexes", "content.code.copy", "content.code.annotate", "content.action.edit", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
