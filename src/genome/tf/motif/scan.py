@@ -64,16 +64,17 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Any, overload
 
-import MOODS.scan
-import MOODS.tools
 import numpy as np
 
+from genome._optional import MOODS_INSTALL, missing_library
 from genome.tf.motif.background import BackgroundArg, resolve_background
 from genome.tf.motif.motif import DEFAULT_THRESHOLD, MIN_MOTIF_LENGTH, Motif
 from genome.tf.motif.thresholds import cutoffs_for
 from genome.workers import DEFAULT_WORKERS, resolve_workers
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the import runs the other way
+    import MOODS.scan
+
     # pandas too, so importing genome stays cheap.
     import pandas as pd
 
@@ -388,6 +389,11 @@ def _prepare(
     The **Background** arrives already settled and already quantised — this is downstream
     of the one decision, not a second copy of it.
     """
+    try:
+        import MOODS.tools
+    except ImportError as error:
+        raise missing_library("MOODS", MOODS_INSTALL) from error
+
     frequencies = np.asarray(background, dtype=np.float64)
     scanned = tuple(motif for motif in motifs if len(motif) >= MIN_MOTIF_LENGTH)
     skipped = tuple(motif.motif_id for motif in motifs if len(motif) < MIN_MOTIF_LENGTH)
@@ -421,6 +427,11 @@ def engine_for(prepared: _Prepared) -> MOODS.scan.Scanner:
     that a thousand-record FASTA builds one automaton rather than a thousand, and so that a
     parallel worker can build its own once and keep it for every shard it is given.
     """
+    try:
+        import MOODS.scan
+    except ImportError as error:
+        raise missing_library("MOODS", MOODS_INSTALL) from error
+
     scanner = MOODS.scan.Scanner(_WINDOW_SIZE)
     scanner.set_motifs(prepared.matrices, list(prepared.background), prepared.cutoffs)
     return scanner

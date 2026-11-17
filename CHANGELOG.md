@@ -1108,6 +1108,16 @@ and this project adheres to [Calendar Versioning](https://calver.org/) using
 
 ### Fixed
 
+- **`import genome` works without MOODS and gffutils, which the package does not declare.**
+  An environment with only the declared dependencies failed with `ModuleNotFoundError` at
+  import, and so did `genome.cli`, `genome doctor` and every submodule, because each runs
+  `genome/__init__` first. Each library now loads on the first call that needs it: a motif scan
+  or its threshold cache for MOODS, building an annotation database or listing its genes for
+  gffutils. A call that needs one that is missing raises `ModuleNotFoundError` saying how to get
+  it: `moods` from bioconda, since pip has only `MOODS-python`, which needs a C++ compiler, and
+  `gffutils`. Neither is declared, as declaring MOODS would make a plain `pip install` fail to
+  build.
+
 - **`pixi install` now works on an Intel Mac (osx-64).** numba and llvmlite reached that platform
   only through memelite, from PyPI, which publishes no osx-64 wheel for them, so pixi built both
   from source and stopped for want of CMake and LLVM. `numba` is now a conda dependency, so the

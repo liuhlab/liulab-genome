@@ -45,9 +45,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-import MOODS.tools
 import numpy as np
 
+from genome._optional import MOODS_INSTALL, missing_library
 from genome.tf.motif.jaspar import motif_data_dir
 
 #: Where the cache lives under the **Data dir**'s ``motif/`` tree. Its own directory rather
@@ -121,6 +121,11 @@ def cutoffs_for(
     cached = _read(path, len(matrices))
     if cached is not None:
         return cached
+    try:
+        import MOODS.tools
+    except ImportError as error:
+        raise missing_library("MOODS", MOODS_INSTALL) from error
+
     weights = list(background)
     cutoffs = [
         float(MOODS.tools.threshold_from_p(matrix, weights, threshold)) for matrix in matrices
