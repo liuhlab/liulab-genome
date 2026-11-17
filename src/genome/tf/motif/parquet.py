@@ -55,34 +55,46 @@ from __future__ import annotations
 
 import json
 from collections.abc import Hashable, Iterable, Mapping
+from functools import cache
 from pathlib import Path
-from typing import Any
-
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
+from typing import TYPE_CHECKING, Any
 
 from genome.tf.motif.scan import HIT_DTYPES, empty_hits
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
+    import pandas as pd
+    import pyarrow as pa
 
 #: Where the scan's provenance lives in the Parquet file's key-value metadata — the six
 #: things :data:`~genome.tf.motif.scan.HIT_PROVENANCE` names, as JSON. Its own key rather
 #: than pandas' ``attributes`` block, which pandas neither writes nor reads back.
 HIT_PROVENANCE_KEY = b"genome.hit_provenance"
 
-#: How the **Hit table**'s dtypes are spelled in Arrow. Built from
-#: :func:`~genome.tf.motif.scan.empty_hits` so that pandas' own column metadata comes along
-#: — that is what makes a category read back as a category — then widened to ``int32``
-#: dictionary indices, which an empty frame would otherwise leave at ``int8`` and a large
-#: batch would overflow.
-_SCHEMA: pa.Schema = pa.schema(
-    [
-        field.with_type(pa.dictionary(pa.int32(), pa.string()))
-        if pa.types.is_dictionary(field.type)
-        else field
-        for field in pa.Table.from_pandas(empty_hits(), preserve_index=False).schema
-    ],
-    metadata=pa.Table.from_pandas(empty_hits(), preserve_index=False).schema.metadata,
-)
+
+# The ignore: pyarrow ships no stubs, so pyright cannot see `pa.Schema`. The annotation is
+# written, which is what the full-annotations rule asks; only its target is unknown.
+@cache
+def _schema() -> pa.Schema:  # pyright: ignore[reportUnknownParameterType]
+    """How the **Hit table**'s dtypes are spelled in Arrow, built on first use.
+
+    Built from :func:`~genome.tf.motif.scan.empty_hits` so that pandas' own column metadata
+    comes along — that is what makes a category read back as a category — then widened to
+    ``int32`` dictionary indices, which an empty frame would otherwise leave at ``int8`` and
+    a large batch would overflow. Built here rather than at import, so importing genome
+    loads neither pandas nor pyarrow.
+    """
+    import pyarrow as pa
+
+    empty = pa.Table.from_pandas(empty_hits(), preserve_index=False).schema
+    return pa.schema(
+        [
+            field.with_type(pa.dictionary(pa.int32(), pa.string()))
+            if pa.types.is_dictionary(field.type)
+            else field
+            for field in empty
+        ],
+        metadata=empty.metadata,
+    )
 
 
 def write_hits(
@@ -128,6 +140,9 @@ def write_hits(
     ...     read_hits(written).attrs
     {'threshold': 0.0001}
     """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     path = Path(output)
     if path.is_dir():
         raise IsADirectoryError(
@@ -135,13 +150,14 @@ def write_hits(
             f"e.g. {path / 'hits.parquet'}."
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    metadata = dict(_SCHEMA.metadata or {})
+    schema = _schema()
+    metadata = dict(schema.metadata or {})
     metadata[HIT_PROVENANCE_KEY] = json.dumps(dict(provenance)).encode("utf-8")
-    with pq.ParquetWriter(path, _SCHEMA.with_metadata(metadata)) as writer:
+    with pq.ParquetWriter(path, schema.with_metadata(metadata)) as writer:
         for batch in batches:
             if batch.empty:
                 continue
-            writer.write_table(pa.Table.from_pandas(batch, schema=_SCHEMA, preserve_index=False))
+            writer.write_table(pa.Table.from_pandas(batch, schema=schema, preserve_index=False))
     return path
 
 
@@ -189,6 +205,8 @@ def read_hits(path: str | Path) -> pd.DataFrame:
     >>> hits.attrs["threshold"]
     0.0001
     """
+    import pandas as pd
+
     source = _existing(path)
     frame = pd.read_parquet(source)
     for name, dtype in HIT_DTYPES.items():
@@ -239,6 +257,8 @@ def provenance_of(path: str | Path) -> dict[Hashable, Any]:
     ...     provenance_of(written)
     {'threshold': 0.0001, 'motifs_skipped': ('MA0261.1',)}
     """
+    import pyarrow.parquet as pq
+
     metadata = pq.read_schema(_existing(path)).metadata or {}
     raw = metadata.get(HIT_PROVENANCE_KEY)
     if raw is None:
@@ -288,6 +308,8 @@ def hit_count(path: str | Path) -> int:
     ...     hit_count(written)
     1
     """
+    import pyarrow.parquet as pq
+
     return int(pq.ParquetFile(_existing(path)).metadata.num_rows)
 
 

@@ -26,9 +26,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import TracebackType
-from typing import Self
-
-import pandas as pd
+from typing import TYPE_CHECKING, Self
 
 from genome.aligner.mixin import AlignerMixin
 from genome.annotation import AnnotationRegistry, GeneList
@@ -45,6 +43,9 @@ from genome.seq import DNA
 from genome.tf.cofactor import TFCofactorList, resolve_tf_cofactors
 from genome.tf.gene import TFGeneList, resolve_tf_genes
 from genome.tf.motif.mixin import MotifScanMixin
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
+    import pandas as pd
 
 
 class Genome(AlignerMixin, MotifScanMixin):
@@ -687,6 +688,8 @@ class Genome(AlignerMixin, MotifScanMixin):
         >>> Genome("ce11").chrom_components["I"]                         # doctest: +SKIP
         'ce11'
         """
+        import pandas as pd
+
         if self._chimera is None:
             components = [self.assembly] * len(self._chrom_sizes)
         else:

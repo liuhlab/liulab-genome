@@ -35,7 +35,6 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
-import pandas as pd
 
 from genome.region import Region
 from genome.tf.motif.motif import DEFAULT_THRESHOLD
@@ -44,6 +43,9 @@ from genome.workers import DEFAULT_WORKERS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, and the dependency runs one way
     from pathlib import Path
+
+    # pandas too, so importing genome stays cheap.
+    import pandas as pd
 
     from genome.assembly.genome import Genome
     from genome.tf.motif.background import BackgroundArg

@@ -93,9 +93,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from importlib.resources import files
-from typing import Any, get_type_hints
-
-import pandas as pd
+from typing import TYPE_CHECKING, Any, get_type_hints
 
 # ``species_slug`` is the file-naming convention every shipped-data directory here uses and
 # belongs to none of them in particular, and the flag spellings are one spelling of *yes*
@@ -108,6 +106,9 @@ from genome.shipped import (
     ShippedTableError,
     species_slug,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, so importing genome stays cheap
+    import pandas as pd
 
 __all__ = [
     "ANIMALTFDB",
@@ -570,6 +571,8 @@ class CofactorTable:
         >>> frame["animaltfdb_category"].nunique()
         6
         """
+        import pandas as pd
+
         frame = pd.DataFrame(list(self.rows), columns=pd.Index(self.columns), dtype=object)
         frame["is_cofactor"] = [row[_IS_COFACTOR] == TRUE_CELL for row in self.rows]
         return frame
