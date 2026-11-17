@@ -23,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-import gffutils
+from genome._optional import GFFUTILS_INSTALL, missing_library
 
 #: What a **Completion marker**'s ``details`` calls the library version that built the
 #: database. Recorded there rather than in ``tool_versions``, which is for **External
@@ -80,6 +80,11 @@ def build_database(
     >>> build_database(Path("mine.gtf"), Path("mine.db"))     # doctest: +SKIP
     '0.13'
     """
+    try:
+        import gffutils
+    except ImportError as error:
+        raise missing_library("gffutils", GFFUTILS_INSTALL) from error
+
     built = gffutils.create_db(
         str(gtf),
         str(database),
@@ -123,6 +128,11 @@ def gene_ids(database: Path) -> Iterator[str]:
     >>> next(gene_ids(Path("gencode_v50.db")))                # doctest: +SKIP
     'ENSG00000000003.16'
     """
+    try:
+        import gffutils
+    except ImportError as error:
+        raise missing_library("gffutils", GFFUTILS_INSTALL) from error
+
     handle = gffutils.FeatureDB(str(database))
     try:
         for row in handle.execute(_GENE_IDS_QUERY):

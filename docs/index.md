@@ -36,7 +36,8 @@ them, so they live in a second pixi environment named `aligners`. Reach it with
 
 `pip install liulab-genome` installs the Python package and its Python dependencies alone.
 It brings no native binary, so anything that shells out fails until you install `samtools`
-and the rest yourself, and it brings no `gffutils`, so annotations do not work either.
+and the rest yourself. It imports fine but brings neither `gffutils` nor `moods`, so
+annotations and motif scans fail until you install them.
 
 `genome doctor` reports what it found on `PATH`, and exits non-zero when a required tool is
 missing:
